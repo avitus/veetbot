@@ -22,6 +22,7 @@ implementation without one.
 - [ADR-0017 — Layered approval and inbound-surface security](0017-layered-approval-and-inbound-surface-security.md)
 - [ADR-0018 — Memory formation and consolidation](0018-memory-formation-and-consolidation.md)
 - [ADR-0019 — Memory retrieval and ranking](0019-memory-retrieval-and-ranking.md)
+- [ADR-0020 — Context engine](0020-context-engine.md)
 
 ADRs 0001–0006 are referenced by the engineering plan as foundational decisions
 (modular monolith, provider-neutral model protocol, event log and projections,

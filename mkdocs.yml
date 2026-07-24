@@ -61,6 +61,7 @@ nav:
   - Current Milestone: plan/current-milestone.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
+      - Context Engine: plan/context-engine.md
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
   - Project State: status/index.md
@@ -79,4 +80,5 @@ nav:
       - ADR-0017 Layered approval and inbound-surface security: adr/0017-layered-approval-and-inbound-surface-security.md
       - ADR-0018 Memory formation and consolidation: adr/0018-memory-formation-and-consolidation.md
       - ADR-0019 Memory retrieval and ranking: adr/0019-memory-retrieval-and-ranking.md
+      - ADR-0020 Context engine: adr/0020-context-engine.md
   - Changelog: changelog.md

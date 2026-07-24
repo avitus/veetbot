@@ -1310,6 +1310,8 @@ Nothing here changes the domain model: open models sit behind the same ModelProv
 
 ## 11. Context engine
 
+The detailed design - the two-region cache boundary and its enforcement test, prefix epochs, the budget allocator and its yield order under pressure, compaction reconciled with the prompt-stability invariant, the trust-envelope rendering contract, and the working-state lifecycle - is specified in [context-engine.md](context-engine.md) and ADR-0020. That document expands this section and Milestone 7; it does not replace the requirements below.
+
 ### 11.1 Initial context builder
 
 The first context builder should assemble:
@@ -2533,6 +2535,8 @@ class WorkingState(BaseModel):
 - Original events remain available for replay.
 - Summaries retain source event references.
 - The runtime does not persist private reasoning.
+
+The assembly design for this milestone - region membership and the prefix hash gate, absolute class caps with history as the only window-scaling class, the yield order, purity of `build()` with compaction as a checkpoint write, elision rather than paraphrase of untrusted spans, and the working-state carry rules - is specified in [context-engine.md](context-engine.md) and ADR-0020, which adds five hard gates and four tracked metrics to the criteria above.
 
 ### Milestone 8: Skills and MCP integration
 

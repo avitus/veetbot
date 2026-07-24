@@ -47,6 +47,8 @@ projection over that log rather than a lossy side-effect write.
 11. **Memory is tiered on two axes**: a continuous confidence lifecycle (provisional -> active -> retired - thresholds over a score, not many discrete tiers) and an explicit memory hierarchy (working -> episodic -> semantic -> archival) that formation promotes across.
 12. **The user model is a projection over user-scoped beliefs**, not a separate artifact.
 13. **Re-derivation is opt-in per principal**, not automatic on consolidation-policy upgrades.
+14. **Belief matching is scoped to the principal, not the project, and cross-project corroboration promotes.** A belief independently corroborated in two or more distinct project scopes is promoted to `user` scope, retaining every contributing origin in provenance and emitting `memory.promoted`. Each `belief_type` carries a default **portability** class (`portable` / `contextual` / `local`) that the extractor may lower but never raise; `local` beliefs never promote. This is the write-path half of the ADR-0019 decision to let beliefs carry across projects, so the agent learns from every project and environment it works in.
+15. **User rejections are typed formation input that every run, including re-derivation, must replay.** A correction arriving from a recall trace (ADR-0019) is one of: not true (retire — `valid_to = now`, no replacement), was true and has changed (supersede with the correction as a new belief at user authority), or true elsewhere but not here (lower `portability` and record a negative scope override). An unspecified rejection flags for review and down-weights; it never retires on an ambiguous signal. A rejection is evidence at the highest authority and enters through the ordinary conflict resolver, not a special case. It is stored as a durable `BeliefRejection` event and applied **before commit on every consolidation run**, because re-derivation re-forms beliefs from the same episodes and would otherwise resurrect everything the user has ever corrected. Matching is by **content** (subject, statement, `belief_type`), not by belief id, since re-derivation mints new ids. **Rejecting is not deleting**: a correction retains its content for audit and replay, while a deletion removes the record and keeps only a `statement_sha256` tombstone, so re-derivation can refuse to re-form a belief without the platform continuing to hold what the user asked it to forget.
 
 ## Consequences
 
@@ -60,6 +62,17 @@ projection over that log rather than a lossy side-effect write.
   ports. Consolidation has a real (if cheap-tier) token cost.
 - Bi-temporal beliefs and conflict edges add query and storage complexity, paid
   back in correctness on changing facts.
+- Formation gains a second input alongside the episodic log: outstanding rejections
+  are consulted on every run, so re-derivation is safe to offer rather than a
+  standing threat to undo the user's corrections.
+- Corrections become a measurable formation-quality signal (rejection rate) drawn
+  from real usage rather than a rubric — the cheapest evaluation in the memory layer,
+  and the one that arrives without being asked for.
+- Content-keyed matching means the rejection set must be checked against candidates
+  by similarity rather than by key lookup, adding work to the resolve stage
+  proportional to the number of outstanding rejections for the principal.
+- Deletion and correction stop being the same operation, which requires the surface
+  to distinguish them and the store to keep a hash-only tombstone for one of them.
 
 ## Alternatives considered
 
@@ -74,3 +87,13 @@ projection over that log rather than a lossy side-effect write.
   `MemoryConsolidator` port (ADR-0014), but the governance, provenance, and
   re-derivation guarantees stay ours; not adopted as the sole path.
 - **Proliferating discrete confidence tiers**: rejected; confidence is continuous, so thresholds over a score give the same control without classification burden or schema churn.
+- **Per-project belief stores**: rejected; identical beliefs would be formed and maintained independently per project, supersession would have to be applied N times, and the cross-project corroboration signal that identifies a genuinely general belief would be destroyed by the duplication.
+- **Applying user corrections as edits to the belief store**: rejected; an edit is
+  output, and re-derivation regenerates output from the log. Every correction would be
+  silently reverted by the next policy upgrade — an invisible, delayed failure that is
+  indistinguishable from the agent ignoring the user.
+- **Matching rejections by belief id**: rejected; re-derivation mints new ids for the
+  same content, so an id-keyed rejection stops matching precisely when it matters most.
+- **Treating "this is wrong" as a delete**: rejected; discarding the content discards
+  the evidence needed to refuse re-formation, and conflates a correction the user wants
+  remembered with data they want removed.

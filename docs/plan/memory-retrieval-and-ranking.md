@@ -41,14 +41,19 @@ These are fixed by earlier decisions and are not re-litigated here.
 - **Prompt-stability invariant (Section 10.1, ADR-0012).** The cacheable prefix is
   built once per session and stays byte-stable. Memory is injected as a **frozen
   per-session snapshot** in that prefix; every mid-session recall goes into the
-  **user turn**, never into the prefix (ADR-0014).
+  **user turn**, never into the prefix (ADR-0014). The prefix itself — its region
+  membership rule, its epoch semantics, and the test that enforces its stability —
+  is specified in [the context engine](context-engine.md) and ADR-0020. The snapshot
+  is a Region A item; in-turn recall and correction lines are Region B items.
 - **Memory is data, never instructions.** Recalled items carry `TrustLevel.MEMORY`
   (Section 11.2) and can never redefine policy, grant permission, or change
   approval requirements. Memory is the one *stored and replayed* injection vector,
   so it is scanned at load and poisoned entries are replaced with `[BLOCKED]`
   placeholders (ADR-0014).
-- **Scope is a hard filter.** Tenant, principal, and scope are query predicates,
-  never ranking features. There is no score high enough to cross a tenant.
+- **Isolation boundaries are hard filters. Relevance boundaries are not.** Tenant,
+  principal, and the surface sensitivity ceiling are query predicates with no score
+  high enough to cross them. **Project is a relevance boundary, not an isolation
+  boundary** — see "Beliefs carry across projects".
 - **Confidence and lifecycle state matter (formation spec, "Memory states and
   tiers").** `active` beliefs retrieve at full weight; `provisional` retrieves
   weakly; `superseded` and `expired` are excluded from live recall.
@@ -96,6 +101,59 @@ correction: [m:8f21] no longer holds as of 2026-07-24; superseded by [m:9d02].
 The prefix is never rewritten. The stable platform text tells the model that
 corrections and the current user turn outrank the memory block.
 
+## Sizing the snapshot
+
+The binding constraint on the snapshot is not token cost. It sits in the cached prefix
+and is read at cache rates, so carrying it is cheap. The constraint is **attention**.
+The snapshot is the one retrieval channel with no query behind it, so its precision is
+structurally lower than in-turn recall's, and every belief in it is read on turns where
+it is irrelevant. Dilution tracks the **absolute number** of irrelevant items, not the
+fraction of the window they occupy, so the cap is absolute tokens with a percentage
+ceiling rather than a pure percentage. A larger context window is not a reason for a
+larger snapshot.
+
+Pulling the other way: the snapshot is the safety net for an imperfect query former.
+Anything the former fails to fire on is simply lost unless the snapshot carries it.
+Correct snapshot size is therefore **inversely proportional to retrieval quality** —
+larger while the former and ranker are young, shrinking as they improve. The numbers
+below are a starting point with a shrink path, not a constant.
+
+Two caps apply and whichever binds first wins. The **item cap is primary**, because
+dilution counts items; the token cap is the backstop against unusually verbose beliefs.
+
+| Session type | Items | Tokens | Ceiling |
+| --- | --- | --- | --- |
+| Interactive | 40 | 1,500 | 2% of window |
+| Async / long-running run | 80 | 3,000 | 2% of window |
+| Child run | 15 | 500 | 2% of window |
+
+At roughly 25 tokens per rendered belief, 1,500 tokens is about 40 beliefs — close to
+what a well-briefed colleague holds about you before a conversation starts: who you
+are, what you are working on, how you like to work, and a handful of standing
+constraints. Past that you are into facts that are relevant *sometimes*, which is what
+the task layer is for. An async run gets double because it amortizes one fixed block
+over many requests and knows its objective up front, where a short interactive session
+pays a much larger share of its total tokens for the same block. Child runs get a small
+scoped budget rather than a copy of the parent's snapshot.
+
+Within the cap, roughly two-thirds of the item budget is reserved for durable
+user-model and preference beliefs and the remainder for the opening-goal priming set,
+so a burst of project-specific beliefs cannot evict "who am I talking to" — the one
+thing the snapshot exists to carry. Unused priming slots are not backfilled. The
+relevance floor still governs: the cap is a ceiling, not a target.
+
+The number is then set empirically, against two signals already present in the trace:
+
+- **Snapshot utilization** — the fraction of snapshot beliefs cited at least once in
+  the session. Sustained utilization below about a quarter means the core is carrying
+  passengers, and it should shrink.
+- **Snapshot misses** — in-turn recalls returning a belief that was snapshot-eligible
+  but did not make the cut. Frequent misses mean the core is too small, or that the
+  wrong things are in it.
+
+The two pull in opposite directions, which is the point: tune until neither is firing.
+Both derive from `RecallTrace`, so retuning is a query rather than an experiment.
+
 ## Beliefs and episodes are different queries
 
 The memory hierarchy has two retrievable stores below working memory, and conflating
@@ -116,6 +174,65 @@ because it is the expensive tier.
 Formation promotes episodic to semantic; retrieval pages both back into working
 memory. Working memory itself (Section 7 `WorkingState`) is not retrieved — it is
 already in context, and it is the *destination*.
+
+## Beliefs carry across projects
+
+The agent learns from every project and environment it works in, and what it learns
+in one is available in all of them. A lesson earned once should not have to be
+taught again in the next repository.
+
+This requires separating two things that the word "scope" conflates:
+
+- **Isolation boundaries** — tenant, principal, and the surface sensitivity ceiling.
+  These are security boundaries. They are SQL predicates applied before scoring, and
+  no relevance score can cross them. A scope filter implemented as a rank feature is
+  a defect here, not a tuning choice.
+- **Relevance boundaries** — project, agent, workspace. These describe *where a
+  belief was learned*, which is evidence about where it applies, not permission to
+  see it. They are ranking and rendering inputs.
+
+Project scope moves to the second category. Within a principal, every belief is
+eligible everywhere; `scope_affinity` decides how strongly it competes.
+
+### Not everything transfers equally
+
+Carrying beliefs across projects introduces a failure mode that scope isolation
+used to prevent for free: **false transfer** — stating project A's facts as though
+they hold in project B. The defense is that portability is a property of the belief
+type, set at formation and carried on the belief.
+
+| Class | Examples | Carries |
+| --- | --- | --- |
+| **Portable** | preferences, working style, communication norms, standing constraints, skills, corrections to the agent's own knowledge | fully, at full weight |
+| **Contextual** | technology choices, architectural patterns, decisions and their rationale | yes, always attributed to the project it came from |
+| **Local** | environment endpoints, service names, credential locations, current status, deadlines, per-project overrides | only on explicit query, heavily discounted, always attributed |
+
+A belief recalled outside the project it was learned in is **rendered with its
+origin** and applied at a **reduced confidence band**, so it can never read as an
+unqualified fact about the current project:
+
+```text
+[m:44b9] (learned in veetbot) Postgres with pgvector backs memory.
+```
+
+### Corroboration across projects promotes
+
+The mechanism that turns this from a wider candidate pool into actual learning is
+**promotion**. When formation observes the same belief independently in two or more
+distinct project scopes, it promotes the belief from project scope to `user` scope:
+independent corroboration in unrelated contexts is precisely the evidence that a
+belief is about the principal rather than about one project. A promoted belief drops
+its origin attribution, competes at full weight everywhere, and becomes eligible for
+the session-open snapshot.
+
+The write-path rule is specified in
+[memory formation and consolidation](memory-formation-and-consolidation.md). The
+read path's obligation is to make it observable: cross-project recalls are marked in
+the trace, so a belief that keeps proving useful outside its origin is visible as a
+promotion candidate.
+
+An explicit per-project override always outranks a carried belief. Learning globally
+does not mean ignoring local instruction.
 
 ## The pipeline
 
@@ -153,15 +270,20 @@ without a cache.
 
 Applied in the SQL predicate, before any scoring:
 
-- `tenant_id`, `principal_id`, and permitted `scopes`;
+- `tenant_id` and `principal_id` — the isolation boundary;
 - lifecycle: exclude `superseded` and `expired` unless the query is historical;
 - bi-temporal validity: `valid_from <= as_of AND (valid_to IS NULL OR valid_to > as_of)`,
   where `as_of` defaults to now. This is what makes "what did I believe last month" a
   first-class query rather than an archaeology exercise;
 - sensitivity ceiling for the current surface (a memory that is fine in a private
-  session may not be renderable to a shared or inbound surface — Section 22).
+  session may not be renderable to a shared or inbound surface — Section 22);
+- `portability = local` beliefs from other projects, unless the query names their
+  subject explicitly. This is the one place project scope still narrows the
+  candidate set, and it is a precision measure rather than an isolation one.
 
-A scope filter implemented as a rank feature is a defect, not a tuning choice.
+Project scope is otherwise **not** a predicate — it is carried into ranking as
+`scope_affinity`. The isolation predicates are, and a filter on those implemented as
+a rank feature is a defect rather than a tuning choice.
 
 ### 3. Recall arms
 
@@ -204,7 +326,7 @@ score(b, q) =
     + w_conf      · conf(b)               # confidence x lifecycle state
     + w_reinforce · reinforce(b)          # corroboration, time-decayed
     + w_authority · authority(b)          # user > affirmed > inferred
-    + w_scope     · scope_affinity(b, q)  # project > user > global
+    + w_scope     · scope_affinity(b, q)  # origin match x portability
     + w_utility   · utility(b)            # usefulness when recalled
     - w_penalty   · penalty(b)            # stale, flagged, near-duplicate
 ```
@@ -218,6 +340,12 @@ with:
   preferences decay slowly, situational facts quickly;
 - `authority(b)` from the belief's provenance: direct user statement, agent-affirmed
   conclusion, or inference;
+- `scope_affinity(b, q)` combines origin match with portability. A belief learned in
+  the current project scores highest; `user` and `global` beliefs score at parity with
+  it, since they have already earned generality; a belief carried from another project
+  is discounted by its portability class — lightly for `portable`, materially for
+  `contextual`, heavily for `local`. Carrying is the default, not the exception; the
+  discount only decides how hard it has to compete;
 - `penalty(b)` covers `flagged_for_review`, being past `expires_hint`, and being a
   near-duplicate of a higher-ranked item.
 
@@ -257,7 +385,10 @@ Filling the budget is not the objective.
 ### 8. Assemble to budget and render
 
 Fit the ranked set into `ContextBudget.retrieved_context_tokens` (Section 11.3),
-highest score first, stopping at the budget or the floor. Then render a
+highest score first, stopping at the budget or the floor. That allocation is set by
+the budget allocator in [the context engine](context-engine.md): the frozen snapshot
+is its Region A half and in-turn recall its Region B half, and in-turn recall is the
+**first** class to yield when the body is over budget. Then render a
 **deterministic, trust-labeled block**:
 
 ```text
@@ -265,6 +396,7 @@ highest score first, stopping at the budget or the floor. Then render a
   [m:8f21] Andy prefers concise, prose-first writing.   (user-stated, high)
   [m:1c07] Andy's current project is veetbot.           (user-stated, high)
   [m:44b9] Andy's stack is Postgres-backed.             (inferred, medium)
+  [m:7ea5] (learned in atlas) Deploys are gated on CI.  (inferred, low)
   [m:0d3e] [BLOCKED] withheld: failed injection scan.
 </memory>
 ```
@@ -282,6 +414,9 @@ Rendering rules exist to protect the cache and the trust boundary:
   are recollections which may be stale, that the current turn outranks them, and that
   the model should cite an id when it relies on one, is platform text in the cached
   prefix. Only the data varies.
+- **Carried beliefs are attributed.** A belief recalled outside its origin project
+  renders with `(learned in <project>)`. Attribution is part of the data, not a
+  footnote — an unattributed carried belief is a false-transfer bug.
 - **Ids are exposed** so the model can cite, the trace can be joined, and the user can
   say "that one is wrong" about a specific belief.
 
@@ -302,14 +437,17 @@ Retrieval then feeds back into formation, in both directions:
   repeatedly returns nothing above the floor is queued as a targeted re-derivation
   hint for the formation loop (formation stage 8). The read path tells the write path
   what it should have remembered.
+- **Cross-project usefulness is a promotion signal.** A belief carried out of its
+  origin project and then actually used is recorded in `carried_in`, giving formation
+  read-path evidence of generality alongside its own write-path corroboration.
 
 ## Ports and data model
 
 ```python
 class RecallQuery(BaseModel):
-    tenant_id: str
-    principal_id: str
-    scopes: list[str]                  # hard filter: user / project / global
+    tenant_id: str                     # isolation boundary, hard filter
+    principal_id: str                  # isolation boundary, hard filter
+    current_scope: str                 # relevance anchor, not a filter
     text: str | None = None            # intent; may be multi-sentence
     subjects: list[str] = []           # structured anchors, alias-expanded
     belief_types: list[str] = []
@@ -328,6 +466,9 @@ class RecalledBelief(BaseModel):
     status: str                        # active | provisional | ...
     confidence_band: str               # "high" | "medium" | "low"
     authority: str                     # "user" | "affirmed" | "inferred"
+    origin_scope: str                  # where it was learned
+    portability: str                   # portable | contextual | local
+    carried: bool = False              # recalled outside origin_scope
     valid_from: datetime
     valid_to: datetime | None
     score: float
@@ -347,14 +488,46 @@ class RecallTrace(BaseModel):
     id: UUID
     session_id: UUID
     run_id: UUID | None
+    turn_id: UUID | None               # joins the answer to its evidence
+    moment: str                        # snapshot | in_turn | child_run
     query: RecallQuery
-    arm_latencies_ms: dict[str, int]
-    candidates: int
+    surface_id: str                    # ceiling in force at render time
+    sensitivity_ceiling: str
+    rendered_sha256: str               # binds the trace to exact bytes
+    arm_latencies_ms: dict[str, int]   # operator tier, nulled after window
+    candidates: int                    # operator tier
     returned: list[UUID]
-    dropped_for_budget: list[UUID]
+    cited: list[UUID]                  # ids the model referenced -> "used"
+    dropped_for_budget: list[UUID]     # operator tier
     blocked: list[UUID]
+    carried_in: list[UUID]             # promotion candidates
     retrieval_policy_version: str
     created_at: datetime
+    operator_fields_expire_at: datetime
+```
+
+The user-safe projection is a separate read model, never a second write:
+
+```python
+class TracedBelief(BaseModel):
+    belief_id: UUID
+    subject: str
+    statement: str
+    learned_at: datetime               # first observed, not last touched
+    origin_scope: str
+    carried: bool
+    authority: str                     # user-stated | affirmed | inferred
+    source_episode_id: UUID | None     # "show me where this came from"
+    confidence_band: str
+    used: bool                         # model cited it this turn
+
+class RecallTraceView(BaseModel):
+    turn_id: UUID
+    moments: list[str]                 # which recalls fed this turn
+    beliefs: list[TracedBelief]
+    considered_not_shown: int          # count only, never ids
+    withheld_by_safety: int            # count and reason, never content
+    as_of: datetime
 ```
 
 Ports, all replaceable strategies behind the existing memory port (ADR-0014):
@@ -380,6 +553,15 @@ class Ranker(Protocol):
 
 class EpisodeSearch(Protocol):
     async def search(self, query: EpisodeQuery) -> list[EventEnvelope]: ...
+
+class TraceStore(Protocol):
+    async def record(self, trace: RecallTrace) -> None: ...
+    async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...
+    async def user_view(
+        self,
+        turn_id: UUID,
+        viewing_surface_id: str,       # ceiling is min(recall, viewing)
+    ) -> RecallTraceView: ...
 ```
 
 ## The agent-facing surface
@@ -395,6 +577,86 @@ Two tools, both returning `TrustLevel.MEMORY` data:
 Both are ordinary tools: policy-gated, traced, and counted against the run budget.
 Neither can return anything the hard filter excludes.
 
+## The trace is a user-facing surface
+
+The `RecallTrace` has two consumers: the operator tuning ranking, and the user asking
+why the agent said what it said. Both read the **same record**. Two logs would drift,
+and the one shown to the user is the one that must not be wrong.
+
+### What a trace can honestly claim
+
+A trace records what was **placed in context**, not what the model attended to. "Why
+did you say that" overclaims; the honest question it answers is *what did you know
+when you said that*. Where the model cited a belief id, the view marks that belief
+**used**; everything else rendered is marked **available**. Inferring causal influence
+from mere presence in the block would be fabrication dressed as transparency, so the
+surface does not do it.
+
+The trace is therefore **recorded, not reconstructed**. It is written in the same pass
+that builds the rendered block and carries `rendered_sha256` over those exact bytes.
+Answering the question later by re-running retrieval would return a different set —
+policies version, beliefs supersede, decay moves scores — and a plausible re-run is
+worse than no answer at all.
+
+### The user-safe projection
+
+The view for a turn is that turn's in-turn recall trace plus the session-open snapshot
+trace, each marked with its moment, since both were in front of the model.
+
+Included, per rendered belief: id, statement, and subject; **when** it was learned and
+**where** — origin project, and whether it was carried; **how** — user-stated,
+affirmed, or inferred — with a link to the source episode; its confidence band; and
+whether it was used or merely available.
+
+Included in aggregate: that *n* further beliefs were considered and not shown, and
+that *n* were withheld by the injection scan. A silent withholding is worse than a
+visible one, so blocked items are counted and explained, never displayed.
+
+Excluded: arm latencies, per-arm ranks, raw scores, candidate ids, and policy
+internals. To a user these are noise at best and alarming out of context — and the
+individual beliefs that lost the ranking never reached the model, so correcting them
+here would be correcting something that had no bearing on the answer.
+
+Browsing everything the agent believes is a **different surface**, the memory
+inspector of the formation spec. This one explains a single answer.
+
+### Sensitivity is the stricter of two ceilings
+
+A trace may be read on a different surface than the recall was rendered for. The view
+is filtered by the **minimum** of the recall surface's sensitivity ceiling and the
+viewing surface's, never either alone. Filtering only by the viewing surface would let
+a restricted channel's recall be re-read at full sensitivity somewhere permissive;
+filtering only by the recall surface would show, inside a locked-down surface, what a
+permissive one had been allowed to see. Transparency must not become a disclosure
+path.
+
+### Retention is two-tier over one record
+
+The operator fields — arm latencies, candidate counts, dropped ids — are high-volume
+and useful only inside the tuning window, and are nulled on a schedule. The user-safe
+fields ride with the session they explain and are deleted with it, on the same delete
+path, so deleting a conversation deletes its explanations.
+
+### Rejection is the correction path
+
+Every item in the view carries its belief id, so "this is wrong" is unambiguous about
+*which* belief. It is ambiguous about *what* is wrong, and the surface asks rather
+than guesses:
+
+- **Not true** — retire the belief.
+- **Was true, has changed** — supersede it with the correction.
+- **True elsewhere, not here** — a scope and portability correction, not a
+  retirement. This kind of rejection exists only because beliefs carry, and it is the
+  highest-value signal for tuning the portability classes.
+
+An undifferentiated rejection flags the belief for review and down-weights it; it does
+not retire it. Retiring on an ambiguous signal destroys information, for the same
+reason formation refuses to silently overwrite. Rejections are durable events, so
+**re-derivation must replay them** — a rejected belief that reappears because the
+consolidation policy was upgraded is the worst bug this surface can have. The
+write-path handling is specified in
+[memory formation and consolidation](memory-formation-and-consolidation.md).
+
 ## Failure modes and defenses
 
 | Failure | Defense |
@@ -403,10 +665,14 @@ Neither can return anything the hard filter excludes.
 | Stale belief surfaces as current | `as_of` filtering, supersession collapse, time-decayed reinforcement |
 | Poisoned memory replayed every session | load-time injection scan to `[BLOCKED]`; memory is data; policy is unreachable from memory |
 | Prompt cache invalidated by memory | frozen byte-stable snapshot; all mid-session recall into the user turn |
-| Cross-tenant or cross-scope leak | scope is a SQL predicate, never a feature; asserted per query path in tests |
+| Cross-tenant or cross-principal leak | isolation scope is a SQL predicate, never a feature; asserted per query path in tests |
+| False transfer — project A's facts asserted about project B | portability classes, origin attribution on every carried belief, reduced confidence band until corroborated locally, explicit local overrides outrank carried beliefs |
 | High-value item buried mid-block | small blocks, highest score first, task recall adjacent to the goal |
 | Retrieval latency on the critical path | concurrent arms with a shared deadline, partial-result degradation, precomputed snapshot |
 | Wrong belief entrenched by being useful | usage resets decay but never raises confidence |
+| Trace disagrees with what the model actually saw | traces are recorded in the render pass, never reconstructed; `rendered_sha256` binds the trace to the exact bytes |
+| Trace becomes a disclosure path | the view is filtered by the minimum of the recall surface's ceiling and the viewing surface's; blocked items are counted, never shown |
+| A rejected belief returns after re-derivation | rejections are durable events that re-derivation replays, not a delete applied to a projection |
 
 ## Evaluation
 
@@ -425,6 +691,17 @@ observed until beliefs can be read back.
   behavior.
 - **Scope isolation** — zero cross-tenant and cross-principal results. A hard gate,
   not a metric to improve.
+- **Trace faithfulness** — for sampled turns, the beliefs listed in the trace must
+  reproduce the rendered block that the recorded hash covers, and no belief above
+  `min(recall ceiling, viewing ceiling)` may ever appear in a view. Both are hard
+  gates, not metrics to improve.
+- **Correction durability** — a rejected belief does not return, including across a
+  consolidation-policy upgrade and a full re-derivation.
+- **Transfer precision and transfer lift** — the paired metrics for carrying beliefs
+  across projects. Lift: tasks in a new project that succeed because something learned
+  elsewhere was recalled. Precision: carried beliefs that were correct in the new
+  context, and attributed when they were not certain. Reported together, since raising
+  either alone is trivial and worthless.
 - **Cache preservation** — measured cached-token ratio must not regress when memory is
   enabled. This is the invariant's regression test.
 - **Cost and latency** — retrieval tokens per turn and p95 recall latency within budget.
@@ -437,17 +714,22 @@ without regressing cache utilization, and without raising noise ratio.
 ## Build sequence (incremental, each gated by evals)
 
 1. **Deterministic core.** Structured scope-filtered lookup, session-open snapshot,
-   byte-stable rendering, trust labeling, and traces. No ranking beyond confidence and
-   recency. This alone gives the agent a stable user model.
+   byte-stable rendering, trust labeling, and traces — recorded with their user-safe
+   fields and `rendered_sha256` from the first commit, since retrofitting faithfulness
+   onto a trace that was never written faithfully is not possible. No ranking beyond
+   confidence and recency. This alone gives the agent a stable user model.
 2. **Lexical recall and ranking.** Postgres FTS arm, the hand-weighted ranker, the
    relevance floor, budgeted assembly, supersession collapse.
 3. **In-turn recall.** `memory.search`, automatic pre-turn recall with a floor, and the
    recall delta over the frozen snapshot.
 4. **Feedback loop.** Usage tracking into decay resistance and `utility`; recall misses
    into formation re-derivation hints.
-5. **Semantic arm.** `pgvector` plus RRF fusion — only if the harness shows lift over
+5. **Inspectable trace and correction.** The `RecallTraceView` projection, the
+   two-ceiling filter, two-tier retention, and the typed rejection path into
+   formation. The record is written from step 1; this step exposes it.
+6. **Semantic arm.** `pgvector` plus RRF fusion — only if the harness shows lift over
    lexical (Milestone 9).
-6. **Later arms.** Entity-graph expansion (graph spec), external provider arm
+7. **Later arms.** Entity-graph expansion (graph spec), external provider arm
    (ADR-0014), learned reranker once traces provide labeled data.
 
 ## Decisions
@@ -455,7 +737,13 @@ without regressing cache utilization, and without raising noise ratio.
 - **Retrieval happens at distinct moments with distinct profiles**: a frozen
   session-open snapshot in the cached prefix, in-turn recall into the user turn, and
   separately-scoped child-run recall. The prefix is never rewritten mid-session.
-- **Scope is a filter, never a ranking feature.** No score crosses a tenant.
+- **Isolation scope is a filter; relevance scope is a ranking feature.** No score
+  crosses a tenant or a principal. Project scope is not an isolation boundary.
+- **Beliefs carry across projects by default.** The agent learns from every project
+  and environment; a belief learned in one is eligible everywhere for that principal,
+  discounted by its portability class, rendered with its origin, and outranked by any
+  explicit local override. Independent corroboration in a second project promotes the
+  belief to `user` scope, where it drops attribution and competes at full weight.
 - **Superseded and expired beliefs are excluded from live recall**, but genuinely
   unresolved conflicts are surfaced as conflicts rather than silently resolved at read
   time — retrieval does not undo formation's refusal to guess.
@@ -472,16 +760,21 @@ without regressing cache utilization, and without raising noise ratio.
   and is enabled on eval evidence, per Milestone 9.
 - **Every recall is traced**, and traces are the feedback channel into both ranking and
   formation.
+- **The snapshot is capped by item count first and tokens second, never by a pure
+  percentage of the window.** It starts at 40 items / 1,500 tokens for an interactive
+  session, doubles for long-running async runs that amortize it, and is expected to
+  *shrink* as the query former and ranker improve. Utilization and miss rate from the
+  trace are the tuning signals.
+- **The trace has two consumers and one record.** It is a user-inspectable surface as
+  well as an operator artifact: recorded rather than reconstructed and bound to the
+  rendered bytes, projected user-safe, filtered by the stricter of the recall and
+  viewing ceilings, retained on two clocks, and carrying a typed rejection path back
+  into formation. It claims only what was known at the turn, never what the model
+  attended to.
 
 ## Open questions
 
-1. **Snapshot budget.** How large should the always-on session-open core be — a hard
-   token cap (proposed: roughly 1–2% of the context window) or a belief count? It is
-   paid on every request of the session, so this is a direct cost-versus-continuity
-   trade.
-2. **Cross-project bleed.** Should a highly relevant project-scoped belief ever surface
-   in a different project? Proposed default: no — user and global scope only, with an
-   explicit per-agent opt-in — but that costs some genuinely useful recall.
-3. **User-visible retrieval traces.** Should "why did you say that" expose the beliefs
-   used in an answer to the end user, or should traces stay an operator surface? The
-   transparency argument is strong; it is a product surface with its own cost.
+None outstanding for the read path. The snapshot budget is now a default with a
+measured tuning loop (see [Sizing the snapshot](#sizing-the-snapshot)) rather than an
+open decision. The temporal entity graph, which supplies the later graph-expansion arm,
+is not yet specified.

@@ -118,6 +118,12 @@ explicit + scheduled, with turn-boundary as a cheap flagger only.
 - Select salient spans: user corrections, decisions, stated preferences, new
   entities, explicit "remember this", task outcomes. De-prioritize routine tool
   chatter.
+- **Working state is a second input.** `WorkingState.established_facts` surviving to
+  the session boundary are offered as candidates with their provenance and trust
+  level attached ([context engine](context-engine.md), ADR-0020). They are
+  candidates, not beliefs: they enter here and pass through every stage below,
+  including the trust gate. A fact the run derived from untrusted content is still
+  untrusted.
 - **Trust gate at selection.** Spans that are solely `EXTERNAL_UNTRUSTED`
   (tool output, web content) are never a *direct* formation source (Section 11.2).
   Such content can only become memory once the user or the agent affirms it; it is
@@ -141,12 +147,21 @@ class MemoryCandidate(BaseModel):
     source_event_ids: list[int]   # mandatory provenance
     model_confidence: float
     proposed_scope: str       # "user" | "project" | "global"
+    proposed_portability: str # portable | contextual | local
     sensitivity_guess: str
     valid_from: datetime | None
     expires_hint: datetime | None
 ```
 
 Candidates are **proposals, not writes.**
+
+**Portability has a deterministic ceiling.** Each `belief_type` carries a default
+portability — preferences, user-model attributes, and procedure pointers are
+`portable`; facts and relationships default to `contextual`. The extractor may
+*lower* a candidate's portability but never raise it, so a model cannot make a belief
+travel further than its type allows. Portability governs how a belief behaves outside
+the project it was learned in, and is defined in
+[memory retrieval and ranking](memory-retrieval-and-ranking.md).
 
 ### 4. Filter — eligibility and salience
 
@@ -178,6 +193,22 @@ with `valid_to` set (bi-temporal — we keep *what was believed and when*), mark
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".
+
+**Promotion across scopes.** Matching is performed within the principal, not within
+the project, so a candidate formed in one project matches an existing belief formed
+in another. When the same belief is independently corroborated in **two or more
+distinct project scopes**, it is **promoted** to `user` scope: independent
+observation in unrelated contexts is the evidence that a belief describes the
+principal rather than one project. Promotion sets `scope = "user"`, retains every
+contributing `origin_scope` in provenance, and emits `memory.promoted`. This is the
+write-path half of
+[beliefs carrying across projects](memory-retrieval-and-ranking.md); the read path
+supplies additional evidence by recording which carried beliefs proved useful outside
+their origin.
+
+Promotion applies only to `portable` and `contextual` beliefs. A `local` belief
+(an endpoint, a service name, a deadline) that happens to look similar across two
+projects is a coincidence, not a generalization, and is never promoted.
 
 ### 6. Gate — policy and safety
 
@@ -213,6 +244,48 @@ call (Section 9):
   produced which belief. This capability is the main advantage of deriving memory
   from an episodic log rather than writing it as a lossy side effect.
 
+## User corrections are evidence
+
+Beliefs are inspectable, so they are also rejectable. A rejection arrives with the
+belief id it refers to, from the recall trace the user was reading
+([memory retrieval and ranking](memory-retrieval-and-ranking.md)), which makes *which*
+belief unambiguous. What is wrong about it is not, and the surface asks rather than
+guesses — the three answers are three different writes:
+
+| The user says | Formation does |
+| --- | --- |
+| Not true | Retire the belief: `valid_to = now`, status `superseded`, no replacement. |
+| Was true, has changed | Supersede it with the correction as a new belief at user authority. |
+| True elsewhere, not here | Lower `portability` and record a negative scope override. The belief survives in its origin; it stops being carried here. |
+| *(unspecified)* | Flag for review and down-weight. Never retire on an ambiguous signal. |
+
+A rejection is **evidence at the highest authority** — a direct user statement, which
+outranks anything inferred and any older user statement under the existing
+conflict-resolution policy. It is not a special case in the resolver; it enters through
+the same door as any other user statement.
+
+**Rejections are events, not edits, and re-derivation replays them.** This is the sharp
+edge. Because the event log is ground truth, a re-derivation run re-forms beliefs from
+history — and would cheerfully re-form everything the user has ever corrected, since
+the improved extractor sees the same original episodes. A rejection is therefore an
+input to formation rather than a correction applied to its output: every consolidation
+run, including re-derivation, applies the outstanding rejections for the principal
+before commit.
+
+That matching cannot be by belief id, because re-derivation mints new ids. A
+`BeliefRejection` stores the rejected `subject`, `statement`, and `belief_type`, and
+matching is by content similarity on the same comparison the resolver already uses for
+duplicates. A belief that a user has rejected does not come back with a new id.
+
+**Rejecting is not deleting.** "This is wrong" is a correction and keeps its content
+for audit and replay. "Delete this" is a data-removal request: the belief record is
+removed and the tombstone retains a **content hash** rather than the statement, so
+re-derivation can still refuse to re-form it without the platform continuing to hold
+what the user asked it to forget.
+
+Rejection rate is also the cheapest formation-quality signal available — corrections
+per hundred rendered beliefs, measured against real usage rather than a rubric.
+
 ## Data-model additions
 
 Extends the Milestone 9 `MemoryRecord`:
@@ -224,21 +297,38 @@ class MemoryRecord(BaseModel):
     #     valid_from, expires_at, status) ...
     belief_type: str
     polarity: str                       # "assert" | "retract"
+    portability: str                    # portable | contextual | local
+    origin_scopes: list[str]            # every scope that corroborated it
     corroboration_count: int = 1
     last_reinforced_at: datetime
-    valid_to: datetime | None           # bi-temporal: when the belief stopped holding
+    valid_to: datetime | None           # bi-temporal: when it stopped holding
     superseded_by: UUID | None
     # `status` (from Milestone 9) carries the lifecycle state:
     #   candidate | provisional | active | superseded | expired
-    flagged_for_review: bool = False    # committed autonomously; surfaced for review
+    flagged_for_review: bool = False    # committed, surfaced for review
     formation_run_id: UUID              # which consolidation produced it
     consolidation_policy_version: str
+
+class BeliefRejection(BaseModel):
+    id: UUID
+    tenant_id: str
+    principal_id: str
+    belief_id: UUID                     # as rejected; ids change on re-derive
+    kind: str                           # untrue | changed | not_here | unspecified
+    subject: str                        # content keys survive re-derivation
+    statement: str | None               # None once the user asked for deletion
+    statement_sha256: str               # the tombstone key
+    belief_type: str
+    scope: str                          # where the rejection was made
+    replacement_id: UUID | None         # set for "was true, has changed"
+    trace_id: UUID | None               # what the user was looking at
+    created_at: datetime
 
 class ConsolidationRun(BaseModel):
     id: UUID
     tenant_id: str
     principal_id: str
-    trigger: str                        # "session" | "explicit" | "scheduled" | ...
+    trigger: str                        # session | explicit | scheduled | ...
     scope: str
     watermark_before: int
     watermark_after: int
@@ -258,9 +348,9 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 ## Ports and runtime placement
 
 - **`MemoryStore` port**: `query`, `upsert_belief`, `reinforce`, `supersede`,
-  `list`, `edit`, `delete`. Backends: Postgres (FTS + normalized belief tables)
-  first; `pgvector` and an external provider (e.g. Honcho) later, behind the same
-  port (ADR-0014).
+  `list`, `edit`, `delete`, `reject`, `outstanding_rejections`. Backends: Postgres
+  (FTS + normalized belief tables) first; `pgvector` and an external provider (e.g.
+  Honcho) later, behind the same port (ADR-0014).
 - **`MemoryConsolidator` port**: `run(trigger, scope, since_watermark) ->
   ConsolidationResult`. The builtin implementation is LLM extraction as above; an
   external memory provider can be delegated to behind this port.
@@ -295,6 +385,10 @@ first formation layer (Section 20).
   (not duplication) and that retrieval returns the current belief.
 - **No fabrication** — it must not form beliefs unsupported by episodes.
 - **Injection resistance** — an untrusted "remember X" must not form a belief.
+- **Correction durability** — a rejected belief must not return, including after a
+  full re-derivation under a newer consolidation policy. A hard gate.
+- **Rejection rate** — user corrections per hundred rendered beliefs. A precision
+  proxy measured against real usage rather than a rubric.
 - **Cost** — consolidation tokens per session within budget.
 
 Adapt LOCOMO-style long-horizon scenarios to exercise the write path. Gate: memory
@@ -302,14 +396,15 @@ improves target eval cases **without** increasing policy failures.
 
 ## Build sequence (incremental, each gated by evals)
 
-The **builtin consolidation path is built to parity first** (steps 1-4); an external provider is a later comparison option (step 5), not the initial path.
+The **builtin consolidation path is built to parity first** (steps 1-5); an external provider is a later comparison option (step 6), not the initial path.
 
 1. Explicit `memory.remember` + belief store + provenance + user edit/delete +
    reinforce-on-duplicate. No automatic formation yet.
 2. Session-boundary consolidation: extraction + eligibility gate + dedupe.
 3. Conflict detection + supersession + bi-temporal validity.
-4. Decay + scheduled reconsolidation + re-derivation.
-5. External-provider adapter option; user-model projection; graph edges (handed to
+4. Typed rejections and their replay, before re-derivation exists to violate them.
+5. Decay + scheduled reconsolidation + re-derivation.
+6. External-provider adapter option; user-model projection; graph edges (handed to
    the separate graph spec).
 
 ## Decisions
@@ -318,14 +413,18 @@ The **builtin consolidation path is built to parity first** (steps 1-4); an exte
 - **Build the builtin consolidation path to parity first.** An external provider (Honcho/Mem0-style) behind the `MemoryConsolidator` port is a later comparison option, not the initial path.
 - **Keep the provisional tier, and model "tiers" as two axes** (see [Memory states and tiers](#memory-states-and-tiers)): a continuous confidence lifecycle (provisional -> active -> retired) and an explicit memory hierarchy (working -> episodic -> semantic -> archival) that formation promotes across. This is the tiered memory system - not merely two tiers.
 - **The user model is a projection over user-scoped beliefs**, not a separately maintained artifact - one source of truth, no drift.
+- **Beliefs are matched within the principal, not within the project, and corroboration across two or more project scopes promotes a belief to `user` scope.** The agent learns from every project and environment it works in. Portability is bounded by `belief_type` so that project-local facts never generalize.
 - **Re-derivation is opt-in per principal**, not automatic on consolidation-policy upgrades - privacy-conscious users should not have old episodes silently re-mined.
+- **User rejections are typed evidence that re-derivation replays.** A correction enters as a direct user statement through the ordinary resolver; it is stored as an event keyed by content rather than by belief id, so a rejected belief does not return with a new id after re-derivation. Rejecting is distinct from deleting: a deletion keeps only a content hash as its tombstone.
 
 ## Open questions
 
 None outstanding for the formation loop. The next specs off this one raise their
 own: [memory retrieval and ranking](memory-retrieval-and-ranking.md) is written and
-carries three open questions; the temporal entity graph is not yet specified.
+carries none; the temporal entity graph is not yet specified.
 
 Retrieval also closes a loop back into formation: recalled beliefs that are used
-resist decay, and subjects that are repeatedly queried with no result queue targeted
-re-derivation hints for stage 8.
+resist decay, subjects that are repeatedly queried with no result queue targeted
+re-derivation hints for stage 8, beliefs that prove useful outside the project they
+were learned in are recorded as promotion candidates, and beliefs the user rejects
+from a trace enter as typed corrections that every later run must honour.
