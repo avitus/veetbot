@@ -1,0 +1,18 @@
+# Generated documentation outputs (canonical sources are Markdown/YAML).
+/site/
+/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mkdocs_tmp/
+
+# uv
+# (uv.lock is intentionally allowed to be committed once generated.)
+
+# OS / editor
+.DS_Store
+Thumbs.db

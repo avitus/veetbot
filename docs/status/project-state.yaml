@@ -1,0 +1,55 @@
+schema_version: 1
+
+project:
+  name: modular-general-purpose-ai-agent
+  phase: pre_implementation
+  status: ready_for_milestone_0
+  canonical_plan: docs/plan/engineering-plan.md
+  current_milestone: 0
+  authorized_milestones:
+    - 0
+    - 1
+
+milestones:
+  "0":
+    title: Repository and engineering foundation
+    status: not_started
+  "1":
+    title: In-memory vertical slice
+    status: not_started
+  "2":
+    title: PostgreSQL persistence and durable worker
+    status: not_started
+  "3":
+    title: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
+    status: not_started
+  "4":
+    title: Policy, approvals, and complete tool lifecycle
+    status: not_started
+  "5":
+    title: HTTP API and SSE
+    status: not_started
+  "6":
+    title: Isolated execution and artifacts
+    status: not_started
+  "7":
+    title: Context budgeting and structured working state
+    status: not_started
+  "8":
+    title: Skills and MCP integration
+    status: not_started
+  "9":
+    title: Long-term memory and knowledge retrieval
+    status: not_started
+  "10":
+    title: Scheduling, model routing, and subagents
+    status: not_started
+
+documentation:
+  canonical_format: markdown
+  navigable_site_output: site/
+  single_html_output: dist/engineering-documentation.html
+  generated_files_are_editable: false
+
+last_updated: 2026-07-20T23:12:41Z
+last_reviewed_commit: null

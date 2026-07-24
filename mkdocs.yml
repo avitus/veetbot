@@ -1,0 +1,82 @@
+site_name: Modular General-Purpose AI Agent
+site_description: Engineering documentation for the modular general-purpose AI agent platform.
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+
+theme:
+  name: material
+  features:
+    - navigation.tracking
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - search.highlight
+    - search.suggest
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.details
+
+plugins:
+  - search
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+    absolute_links: ignore
+  links:
+    not_found: warn
+    anchors: info
+    absolute_links: ignore
+    unrecognized_links: ignore
+
+nav:
+  - Home: index.md
+  - Current Milestone: plan/current-milestone.md
+  - Engineering Plan: plan/engineering-plan.md
+  - Specs:
+      - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
+      - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
+  - Project State: status/index.md
+  - Architecture Decisions:
+      - Overview: adr/index.md
+      - ADR-0007 Provider-neutral reasoning state: adr/0007-provider-neutral-reasoning-state.md
+      - ADR-0008 Sandbox isolation: adr/0008-sandbox-isolation.md
+      - ADR-0009 Run, turn, and session model: adr/0009-run-turn-session-model.md
+      - ADR-0010 Live event transport: adr/0010-live-event-transport.md
+      - ADR-0011 Multi-device and the shared core: adr/0011-multi-device-shared-core.md
+      - ADR-0012 Open and self-hosted models: adr/0012-open-and-self-hosted-models.md
+      - ADR-0013 Self-improving skills: adr/0013-self-improving-skills.md
+      - ADR-0014 Memory surface and external providers: adr/0014-memory-surface-and-external-providers.md
+      - ADR-0015 Programmatic tool orchestration: adr/0015-programmatic-tool-orchestration.md
+      - ADR-0016 Trajectory capture and export: adr/0016-trajectory-capture-and-export.md
+      - ADR-0017 Layered approval and inbound-surface security: adr/0017-layered-approval-and-inbound-surface-security.md
+      - ADR-0018 Memory formation and consolidation: adr/0018-memory-formation-and-consolidation.md
+      - ADR-0019 Memory retrieval and ranking: adr/0019-memory-retrieval-and-ranking.md
+  - Changelog: changelog.md

@@ -1,0 +1,18 @@
+[project]
+name = "modular-general-purpose-ai-agent"
+version = "0.0.0"
+description = "Modular general-purpose AI agent platform. Documentation tooling only until Milestone 0 begins."
+requires-python = ">=3.11"
+# Documentation tooling only. Application dependencies are added at Milestone 0
+# per docs/plan/engineering-plan.md; do not add application modules here yet.
+dependencies = [
+  "mkdocs>=1.6",
+  "mkdocs-material>=9.5",
+  "pymdown-extensions>=10.7",
+  "PyYAML>=6.0",
+]
+
+[tool.uv]
+# This project is not an installable package yet (no application modules exist);
+# uv should manage the documentation dependencies without building the project.
+package = false

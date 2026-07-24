@@ -1,0 +1,39 @@
+name: docs
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install Pandoc
+        run: sudo apt-get update && sudo apt-get install -y pandoc
+
+      - name: Install documentation dependencies
+        run: uv sync
+
+      - name: Validate documentation (strict build + checks)
+        run: uv run make docs-check
+
+      - name: Build documentation outputs
+        run: uv run make docs
+
+      - name: Upload MkDocs site
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: site/
+
+      - name: Upload single-file HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: engineering-documentation-html
+          path: dist/engineering-documentation.html

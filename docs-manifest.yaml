@@ -1,0 +1,10 @@
+# Order of documents combined into the single self-contained HTML publication.
+# Sources must be canonical Markdown under docs/. Generated directories
+# (site/, dist/) must never appear here.
+title: Modular General-Purpose AI Agent
+output: dist/engineering-documentation.html
+sources:
+  - docs/index.md
+  - docs/plan/current-milestone.md
+  - docs/plan/engineering-plan.md
+  - docs/changelog.md

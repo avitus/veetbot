@@ -1,0 +1,34 @@
+/* Restrained readability and print improvements. Not a custom theme. */
+
+.md-grid {
+  max-width: 62rem;
+}
+
+/* The plan has several wide reference tables; keep them legible without overflow. */
+.md-typeset table:not([class]) {
+  font-size: 0.72rem;
+}
+
+.md-typeset pre > code {
+  font-size: 0.76rem;
+}
+
+/* Print: expand content, wrap code, drop chrome. */
+@media print {
+  .md-typeset pre > code {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .md-sidebar,
+  .md-header,
+  .md-footer,
+  .md-tabs {
+    display: none !important;
+  }
+  .md-content {
+    margin: 0 !important;
+  }
+  a[href]::after {
+    content: "";
+  }
+}

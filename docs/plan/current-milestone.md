@@ -1,0 +1,28 @@
+---
+title: Current Milestone
+---
+
+# Current milestone
+
+- **Current milestone:** Milestone 0 — Repository and engineering foundation
+- **Authorized next milestone:** Milestone 1 — In-memory vertical slice
+- **Project status:** implementation has not started (`pre_implementation`).
+
+Authoritative acceptance criteria for every milestone are defined only by the
+canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
+substitute.
+
+## Authorized work
+
+- [Milestone 0 — Repository and engineering foundation](engineering-plan.md#milestone-0-repository-and-engineering-foundation)
+- [Milestone 1 — In-memory vertical slice](engineering-plan.md#milestone-1-in-memory-vertical-slice)
+- [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
+
+No milestone later than Milestone 1 is authorized. Do not begin Milestone 2 or
+any later milestone speculatively.
+
+## Completion rule
+
+Milestone 1 must not be considered complete until Milestone 0 is complete and
+**both** milestones satisfy every acceptance criterion defined in the canonical
+engineering plan.
