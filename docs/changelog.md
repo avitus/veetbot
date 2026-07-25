@@ -42,6 +42,19 @@ title: Changelog
   mechanism, and the container-escape test the case table does not contain.
 - Wired the document into the nav and recorded six judgment calls in
   `docs/status/questions-for-review.md`, three of them carrying questions.
+- Added a `readiness` block to `docs/status/project-state.yaml` recording which
+  milestones the corpus covers and which three documents must exist before
+  coding reaches Milestones 5, 6, and 8. The block records coverage; it does not
+  authorize work, and `authorized_milestones` is unchanged at 0 and 1. Set
+  `last_reviewed_commit`, which had been null since the file was created.
+- Rewrote the required reading order in `AGENTS.md` to name the detailed-design
+  documents, the milestone map, and the readiness review, and added a routing
+  table from subject to document — fourteen rows, plus the statement that the
+  HTTP API, sandbox isolation, and skills have no such document. Added a scope
+  rule: do not begin an undesigned milestone by inventing the missing design.
+- Pointed `CLAUDE.md` and the project-state overview page at the readiness
+  review, so an agent checks what is known to be missing before concluding that
+  something is missing.
 
 ## 2026-07-25 — Gate milestones and the milestone map
 

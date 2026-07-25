@@ -21,8 +21,36 @@ Read, in this order, before starting an assignment:
 2. `docs/status/project-state.yaml` — current phase and authorized milestones
 3. `docs/plan/current-milestone.md` — the work currently authorized
 4. The relevant sections of `docs/plan/engineering-plan.md`
-5. Relevant ADRs in `docs/adr/` when they exist
-6. Existing code and tests related to the assignment
+5. The detailed-design document that expands those sections — see the routing
+   table below. The plan states the requirement; the spec states the mechanism.
+6. `docs/plan/milestone-map.md` — which gates the active milestone must make
+   true, and the milestone every gate in the corpus belongs to
+7. `docs/plan/readiness.md` — what the corpus does and does not cover for that
+   milestone, including what it names as designed nowhere
+8. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
+9. Existing code and tests related to the assignment
+
+## Where each subject is designed
+
+| Subject | Document under `docs/plan/` |
+| --- | --- |
+| Startup, configuration, the composition root, the CLI | `bootstrap-and-composition.md` |
+| Makefile targets, compose, CI, local development | `development-toolchain.md` |
+| The run loop, cancellation, checkpoints, resume | `runtime-loop.md` |
+| Tool registration, validation, execution, MCP | `tool-system.md` |
+| The builtin tools and their classification | `builtin-tools.md` |
+| Provider adapters, streaming, usage, cost | `model-gateway.md` |
+| Policy decisions, hardline rules, approvals | `policy-and-approvals.md` |
+| Events, projections, persistence, the queue | `event-log-and-persistence.md` |
+| Context assembly, budgeting, working state | `context-engine.md` |
+| Memory formation, tiers, consolidation | `memory-formation-and-consolidation.md` |
+| Memory retrieval, ranking, the recall trace | `memory-retrieval-and-ranking.md` |
+| Evaluation cases, gates, the harness | `evaluation-harness.md` |
+| Which milestone each gate belongs to | `milestone-map.md` |
+| What the corpus does and does not cover | `readiness.md` |
+
+The HTTP API, sandbox isolation, and skills have **no** such document. Sections
+16, 28, and 30 of the engineering plan are all that exists for them.
 
 ## Authority and conflicts
 
@@ -43,6 +71,10 @@ Read, in this order, before starting an assignment:
 - Work only on the **active** milestone or an explicitly authorized one
   (see project state; currently Milestones 0 and 1).
 - Do not begin later milestones speculatively.
+- Milestones 0 through 4 are implementable from the documentation as it stands.
+  Milestone 5 has no API specification, Milestone 6 has no sandbox
+  specification, and Milestone 8's skills half has no design at all. Do not
+  begin those by inventing the missing design: report what is missing and stop.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).
