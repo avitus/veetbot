@@ -62,6 +62,7 @@ nav:
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
       - Bootstrap & Composition: plan/bootstrap-and-composition.md
+      - Development Toolchain: plan/development-toolchain.md
       - Event Log & Persistence: plan/event-log-and-persistence.md
       - Policy & Approvals: plan/policy-and-approvals.md
       - Context Engine: plan/context-engine.md
@@ -100,4 +101,5 @@ nav:
       - ADR-0022 The evaluation harness: adr/0022-evaluation-harness.md
       - ADR-0023 The run loop and the single terminal writer: adr/0023-runtime-loop.md
       - ADR-0024 The composition root and configuration: adr/0024-bootstrap-and-composition.md
+      - ADR-0025 The development toolchain and make check: adr/0025-development-toolchain.md
   - Changelog: changelog.md

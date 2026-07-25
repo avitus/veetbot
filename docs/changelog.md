@@ -4,6 +4,80 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — The development toolchain
+
+- Added `docs/plan/development-toolchain.md`, the design for the nine Milestone
+  0 deliverables that were one line each. Recorded as ADR-0025. "Makefile" was
+  one word; "Docker Compose with PostgreSQL" named no version, port, volume, or
+  database; "CI pipeline" named no workflow file; "Structured logging bootstrap"
+  occurred once in the entire documentation set.
+- Resolved the collision between **"CI executes `make check`"** and the
+  evaluation harness's **four CI jobs**, one of which needs PostgreSQL and one
+  of which needs a provider credential. `make check` is `lint typecheck
+  test-fast`, `test-fast` is `test-static` followed by `test-contract`, and
+  those two are CI jobs 1 and 2 exactly — a partition, not a duplication. CI
+  then runs the two jobs that need resources. Both corpus statements are true
+  afterward and neither was weakened.
+- Resolved the second collision underneath it: Section 21 requires both `make
+  test` and `make check`, and if `check` contained `test` it would inherit the
+  database requirement and fail on a fresh checkout, contradicting Section 24's
+  definition-of-done item that `make check` succeeds. `check` depends on
+  `test-fast`; `test` stays the broader local target it reads as.
+- Fixed **the governing rule**: CI runs no command the Makefile does not define.
+  The workflow file is a schedule and an environment, not a second definition of
+  what the project checks. Six targets were added to Section 21's eight for that
+  reason alone, and each exists because a CI job invokes it.
+- Specified **every Makefile target body**: what all fourteen run, why `db-up`
+  polls the compose healthcheck rather than sleeping, and why `db-up` and
+  `migrate` stay two commands — Section 25 documents them separately and
+  ADR-0024 forbids migrating from the composition root.
+- Specified **the compose file**: `postgres:16-alpine` pinned rather than
+  floated because the persistence layer depends on `FOR UPDATE SKIP LOCKED`
+  semantics, one service, named volume, `pg_isready` healthcheck, and
+  credentials that live in `.env.example` and pass the secret scanner by an
+  allowlist entry carrying a prose reason.
+- Specified **the CI workflow**: one file, four jobs matching the harness, one
+  Python version rather than a matrix, `uv` cache keyed on the committed
+  lockfile, and a live job that runs on schedule and manual dispatch only —
+  never on a pull request, because a fork cannot hold the credential.
+  `mkdocs build --strict` runs inside job 1 rather than in a job of its own.
+- Specified **structured logging**: structlog, configured in phase 1 of the
+  composition root, two renderers keyed on deployment mode, Section 19's eight
+  fields bound as context variables at four named points, and `trace_id` read
+  from the active span rather than threaded through call sites. Redaction is a
+  processor in the chain rather than a convention, with content keys truncated
+  to 200 characters instead of dropped.
+- Mapped **each of the six test directories to a marker**, which is the piece
+  that was missing: the harness had already named `resilience` as the sixth
+  category, but nothing said how a category is selected at the command line.
+  Three of the six carry `integration` because all three need a database.
+- Reconciled Milestone 1's **"Deterministic tests"** with the harness's **"cases
+  1 through 11"** as one deliverable. Reading them as two is how a milestone
+  acquires a second, informal test framework beside the specified one.
+- Resolved **"Initial ADRs"**, which had three defensible readings — the six
+  filenames in the Section 4 tree, the eleven a note defers to their milestones,
+  or the twenty-five that now exist. Milestone 0 carries the accepted set
+  forward whole and authors nothing new; numbering continues from the highest
+  number carried over.
+- Placed **the Milestone 0 egress block**, previously attributed to that
+  milestone only by a non-authoritative status document. It is an autouse pytest
+  fixture of about thirty lines — no firewall, no container network policy — and
+  it is what turns the harness's "runs without an API key" claim into a test.
+- Placed **`docs/security.md` at Milestone 0**. No milestone claimed it, but
+  Section 24 requires security implications to be documented for every
+  milestone, and Milestone 0 already ships two security controls. This adds no
+  deliverable; it identifies where an existing item lands.
+- Left **`docs-manifest.yaml` at four sources** and recorded why. Widening the
+  single-file HTML publication to the full corpus requires per-document anchor
+  prefixing in `scripts/build_docs.py` first: thirty-seven documents share
+  heading names like "Decisions", and the anchor generator resolves duplicates
+  to the first occurrence, so a naive widening produces cross-references that
+  silently point at the wrong document.
+- Added six additive cross-reference paragraphs to the canonical plan (Sections
+  19, 20.4, 22, 24, 25, and Milestone 0), wired the new spec and ADR into the
+  MkDocs nav and the ADR index, and recorded twelve judgment calls in
+  `docs/status/questions-for-review.md`.
+
 ## 2026-07-25 — Bootstrap, configuration, and the composition root
 
 - Added `docs/plan/bootstrap-and-composition.md`, the design for the process

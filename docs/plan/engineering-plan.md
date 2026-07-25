@@ -2048,6 +2048,8 @@ Large tool results should be converted into artifacts, with only a summary and a
 
 ## 19. Observability
 
+The detailed design of the logging half - the library, where the bootstrap runs, the two renderers and the deployment mode that selects between them, the four points at which the eight fields below are bound as context variables, and the redaction processor that enforces the do-not-record list rather than leaving it to convention - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this section and Milestone 0; it does not replace the requirements below, and it removes no field from the list.
+
 Create an OpenTelemetry span hierarchy:
 
 ```text
@@ -2209,6 +2211,8 @@ The deterministic suite above uses fake fixtures and belongs in CI; it verifies 
 
 ### 20.4 Test categories
 
+The detailed design - the mapping from each of the six test directories to a pytest marker, the marker declarations and strict-marker settings, the naming convention, which of the four CI jobs runs each category, and the reconciliation of Milestone 1's "Deterministic tests" with the harness's cases 1 through 11 as one deliverable - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this section and Milestones 0, 1, 2, and 3; it does not replace the requirements below, and it adds no test category.
+
 #### Unit tests
 
 Test pure logic:
@@ -2312,6 +2316,8 @@ Keep late - deliberately deferred. Self-improving skills stay behind the static-
 \* Self-improving skills and inbound surfaces are the two additions kept deliberately late; everything marked M1-M3 is either a cheap data-model decision or a high-leverage fast-follow that is cheaper to do early than to bolt on. The single most consequential move is bringing the OpenAI-compatible adapter into Milestone 3, which also buys a no-cost local live-test path.
 
 ### Milestone 0: Repository and engineering foundation
+
+The detailed design of the toolchain deliverables below - what each of the eight required commands runs, the six targets added so that continuous integration invokes no command the Makefile does not define, the compose file's version, port, volume, credentials, and healthcheck, the workflow file with its four jobs and their triggers, the structured-logging bootstrap, the pinned test-directory markers, the egress block, and what "Initial ADRs" resolves to - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this milestone and Sections 2.2, 19, 20.4, 22, 24, and 25; it does not replace the requirements below, and it adds no deliverable to this list.
 
 #### Implement
 
@@ -2811,6 +2817,8 @@ Do not add role-named agents merely for planning, writing, or criticism without 
 
 ## 22. Security baseline
 
+[development-toolchain.md](development-toolchain.md) and ADR-0025 place the file this section requires: `docs/security.md` exists from Milestone 0, because the definition of done in Section 24 requires security implications to be documented for every milestone and Milestone 0 already ships two security controls. That document also specifies the secret scanner's treatment of `.env.example` and the Milestone 0 egress block; it changes no control listed below.
+
 Create `docs/security.md` documenting these trust boundaries:
 
 ```text
@@ -2892,6 +2900,8 @@ The coding agent must follow these rules:
 
 ## 24. Definition of done for every milestone
 
+The last item below - "`make check` succeeds" - is defined in [development-toolchain.md](development-toolchain.md) and ADR-0025, which fix `make check` as `lint typecheck test-fast` so that it stays runnable on a fresh checkout with no database and no provider credential, and which make it the exact union of the two continuous-integration jobs that need neither. That document adds no item to this list.
+
 A milestone is not complete until:
 
 - All acceptance criteria pass.
@@ -2912,6 +2922,8 @@ A milestone is not complete until:
 Do not leave untracked TODO comments. Convert deferred work into documented issues or a roadmap section.
 
 ## 25. Initial local-development experience
+
+The detailed design of the commands below - the contents of every Makefile target, why `docker compose up -d postgres` and `alembic upgrade head` remain two steps, the compose service the first of them starts, and the console script that makes `uv run agent api` the invocation rather than a module path - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this section and Milestone 0; it does not replace the sequence below, and it removes no item from the README list.
 
 The final setup should support:
 

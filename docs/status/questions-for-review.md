@@ -1639,3 +1639,180 @@ is the one the rest of that spec, the router, and the retry ownership
 split all assume.
 
 **Reversal cost:** cheap.
+
+## Development toolchain (ADR-0025)
+
+### `make check` excludes the integration suite
+
+**Decided:** `make check` is `lint typecheck test-fast`, where
+`test-fast` is everything that needs neither a database nor a provider
+credential. The integration suite has its own target and its own CI job.
+
+**Why:** Section 21 requires both `make test` and `make check`, and
+Section 24 makes "`make check` succeeds" a definition-of-done item. If
+`check` contained the whole suite it would need Docker, and a fresh
+checkout with no daemon running could not satisfy a definition of done.
+The alternative — dropping the integration job from CI — would make the
+harness's four-job shape decorative.
+
+**Reversal cost:** cheap. One line in the Makefile.
+
+### Six Makefile targets were added to Section 21's eight
+
+**Decided:** `test-static`, `test-contract`, `test-fast`,
+`test-integration`, `test-live`, and `docs`.
+
+**Why:** the governing rule is that CI runs no command the Makefile does
+not define, and there are four CI jobs plus a documentation build. Each
+addition exists because a job invokes it. Without them the workflow file
+inlines pytest selectors, which is the exact drift that lets `make check`
+and CI stop agreeing about whether the build is green.
+
+**Reversal cost:** cheap, but reversing it reintroduces the drift.
+
+### Test selection is by pytest marker, not by directory
+
+**Decided:** each of the six test directories is assigned a marker, and
+`static`, `integration`, and `live` are the three that select. The
+contract selector is a negation, so an unmarked test runs in job 2.
+
+**Why:** the question a CI job asks is "can this run without Docker",
+not "which folder is this in", and three of the six directories need a
+database. Making the negation the default means a new test with no
+marker is visible rather than silently unrun.
+
+**Reversal cost:** cheap.
+
+### PostgreSQL is pinned to 16-alpine
+
+**Decided:** `postgres:16-alpine`, one service, named volume, healthcheck
+that `make db-up` polls.
+
+**Why:** the persistence layer depends on `FOR UPDATE SKIP LOCKED`
+semantics, and a major-version change should be a reviewed change rather
+than whatever `latest` resolved to that morning. Alpine is the smaller
+image; the open question below records that its locale and collation
+behaviour differs from the Debian-based tag, which is the surface a
+sort-order-dependent query would hit.
+
+**Cost:** none today.
+
+**Reversal cost:** cheap, but a version change is a migration test.
+
+### The compose credentials are `agent/agent` and the scanner scans them
+
+**Decided:** they live in `.env.example`, and they pass the secret
+scanner by an allowlist entry carrying the prose reason "local compose
+default, not reachable from outside the host network".
+
+**Why:** ADR-0024 already decided the scanner scans `.env.example`
+rather than exempting it. A scanner that skips the one file every
+contributor copies is not a scanner, and an allowlist entry that has to
+state a reason is a reviewed fact.
+
+**Reversal cost:** cheap.
+
+### CI runs one Python version, not a matrix
+
+**Decided:** 3.12 only.
+
+**Why:** the project pins `requires-python >=3.12` and runs one
+deployment. A matrix tests a configuration nothing runs, at roughly
+double the CI minutes. This is recorded as an open question in the spec
+because it sets an expectation about what "supported" means.
+
+**Reversal cost:** cheap. A matrix is three lines of YAML.
+
+### The live job never runs on a pull request
+
+**Decided:** schedule and manual dispatch only. The job is defined at
+Milestone 0 even though no live adapter exists until Milestone 3.
+
+**Why:** live tests cost money per run and need a credential a fork's
+pull request cannot hold. Defining the job early keeps the workflow file
+complete and costs one skipped job per night.
+
+**Cost:** external contributors never see live results on their branch.
+
+**Reversal cost:** cheap.
+
+### Egress is blocked at Milestone 0 by a pytest fixture
+
+**Decided:** an autouse session fixture patches `socket.socket` to raise
+on connect for the `static` and `contract` markers, exempting Unix
+sockets and loopback for `integration`, and lifted by `live`.
+
+**Why:** the harness's gate 7 requires the deterministic suite to run
+without an API key, and observes that this is usually implemented as "we
+did not configure one" — true until a fixture falls through to a real
+client. The requirement was previously attributed to Milestone 0 only by
+this document, which is not authoritative. A conftest fixture is the
+smallest thing that makes the claim testable: no firewall, no container
+network policy, no runner configuration.
+
+**Reversal cost:** cheap.
+
+### "Initial ADRs" means carrying the accepted set forward
+
+**Decided:** Milestone 0 copies `docs/adr/` into the agent repository in
+full, keeps the numbering and the index, and authors nothing new.
+Numbering continues from the highest number carried over.
+
+**Why:** the phrase had three defensible readings — the six filenames in
+the Section 4 tree, the eleven a note defers to their milestones, or the
+twenty-five that now exist. Carrying the set forward satisfies all three
+at once. Authoring a fresh ADR for a decision this corpus already
+recorded would create a second record that is edited independently of
+the first, leaving a reader unable to tell which one the code follows.
+
+**Reversal cost:** cheap.
+
+### `docs/security.md` is placed at Milestone 0
+
+**Decided:** the file Section 22 requires exists from Milestone 0.
+
+**Why:** no milestone claims it. Section 24's definition of done requires
+"Security implications are documented" for every milestone, and this is
+the file that requirement writes to, so it must exist from the first
+milestone with security implications. Milestone 0 ships two security
+controls — the secret scanner and the egress block — so it is that
+milestone. This adds no deliverable to the Milestone 0 implement list;
+it identifies where an existing definition-of-done item lands.
+
+**Reversal cost:** cheap.
+
+### `docs-manifest.yaml` was left at four sources
+
+**Decided:** the single-file HTML publication continues to carry the
+index, the current milestone, the engineering plan, and the changelog.
+The MkDocs site remains the complete corpus.
+
+**Why:** widening it correctly requires per-document anchor prefixing in
+`scripts/build_docs.py` first. Thirty-seven documents share heading names
+— "Decisions", "Context", "Open questions for review" — and the anchor
+generator resolves duplicates to the first occurrence, so a naive
+widening produces a publication whose cross-references silently point at
+the wrong document. Doing it badly is worse than not doing it, and the
+plan now carries roughly thirty cross-reference paragraphs that a reader
+of the combined file cannot follow either way.
+
+**Cost:** a reader handed the single file must go to the site for any
+specification or ADR.
+
+**Reversal cost:** cheap once the anchor work is done; the manifest is
+generated-output tooling and no canonical source changes.
+
+### The structured-logging design is split across two specifications
+
+**Decided:** the configuration shape, renderers, context variables, and
+redaction processor are specified in `development-toolchain.md`; the call
+site that runs the bootstrap is phase 1 of the composition root in
+`bootstrap-and-composition.md`.
+
+**Why:** logging is a Milestone 0 toolchain deliverable and the
+composition root is where every startup-ordered thing is sequenced. Both
+statements are true, and duplicating either would create a second place
+to edit. It is recorded as an open question because it is the one file in
+the corpus described by two specifications.
+
+**Reversal cost:** cheap.
