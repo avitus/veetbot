@@ -74,6 +74,7 @@ nav:
       - Evaluation Harness: plan/evaluation-harness.md
       - Runtime Loop: plan/runtime-loop.md
       - Milestone Map: plan/milestone-map.md
+  - Readiness: plan/readiness.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md

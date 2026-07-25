@@ -2225,3 +2225,113 @@ real adapters rather than as test doubles. Eleven of the thirty-eight
 hold against a repository with no agent in it.
 
 **Reversal cost:** not applicable; it is an observation.
+
+## Readiness review
+
+### Coverage is judged against the whole corpus, not the specs alone
+
+**Decided:** a mechanism designed in the engineering plan and nowhere
+else counts as covered, and is labelled plan-only so the distinction
+stays visible.
+
+**Why:** Section 16 specifies nine endpoints with methods, paths,
+headers, request and response bodies, the SSE frame format, the
+reconnect rule, and the error envelope. Scoring that as absent because
+no file under `docs/plan/` expands it would produce a Milestone 5
+verdict that is false in the way that matters, since an implementer
+reading Section 16 can build most of that milestone. The distinction is
+still reported, because every other plan section was expanded exactly
+once and every expansion found a real conflict.
+
+**Reversal cost:** none. It changes a label, not a finding.
+
+### An explicit deferral scores as partial rather than absent
+
+**Decided:** where a document names what it does not design, the
+undesigned thing is partial.
+
+**Why:** `builtin-tools.md` has a section titled *"The six tools this
+document does not design"* that assigns each a milestone and lists what
+it owes, and `tool-system.md` states that device tools are a reserved
+seam rather than a design. A hole somebody has measured is a different
+object from one nobody has looked at, and collapsing the two would make
+the review least useful exactly where the corpus is most self-aware.
+
+**Cost:** it makes the review's counts look better than a naive scan
+would. The compensation is that each deferral is named individually
+with what it still owes, so nothing hides behind the label.
+
+**Reversal cost:** none.
+
+### The readiness review resolves no conflict
+
+**Decided:** it reports four milestone conflicts and defers each to the
+document that owns the subject.
+
+**Why:** the milestone map owns scheduling and the specs own their
+requirements. A readiness review that also decided things becomes a
+document the other documents must be reconciled against, which is the
+problem the map was written to solve.
+
+**Reversal cost:** none.
+
+### The API specification is named as the next document to write
+
+**Decided:** the review recommends writing an API specification before
+coding reaches Milestone 5, rather than building that milestone from
+Section 16 directly.
+
+**Why:** Milestone 5 registers one gate, the fewest of any milestone
+that adds work, and no detailed-design spec covers the API layer. Six
+items inside Section 16 are visibly unsettled: the error envelope has
+one example and no code list, request IDs are a bullet, whether the
+HTTP `Idempotency-Key` and the Milestone 1 idempotency port are one
+mechanism is undecided, the SSE consumer side is one sentence
+forwarding to Section 16, authentication is designed only at its
+refusal, and nothing turns an HTTP cancel into an observation by a
+worker in another process.
+
+**Question for you:** this is the largest remaining piece of design
+work and I have recommended rather than started it, because it is a
+document rather than a reconciliation and you may want the API surface
+to be yours. The counter-argument is real: Section 16 is more detailed
+than the sections that turned out to hide contradictions, HTTP has
+stronger conventions than composition roots do, and the six items are
+individually small.
+
+**Reversal cost:** low now, high after clients exist.
+
+### The sandbox specification is named as the second document
+
+**Decided:** reported as the highest-consequence gap, and flagged as
+possibly belonging before Milestone 5 rather than after.
+
+**Why:** Milestone 6 registers zero gates, eight of its twelve implement
+bullets have no design outside the plan, and `tool-system.md:977`
+already constrains MCP server URLs by *"the egress allowlist the sandbox
+spec establishes"* — a specification that does not exist. It is the only
+undesigned area whose failure mode is a trust boundary rather than a
+missing feature.
+
+**Question for you:** milestone order says the sandbox spec follows the
+API spec. I have not reordered them, but writing it first costs nothing
+except the order in which two documents get written, and one document
+already depends on it.
+
+**Reversal cost:** none; it is an ordering question between two
+unwritten documents.
+
+### Knowledge retrieval is reported as possibly its own milestone
+
+**Decided:** reported, not acted on.
+
+**Why:** knowledge is half of Milestone 9's title and has no design
+anywhere — no ingestion, chunking, indexing, or scoping — while the
+memory half has two complete specifications and fourteen gates.
+
+**Question for you:** splitting knowledge out would make Milestone 9
+shippable against what is actually designed. I did not split it,
+because renumbering milestones touches every document in the corpus and
+that is your call rather than mine.
+
+**Reversal cost:** high once made, which is why it is a question.

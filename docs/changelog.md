@@ -4,6 +4,45 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — The readiness review
+
+- Added `docs/plan/readiness.md`, which traces every `#### Implement` bullet,
+  acceptance criterion, and milestone subsection in the engineering plan to
+  the document that designs it, and states a verdict per milestone. It owns
+  no requirement and resolves no conflict.
+- The verdict: Milestones 0 through 4 are implementable from the corpus
+  alone; Milestone 5 is implementable from the engineering plan but from no
+  detailed-design specification; Milestones 6 through 10 are not
+  implementable without design work that has not been done.
+- The gate census in `milestone-map.md` was used as an independent check on
+  every verdict. It was derived mechanically before the review began and it
+  agrees with the review everywhere: Milestone 5 registers one gate and
+  Milestone 6 registers none, which are the two milestones the tracing found
+  least covered.
+- Named the two documents that do not exist and should: an API specification
+  expanding Section 16, and a sandbox specification expanding Section 28.
+  `tool-system.md:977` already depends on the second by name.
+- Named the third-largest gap: skills have no design at all. `SKILL.md`
+  appears only in the engineering plan and ADR-0013, and the acceptance
+  criterion "A selected skill is version-pinned in the run" has nothing
+  behind it, while Section 30 is referenced from eleven places as though the
+  mechanism were settled.
+- Recorded the four plan sections no specification expands — 28 sandbox, 29
+  multi-device, 30 self-improving skills, and 31 trajectory export, the last
+  of which is fully designed on the consuming side by the evaluation harness
+  and not at all on the producing side.
+- Recorded that the twenty-five initial evaluation cases carry milestones 1,
+  2, 4, 5, and 6 and no others, so Milestones 7, 8, and 9 have acceptance
+  criteria with no case backing, and that two criteria — the container-escape
+  red-team test and path-traversal rejection — stand on algorithms no
+  document specifies.
+- Reported four milestone conflicts without resolving any: `sandbox.run_command`
+  at Milestone 5 or 6, usage token classes at Milestone 2 or 3, whether the
+  HTTP `Idempotency-Key` and the Milestone 1 idempotency port are one
+  mechanism, and the container-escape test the case table does not contain.
+- Wired the document into the nav and recorded six judgment calls in
+  `docs/status/questions-for-review.md`, three of them carrying questions.
+
 ## 2026-07-25 — Gate milestones and the milestone map
 
 - Added `docs/plan/milestone-map.md`, which decides when each stated
