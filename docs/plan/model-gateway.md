@@ -1090,6 +1090,17 @@ class ModelProvider(Protocol):
     async def close(self) -> None: ...
 ```
 
+This supersedes the `ModelProvider` declared in Section 7, which predates
+the router. `provider_name` becomes `name` and matches the adapter key on
+`ResolvedModel`; `stream` gains the `ResolvedModel` and `ModelAttempt` the
+router has already produced, so no adapter resolves a model twice; `close`
+is added because a pooled HTTP client needs an owner; and `capabilities`
+moves to `ModelRouter`, because two models behind one provider can differ
+in context window and in tool support — a capability is a property of the
+resolved model, not of the adapter. Nothing else in Section 7 changes, and
+the rule that the iterator ends with exactly one completed or failed event
+is carried below as a contract-suite assertion.
+
 Streaming is the only method. A non-streaming call is a streaming call whose
 events are collected, and offering both would give adapters two code paths to
 keep in agreement, which is exactly the divergence the contract suite exists

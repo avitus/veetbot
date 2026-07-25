@@ -250,6 +250,8 @@ Version 0.1 is complete when all of the following work:
 
 ## 4. Repository structure
 
+The detailed design - the settings object and the eight environment values that survive the test "differs between two deployments of the same revision and cannot be committed"; the three configuration layers and why the environment is interpolated into files at named points rather than allowed to override them; the six configuration files, the operator overlay directory, and the one file the overlay may not touch; `.env.example` reconciled with the 106 knobs the corpus declares; the composition root's five startup phases and where each of the seventeen stated startup constraints lands; the shape of `build` and what a `Composition` may expose; the three entry points and the deployment role each passes; the eleven files this tree gains and the one name it retires; the Milestone 1 in-memory repositories, the `RunDispatcher` Protocol, and the minimal context builder; the CLI's arguments, output streams, reserved words, and exit codes; and the secret scanner's five rule families - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024. That document expands Sections 4, 5, 7, 10.5, 10.7, 11.1, 15, 16, 17, 25, 26, and 28 and Milestones 0, 1, 2, and 3; it does not replace the requirements below, and it removes no file this tree names.
+
 Use a `src` layout.
 
 ```text
@@ -411,7 +413,7 @@ Enforce these rules:
 
 1.  `domain` may depend only on the Python standard library and Pydantic.
 
-Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (validation and serialization ergonomics) that does let an external library shape core types. Keep domain models free of Pydantic-only behavior that would be costly to replace - custom validators that perform I/O, settings loading, ORM modes - and treat them as plain value objects that happen to use BaseModel.
+    Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (validation and serialization ergonomics) that does let an external library shape core types. Keep domain models free of Pydantic-only behavior that would be costly to replace - custom validators that perform I/O, settings loading, ORM modes - and treat them as plain value objects that happen to use BaseModel.
 
 2.  `ports` may depend on `domain`.
 3.  `runtime` and `application` may depend on `domain` and `ports`.
@@ -430,6 +432,8 @@ Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (valida
 Add an import-boundary test or static rule that verifies these constraints where practical.
 
 [evaluation-harness.md](evaluation-harness.md) and ADR-0001 resolve "where practical" rule by rule rather than leaving it to judgement: eight of the fourteen rules above are decidable by walking the import graph, four need a different static check (signature resolution for rules 6 and 7, a module-scope check for rule 13, a dependency-manifest check for rule 14), rule 12 is the secret scanner, and rule 4 is the adapter-registration check. Two residues - the run-time half of rule 6 and "must not depend on model judgment" in rule 11 - are recorded as not mechanically checkable, with the contract suite and ADR-0005's determinism gate named as their compensating controls. The walk is a registered structural gate and a Milestone 0 deliverable. The fourteen rules themselves are unchanged.
+
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 give rule 14 the module it names. That document states the rule as a property - the composition root is the only module that knows both a port and its adapter - and adds four static checks that make the property testable: `bootstrap` is imported only by the three entry points, no module outside `bootstrap.py` instantiates an adapter class, no module outside `adapters/determinism.py` reads ambient time or generates an identifier, and no `AsyncSession` exists at module scope. The second check is what rules 4 and 13 look like once there is a construction site to check against. All four run against an almost-empty repository. No rule above is changed, reordered, or relaxed.
 
 ## 6. Core domain objects
 
@@ -715,6 +719,8 @@ class ModelProvider(Protocol):
         ...
 ```
 The iterator must end with exactly one completed or failed event.
+
+The `ModelProvider` signature above is superseded. [model-gateway.md](model-gateway.md) and ADR-0002 declare the canonical port: `provider_name` becomes `name` and matches the adapter key on `ResolvedModel`; `stream` gains the `ResolvedModel` and `ModelAttempt` the router has already produced, so no adapter resolves a model twice; `close` is added because a pooled HTTP client needs an owner and `bootstrap.py` is where ownership ends; and `capabilities` moves off the adapter onto `ModelRouter`, because a capability belongs to a resolved model rather than to the provider serving it - one provider serves models that differ in context window and in tool support. Implement the model-gateway signature; the one above remains here as the record of what it replaced. The rule stated immediately above is unchanged, and that document restates it as a contract-suite assertion.
 
 ```python
 class ContextBuilder(Protocol):
@@ -1345,6 +1351,8 @@ Do not load every registered tool. Filter tools by:
 - Policy profile
 - Runtime environment
 
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 identify which builder this is: build-sequence step 1 of [context-engine.md](context-engine.md), deterministic assembly with the two regions and `prefix_sha256` recorded from the first commit. That document assigns each of the seven inputs above to Region A or Region B, states the prompt-stability test as two assertions rather than one - the prefix hash is stable *and* the request bytes differ, in Region B only - and requires all four tool filters to exist from the first commit, two of them as identity stages until the milestones that give them data. The seven inputs and the four filters are unchanged.
+
 ### 11.2 Trust labels
 
 Every context item must have a trust classification.
@@ -1931,6 +1939,8 @@ Do not expose tracebacks through the API.
 
 ## 17. CLI contract
 
+The detailed design - each command's arguments and options, what it writes to stdout versus stderr, the three reserved words after `agent run` and the `--` escape that keeps a prompt beginning with one of them runnable, the six exit codes, the milestone at which each command first works, and the application service each of the seven `agent chat` steps below calls - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024. Four options are added where this section names none, each because a command is otherwise unusable rather than merely less convenient. That document adds no command, removes none, and restates the last rule of this section as a structural check rather than a convention.
+
 Provide these commands:
 
 ```text
@@ -2339,6 +2349,8 @@ make migrate
 
 [evaluation-harness.md](evaluation-harness.md), ADR-0001, and ADR-0022 place two deliverables in this milestone that need no runtime: the gate registry, with the docs check that reconciles each spec's declared gates against it, and the structural gates - the import-boundary walk, the transaction-hygiene check, the secret scanner, and contract-module coverage. Both run against an almost-empty repository and stay correct as it fills; added later, they are added against existing violations, which is the situation in which they get relaxed rather than obeyed. The last acceptance criterion above is what the import-boundary walk turns from a statement into a test.
 
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 give the "configuration module" and "`.env.example`" items above their bodies: the settings object and its eight fields, the three layers, the six committed YAML files, and the operator overlay. They also specify the secret scanner this milestone owes - five rule families, a report that never prints what it matched, an allowlist whose entries require prose, and `.env.example` scanned rather than exempted - and resolve the transaction-hygiene placement by separating two words: the *check* is a Milestone 0 deliverable, and the *gate* it feeds is a Milestone 2 acceptance criterion, because this milestone has no database code to walk. Four static checks join the import-boundary walk here. No acceptance criterion above is changed.
+
 ### Milestone 1: In-memory vertical slice
 
 The tool registry, the execution pipeline, and the two types the `Tool` port names are specified in [tool-system.md](tool-system.md) and ADR-0021; its build order places steps 1 through 5 in this milestone.
@@ -2346,6 +2358,8 @@ The tool registry, the execution pipeline, and the two types the `Tool` port nam
 [evaluation-harness.md](evaluation-harness.md) and ADR-0022 place the determinism harness in this milestone - the `Clock` and `IdFactory` ports and their pinned implementations, before anything depends on ambient time - along with the case schema, the loader, and the runner. Ten of the twenty-five Section 20.3 cases are writable here, which is what makes "build evaluations before advanced features" a schedule rather than an aspiration. Cases above this milestone are reported as pending, not failed.
 
 [runtime-loop.md](runtime-loop.md) and ADR-0023 specify the loop this milestone builds: the executor and loop split, `RunOutcome` and its five kinds, `Step`, `FailureReason`, the nine additive `Run` fields, and the `Clock` and `IdFactory` ports the harness above depends on - declared here because the runtime is their heaviest consumer. Five of its fourteen hard gates land in this milestone, including the structural gate that only `runtime/executor.py` may call `RunRepository.transition` or `RunQueue.release`. "State transition logic" in the implement list above is the item that document expands.
+
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 supply the bodies for three items in the list below. "In-memory repositories" is five adapters in `adapters/persistence/memory.py` - agent, session, run, event, and tool invocation - which are production adapters run against the same contract suites as their PostgreSQL counterparts, not test doubles; there is no in-memory `RunQueue`, because that port's entire content is a locking discipline a simulation cannot tell the truth about. "Inline run dispatcher" is a `RunDispatcher` port with one method whose postcondition both adapters satisfy, called after the creating unit of work commits. "Minimal context builder" is context-engine build-sequence step 1. That document also resolves this milestone's event criterion against Milestone 2's event storage by separating repository from storage - one port, two implementations - and specifies the composition root, the settings object, and the CLI contract the acceptance command below runs through.
 
 #### Implement
 

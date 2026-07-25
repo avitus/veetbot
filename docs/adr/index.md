@@ -32,3 +32,4 @@ implementation without one.
 - [ADR-0021 — Tool execution pipeline, effect watermarking, and MCP](0021-tool-execution-pipeline-and-mcp.md)
 - [ADR-0022 — The gate registry, evaluation identity, and the capability track](0022-evaluation-harness.md)
 - [ADR-0023 — The run loop, the step, and the single terminal writer](0023-runtime-loop.md)
+- [ADR-0024 — The composition root and the configuration layers](0024-bootstrap-and-composition.md)

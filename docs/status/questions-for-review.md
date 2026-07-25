@@ -1372,3 +1372,270 @@ cross-reference in a spec that is meant to be copy-ready sends the implementer
 to the wrong requirement.
 
 **Reversal cost:** cheap.
+
+## Bootstrap and composition (ADR-0024)
+
+### `DATABASE_URL` is invented
+
+**Decided:** `Settings.database_url` reads `DATABASE_URL`, a
+`postgresql+asyncpg://` DSN, required in every deployment and validated
+before anything is constructed.
+
+**Why:** the plan makes PostgreSQL the source of truth, ships a Docker
+Compose file, and requires `make migrate` — and names no environment
+variable for reaching the database. It names exactly three environment
+variables in total, none of them this one. Something has to carry the
+connection string, it fails the "can be committed" test, and every
+alternative I could see was worse: a committed YAML file with a password
+in it, or a hostname/port/user/password quartet that has to be
+reassembled. `DATABASE_URL` is what SQLAlchemy, Alembic, and the compose
+file already expect.
+
+**Reversal cost:** cheap. It is one field and one name.
+
+### `.env.example` is not a list of all 106 configuration knobs
+
+**Decided:** the Milestone 0 definition-of-done item "New configuration
+appears in `.env.example`" is read as applying to the environment layer
+only. A value is an environment variable if and only if it differs
+between two deployments of the same revision and cannot be committed.
+That test leaves eight fields in `Settings`; the other knobs live in
+committed YAML.
+
+**Why:** the literal reading makes all 106 knobs environment variables,
+which contradicts `policy_version` — defined as a hash of the profile
+file and the hardline file and recorded on every policy decision. If an
+environment variable could change an effective rule, that hash would not
+change with it, and the audit trail would be false rather than merely
+stale. The literal reading also contradicts Section 15's own sentence
+that policy rules are version-controlled files, not rows. This is the
+single largest interpretive decision in the document and the one most
+worth confirming.
+
+**Cost:** changing a knob for one deployment now means committing a file
+or adding a named interpolation point.
+
+**Reversal cost:** moderate. Widening the environment layer later is
+additive; narrowing it after operators depend on an override is not.
+
+### The environment never overrides a file — it is interpolated into one
+
+**Decided:** configuration is three layers: shipped defaults, an optional
+operator overlay directory, and `${VAR}` interpolation at points the YAML
+names explicitly. Only the first two are a precedence chain. There is no
+`AGENT__POLICY__DEFAULT__X=1` style override path.
+
+**Why:** Section 10.5 already writes `model: ${OPENAI_MODEL}`, so the
+interpolation form is the plan's own precedent; this generalizes it and
+forbids the other. The conventional twelve-factor arrangement, where the
+environment wins over files, is the specific thing that would make
+`policy_version` unfalsifiable. Interpolation keeps the secret out of the
+file while leaving the file the thing that gets hashed.
+
+**Reversal cost:** high. This is the decision the audit story rests on.
+
+### The overlay merges by top-level key, not deeply
+
+**Decided:** `AGENT_CONFIG_DIR` is merged file by file over the shipped
+defaults, and within a file, by top-level key. An overlay that defines
+`model_policies` replaces the whole mapping rather than merging into each
+policy.
+
+**Why:** deep merge makes the effective document hard to predict from the
+two inputs, and the effective document is what gets hashed. Replacing a
+whole top-level key is legible in a diff. The cost is verbosity when an
+operator wants to change one nested value.
+
+**Reversal cost:** moderate — deep merge is a superset, but overlays
+written against shallow merge would then change meaning.
+
+### Configuration YAML lives beside the package that owns it
+
+**Decided:** six files under `src/agent_core/`, each next to the module
+that reads it, rather than a top-level `config/` directory.
+
+**Why:** the plan set exactly one precedent, `policy/hardline.yaml`, and
+it is beside its package. A top-level `config/` would also collide
+confusingly with the `config.py` module Section 4 names, and it separates
+a default from the code that reads it, which is the arrangement where the
+two drift.
+
+**Reversal cost:** cheap.
+
+### `hardline.yaml` is the one file the overlay may not touch
+
+**Decided:** an overlay that contains `policy/hardline.yaml` is a startup
+error, not a silent no-op.
+
+**Why:** the hardline set is defined as what configuration cannot
+disable, and an overlay is configuration. A silent no-op would let an
+operator believe they had changed something. Failing loudly at startup is
+the only behaviour consistent with the definition.
+
+**Reversal cost:** cheap.
+
+### The composition root never runs migrations
+
+**Decided:** startup asserts the schema revision matches and refuses to
+start on a mismatch. `make migrate` stays a separate step.
+
+**Why:** migrating on boot means N processes racing during a rolling
+deploy, and a process that failed to start having already changed the
+schema. Section 25 already treats migration as its own step. The cost is
+one more command in local setup, which the Makefile already has.
+
+**Reversal cost:** cheap.
+
+### The deployment role is an entry-point argument, not a variable
+
+**Decided:** `runtime/worker.py` passes `role="worker"` or
+`role="maintenance"`; `api/main.py` and `cli/main.py` pass `role="api"`.
+The role is not in `Settings`.
+
+**Why:** `runtime-loop.md` says all three deployment roles are the same
+binary with a role flag, and a flag on the entry point is what makes a
+process's role visible in the process table rather than in its
+environment. It also keeps `Settings` to values that are genuinely
+per-deployment; the role is per-process.
+
+**Reversal cost:** cheap.
+
+### Four CLI options are added where the plan names none
+
+**Decided:** `--json`, `--session <id>`, `--role <role>`, and `--follow`.
+
+**Why:** Section 17 lists twelve commands and no options at all, which
+reads as a command inventory rather than a complete grammar. Each of the
+four is added because a command is otherwise unusable rather than merely
+less convenient: without `--session` there is no way to continue a
+conversation, without `--role` `agent worker` cannot start the
+maintenance role the runtime spec requires, without `--follow` the events
+command can only poll, and without `--json` nothing that calls the CLI
+can parse it. If the plan's silence was deliberate minimalism rather than
+omission, this is the entry to reverse.
+
+**Reversal cost:** cheap, but the four are load-bearing in the milestone
+walkthroughs.
+
+### `get`, `events`, and `cancel` are reserved after `agent run`
+
+**Decided:** `agent run get <id>` and `agent run "get the weather"` are
+disambiguated by treating the three subcommand names as reserved words,
+with `--` as the escape: `agent run -- get the weather`.
+
+**Why:** the plan gives both forms — `agent run "Calculate 12 times 9"`
+and `agent run get <run-id>` — and never says how they are told apart. A
+prompt is free text and can begin with any word. Reserving three words is
+the smallest rule that makes the grammar decidable, and `--` is the
+convention every POSIX tool already uses for it.
+
+**Reversal cost:** cheap. The alternative is a separate `agent prompt`
+verb.
+
+### The secret scanner is specified rather than left to a tool choice
+
+**Decided:** five rule families — provider key prefixes, PEM blocks,
+literal bearer values, DSNs with inline passwords, and secret-named
+assignments over twelve characters — plus a report that never prints what
+it matched and an allowlist whose entries require prose.
+
+**Why:** dependency rule 12 and the Milestone 0 deliverable both name a
+scanner and neither says what it looks for, which makes "the check
+passes" unfalsifiable. Naming the families also fixes the thing a scanner
+most often gets wrong, which is printing the secret it found into CI
+logs. `.env.example` is scanned rather than exempted, because an example
+file is exactly where a real key gets pasted by accident.
+
+**Reversal cost:** cheap.
+
+### Transaction hygiene: the check is Milestone 0, the gate is Milestone 2
+
+**Decided:** the two placements are not in conflict once *check* and
+*gate* are separated. The check ships in Milestone 0 with the other
+structural checks; the gate that asserts it passes over real repository
+code is a Milestone 2 acceptance criterion.
+
+**Why:** the plan puts transaction hygiene in Milestone 0 and the runtime
+spec tags its gate Milestone 2. Milestone 0 has no database code to walk,
+so a Milestone 0 gate would pass vacuously; a Milestone 2 check would be
+added against code that already violates it. Shipping the check early and
+gating on it later is what both documents are each half-saying.
+
+**Reversal cost:** cheap.
+
+### An event repository is Milestone 1; event storage is Milestone 2
+
+**Decided:** Milestone 1's criterion that every state transition is
+represented by an event is satisfied by an in-memory `EventRepository`
+behind the same port. Milestone 2 adds the PostgreSQL adapter with
+append-only guarantees, sequence allocation, and projections.
+
+**Why:** the two milestones appear to contradict each other only if
+"event storage" and "event repository" are the same thing. One port with
+two adapters is the arrangement the whole plan is built on, and it is
+what makes Milestone 1's vertical slice real rather than mocked.
+
+**Reversal cost:** cheap.
+
+### In-memory repositories are adapters, and there is no in-memory queue
+
+**Decided:** five in-memory adapters in
+`adapters/persistence/memory.py`, shipped as production code and run
+against the same contract suites as their PostgreSQL counterparts, each
+declaring which capability groups it satisfies against a checked-in
+table. `RunQueue` gets no in-memory adapter.
+
+**Why:** ADR-0001 defines replaceability as a port with a contract suite
+attached; a double under `tests/` would be a second, unverified
+definition of what the port means. The `RunQueue` exception is the
+inverse of the same argument — that port's entire content is `FOR UPDATE
+SKIP LOCKED` and lease fencing, so an in-memory version would pass its
+own tests while teaching the wrong lesson about what the port guarantees.
+
+**Reversal cost:** cheap for the five; the `RunQueue` omission is what
+keeps Milestone 1 from appearing to exercise the worker path.
+
+### A `Composition` exposes application services and nothing else
+
+**Decided:** no adapter, repository, session factory, or engine is
+reachable from the object `build` returns.
+
+**Why:** ADR-0023 reserves `RunRepository.transition` to
+`runtime/executor.py`, and the way that reservation survives a second
+entry point is to make the repository unreachable from the entry points
+rather than to rely on everyone remembering. Narrowing the return type is
+the mechanism; the static check that no module outside `bootstrap.py`
+instantiates an adapter is its enforcement.
+
+**Reversal cost:** cheap now, expensive later.
+
+### `runtime/engine.py` is retired in favour of three files
+
+**Decided:** the Section 4 tree's `runtime/engine.py` becomes `loop.py`,
+`executor.py`, and `supervisor.py`, and the tree is annotated rather than
+redrawn.
+
+**Why:** ADR-0023 already split the loop from the executor and made the
+split structurally enforced — only `runtime/executor.py` may call
+`RunRepository.transition` — which a single `engine.py` cannot express.
+`supervisor.py` is the heartbeat and deadline task the same document
+requires. Keeping the old name would leave a gate pointing at a file that
+does not exist.
+
+**Reversal cost:** cheap.
+
+### `ModelProvider` was declared twice with incompatible shapes
+
+**Decided:** `model-gateway.md` holds the canonical port. Section 7's
+declaration is annotated as superseded and left in place, matching the
+treatment already given to `RunRepository.claim_next`.
+
+**Why:** the two declarations differ in the attribute name
+(`provider_name` versus `name`), in the `stream` signature (the gateway
+passes `ResolvedModel` and `ModelAttempt`), in the presence of `close`,
+and in whether `capabilities` sits on the adapter at all — and neither
+document said which one an implementer should write. The gateway version
+is the one the rest of that spec, the router, and the retry ownership
+split all assume.
+
+**Reversal cost:** cheap.

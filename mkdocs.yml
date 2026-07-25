@@ -61,6 +61,7 @@ nav:
   - Current Milestone: plan/current-milestone.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
+      - Bootstrap & Composition: plan/bootstrap-and-composition.md
       - Event Log & Persistence: plan/event-log-and-persistence.md
       - Policy & Approvals: plan/policy-and-approvals.md
       - Context Engine: plan/context-engine.md
@@ -98,4 +99,5 @@ nav:
       - ADR-0021 Tool execution pipeline and MCP: adr/0021-tool-execution-pipeline-and-mcp.md
       - ADR-0022 The evaluation harness: adr/0022-evaluation-harness.md
       - ADR-0023 The run loop and the single terminal writer: adr/0023-runtime-loop.md
+      - ADR-0024 The composition root and configuration: adr/0024-bootstrap-and-composition.md
   - Changelog: changelog.md

@@ -4,9 +4,91 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — Bootstrap, configuration, and the composition root
+
+- Added `docs/plan/bootstrap-and-composition.md`, the design for the process
+  that constructs everything the other nine specs describe. Recorded as
+  ADR-0024. Nine specifications described nine mechanisms; none described the
+  interval before any of them runs.
+- Gave **configuration a shape**. The corpus declares 106 knobs and the plan
+  names three environment variables. A value is an environment variable if and
+  only if it differs between two deployments of the same revision and cannot be
+  committed — which leaves eight fields in `Settings` and puts the rest in six
+  committed YAML files, each beside the package that reads it, with an optional
+  operator overlay directory merged over them.
+- Fixed the reading of "New configuration appears in `.env.example`" that would
+  have made all 106 knobs environment variables. That reading contradicts
+  `policy_version`, which is a hash of the files the rules came from: an
+  environment variable that changed an effective rule would leave the hash
+  untouched, turning the audit trail from stale into false. **The environment
+  never overrides a file; it is interpolated into one at named points**,
+  generalizing the `model: ${OPENAI_MODEL}` form Section 10.5 already uses.
+- Introduced `DATABASE_URL`, which no document named, for the PostgreSQL
+  instance the plan makes the source of truth.
+- Assembled **startup order**, stated seventeen times across nine documents and
+  composed nowhere. Five phases, ordered by what each may touch: refuse
+  (settings only), determinism (`Clock` and `IdFactory`, before anything reads
+  ambient time), resources (a session factory, never a session), freeze (every
+  versioned asset loaded, hashed, and made immutable, hardline first), and wire.
+  All seventeen constraints land in one of the five, and the three that read
+  like startup constraints and are not — migrations, provider pinning, contract
+  coverage — are named as such.
+- Specified `build` as one async context manager whose `Composition` exposes
+  application services and nothing else. No adapter, repository, or session
+  factory is reachable from an entry point, which is how ADR-0023's reservation
+  of `RunRepository.transition` to `runtime/executor.py` survives a second one.
+- Gave **Milestone 1's three bodiless bullets** bodies. "In-memory
+  repositories" is five adapters in `adapters/persistence/memory.py`, run
+  against the same contract suites as their PostgreSQL counterparts rather than
+  living under `tests/` as doubles; there is no in-memory `RunQueue`, because
+  that port's entire content is `FOR UPDATE SKIP LOCKED` and lease fencing.
+  "Inline run dispatcher" is a one-method `RunDispatcher` whose postcondition
+  both adapters satisfy. "Minimal context builder" is context-engine
+  build-sequence step 1, with its stability test stated as two assertions
+  rather than one.
+- Resolved **two milestone conflicts** by separating two words each. An event
+  *repository* is Milestone 1 and append-only event *storage* is Milestone 2 —
+  one port, two implementations. The transaction-hygiene *check* is a Milestone
+  0 deliverable and the *gate* is a Milestone 2 criterion, because Milestone 0
+  has no database code to walk.
+- Completed the **Section 17 CLI contract**: arguments, options, stdout versus
+  stderr, six exit codes, and the milestone each command first works at. `get`,
+  `events`, and `cancel` are reserved words after `agent run`, with `--` as the
+  escape, which is what makes `agent run "get the weather"` decidable.
+- Specified the **secret scanner** dependency rule 12 and Milestone 0 both name
+  and neither describes: five rule families, a report that never prints what it
+  matched, an allowlist whose entries require prose, and `.env.example` scanned
+  rather than exempted.
+- Added four static checks to the Milestone 0 import-boundary walk, each true
+  of an empty repository and still true as it fills: `bootstrap` is imported
+  only by the three entry points, no module outside `bootstrap.py` instantiates
+  an adapter, no module outside `adapters/determinism.py` reads ambient time or
+  generates an identifier, and no `AsyncSession` exists at module scope.
+- Annotated the Section 4 tree rather than redrawing it: eleven files added,
+  one name retired. `runtime/engine.py` becomes `loop.py`, `executor.py`, and
+  `supervisor.py`; `ports/` gains `context.py`, `memory.py`, and
+  `determinism.py`; `adapters/models/` gains the Anthropic, OpenAI-chat, and
+  local-endpoint adapters ADR-0002 and ADR-0012 require and the tree never
+  listed.
+- Recorded that **`ModelProvider` was declared twice** with incompatible
+  shapes, in Section 7 and in `model-gateway.md`, and made the gateway's
+  version canonical. Section 7's is annotated as superseded and left in place,
+  the same treatment `RunRepository.claim_next` received.
+- Fixed a rendering defect in **Section 5**: the Pydantic note between rules 1
+  and 2 split the ordered list, so the fourteen dependency rules rendered as
+  1 and then 1 through 13 — meaning every reference to "rule 14" in the
+  corpus pointed at a line the reader saw numbered 13. The note is now
+  indented as continuation text under rule 1, which is the rule it is about.
+  No rule text changed. A sweep of all forty-one built pages found no other
+  interrupted list.
+- Sixteen further judgment calls are recorded with their reasoning and reversal
+  cost in [questions-for-review.md](status/questions-for-review.md).
+
+No product implementation was performed.
+
 ## 2026-07-25 — Cross-document defect sweep before the readiness review
 
-- Read the eleven detailed-design specs against each other rather than against
+- Read the nine detailed-design specs against each other rather than against
   the plan, looking only for places where two documents state the same fact
   differently or where one names something no document declares. **Ten defects
   were found and all ten are fixed.** Each is recorded with its reasoning in
