@@ -513,3 +513,180 @@ sessions with reasoning display enabled.
 Per-session is more flexible than per-tenant and marginally more work.
 
 **Reversal cost:** cheap.
+
+## Tool system and MCP (ADR-0021)
+
+### `mark_effect_sent` is a tool-author obligation, not a type-checked one
+
+**Decided:** a `NON_IDEMPOTENT` or `CONDITIONALLY_IDEMPOTENT` tool must call
+`ctx.mark_effect_sent()` immediately before its first outbound operation. The
+contract suite asserts it for every registered tool against a fake target, and
+the executor records `tool.contract.no_watermark` when a tool returns `ok`
+without having called it.
+
+**Why:** the alternative is wrapping every outbound call in a decorator the
+framework controls, which only works if the framework knows what "outbound"
+means — and for an MCP tool, a sandbox command, or a device call it does not.
+A contract the suite checks is weaker than a type, and stronger than the
+current design, which has no mechanism at all.
+
+**Alternative:** make the executor write the watermark unconditionally before
+step 10, which is safe but marks every call, so every interrupted call becomes
+`UNCERTAIN` again and the column buys nothing.
+
+**Reversal cost:** cheap now, moderate after tools exist.
+
+### `UNCERTAIN` is reserved for non-idempotent calls with a set watermark
+
+**Decided:** the recovery table re-executes everything else, including a
+non-idempotent call whose watermark is `NULL`.
+
+**Why:** it is the whole point of the column. The risk is a tool that performs
+an effect before calling the method, which is a contract violation the suite
+catches, versus the current behaviour where every crash during a consequential
+call reaches a person.
+
+**Reversal cost:** cheap — deleting one row of the table restores today's
+pessimism.
+
+### A batch of parallel tool calls admits or rejects as a whole
+
+**Decided:** if any call in a batch fails the five conditions, the entire batch
+runs sequentially. No splitting into a parallel read group and a sequential
+write group.
+
+**Why:** splitting requires deciding that no read in the first group depends on
+a write in the second, and Section 12.4's closing sentence is a warning against
+exactly that inference. The cost is latency on mixed batches.
+
+**Reversal cost:** cheap.
+
+### Operators classify MCP servers, and an unclassified server is maximal risk
+
+**Decided:** `side_effect`, `risk`, `idempotency`, and `required_scopes` are
+per-server operator configuration. The default is `EXTERNAL_WRITE`, `HIGH`,
+`NON_IDEMPOTENT`.
+
+**Why:** MCP has no field for these, and a field would be a claim by the party
+the classification constrains. Per-server rather than per-tool because the
+configuration surface is a place to move slowly.
+
+**Alternative:** per-tool overrides, which is one more column and is the obvious
+next step once a real server makes the coarseness hurt.
+
+**Cost of this choice:** onboarding an MCP server is now a deliberate act with a
+classification step, and a server with one destructive tool makes its nine
+harmless ones expensive. This will be felt as friction.
+
+**Reversal cost:** cheap.
+
+### Tenant-configured MCP servers are HTTP-only; stdio is operator-only
+
+**Decided:** a tenant may not name a stdio command.
+
+**Why:** a stdio server is a child process of the worker, so a tenant-supplied
+command line is remote code execution in the worker's trust zone. This one is
+not really a judgement call, but it is a restriction Milestone 8 does not state
+and someone will ask why their local server will not connect.
+
+**Reversal cost:** none; it should not be reversed.
+
+### MCP resources become a tool, not a context source
+
+**Decided:** one synthetic `mcp.{server}.read_resource` per server with a
+resources capability. Milestone 8 says to map resources to "the context-source
+abstraction", and this maps them to the tool abstraction instead.
+
+**Why:** an automatic context source puts externally controlled text into
+assembled context on a schedule the platform does not control, in the region
+ADR-0020 keeps stable. Making the model ask means the request passes policy,
+size limits, and trust labelling like anything else. This is the one place this
+document knowingly reads a milestone line differently from its literal wording,
+and it is flagged here for that reason.
+
+**Alternative:** implement the context-source mapping with a per-server
+allowlist of URIs. More faithful to the milestone text, more surface.
+
+**Reversal cost:** moderate.
+
+### Sampling and roots are declined at capability negotiation
+
+**Decided:** the client does not advertise them, so a server requiring them
+fails to connect.
+
+**Why:** sampling is an external party spending a tenant's model budget on a
+prompt the platform did not compose. Declining at negotiation rather than at
+request time means a server never gets to try.
+
+**Reversal cost:** cheap for roots, expensive for sampling — it would need its
+own budget, policy, and context rules.
+
+### A server's catalog change is recorded and not applied mid-session
+
+**Decided:** `tools/list_changed` emits `mcp.catalog.changed` and does nothing
+else until the next session opens.
+
+**Why:** applying it hands an external server the ability to invalidate a
+tenant's byte-stable prefix at will, which is unbounded cost imposed by a third
+party plus a cache-timing channel. It generalizes ADR-0020's existing rule.
+
+**Cost:** a genuinely new tool is unavailable until the next session.
+
+**Reversal cost:** cheap.
+
+### The excerpt split is 60% head, 20% tail
+
+**Decided:** a truncated result shows the first 60% and last 20% of the byte
+budget with an explicit elision marker, and the whole output becomes an
+artifact.
+
+**Why:** most large tool outputs are logs whose beginning says what ran and
+whose end says whether it worked. It is a guess and the eval harness should
+measure it.
+
+**Reversal cost:** cheap.
+
+### `approval_hold_seconds` defaults to 300
+
+**Decided:** the bridge blocks for up to five minutes on an in-script approval,
+then tears the sandbox down and re-executes the script from the start on
+resume, deduplicating the calls that already ran.
+
+**Why:** long enough for an approver at their desk, short enough that a held
+sandbox is not a leak. Per-tenant configurable.
+
+**Reversal cost:** cheap.
+
+### Replay safety for orchestration scripts is conditional on determinism
+
+**Decided:** stated as a caveat in the document rather than engineered around.
+
+**Why:** a script that branches on the clock or on changed tool output issues a
+different call, derives a fresh key, and executes for real — which is correct,
+but it means replay does not guarantee no duplicate work, only no duplicate
+identical work. Engineering around it would mean recording and replaying the
+script's own control flow, which is a much larger project than the bridge.
+
+**Reversal cost:** n/a — this is a documented limit, not a decision to undo.
+
+### Events carry classification; rows carry payload
+
+**Decided:** no tool event contains arguments, results, error detail, or
+external text.
+
+**Why:** the event stream is replayed to SSE consumers, retained on a different
+schedule, and exported to observability stacks. Tenant data in three places with
+three retention policies is a compliance problem waiting to be discovered.
+
+**Cost:** the SSE stream stops being useful for debugging a failing tool call.
+
+**Reversal cost:** cheap now, expensive once events are retained.
+
+### No `tool_registry_snapshots` table
+
+**Decided:** the context plan's `tool_names` and `tool_schema_sha256`, plus the
+`mcp_tool_catalog` history, answer what a session advertised.
+
+**Why:** a third record of the same fact is a third place for it to disagree.
+
+**Reversal cost:** cheap.

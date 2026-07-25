@@ -4,6 +4,106 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — The tool system, the execution pipeline, and MCP
+
+- Added `docs/plan/tool-system.md`, the design for Sections 7, 8, 12.4, 12.5,
+  15's `tool_invocations`, and Milestones 1, 4, 6, and 8: the execution
+  pipeline, idempotency and recovery, output limits, control tools, the
+  orchestration bridge, and the MCP adapter. Recorded as ADR-0021, constrained
+  by ADR-0015, ADR-0008, ADR-0005, ADR-0006, ADR-0002, ADR-0013, and ADR-0020.
+- Defined the two types the Section 7 `Tool` port names and nothing in the plan,
+  the six sibling specs, or the twenty ADRs declared: **`ToolResult`** with
+  `ToolFailure` and `ToolFailureKind`, and **`ToolExecutionContext`** with its
+  sixteen fields. A tool returns `ok` and content, never a status, because
+  status is the pipeline's judgement and a tool able to claim `denied` could
+  launder a denial.
+- Ruled that `ToolExecutionContext` carries no database session, no repository,
+  no policy engine, and no registry, so Section 12.2's "no transaction across
+  tool I/O" is enforced by construction and a tool cannot call a tool.
+- Completed `ToolSpec` with `kind`, `target_kind`, `output_trust`, `source`,
+  `server_id`, and `deprecated`, and added `ToolKind`, `ToolSource`, and
+  `ToolOutcomeStatus`. `output_trust` is **forced** to `EXTERNAL_UNTRUSTED` at
+  registration for every MCP, device, and sandbox source, which also resolves
+  the plan's two conflicting defaults for `ToolResultItem.trust`.
+- Gave the registry a **name grammar and a reserved-domain partition**, and
+  named MCP tools `mcp.{server_id}.{normalized_remote_name}` by a deterministic
+  five-step normalization. This is the join Milestone 8 needed and lacked:
+  without it every discovered MCP tool is an unknown tool and Section 9.2's
+  `Unknown tool -> Deny` row makes the milestone non-functional.
+- Made the pipeline **fourteen steps, one function, one call site**, preserving
+  Section 8.3's ten in order and inserting the four persistence points Section
+  12.2 requires. Nothing before step 8 has touched the world; nothing after
+  step 10 can undo step 10. The bridge, the device channel, and the MCP adapter
+  re-enter this function rather than implementing variants, which is what makes
+  ADR-0015's "the bridge is the enforcement point" true rather than aspirational.
+- Added **`effect_sent_at`**, a nullable timestamp written immediately before a
+  tool's first outbound operation, and turned the event-log spec's undefined
+  word *ambiguous* into a fact a recovering worker can read. Section 8.4's rule
+  against auto-retrying non-idempotent calls is preserved exactly for calls that
+  may have escaped, while a worker that died during argument marshalling is
+  retried instead of escalated. The honest limits — that a set watermark proves
+  the effect *may* have happened, and that the false-positive case costs one
+  human review — are stated in the document rather than left to be discovered.
+- Derived the idempotency key from Section 8.4's five inputs plus a version tag
+  and `tool_version`, and **excluded `attempt_number`** so a bounded retry
+  reuses the key and the external service can deduplicate it.
+- Defined where `argument_trust` and `origin_trust` come from, which the policy
+  spec consumed and nothing produced. `origin_trust` is the minimum label over
+  the request's context items; `argument_trust` defaults to
+  `EXTERNAL_UNTRUSTED` and is only ever **raised**, on a verbatim
+  sixteen-character match against `USER`-labelled context — a direction chosen
+  so the failure mode is an unnecessary approval rather than an injection
+  passing as trusted.
+- Ruled that large output is **excerpted head-and-tail and artifactized, never
+  summarized**, since a summarizer over untrusted tool output is the laundering
+  ADR-0020 forbids, and that an excerpt never splits a trust envelope.
+- Gave all four non-success outcomes **one six-field shape** with a stable
+  `reason_code` and a fixed message, and ruled that external text is data and
+  never narration: a remote system's error string is enveloped untrusted
+  content, never the outcome `message`.
+- Unified the policy spec's repeated-denial breaker and Section 12.5's loop
+  detector into **one counter at three thresholds**, adding the rule that an
+  invocation which resolved `UNCERTAIN` is never proposed again in the run.
+- Defined a **step** as one model call plus the complete disposition of every
+  tool call it produced, so a batch shares a `step_number` and a crash-retry
+  derives the same keys. Parallelism admits or rejects the whole batch; a mixed
+  batch runs sequentially rather than being split, because splitting requires
+  the independence inference Section 12.4 warns against.
+- Made control tools a declared kind that runs the full pipeline and suspends
+  through a nullable marker rather than a new status, so no consumer of
+  `tool_invocations.status` learns about suspension and the lease reaper
+  excludes them by predicate.
+- Specified the MCP adapter to one principle: **a server does not classify
+  itself**. `side_effect`, `risk`, `idempotency`, and `required_scopes` come
+  from operator configuration, an unclassified server is maximally restricted,
+  tenant-configured servers are HTTP-only through the egress allowlist, and
+  stdio servers — child processes in the worker's trust zone — are
+  operator-configured only.
+- Mapped MCP's other surfaces deliberately rather than naturally: resources
+  become one synthetic per-server read tool instead of an automatic context
+  source, prompts become read-only untrusted skills that never enter the
+  cacheable prefix, and sampling and roots are declined at capability
+  negotiation so a server never gets to spend a tenant's model budget.
+- Extended ADR-0020's pinned-advertisement rule to MCP catalog changes, so
+  `tools/list_changed` is recorded and not applied and an external server cannot
+  invalidate a tenant's prompt cache at will.
+- Gave the orchestration bridge a synthesized `call_id` from the script hash and
+  a bridge-counted ordinal so a replayed script deduplicates, with the
+  determinism caveat stated plainly, plus a bounded approval hold and a
+  per-turn cap on underlying calls.
+- Added fourteen columns to `tool_invocations` and two new tables,
+  `mcp_servers` and `mcp_tool_catalog`, the second a history rather than a
+  cache. Declined to add a `tool_registry_snapshots` table, since the context
+  plan's pin already answers what a session advertised.
+- Added seven event families, two span children, five metrics, an import
+  boundary table, ten hard gates, and a nine-step build order that places most
+  of the work in Milestone 1 rather than Milestone 8.
+- Cross-referenced the new document from Section 8, Milestone 1, and Milestone
+  8's MCP subsection, additively. No requirement in the plan was rewritten,
+  weakened, or reordered.
+
+No product implementation was performed.
+
 ## 2026-07-25 — Model gateway and the provider-neutral protocol
 
 - Added `docs/plan/model-gateway.md`, the translation design for Section 10 and

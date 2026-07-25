@@ -805,6 +805,8 @@ Also define ports for:
 
 ## 8. Tool system
 
+The detailed design - definitions for `ToolResult` and `ToolExecutionContext`, the two types named by the Section 7 `Tool` port; the completed `ToolSpec` with its tool kind, source, and required output trust label; the registry name grammar and the reserved-domain partition that lets an MCP tool be a known tool; the fourteen-step execution pipeline with its four persistence points; the `effect_sent_at` watermark that makes crash recovery decidable rather than pessimistic; the derivation of `argument_trust` and `origin_trust`; output excerpting and artifactization; the single outcome shape shared by every non-success result; the unified repeated-call breaker; the batch step boundary for parallel calls; control-tool suspension; and the MCP adapter, its operator-owned classification, and its resource, prompt, sampling, and roots mappings - is specified in [tool-system.md](tool-system.md) and ADR-0021. That document expands Sections 7, 8, 9.2's unknown-tool row, 11.1, 12.4, 12.5, 13, 15, 18.3, 18.4, 19, 22, 26, 27.3, 29.4, and 30.4 and Milestones 1, 4, 6, and 8; it does not replace the requirements below, and it reorders none of the Section 8.3 steps.
+
 ### 8.1 Tool specification
 
 ```python
@@ -2325,6 +2327,8 @@ make migrate
 
 ### Milestone 1: In-memory vertical slice
 
+The tool registry, the execution pipeline, and the two types the `Tool` port names are specified in [tool-system.md](tool-system.md) and ADR-0021; its build order places steps 1 through 5 in this milestone.
+
 #### Implement
 
 - Core domain objects
@@ -2595,6 +2599,8 @@ Only load skill metadata into ordinary context. Load full instructions and files
 Skills are also the substrate for agent self-improvement: the agent can author and refine its own procedural-memory skills under governance. See Section 30 and ADR-0013.
 
 #### MCP
+
+The MCP adapter, the `mcp.{server_id}.{tool}` namespace join, the operator-owned server classification, the two transports and their trust zones, and the resource, prompt, sampling, and roots mappings are specified in [tool-system.md](tool-system.md) and ADR-0021.
 
 Implement MCP as an adapter at the integration boundary. MCP distinguishes tools, resources, and prompts; map these to the internal tool, context-source, and skill abstractions rather than allowing MCP concepts to become the application’s core domain model. See the [Model Context Protocol specification](https://modelcontextprotocol.io/specification/2025-11-25).
 

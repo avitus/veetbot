@@ -28,6 +28,7 @@ implementation without one.
 - [ADR-0018 — Memory formation and consolidation](0018-memory-formation-and-consolidation.md)
 - [ADR-0019 — Memory retrieval and ranking](0019-memory-retrieval-and-ranking.md)
 - [ADR-0020 — Context engine](0020-context-engine.md)
+- [ADR-0021 — Tool execution pipeline, effect watermarking, and MCP](0021-tool-execution-pipeline-and-mcp.md)
 
 ADR-0001 is referenced by the engineering plan as a foundational decision (the
 modular monolith and the evaluation harness); its record is being written

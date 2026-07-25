@@ -65,6 +65,7 @@ nav:
       - Policy & Approvals: plan/policy-and-approvals.md
       - Context Engine: plan/context-engine.md
       - Model Gateway: plan/model-gateway.md
+      - Tool System: plan/tool-system.md
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
   - Project State:
@@ -91,4 +92,5 @@ nav:
       - ADR-0018 Memory formation and consolidation: adr/0018-memory-formation-and-consolidation.md
       - ADR-0019 Memory retrieval and ranking: adr/0019-memory-retrieval-and-ranking.md
       - ADR-0020 Context engine: adr/0020-context-engine.md
+      - ADR-0021 Tool execution pipeline and MCP: adr/0021-tool-execution-pipeline-and-mcp.md
   - Changelog: changelog.md
