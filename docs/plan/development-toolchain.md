@@ -472,12 +472,13 @@ corpus, and a single self-contained HTML file listed in
 `docs-manifest.yaml`. The manifest names four sources — the index, the
 current milestone, the engineering plan, and the changelog — and that
 is deliberate rather than an oversight. Those four are the documents
-that are read start to finish. The eleven specifications and the
-twenty-five ADRs are reference material reached by cross-reference,
-and the site is where cross-references work.
+that are read start to finish. The twelve specifications, the
+milestone map, the readiness review, and the twenty-seven ADRs are
+reference material reached by cross-reference, and the site is where
+cross-references work.
 
 Widening the manifest is not free, and the reason is worth recording
-because it will be proposed again. Concatenating thirty-seven
+because it will be proposed again. Concatenating forty-eight
 documents into one file collapses their heading namespaces. The
 headings `Decisions`, `Context`, and `Open questions for review`
 appear in almost every one of them, and the anchor generator would
