@@ -1037,6 +1037,8 @@ Approval is layered, with the deterministic engine always primary:
 
 ## 10. Model gateway
 
+The detailed design - the six invariants of the normalized stream and the shared assembler that folds it into a turn; definitions for the streaming event classes, conversation items, content parts, usage, stop reasons, and the three error classes; resolutions for the nine unfilled cells of the 10.2 mapping table including `server_tool_use`, the in-band `<think>` mapping, and the fifth token class; the `ModelRouter` port that turns a model policy into capabilities, limits, and pricing; how provider pinning and availability routing coexist; the retry ownership split; and the model-call timeouts - is specified in [model-gateway.md](model-gateway.md) and ADR-0002. That document expands this section and Milestones 1 and 3; it does not replace the requirements below, and it changes no mapping stated in the 10.2 table.
+
 ### 10.1 Normalized request
 
 ```python
@@ -1593,6 +1595,8 @@ Add a resilience integration test that terminates a worker process after a check
 Create Alembic migrations for at least these tables.
 
 [event-log-and-persistence.md](event-log-and-persistence.md) adds columns and tables required by Section 6.8, Section 16, Section 27.5, and the Milestone 2 acceptance criteria that are not yet reflected below: `events.payload_schema_version`, the `runs` columns `priority`, `attempts`, `scheduled_for`, and `lease_epoch` with a partial unique index enforcing one non-terminal run per session, and the `idempotency_keys`, `projection_watermarks`, and `derived_event_keys` tables. All are additive to the tables specified here.
+
+[model-gateway.md](model-gateway.md) adds the two tables Section 6.5's cost precedence and the Milestone 3 usage criteria require and this section does not yet carry: `model_calls`, one row per model attempt with all five token classes, cost, `cost_source`, and the resolved provider, model, and registry version; and `model_prices`, an append-only price history so a recorded cost stays reproducible after a vendor price change. `runs.usage` is unchanged in shape and becomes a rollup of `model_calls` maintained in the same transaction. Both are additive to the tables specified here.
 
 [policy-and-approvals.md](policy-and-approvals.md) likewise adds what Section 9, Section 11.2, and the Milestone 4 acceptance criteria require and this section does not yet carry: `tenant_id`, `principal_id`, `session_id`, `action_kind`, `action_id`, `risk`, `policy_version`, and `revalidated_policy_version` on `approvals`, with `tool_invocation_id` widened to nullable so non-tool actions can be approved, and the indexes the approval list, the resume path, and the expiry reaper each need; the classification columns `side_effect`, `risk`, `idempotency`, `origin_trust`, and `effective_arguments_hash` on `tool_invocations`; and a `policy_profiles` audit table that records which ruleset a `policy_version` refers to. Policy rules themselves are version-controlled files, not rows.
 
@@ -2364,6 +2368,8 @@ run completes
 - Every state transition is represented by an event.
 - No provider-specific code exists in the runtime.
 
+[model-gateway.md](model-gateway.md) and ADR-0002 supply the domain types this milestone designs in and Milestone 3 consumes: the five conversation items, the content parts, the six streaming event classes, `ModelUsage` with its five token classes, the neutral `StopReason` vocabulary, the three error classes, and `FakeModelScript` for the fake provider above. They also give "no provider-specific code exists in the runtime" a test: an import-graph walk rather than a search for SDK names, since the failure that matters is a transitive import through a shared helper.
+
 ### Milestone 2: PostgreSQL persistence and durable worker
 
 #### Implement
@@ -2428,6 +2434,8 @@ The persistence design for this milestone - the observation-not-durability contr
 
 - A local OpenAI-compatible endpoint (e.g. Ollama) passes the calculator scenario, giving a no-cost live-test path.
 - The normalized protocol passes the same contract suite against OpenAI, Anthropic, and a chat_completions endpoint.
+
+[model-gateway.md](model-gateway.md) and ADR-0002 expand these criteria into ten hard gates and six tracked metrics, and specify the fourteen-step build order for this milestone. Three of the criteria above need definitions this section does not carry: "the runtime passes all tests against fake and recorded adapters" gets `FakeModelScript` and the recorded-fixture format there, "tool-call IDs are preserved correctly" gets the stream invariant that makes preservation testable, and "provider errors are mapped to internal error types" gets the three error classes and the `stream_had_output` split that decides who retries. The fixture list under Implement names OpenAI only; the contract-suite criterion naming three providers is the controlling requirement.
 
 ### Milestone 4: Policy, approvals, and complete tool lifecycle
 

@@ -4,6 +4,87 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — Model gateway and the provider-neutral protocol
+
+- Added `docs/plan/model-gateway.md`, the translation design for Section 10 and
+  Milestones 1 and 3: the normalized stream, the two first adapters, routing,
+  usage and cost, retries, and reasoning. Recorded as ADR-0002, constrained by
+  ADR-0006, ADR-0007, ADR-0010, and ADR-0012.
+- Defined the roughly twenty types the plan used at call sites and never
+  declared: the five `ConversationItem` members, `ContentPart` with its text,
+  image and file variants, `PendingToolCall`, the six streaming event classes,
+  `ModelUsage`, `CostSource`, `StopReason`, `ModelAttempt`, the three error
+  classes, `FakeModelScript` with `ScriptedTurn` and `ScriptedToolCall`, the
+  `UsageRepository` port, and `ResolvedModel` with `ModelCapabilities`,
+  `ModelLimits`, and `ModelPricing`.
+- Stated the **six invariants of the normalized stream** — contiguous sequence,
+  exactly one terminal event, contiguous ordered deltas per item, `call_id` and
+  `name` known at tool-item start, advisory usage, and no raw provider error
+  text or credentials on any event — and gave them a shared validator, so a
+  violation is an adapter defect rather than a caller concern.
+- Made **one shared assembler** fold events into turns for every adapter, which
+  is what makes the contract suite a controlled comparison: the same code
+  produces the turn on every provider, so a difference in the turn is a
+  difference in the events.
+- Resolved the **nine unfilled cells** of the Section 10.2 mapping table without
+  changing any mapping it already states: `server_tool_use` becomes a protocol
+  error, `content_block_stop` and `message_stop` are structural, `UsageEvent` is
+  advisory so its missing OpenAI source stops mattering, `response.incomplete`
+  maps to `MAX_TOKENS` where the cap is the cause, and the five OpenAI lifecycle
+  events drive item bookkeeping only.
+- Gave in-band `<think>` the mapping table ADR-0012 assumed and Section 10 never
+  wrote, plus a streaming scrubber with one-token lookahead and a per-profile
+  configurable tag pair, since open models do not agree on the delimiter.
+- Gave `cache_creation_input_tokens` the home Section 10.2 said to find for it:
+  `cache_write_input_tokens`, a **fifth tracked token class** on both
+  `ModelUsage` and `RunUsage`. Made `reasoning_tokens` `None` rather than `0`
+  where a provider does not itemize it, and moved the itemization question into
+  pricing as `reasoning_priced_separately`.
+- Added the **`ModelRouter` port**, turning `model_policy` from a bare string
+  into a `ResolvedModel` carrying provider, model, capabilities, limits,
+  pricing, and a credential reference. This gives `ModelCapabilities` a
+  resolution path and gives the context engine's "8,192 or the model's default"
+  output reserve its missing second half.
+- Resolved **provider pinning against availability routing** temporally rather
+  than architecturally: selection happens once at run start, the pin is absolute
+  and persisted for the life of the run, and Milestone 10 routes selection and
+  never live runs.
+- Split **retry ownership on `stream_had_output`**: the adapter retries only
+  before the first event reaches the caller, at most three times; after any
+  output it fails and the caller decides. `max_attempts = 3` lives in
+  application code, matching the worker's existing figure.
+- Added the **model-call timeouts** no document carried — `timeout_seconds` and
+  the load-bearing `stream_idle_seconds` — and made cancellation produce
+  `StopReason.CANCELLED` on a partial turn rather than an error.
+- Bounded the **`PLATFORM` trust default** on `ProviderReasoningItem` with four
+  properties that leave the label no consumer able to act on it: the payload is
+  never parsed, never rendered as prompt text, never reaches the policy engine,
+  and never enters memory or a user-facing renderer. The name is still wrong and
+  is raised for review rather than edited.
+- Made the gateway enforce **tool call and tool result pairing before sending**,
+  which the policy spec's denial-as-tool-result and the context engine's
+  compaction atomicity both depended on and neither owned.
+- Added `model_calls` and `model_prices` to the schema, one row per attempt and
+  an append-only price history, so a three-month-old invoice stays reconcilable
+  and per-attempt cost is a query rather than log archaeology. `runs.usage` is
+  unchanged in shape and becomes a rollup maintained in the same transaction.
+- Made **failed attempts count against budget**, checked before each attempt, so
+  a crash-looping run stops for a stated reason instead of being mysteriously
+  expensive.
+- Added event payloads for `model.request.started` and `model.response.completed`
+  that the context engine already consumed and Section 6.8 never specified, plus
+  three telemetry attributes for the cached, cache-write, and reasoning token
+  classes and a `model.attempt` span.
+- Specified ten hard gates, six tracked metrics, and a fourteen-step build order
+  in which the stream validator and the contract suite are written **before the
+  first real adapter**.
+- Wrote ADR-0002 with twenty decisions and seventeen rejected alternatives, and
+  wired it and the spec into the navigation, the ADR index, and Section 10,
+  Section 15, and Milestones 1 and 3 of the engineering plan.
+- Recorded twelve judgment calls in `docs/status/questions-for-review.md`,
+  flagging the `PLATFORM` trust default as the one worth reading first.
+- No product implementation was performed.
+
 ## 2026-07-25 — Policy engine and approval lifecycle spec
 
 - Added `docs/plan/policy-and-approvals.md`, the authorization design for

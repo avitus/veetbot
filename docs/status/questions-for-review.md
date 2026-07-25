@@ -337,3 +337,179 @@ version would have created a record that the plan already disagrees with on the
 day it was committed.
 
 **Reversal cost:** none — it is a record of a decision already made elsewhere.
+
+## Model gateway (ADR-0002)
+
+### `ProviderReasoningItem.trust_level` still defaults to `PLATFORM`
+
+**Decided:** the default was left as Section 6.6 states it, and the spec bounds
+it instead — the payload is never parsed, never rendered as prompt text, never
+reaches the policy engine, and never enters memory or a user-facing renderer as
+trusted content.
+
+**Why:** `PLATFORM` is the highest trust tier and the policy engine reads trust
+tiers to set restrictiveness, so on its face this gives model output the standing
+of platform configuration. `AssistantMessage` correctly defaults to
+`EXTERNAL_UNTRUSTED`. Fixing the default means editing a plan sentence, which the
+conversion constraints forbid doing unilaterally. The four bounding properties
+leave the label no consumer able to act on it, which turns a live privilege
+inversion into a naming defect.
+
+**This is the one item on this page worth reading first.** The bounding is sound
+but it is a fence around a mislabelled thing, and fences are maintained by people
+who remember why they are there.
+
+**Reversal cost:** cheap now — it is a default value and four sentences.
+Expensive after any code reads the field.
+
+### `server_tool_use` is refused rather than mapped
+
+**Decided:** an Anthropic `server_tool_use` content block raises
+`ModelProtocolError` and fails the attempt in 0.1.
+
+**Why:** Section 10.2 has no row for it. A tool executed inside the provider
+never passes the policy engine, so mapping it onto an ordinary tool call would
+admit a class of side effects with no policy decision. We never request server
+tools, so the refusal is unreachable in normal operation and exists to make the
+day someone enables one loud rather than quiet.
+
+**Alternative:** a configuration flag permitting specific server tools with an
+explicit policy mapping. That is the right eventual answer and it needs a policy
+design first.
+
+**Reversal cost:** cheap.
+
+### Retry ownership splits on whether output was already emitted
+
+**Decided:** the adapter retries only before the first event reaches the caller,
+at most three times; after any output it fails and the caller decides.
+`max_attempts = 3` lives in application code.
+
+**Why:** plan line 1233 puts retries in the adapter and line 1556 says to keep
+retry decisions in application code "not in provider adapters alone". The word
+alone implies a split and does not say where. Pre-output failures are invisible
+and safely repeatable; post-output failures need to know whether partial output
+was shown to a user, which only the caller knows.
+
+**Reversal cost:** cheap.
+
+### `UsageEvent` was made advisory rather than terminal
+
+**Decided:** `UsageEvent` may appear zero or more times, carries provisional
+figures, and is always superseded by `ModelCompletedEvent.turn.usage`.
+
+**Why:** Section 10.2 lists `UsageEvent` in the neutral vocabulary with no OpenAI
+source row, and Section 10.4 requires exactly one completed-or-failed event per
+attempt. Making usage advisory resolves both at once: OpenAI emits none,
+Anthropic emits an early one for live cost meters, and neither competes with the
+terminal event.
+
+**Reversal cost:** cheap.
+
+### Provider pinning was resolved temporally, not architecturally
+
+**Decided:** provider selection happens once at run start and the pin is absolute
+and persisted for the life of the run. Milestone 10's availability routing
+chooses the pin; it never re-routes a live run. A provider outage fails a pinned
+run.
+
+**Why:** Section 10 line 1266 requires pinning and Milestone 10 line 2722 wants
+availability routing, which read as a contradiction. They are not, if selection
+and execution are separated in time. Mid-run switching would either discard
+provider continuation state invisibly or attempt a translation that cannot be
+done.
+
+**Question for Andy:** is failing a run on a provider outage acceptable, or
+should a run be allowed to restart against a different provider from its last
+checkpoint? The second is a real option and it is a different feature.
+
+**Reversal cost:** moderate — the pin is a persisted column.
+
+### Two schema tables were added for usage
+
+**Decided:** `model_calls` (one row per attempt) and `model_prices`
+(append-only). `runs.usage` keeps its shape and becomes a rollup maintained in
+the same transaction.
+
+**Why:** Section 15 has no usage table and `runs.usage JSONB` cannot answer which
+attempt burned the tokens, which is the question a run that retried three times
+raises. Section 6.5's cost precedence needs a place to record which source a
+figure came from.
+
+**Reversal cost:** moderate — a migration that has not been written yet.
+
+### Failed attempts count against budget
+
+**Decided:** budget is checked before each attempt using usage that includes
+failed and crashed-out attempts, and a run that exhausts its budget this way
+stops with `BUDGET_EXCEEDED`.
+
+**Why:** Section 12.3 accepts duplicate provider cost on crash recovery and
+Section 6.5 enforces `max_cost`; together they permit a crash-looping run to
+overspend on work it never kept. Charging failed attempts makes the overspend
+visible to the check rather than after the invoice.
+
+**Reversal cost:** cheap.
+
+### Model-call timeouts were invented
+
+**Decided:** `ModelRequest.timeout_seconds` defaults to 600 and
+`stream_idle_seconds` to 60.
+
+**Why:** no document defines a model-call timeout, while `ToolSpec` has had one
+since Section 8. Without them a hung connection stalls a run until the worker
+deadline fires, if it has one. The idle timeout is the load-bearing half.
+
+**Question for Andy:** 60 seconds between events is comfortable on both vendors
+today, including during extended thinking, but it is a guess until real traces
+exist.
+
+**Reversal cost:** cheap — both are configuration.
+
+### The model registry is a hashed file, not a table
+
+**Decided:** the model registry is a YAML file per provider profile, validated
+and hashed at load, with `registry_version` recorded on every attempt.
+
+**Why:** it matches how the policy profile is treated, keeps 0.1 free of another
+migration, and makes a run reproducible against the exact catalogue it resolved
+against.
+
+**Alternative:** a database table, which would allow per-tenant model catalogues
+sooner.
+
+**Reversal cost:** moderate.
+
+### The contract suite runs against five adapters, not the one the fixtures name
+
+**Decided:** fake, recorded, OpenAI, Anthropic and `chat_completions`, with the
+suite written against the fake before any real adapter exists.
+
+**Why:** Milestone 3 line 2202 names OpenAI fixtures only and line 2430 requires
+the suite against three providers. The acceptance criterion is treated as
+controlling and the fixture list as an incomplete enumeration. Writing the suite
+against the fake first is what stops it being shaped around whichever provider
+was implemented first.
+
+**Reversal cost:** cheap.
+
+### Unknown provider stream events are ignored rather than fatal
+
+**Decided:** an unrecognized event type is logged once per process per type and
+skipped.
+
+**Why:** providers add event types without warning, and a strict adapter breaks
+on a vendor deploy we did not perform. Logging once keeps the addition visible in
+telemetry without one line per token.
+
+**Reversal cost:** cheap.
+
+### Reasoning display is filtered per session
+
+**Decided:** `ReasoningDeltaEvent` is published to the live transport only for
+sessions with reasoning display enabled.
+
+**Why:** reasoning is the highest-volume event class and the least often wanted.
+Per-session is more flexible than per-tenant and marginally more work.
+
+**Reversal cost:** cheap.

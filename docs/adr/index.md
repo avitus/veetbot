@@ -9,6 +9,7 @@ material architectural change requires a new ADR; requirements in the
 [engineering plan](../plan/engineering-plan.md) must not be weakened to match an
 implementation without one.
 
+- [ADR-0002 — The provider-neutral model protocol](0002-provider-neutral-model-protocol.md)
 - [ADR-0003 — Event log, projections, and checkpoints](0003-event-log-and-projections.md)
 - [ADR-0004 — The Postgres run queue, leases, and recovery](0004-postgres-run-queue.md)
 - [ADR-0005 — The deterministic policy engine](0005-deterministic-policy-engine.md)
@@ -28,7 +29,6 @@ implementation without one.
 - [ADR-0019 — Memory retrieval and ranking](0019-memory-retrieval-and-ranking.md)
 - [ADR-0020 — Context engine](0020-context-engine.md)
 
-ADRs 0001 and 0002 are referenced by the engineering plan as foundational
-decisions (the evaluation harness and the modular monolith, and the
-provider-neutral model protocol); their records are being written alongside the
-detailed specs for each area.
+ADR-0001 is referenced by the engineering plan as a foundational decision (the
+modular monolith and the evaluation harness); its record is being written
+alongside the detailed spec for that area.
