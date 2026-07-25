@@ -34,3 +34,4 @@ implementation without one.
 - [ADR-0023 — The run loop, the step, and the single terminal writer](0023-runtime-loop.md)
 - [ADR-0024 — The composition root and the configuration layers](0024-bootstrap-and-composition.md)
 - [ADR-0025 — The development toolchain and the meaning of `make check`](0025-development-toolchain.md)
+- [ADR-0026 — The builtin tool roster and the two Milestone 1 tools](0026-builtin-tools.md)

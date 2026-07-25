@@ -4,6 +4,72 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — The builtin tools
+
+- Added `docs/plan/builtin-tools.md`, the design for the two tools Milestone 1
+  cannot be written without and the classification for the six that arrive
+  later. Recorded as ADR-0026. `math.calculate` had five bullets, two of which
+  said what not to do; `system.current_time` had four, one of which said
+  "Deterministic" about a tool that reads a clock.
+- Reconciled the roster. Section 8.1 ends with seven namespaced names and
+  Section 8.2 specifies six tools — `demo.external_write` is in 8.2 and not
+  8.1, `artifact.export` is in 8.1 and specified nowhere. Read as two rosters
+  they contradict; read as a naming convention illustrated by example and a
+  list of what the early milestones build, they do not. `tool-system.md`'s
+  domain partition already reserves `demo`, which settles which reading was
+  intended. The roster is the union: **eight tools**.
+- Placed `artifact.export` at **Milestone 6**, the one tool the plan assigns
+  to no milestone, with the two rejected alternatives and their reasons.
+- Gave every one of the eight a value for every `ToolSpec` field —
+  side-effect class, risk, idempotency, trust label, scopes, timeout, output
+  ceiling, parallelism, kind, source, and execution target. Hard gate 1
+  refuses to start without `output_trust` on every registered spec, and not
+  one builtin in the corpus declared one.
+- Specified `math.calculate` completely: an eight-production grammar, a
+  hand-written tokenizer and precedence-climbing parser rather than an
+  allowlist over `ast.parse`, `decimal.Decimal` at fifty significant digits
+  with `ROUND_HALF_EVEN`, the operator set with `^` and `**` unified and `//`
+  and `%` flooring rather than truncating, ten functions and two constants,
+  four bounds, eight reason codes with their checked-in messages, and both
+  JSON schemas.
+- Made `9**9**9` a failure rather than an outage, and made it one without a
+  check in the evaluator: `Emax` and `Emin` at ten thousand with `Overflow`
+  and `Underflow` trapped means the decimal context refuses from the exponents
+  before a digit is computed.
+- Specified `system.current_time` completely: IANA names only, defaulting to
+  `UTC` rather than the host's zone, resolved through `zoneinfo` with `tzdata`
+  as a declared dependency, five output fields, and an ISO string that always
+  carries a numeric offset so it is byte-stable under a fixed clock.
+- Relocated Section 8.2's determinism claim to where it can be true. The tool
+  is a pure function of `Clock.now()`, the timezone argument, and the timezone
+  database; determinism is a property of the port, not of the tool. An
+  implementation calling `datetime.now(UTC)` satisfies all four of Section
+  8.2's bullets and is untestable.
+- Closed an open declaration in `runtime-loop.md`: **`Clock.now()` returns an
+  aware `datetime` in UTC**, asserted in the port's contract suite. Every
+  consumer so far compared two values from the same clock, so the ambiguity
+  was harmless until a consumer converted between zones.
+- Closed a hole in hard gate 2. It forbids trust above `EXTERNAL_UNTRUSTED`
+  for tools whose `source` is `mcp`, `device`, or `sandbox`;
+  `sandbox.run_command` is a builtin with `target_kind = sandbox`, so the gate
+  as written did not reach the one builtin that returns bytes produced by code
+  we did not write. Restated over both fields.
+- Established the failure-message rule for builtins: the reason code carries
+  the diagnosis, the message carries the remedy and the supported set, and
+  neither carries the input. Hard gate 4's message table is shared with MCP
+  tools whose failure text is attacker-controlled, and a table with one
+  interpolating entry has no invariant left.
+- Specified registration as seven ordered refusals in the composition root's
+  freeze phase, pure and testable with nothing else constructed.
+- Added nine hard gates, four of them adversarial: a property test that no
+  generated expression escapes the eight reason codes, timing assertions on
+  `9**9**9` and its neighbours, a differential test pinning `//` and `%`
+  against Python's integer operators, and `0.1 + 0.2` returning exactly `0.3`,
+  which is the entire argument for `Decimal` in one line.
+- Added four additive cross-reference paragraphs to the engineering plan
+  (Sections 8 and 8.2, Milestones 1 and 4) and twelve entries to
+  `questions-for-review.md`. No requirement was rewritten.
+
 ## 2026-07-25 — The development toolchain
 
 - Added `docs/plan/development-toolchain.md`, the design for the nine Milestone

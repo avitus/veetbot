@@ -1816,3 +1816,216 @@ to edit. It is recorded as an open question because it is the one file in
 the corpus described by two specifications.
 
 **Reversal cost:** cheap.
+
+## Builtin tools (ADR-0026)
+
+### Section 8.1's seven names are read as a convention, not a roster
+
+**Decided:** the builtin roster is the union of Section 8.1's namespaced
+names and Section 8.2's specified tools — eight tools, including
+`demo.external_write`, which 8.1 omits, and `artifact.export`, which 8.2
+omits.
+
+**Why:** read as two rosters they contradict, and nothing in the plan
+says which wins. `tool-system.md`'s domain partition table already
+reserves `demo` as a builtin domain registered at build time, which a
+document treating 8.1 as complete would not have done. The 8.1 fence
+follows the words "Use namespaced names:", which is a convention
+illustrated by example.
+
+**Reversal cost:** cheap. Removing a tool from the roster is deleting a
+row from the classification table.
+
+### `artifact.export` is placed at Milestone 6
+
+**Decided:** Milestone 6, with the control tools and the programmatic
+bridge.
+
+**Why:** the plan assigns it no milestone at all. Milestone 4 was
+rejected because artifact export is not a workspace operation and would
+put the model in front of the artifact store before that store's
+retention and cross-tenant rules have been exercised. Milestone 5 was
+rejected because pairing it with `sandbox.run_command` invites the two
+designs to merge, and exporting a file is not a property of having run a
+command. Milestone 6 is the first point at which the model rather than
+the executor decides what leaves the run.
+
+**Reversal cost:** cheap while it has no design; the classification is
+milestone-independent.
+
+### `math.calculate` gets a hand-written parser, not an `ast` allowlist
+
+**Decided:** a hand-written tokenizer and precedence-climbing parser,
+roughly two hundred lines, no dependency.
+
+**Why:** Section 8.2 forbids unrestricted `eval` and says nothing about
+what to use instead. The conventional answer — `ast.parse` in eval mode
+plus a node-type allowlist — was rejected on three grounds: an allowlist
+is a subtraction from a grammar that grows with every Python release,
+Python's parse semantics are not the ones the tool wants (`/` is float
+division, `-7 // 2` floors while `Decimal` truncates), and `ast.parse`
+can exhaust the C stack on deeply nested input before any allowlist
+runs. A closed grammar that a test can enumerate is not available any
+other way.
+
+**Cost:** about two hundred lines to write and maintain, against thirty
+for the allowlist.
+
+**Reversal cost:** moderate. The grammar is checked in and the property
+test asserts against it, so replacing the front end means replacing the
+test's premise.
+
+### The numeric type is `decimal.Decimal` at fifty significant digits
+
+**Decided:** `Decimal`, `prec = 50`, `ROUND_HALF_EVEN`, `Emax` and
+`Emin` at ten thousand, with `InvalidOperation`, `DivisionByZero`,
+`Overflow`, and `Underflow` trapped.
+
+**Why:** the most commonly reported class of "the model got the
+arithmetic wrong" is a tool returning `0.30000000000000004` for
+`0.1 + 0.2`. A calculator that reproduces binary floating-point surprise
+has given up its only advantage over the model's own token-level
+arithmetic. Fifty digits is past anything a calculator tool is asked and
+bounds the cost of `exp` and `ln`. Putting the magnitude bound in the
+context rather than the evaluator means no call site can forget it.
+
+**Reversal cost:** raising the precision is a one-line change nobody
+would notice; lowering it is not, once results have been rendered.
+
+### `//` and `%` floor rather than truncate
+
+**Decided:** Python's `int` semantics — `floor(a / b)` and a remainder
+whose sign follows the divisor — implemented explicitly rather than by
+calling `Decimal`'s operators.
+
+**Why:** `Decimal` truncates toward zero, so `Decimal(-7) // Decimal(2)`
+is `-3` where `-7 // 2` is `-4`. The caller is a language model whose
+prior for both operators is Python's, and whose reasoning about a
+modulus is almost always a positive-residue argument. Being wrong in the
+other direction produces a correct argument built on an unexpected `-1`,
+which is confidently wrong with no failure anywhere.
+
+**Cost:** someone reading the implementation has to notice the operators
+are not `Decimal`'s.
+
+**Reversal cost:** cheap now — one function, one differential test, one
+sentence of the `description` — and expensive once a model has learned
+the tool's behaviour.
+
+### There is no trigonometry at Milestone 1
+
+**Decided:** the function set is `abs`, `ceil`, `floor`, `round`,
+`sqrt`, `ln`, `log10`, `exp`, `min`, and `max`, plus the constants `pi`
+and `e`.
+
+**Why:** not difficulty — a Taylor series over `Decimal` is short — but
+that `sin(90)` has two defensible answers and a result has no field in
+which to say which convention it used. A tool that silently reads
+degrees as radians returns a plausible wrong number. Adding trigonometry
+means adding a units argument or a second family of names, which is a
+decision to make when something needs it.
+
+**Reversal cost:** cheap, but it is a `ToolSpec` version bump, which
+invalidates every cached prefix.
+
+### Builtin failure messages carry the supported set and never the input
+
+**Decided:** the model-facing `message` for every reason code is static;
+`unknown_name` carries the whole supported function and constant list;
+the character offset of a syntax error goes to `detail`, which the
+operator sees and the model does not.
+
+**Why:** hard gate 4 requires a static message per `reason_code`, and
+that table is one table for every tool including MCP tools whose failure
+text is written by a third party. A table with one interpolating entry
+has no invariant left. The mitigation is to make the reason codes
+specific enough — `syntax` against `arity` against `domain` against
+`unknown_name` — that the model can tell a typo from a misunderstanding
+without being told where.
+
+**Cost:** a model that mis-parenthesizes has to re-derive where, from an
+expression it wrote.
+
+**Reversal cost:** cheap for this tool, expensive as a precedent.
+
+### `Clock.now()` is declared to return an aware UTC `datetime`
+
+**Decided:** aware, `tzinfo` UTC, asserted in the `Clock` contract
+suite.
+
+**Why:** `runtime-loop.md` types it as `datetime` and says no more.
+Every consumer so far compares two values from the same clock, so the
+ambiguity was harmless; `system.current_time` converts between zones and
+is the first consumer for which it is not. A naive datetime cannot be
+converted without assuming the process's local zone, which would smuggle
+ambient state through a port built to keep it out.
+
+**Reversal cost:** none in practice — it is a clarification every
+existing consumer already satisfies.
+
+### `system.current_time` accepts IANA names only and defaults to UTC
+
+**Decided:** resolved through `zoneinfo.ZoneInfo`; abbreviations like
+`EST`, fixed offsets like `+05:30`, and the literal `local` are all
+rejected; the default is `UTC` rather than the process's local zone;
+`tzdata` becomes a declared runtime dependency.
+
+**Why:** abbreviations are ambiguous — `IST` names three zones and `CST`
+names four — so a tool that picks one has answered a different question.
+Defaulting to the server's zone makes the answer depend on which host
+ran it, which is the nondeterminism the `Clock` port exists to remove.
+`tzdata` is declared because the failure without it is that every name
+except `UTC` stops resolving in a slim image while every developer
+machine passes.
+
+**Cost:** one more runtime dependency in the image.
+
+**Reversal cost:** accepting fixed offsets later is cheap; removing them
+once accepted is not. Recorded as an open question in the spec.
+
+### Hard gate 2 is restated over `target_kind` as well as `source`
+
+**Decided:** no spec whose `source` is `MCP` or `DEVICE`, **or** whose
+`target_kind` is `sandbox` or `device`, may declare `output_trust` above
+`EXTERNAL_UNTRUSTED`.
+
+**Why:** `tool-system.md` states the gate over `source`, which catches
+MCP and device tools. `sandbox.run_command` is a builtin — `source =
+BUILTIN`, `target_kind = sandbox` — so the gate as written does not
+reach the one builtin that returns bytes produced by code we did not
+write, which is exactly what the gate exists to stop being read as
+trusted narration.
+
+**Reversal cost:** none. It is a widening that fails nothing currently
+declared.
+
+### `allow_parallel` is false for every builtin that writes
+
+**Decided:** true for the four read-only tools, false for the other
+four.
+
+**Why:** it costs nothing at Milestone 1, where both tools are pure, and
+it removes an ordering-bug class that would first appear at Milestone 4
+when three workspace tools can appear in one batch. Loosening it later
+is a measured decision; tightening it after a bug is a regression
+investigation.
+
+**Reversal cost:** cheap, but it is a `ToolSpec` version bump.
+
+### Classification is settled for all eight tools four milestones early
+
+**Decided:** every `ToolSpec` field that registration validation reads
+or the 9.2 matrix is keyed by has a value now, including for
+`sandbox.run_command` and `artifact.export`, whose behaviour is not
+designed.
+
+**Why:** hard gate 1 refuses to start without `output_trust` on every
+registered spec, and no builtin in the corpus declared one. Settling
+classification is also what lets Milestone 4's policy work run against
+real registry rows. The alternative — specifying all eight completely
+now — is false precision, because `sandbox.run_command`'s design is the
+sandbox design and would be rewritten after Section 28's mechanism
+decision is exercised.
+
+**Reversal cost:** cheap. A classification field is one table cell and
+one line of a spec.

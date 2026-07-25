@@ -819,6 +819,8 @@ Also define ports for:
 
 The detailed design - definitions for `ToolResult` and `ToolExecutionContext`, the two types named by the Section 7 `Tool` port; the completed `ToolSpec` with its tool kind, source, and required output trust label; the registry name grammar and the reserved-domain partition that lets an MCP tool be a known tool; the fourteen-step execution pipeline with its four persistence points; the `effect_sent_at` watermark that makes crash recovery decidable rather than pessimistic; the derivation of `argument_trust` and `origin_trust`; output excerpting and artifactization; the single outcome shape shared by every non-success result; the unified repeated-call breaker; the batch step boundary for parallel calls; control-tool suspension; and the MCP adapter, its operator-owned classification, and its resource, prompt, sampling, and roots mappings - is specified in [tool-system.md](tool-system.md) and ADR-0021. That document expands Sections 7, 8, 9.2's unknown-tool row, 11.1, 12.4, 12.5, 13, 15, 18.3, 18.4, 19, 22, 26, 27.3, 29.4, and 30.4 and Milestones 1, 4, 6, and 8; it does not replace the requirements below, and it reorders none of the Section 8.3 steps.
 
+The builtin tools that pipeline runs - the roster reconciled where 8.1's seven names and 8.2's six specifications disagree; every `ToolSpec` field value for all eight, including the trust label, idempotency class, timeout, output ceiling, and scopes that registration validation refuses to start without; the complete design of `math.calculate` and `system.current_time`; and the seven ordered refusals that make up the startup registration check - is specified in [builtin-tools.md](builtin-tools.md) and ADR-0026. That document expands Sections 8.1, 8.2, 9.2, 11.2, and 26 and Milestones 1, 4, 5, and 6; it does not replace the requirements below, and it changes no behaviour any tool below is given.
+
 ### 8.1 Tool specification
 
 ```python
@@ -848,6 +850,8 @@ sandbox.run_command
 artifact.export
 ```
 ### 8.2 Initial tools
+
+[builtin-tools.md](builtin-tools.md) and ADR-0026 complete every tool named below and place the two this section leaves unassigned. `math.calculate` gets its grammar, its `Decimal` numeric model, its operator and function sets, the four bounds that make `9**9**9` a failure rather than an outage, and its eight reason codes; `system.current_time` gets its IANA-only timezone argument, its aware-UTC `Clock` contract, and the output fields that make Section 8.2's determinism claim testable. `demo.external_write`, which 8.1 omits, and `artifact.export`, which this section omits, are both in the roster; `artifact.export` is placed at Milestone 6. Nothing stated below changes.
 
 #### `math.calculate`
 
@@ -2361,6 +2365,8 @@ make migrate
 
 The tool registry, the execution pipeline, and the two types the `Tool` port names are specified in [tool-system.md](tool-system.md) and ADR-0021; its build order places steps 1 through 5 in this milestone.
 
+[builtin-tools.md](builtin-tools.md) and ADR-0026 supply the bodies for the two tool items in the list below. `math.calculate` is a hand-written tokenizer and precedence-climbing parser over `decimal.Decimal` at fifty significant digits - not an allowlist over `ast.parse` - with four bounds enforced by the decimal context rather than by the evaluator, and every failure a single `ToolFailureKind` with one of eight reason codes. `system.current_time` reads the injected `Clock` and nothing else, which is what makes its determinism a property of a port rather than a claim about a tool; that document also fixes `Clock.now()` as returning an aware UTC `datetime`, a clarification of a declaration [runtime-loop.md](runtime-loop.md) leaves open. The required demonstration below is a pure function from `17 * 23` to `391`, asserted on the rendered bytes.
+
 [evaluation-harness.md](evaluation-harness.md) and ADR-0022 place the determinism harness in this milestone - the `Clock` and `IdFactory` ports and their pinned implementations, before anything depends on ambient time - along with the case schema, the loader, and the runner. Ten of the twenty-five Section 20.3 cases are writable here, which is what makes "build evaluations before advanced features" a schedule rather than an aspiration. Cases above this milestone are reported as pending, not failed.
 
 [runtime-loop.md](runtime-loop.md) and ADR-0023 specify the loop this milestone builds: the executor and loop split, `RunOutcome` and its five kinds, `Step`, `FailureReason`, the nine additive `Run` fields, and the `Clock` and `IdFactory` ports the harness above depends on - declared here because the runtime is their heaviest consumer. Five of its fourteen hard gates land in this milestone, including the structural gate that only `runtime/executor.py` may call `RunRepository.transition` or `RunQueue.release`. "State transition logic" in the implement list above is the item that document expands.
@@ -2508,6 +2514,8 @@ The persistence design for this milestone - the observation-not-durability contr
 - Unknown tools and missing scopes are denied before execution.
 
 [policy-and-approvals.md](policy-and-approvals.md) expands these criteria into ten hard gates and six tracked metrics, and specifies the twelve-step build order for this milestone. Two of the criteria above need definitions this section does not carry: "denial becomes a structured tool result" gets its field allowlist there, and "cross-tenant approval access is rejected" gets the `approvals.tenant_id` column and the not-found-rather-than-forbidden response it requires. The optional LLM-assisted approval layer remains sequenced after Milestone 6 per Section 21.1 and is not a dependency of this milestone.
+
+[builtin-tools.md](builtin-tools.md) and ADR-0026 fix the classification of the four tools this milestone implements before their behaviour is designed: the three `workspace.` tools and `demo.external_write` each carry a side-effect class, risk level, idempotency class, trust label, scope, timeout, and output ceiling, which is what lets this milestone's policy work run against real registry rows rather than fixtures. Two constraints on the workspace design are stated there rather than left to be noticed - the reader must lower `output_trust` to `EXTERNAL_UNTRUSTED` for any file whose provenance within the run is not established, and `allow_parallel` is false for every tool that writes. The behaviour of all four remains this milestone's to specify.
 
 [runtime-loop.md](runtime-loop.md) and ADR-0023 specify what "approval creates a durable paused run" means on the runtime side: the suspension outcome, the single `finalize` path that releases the lease before the `run.waiting_for_approval` event is visible to a second worker, the resume ladder that re-enters the tool pipeline at step 6 for each pending call rather than re-proposing it, and the gate that a waiting run holds no lease, no worker slot, and no open transaction and is not reclaimed by the lease sweep. That gate is what makes "approval after worker restart resumes correctly" checkable rather than asserted.
 
