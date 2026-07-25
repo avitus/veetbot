@@ -4,6 +4,126 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — The evaluation harness, the gate mechanism, and ADR-0001
+
+- Added `docs/plan/evaluation-harness.md`, the design for Section 20 and for the
+  gate sections the seven sibling specs close with, plus the parts of Sections
+  3, 4, 10.3, 19, 21, 22, and 31 they depend on. Recorded as ADR-0022, with the
+  boundary-enforcement half recorded as ADR-0001.
+- Added `docs/adr/0001-modular-monolith.md`, closing the numbering gap the ADR
+  index had been apologizing for. Section 4's repository layout names the file
+  and twenty ADRs referred to a decision documented nowhere. It records the
+  modular monolith as accepted, defines replaceability as a port with a contract
+  suite rather than as a service boundary, and resolves Section 5's *"where
+  practical"* rule by rule: eight of the fourteen dependency rules by import
+  graph, four by other static checks, one by the secret scanner, one by
+  adapter registration, and two residues named as not mechanically checkable
+  with their compensating controls.
+- Established that **Section 20's harness cannot run the gates six specs assign
+  to it.** The specs declare roughly forty-nine hard gates and the policy spec
+  names Section 20 as their enforcer; Section 20's sixteen assertion types can
+  express perhaps eight. Sorting the declared gates by kind gives the finding
+  that drives the document: **roughly a third of them are not case gates**, so a
+  case-only harness reports a green build with a third of the plan's stated
+  invariants unchecked.
+- Defined a **hard gate** as a named, executable, milestone-attached condition
+  that fails the build, and gave gates a checked-in **registry** — one YAML file
+  per spec area, carrying the identifier, milestone, kind, a verified link back
+  to the declaring document, the prose statement, and the check that implements
+  it. A gate declared in a spec but absent from the registry fails the docs
+  build; a gate at or past its milestone may not skip.
+- Added the three gate kinds the case format cannot express: **property** gates
+  with a generator, a predicate, a minimum trial count, and a recorded failing
+  seed; **corpus** gates with a `minimum_members` floor so they cannot pass
+  vacuously; and **structural** gates that never run the agent. The last two
+  need no runtime and are Milestone 0 work.
+- Defined **"deterministic"**, which the plan asserts and never defines, by
+  naming its seven sources and their treatments: the clock, identifiers, and
+  model output are pinned behind ports; batch concurrency and database row
+  order are ordered by explicit keys; retry timing is bounded; hash iteration
+  order is accepted and never asserted on. Stated the limits as plainly — the
+  runtime is not deterministic, payloads are not byte-identical, and the
+  deterministic scheduler proves the parallel path produces the right result,
+  not that it is race-free.
+- Resolved `model_fixture`, which Section 20.1 names with a bare string and
+  nothing defines: it resolves to `evals/fixtures/models/NAME.yaml`, validated
+  at collection against the current `FakeModelScript` shape rather than at run
+  time. Recording is an explicit command and never a side effect of running the
+  suite.
+- Added **`interventions`** to the case schema — approve, deny, cancel, kill the
+  worker, answer, disconnect — without which the eight Section 20.3 cases that
+  involve approval, restart, cancellation, or disconnect are unwritable. Every
+  field Section 20.1 already had is unchanged.
+- Made **"no unauthorized side effects"** decidable. It was the last assertion
+  type in Section 20.2 and it asked the harness to prove a negative about a
+  system it does not control. It is now asserted against ADR-0021's
+  `tool_invocations.effect_sent_at`: an empty `expected.effects` list means no
+  invocation in the run set a watermark, and it is the default.
+- Ruled that **there is no test mode.** No environment variable, no flag, no
+  `if settings.testing` branch in the policy engine, the approval service, or
+  the tool executor. Evaluation identity is data — a `tenant_eval` tenant under
+  ordinary row-level security, named principals with real scopes, and policy
+  profile files loaded by the same loader and subject to the same totality gate.
+  An `approve` intervention calls the real approval service as a second
+  principal rather than setting a status, and the structural form of the rule is
+  that no module under `agent_core` outside `agent_core.evals` may import
+  `agent_core.evals`.
+- Bound **contract suites to ports rather than to implementations**, so the
+  model gateway's second gate — the same contract passing against fake,
+  recorded, OpenAI, Anthropic, and `chat_completions` — is one configuration
+  line per adapter instead of five files that drift. A port with no contract
+  module, or an implementation not registered against its port's contract, fails
+  the build.
+- Named **`resilience`** as the sixth test category. Section 20.4 lists five;
+  Section 4's layout has six directories and two specs already place tests in
+  the sixth. Added the routing rule that keeps "integration" from becoming the
+  drawer everything slow ends up in, and stated that eval cases are not a
+  seventh category.
+- Gave every one of Section 20.3's twenty-five cases an **earliest milestone**
+  and a statement of what only that case proves. Ten are writable in Milestone
+  1, which is what makes "build evaluations before advanced features" a schedule
+  rather than an aspiration. Split case 18 into **18a** and **18b** around the
+  effect watermark, since only the second — asserting that the model is told the
+  outcome is unknown rather than that the call failed — has a safety
+  consequence.
+- Specified the **capability track's** governance: scenarios have no assertions
+  and default to five repeats; a judge is a model, prompt, and rubric versioned
+  as one unit and pinned to a provider version, replaced only alongside a bridge
+  run, never shown the rubric's weights, and never reusing an identifier after
+  deprecation; cross-version score comparison is refused by the tooling. A
+  regression is a distribution change — floor drops and policy failures block a
+  release, mean drops inside a measured noise band do not — and **a capability
+  improvement that increases policy failures is a regression.**
+- Ruled that a scenario hitting a cost ceiling is **excluded from the score
+  distribution rather than scored zero**, since it conflates "we stopped paying"
+  with "the agent failed" in the direction that corrupts the distribution most.
+- Designed the **trajectory-to-case conversion** that Section 31.3 asserts and
+  nothing specified, and stated its lossy boundary field by field. Recorded tool
+  results are replayed rather than re-executed; timestamps, identifiers, usage,
+  and cost are discarded; redaction happens at export so there is one place the
+  rule lives; and a converted case is marked `source: trajectory` and stays out
+  of the blocking suite until a person writes its assertions.
+- Added a **flake policy with an expiry**: retry once with the retry rate
+  reported even while green, quarantine on a second failure within thirty days,
+  and automatic release after fourteen days whether or not the test was fixed.
+  Gates may never be quarantined.
+- Added ten hard gates of the harness's own, ten build-order steps with the
+  first two in Milestone 0, six metrics, four event families, two tables for the
+  capability track and none for the deterministic suite, an eight-row
+  import-boundary table, and ten failure modes with their mitigations. Gate 7
+  asserts the definition of done's eighteenth item by running CI with egress
+  blocked rather than by not configuring an API key.
+- Wired the nav, the ADR index, and additive cross-references from Sections 2.1,
+  5, and 20 and from Milestones 0 and 1. No requirement was rewritten: the
+  twenty-five cases stay twenty-five, the sixteen assertion types stay and gain
+  four, the capability track stays non-blocking, and Section 5's fourteen
+  dependency rules are unchanged.
+- Recorded seventeen further decisions in `docs/status/questions-for-review.md`,
+  including the ADR renumbering that moves the runtime-loop record to ADR-0023,
+  and five open questions in the spec.
+
+No product implementation was performed.
+
 ## 2026-07-25 — The tool system, the execution pipeline, and MCP
 
 - Added `docs/plan/tool-system.md`, the design for Sections 7, 8, 12.4, 12.5,

@@ -68,11 +68,13 @@ nav:
       - Tool System: plan/tool-system.md
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
+      - Evaluation Harness: plan/evaluation-harness.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md
   - Architecture Decisions:
       - Overview: adr/index.md
+      - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
       - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md
       - ADR-0003 Event log, projections, and checkpoints: adr/0003-event-log-and-projections.md
       - ADR-0004 The Postgres run queue: adr/0004-postgres-run-queue.md
@@ -93,4 +95,5 @@ nav:
       - ADR-0019 Memory retrieval and ranking: adr/0019-memory-retrieval-and-ranking.md
       - ADR-0020 Context engine: adr/0020-context-engine.md
       - ADR-0021 Tool execution pipeline and MCP: adr/0021-tool-execution-pipeline-and-mcp.md
+      - ADR-0022 The evaluation harness: adr/0022-evaluation-harness.md
   - Changelog: changelog.md

@@ -690,3 +690,245 @@ three retention policies is a compliance problem waiting to be discovered.
 **Why:** a third record of the same fact is a third place for it to disagree.
 
 **Reversal cost:** cheap.
+
+## Evaluation harness (ADR-0001, ADR-0022)
+
+### ADR-0001 was written now, and the runtime-loop ADR moves to 0023
+
+**Decided:** `docs/adr/0001-modular-monolith.md` was written as part of this
+task rather than left as a gap, and the evaluation harness took ADR-0022. The
+runtime-loop ADR planned as 0022 becomes ADR-0023.
+
+**Why:** Section 4's repository layout names `0001-modular-monolith.md`, the ADR
+index carried an apologetic paragraph explaining its absence, and twenty ADRs
+referred to a foundational decision documented nowhere. It also had real content
+to add rather than being a formality: Section 5 closes its fourteen dependency
+rules with *"verify these constraints where practical"*, and the harness spec's
+structural-gate mechanism is what lets "where practical" be resolved rule by
+rule. Writing it alongside the harness is what made it worth writing at all.
+
+**Alternative:** fold the monolith decision into ADR-0022 and leave 0001 unused.
+Rejected because the two decisions have different lifetimes — the architecture
+outlives any particular harness — and a permanently skipped 0001 invites the
+question forever.
+
+**Reversal cost:** cheap now; the renumbering touches two files. Expensive once
+anything outside this repository cites ADR-0023.
+
+### The harness is treated as larger than the case runner
+
+**Decided:** Section 20's harness is read as including a gate registry, property
+gates, corpus gates, and structural gates, not only the YAML case runner it
+describes.
+
+**Why:** the seven specs declare roughly forty-nine hard gates and name Section
+20 as their enforcer, but Section 20's sixteen assertion types can express
+perhaps eight of them. Either the gates are decoration or the harness is bigger
+than the case format. Nothing in Section 20 was changed; four gate kinds were
+added around it.
+
+**Cost:** the harness becomes a Milestone 0 deliverable rather than a Milestone
+1 one, and it is more machinery than the plan implies.
+
+**Reversal cost:** cheap as prose. Expensive as a decision, because the
+alternative reading makes six spec documents' closing sections unenforceable.
+
+### Roughly a third of the declared gates are not case gates
+
+**Decided:** each spec's gates were sorted into the four kinds, and the
+per-spec counts are published in the harness document as a table.
+
+**Why:** the counts are the useful output, not the individual assignments. They
+say which harness facility each spec needs, and they say that a case-only
+harness would report green with a third of the plan's stated invariants
+unchecked.
+
+**Caveat worth your eye:** the individual assignments are a judgement call in a
+handful of cases, particularly where a gate could be written either as a
+parameterized case sweep or as a property. The counts are robust to those; the
+row-level assignments are not authoritative.
+
+**Reversal cost:** cheap.
+
+### There is no test mode
+
+**Decided:** no environment variable, no configuration flag, and no
+`if settings.testing` branch in the policy engine, the approval service, or the
+tool executor. Evaluation identity is data: a `tenant_eval` tenant created by an
+ordinary migration, named principals, and policy profile files loaded by the
+production loader and subject to the same totality gate.
+
+**Why:** a flag that disables the gate is a code path in the shipped binary and
+is therefore reachable from production. ADR-0005's third gate says exactly one
+function performs the `PROPOSED` to `AUTHORIZED` transition, and a test bypass
+would be a second one.
+
+**Cost:** setting up an evaluation is more work than flipping a flag, and the
+production loader gains a startup check that must be maintained.
+
+**Reversal cost:** cheap now. Expensive after Milestone 4, since the alternative
+is a bypass that would then have to be removed from working code.
+
+### The eval tenant is created by a migration in every deployment
+
+**Decided:** unconditionally, in production too, with the production loader
+check as the thing standing between an eval profile and a production process.
+
+**Why:** a migration that runs only outside production introduces a schema
+difference between environments, which is its own class of bug and a
+particularly annoying one to diagnose.
+
+**This is the open question most worth your answer.** The alternative is
+defensible and I do not have a strong view. Recorded as open question 1 in the
+harness document.
+
+**Reversal cost:** cheap now, moderate after the migration ships.
+
+### `interventions` was added to the case schema
+
+**Decided:** six of them — approve, deny, cancel, kill the worker, answer, and
+disconnect — fired at named points in a run.
+
+**Why:** Section 20.3 requires cases for approval requested, approval granted
+and resumed, approval denied, cancellation, restart after checkpoint, restart
+after an idempotent success, the ambiguous non-idempotent call, and SSE replay
+after disconnect. None of them is writable in a format whose only input is the
+opening user message. This is an addition to Section 20.1's format, not a change
+to it; every field it already had is unchanged.
+
+**Reversal cost:** cheap.
+
+### Case 18 was split into 18a and 18b
+
+**Decided:** kill before the watermark asserts re-execution; kill after asserts
+`UNCERTAIN`, a human-review row, and that the model is told the outcome is
+unknown rather than that the call failed.
+
+**Why:** the case was untestable while "ambiguous" was an undefined word, and
+ADR-0021's `effect_sent_at` made it two cases. Only the second has a safety
+consequence — telling a model a non-idempotent write failed is the fastest route
+to a duplicate write.
+
+**Note:** this makes the count twenty-six, not twenty-five. Section 20.3 says
+"at least these twenty-five", so the floor is respected.
+
+**Reversal cost:** cheap.
+
+### `resilience` was named as the sixth test category
+
+**Decided:** Section 20.4 lists five categories; a sixth is named here.
+
+**Why:** Section 4's repository layout already has `tests/resilience/`, the
+event-log spec places its kill-the-worker recovery test there, and the tool
+system spec calls its crash-recovery gate "a resilience test". The category
+existed in the layout and in two specs' expectations; only the list omitted it.
+This is reconciliation, not a new requirement.
+
+**Reversal cost:** cheap.
+
+### The capability track defaults to five repeats
+
+**Decided:** five, not one.
+
+**Why:** a single run of a stochastic system against a rubric produces a number
+of unknown variance, and comparing two such numbers across a release is how an
+evaluation programme generates false alarms until people stop reading it.
+
+**Cost:** five times the track's spend, and the number is chosen for variance
+estimation rather than measured against this suite's actual spread.
+
+**Reversal cost:** cheap — it is a default. Recorded as open question 2.
+
+### A ceiling hit is excluded from the score, not scored zero
+
+**Decided:** a scenario that exhausts its cost ceiling records `ceiling.hit`,
+is excluded from the distribution, and is counted separately.
+
+**Why:** it conflates "we stopped paying" with "the agent failed", and it does
+so in the direction that corrupts the distribution most. A rising ceiling-hit
+rate is its own signal, usually of the agent becoming less efficient rather than
+less capable.
+
+**Reversal cost:** cheap.
+
+### Judges are versioned as a unit and cross-version comparison is refused
+
+**Decided:** a judge is a model, a prompt, and a rubric under one identifier,
+pinned to a provider version, replaced only alongside a bridge run publishing a
+calibration offset, never reusing an identifier after deprecation. The tooling
+refuses to compare scores across judge versions rather than footnoting them.
+
+**Why:** a judge change and a subject change are indistinguishable in the
+resulting score. A footnote is not read at the moment the comparison is made.
+
+**Cost:** the first published score waits for judge governance to exist.
+
+**Reversal cost:** cheap now; expensive after scores are published, since the
+comparability of the historical series depends on it.
+
+### Trajectory conversion replays tool results rather than re-executing tools
+
+**Decided:** each recorded tool result becomes a fixture keyed by tool name and
+normalized argument hash; a converted case that reaches a call with no recorded
+result fails with `fixture.missing_tool_result`.
+
+**Why:** the real run called a real tool against a real system, and the case must
+not. The failure is the correct outcome — it means the model behaved differently
+from the recording, and the case has nothing to say about what happens next.
+
+**Reversal cost:** cheap.
+
+### A converted case needs a human to write its assertions
+
+**Decided:** it carries `source: trajectory` and does not enter the blocking
+suite until reviewed.
+
+**Why:** auto-generated assertions assert whatever the system did on the day it
+was recorded, including its defects. There is no worse outcome for a regression
+suite than pinning a bug as expected behaviour.
+
+**Cost:** the conversion is not push-button, which is most of its appeal.
+
+**Reversal cost:** cheap.
+
+### Quarantine expires after fourteen days whether or not the test was fixed
+
+**Decided:** flaky tests are retried once with the retry rate reported even
+while green, quarantined on a second failure within thirty days, and released
+from quarantine automatically after fourteen days. Gates may never be
+quarantined.
+
+**Why:** a quarantine with no expiry is a delete with extra steps, and the tests
+that end up there are disproportionately the ones covering concurrency and
+recovery — exactly the ones worth fixing.
+
+**Cost:** a build that goes red on a schedule rather than on a change, which is
+annoying by design.
+
+**Reversal cost:** cheap.
+
+### The deterministic suite adds no tables
+
+**Decided:** the capability track gets `eval_scenario_runs` and
+`eval_criterion_scores`; the deterministic suite persists nothing beyond the
+ordinary event log it already writes as `tenant_eval`.
+
+**Why:** the suite's output is a CI result, and a table would be a second record
+of it that can disagree with the first.
+
+**Reversal cost:** cheap.
+
+### Gate 7 is asserted by blocking egress, not by not configuring a key
+
+**Decided:** the definition of done's eighteenth item — a deterministic suite
+that runs in CI without an API key — is asserted by running the integration job
+with network egress blocked.
+
+**Why:** "without requiring an API key" is usually implemented as "we did not
+configure one", which stays true until a fixture falls through to a real client
+and the failure is a confusing timeout rather than a clear one.
+
+**Cost:** the CI job needs a network policy, which is a small amount of
+infrastructure work in Milestone 0.
+
+**Reversal cost:** cheap.

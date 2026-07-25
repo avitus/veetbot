@@ -99,6 +99,8 @@ The platform is a shared cloud core with many thin device clients: PostgreSQL ho
 
 Use a modular monolith with explicit interfaces between modules.
 
+ADR-0001 records this decision, defines replaceability as a port with a contract suite attached to it rather than as a service boundary, and names the mechanism that enforces the Section 5 dependency rules.
+
 ```text
 +------------------------------------------------------------+
 |                    Entry Points                            |
@@ -426,6 +428,8 @@ Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (valida
 14. Use explicit dependency construction in `bootstrap.py`; do not add a dependency-injection framework.
 
 Add an import-boundary test or static rule that verifies these constraints where practical.
+
+[evaluation-harness.md](evaluation-harness.md) and ADR-0001 resolve "where practical" rule by rule rather than leaving it to judgement: eight of the fourteen rules above are decidable by walking the import graph, four need a different static check (signature resolution for rules 6 and 7, a module-scope check for rule 13, a dependency-manifest check for rule 14), rule 12 is the secret scanner, and rule 4 is the adapter-registration check. Two residues - the run-time half of rule 6 and "must not depend on model judgment" in rule 11 - are recorded as not mechanically checkable, with the contract suite and ADR-0005's determinism gate named as their compensating controls. The walk is a registered structural gate and a Milestone 0 deliverable. The fourteen rules themselves are unchanged.
 
 ## 6. Core domain objects
 
@@ -2105,6 +2109,8 @@ budget_exceeded_total
 
 Build evaluations before advanced features.
 
+The detailed design - what a hard gate is, and the registry that makes the forty-nine gates the seven specs declare reconcilable against a test run; the four gate kinds, and why roughly a third of those gates cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five, the sixteen assertion types stay and gain four, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
+
 ### 20.1 Evaluation case format
 
 ```yaml
@@ -2325,9 +2331,13 @@ make migrate
 - CI executes `make check`.
 - No application code exists outside the documented module boundaries.
 
+[evaluation-harness.md](evaluation-harness.md), ADR-0001, and ADR-0022 place two deliverables in this milestone that need no runtime: the gate registry, with the docs check that reconciles each spec's declared gates against it, and the structural gates - the import-boundary walk, the transaction-hygiene check, the secret scanner, and contract-module coverage. Both run against an almost-empty repository and stay correct as it fills; added later, they are added against existing violations, which is the situation in which they get relaxed rather than obeyed. The last acceptance criterion above is what the import-boundary walk turns from a statement into a test.
+
 ### Milestone 1: In-memory vertical slice
 
 The tool registry, the execution pipeline, and the two types the `Tool` port names are specified in [tool-system.md](tool-system.md) and ADR-0021; its build order places steps 1 through 5 in this milestone.
+
+[evaluation-harness.md](evaluation-harness.md) and ADR-0022 place the determinism harness in this milestone - the `Clock` and `IdFactory` ports and their pinned implementations, before anything depends on ambient time - along with the case schema, the loader, and the runner. Ten of the twenty-five Section 20.3 cases are writable here, which is what makes "build evaluations before advanced features" a schedule rather than an aspiration. Cases above this milestone are reported as pending, not failed.
 
 #### Implement
 
