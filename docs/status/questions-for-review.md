@@ -172,3 +172,168 @@ already have succeeded.
 
 **Reversal cost:** moderate. It is a tool-protocol outcome value, so changing it
 later means changing every tool contract and the prompt text that explains it.
+
+## Policy and approvals (ADR-0005, ADR-0006)
+
+### Five undefined types were defined rather than deferred
+
+**Decided:** `ProposedAction`, `ApprovalStatus`, `SideEffectClass`,
+`RiskLevel`, and `IdempotencyClass` each appear exactly once in the plan, as the
+type of a field, and are defined nowhere. All five are now specified.
+
+**Why:** Milestone 4 cannot start without them, and each one silently decides
+what the engine is capable of deciding. Every value was derived from a statement
+the plan already makes — the fifteen `SideEffectClass` values are Section 9.2's
+fifteen action categories, and the four `IdempotencyClass` values are Section
+8.4's four crash-recovery bullets — so that nothing was invented that the plan
+did not already imply.
+
+**Alternative:** leave them for the coding agent to decide at implementation
+time.
+
+**Reversal cost:** moderate. Renaming a value is cheap now and a migration
+later, since three of them are persisted on `tool_invocations`.
+
+### Section 9.2's three non-enum decision strings were resolved as conditions
+
+**Decided:** "Allow with restrictions" and "Allow only in sandbox" become
+`ALLOW` guarded by a predicate, denying when the predicate fails. "Deny
+initially" becomes `DENY` in the `default` profile, with "initially" read as a
+statement about which profile is loaded.
+
+**Why:** three of the matrix's sixteen cells hold strings that are not
+`PolicyDecisionType` values, so the matrix cannot be looked up by a program as
+written. Both readings preserve the stated outcome exactly; no cell's behaviour
+changes.
+
+**The question:** is "Deny initially" about a later *profile* (a deployment can
+turn it on) or a later *milestone* (the default changes for everyone)? The two
+differ in who holds the switch.
+
+**Reversal cost:** cheap.
+
+### `policy_version` is a content hash, and rules are files rather than rows
+
+**Decided:** `policy_version` is `{profile}@{profile_sha256[:12]}+h{hardline_
+sha256[:8]}`. Profiles and hardline rules are version-controlled YAML packaged
+in the distribution, loaded once at process start and frozen. The
+`policy_profiles` table records that a ruleset was loaded; it does not store
+rules.
+
+**Why:** the field is declared as a bare `str` on `PolicyDecision` with no
+producer, format, or storage, and the context engine's `ContextPlan` already
+consumes it. A counter depends on someone remembering to increment it; a stale
+counter asserts an equality that does not hold. Section 22 classifies policy
+rules as trusted, and a table anyone with a connection string can edit is not a
+trust boundary.
+
+**The cost, stated plainly:** an urgent policy change requires a deploy. It
+cannot be made from a console.
+
+**Alternative:** a rules table with an admin UI, or a monotonic counter.
+
+**Reversal cost:** moderate. The format is embedded in every persisted decision,
+so changing it later means either a migration or a parser that understands two
+formats.
+
+### Approval was generalized beyond tool calls
+
+**Decided:** `ActionKind` covers tool calls, memory writes, skill authoring, and
+artifact export. `approvals.tool_invocation_id` widens from `NOT NULL` to
+nullable and a general `action_id` carries the reference.
+
+**Why:** Section 30.4 requires skill authoring to be approval-gated and the
+memory specs require governance on the write path, but the approval object is
+structurally tool-only. The alternative — fabricating a tool invocation for each
+non-tool action — puts rows in `tool_invocations` that no tool executed and
+corrupts every metric computed over that table.
+
+**Reversal cost:** moderate. It is a nullable column and an enum, both cheap
+before Milestone 4 ships.
+
+### The denial tool result deliberately tells the model very little
+
+**Decided:** a denial carries a stable `reason_code`, a fixed message per code,
+and a remediation hint, enforced by a field allowlist. The rule that fired, the
+pattern, and the profile name never reach the model. Three identical denied
+proposals fail the run.
+
+**Why:** Milestone 4 requires that "denial becomes a structured tool result" and
+no shape exists anywhere. The model is a partially trusted consumer under
+Section 22; naming the rule that blocked it hands it a search gradient. The
+circuit breaker exists because a model that re-proposes a denied action will do
+so until the run budget is gone.
+
+**The cost:** some legitimate self-correction will be slower than it would be
+with a richer message.
+
+**Reversal cost:** cheap for the message content; moderate for the breaker
+threshold, which is a constant.
+
+### `MEMORY` and `KNOWLEDGE` were placed in Section 22's trust tiers
+
+**Decided:** Section 11.2's seven trust labels map onto Section 22's three
+tiers. `MEMORY` is partially trusted content that cannot authorize;
+`KNOWLEDGE` is untrusted as instructions. Only `PLATFORM`,
+`TRUSTED_CONFIGURATION`, and `USER` can authorize anything, and `USER` only
+within the principal's own scopes.
+
+**Why:** the two lists never map onto each other and two labels had no tier at
+all, which matters because Section 11.2 makes an authorization claim about trust
+labels — a tool result must never change approval requirements. Memory is
+agent-authored from prior conversation, so a belief that the user always
+approves deletions is a belief and not a grant.
+
+**Reversal cost:** cheap as prose; moderate once rules key on it.
+
+### Self-approval is permitted by default
+
+**Decided:** the principal who started a run may resolve their own approval.
+Requiring a distinct resolver is available as a rule, not a hardcoded condition.
+
+**Why:** Section 6.2 anticipates single-user deployments, where there is no one
+else to ask, and a gate nobody can pass is not a safety control.
+
+**Alternative:** require a second principal for `HIGH` and `CRITICAL` risk.
+
+**Reversal cost:** cheap — it is a rule in a profile.
+
+### Two API endpoints were added because the CLI has no endpoint to call
+
+**Decided:** `GET /v1/approvals` and `GET /v1/approvals/{id}`, tenant-scoped
+from the authenticated principal and never from a query parameter.
+
+**Why:** Section 17 requires `agent approval list` and Section 16 defines only
+the resolve endpoint. Section 17 also forbids a second runtime loop in the CLI,
+so the command must call an application service through an endpoint that does
+not exist.
+
+**Reversal cost:** cheap.
+
+### A second `REQUIRE_APPROVAL` at revalidation becomes a denial
+
+**Decided:** revalidation after approval voids outright on an argument, scope,
+or agent-version change, and re-evaluates only when `policy_version` changed. If
+re-evaluation returns anything other than `ALLOW` — including a second
+`REQUIRE_APPROVAL` — the call is denied rather than asked again.
+
+**Why:** Section 9.3's step 8 says to revalidate and does not say what the
+comparison is or what happens when it fails. Asking twice is defensible, but it
+admits a loop where a ruleset that always escalates parks a run forever. A
+denial the user can deliberately retry is better than a pause the system cannot
+leave.
+
+**Reversal cost:** cheap.
+
+### ADR-0006 was written as already amended
+
+**Decided:** the record states the original prohibition and carries ADR-0007's
+amendment inside it as decision 5, rather than presenting an unamended decision
+that four sections of the plan already contradict.
+
+**Why:** Section 6.8 cites "ADR-0006 as amended" and Section 10.6 records the
+amendment, but the ADR itself was never written. Writing the pre-amendment
+version would have created a record that the plan already disagrees with on the
+day it was committed.
+
+**Reversal cost:** none — it is a record of a decision already made elsewhere.

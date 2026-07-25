@@ -11,6 +11,8 @@ implementation without one.
 
 - [ADR-0003 — Event log, projections, and checkpoints](0003-event-log-and-projections.md)
 - [ADR-0004 — The Postgres run queue, leases, and recovery](0004-postgres-run-queue.md)
+- [ADR-0005 — The deterministic policy engine](0005-deterministic-policy-engine.md)
+- [ADR-0006 — No private reasoning storage](0006-no-private-reasoning-storage.md)
 - [ADR-0007 — Provider-neutral reasoning state](0007-provider-neutral-reasoning-state.md)
 - [ADR-0008 — Sandbox isolation](0008-sandbox-isolation.md)
 - [ADR-0009 — Run, turn, and session model](0009-run-turn-session-model.md)
@@ -26,8 +28,7 @@ implementation without one.
 - [ADR-0019 — Memory retrieval and ranking](0019-memory-retrieval-and-ranking.md)
 - [ADR-0020 — Context engine](0020-context-engine.md)
 
-ADRs 0001, 0002, 0005, and 0006 are referenced by the engineering plan as
-foundational decisions (evaluation harness and the modular monolith, the
-provider-neutral model protocol, the deterministic policy engine, and no private
-reasoning storage); their records are being written alongside the detailed specs
-for each area.
+ADRs 0001 and 0002 are referenced by the engineering plan as foundational
+decisions (the evaluation harness and the modular monolith, and the
+provider-neutral model protocol); their records are being written alongside the
+detailed specs for each area.

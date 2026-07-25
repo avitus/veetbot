@@ -949,6 +949,8 @@ This collapses multi-step pipelines into near-zero model round-trips - a large t
 
 ## 9. Policy and approval model
 
+The detailed design - definitions for `ProposedAction`, `ApprovalStatus`, `SideEffectClass`, `RiskLevel`, and `IdempotencyClass`; the mechanizable key for the 9.2 matrix and how its three non-enum decision strings resolve; the restrictiveness ordering the layered model needs; the format, producer, and storage of `policy_version`; the hardline rule format and freeze; revalidation after approval; the denial tool-result shape; and the trust-label-to-tier mapping - is specified in [policy-and-approvals.md](policy-and-approvals.md), ADR-0005, and ADR-0006. That document expands Sections 8.3, 8.4, 9, 11.2, 13, and 22 and Milestone 4; it does not replace the requirements below, and it changes no outcome stated in the 9.2 matrix.
+
 ### 9.1 Policy decisions
 
 ```python
@@ -1591,6 +1593,8 @@ Add a resilience integration test that terminates a worker process after a check
 Create Alembic migrations for at least these tables.
 
 [event-log-and-persistence.md](event-log-and-persistence.md) adds columns and tables required by Section 6.8, Section 16, Section 27.5, and the Milestone 2 acceptance criteria that are not yet reflected below: `events.payload_schema_version`, the `runs` columns `priority`, `attempts`, `scheduled_for`, and `lease_epoch` with a partial unique index enforcing one non-terminal run per session, and the `idempotency_keys`, `projection_watermarks`, and `derived_event_keys` tables. All are additive to the tables specified here.
+
+[policy-and-approvals.md](policy-and-approvals.md) likewise adds what Section 9, Section 11.2, and the Milestone 4 acceptance criteria require and this section does not yet carry: `tenant_id`, `principal_id`, `session_id`, `action_kind`, `action_id`, `risk`, `policy_version`, and `revalidated_policy_version` on `approvals`, with `tool_invocation_id` widened to nullable so non-tool actions can be approved, and the indexes the approval list, the resume path, and the expiry reaper each need; the classification columns `side_effect`, `risk`, `idempotency`, `origin_trust`, and `effective_arguments_hash` on `tool_invocations`; and a `policy_profiles` audit table that records which ruleset a `policy_version` refers to. Policy rules themselves are version-controlled files, not rows.
 
 ### `agents`
 
@@ -2450,6 +2454,8 @@ The persistence design for this milestone - the observation-not-durability contr
 - Path traversal is rejected.
 - Cross-tenant approval access is rejected.
 - Unknown tools and missing scopes are denied before execution.
+
+[policy-and-approvals.md](policy-and-approvals.md) expands these criteria into ten hard gates and six tracked metrics, and specifies the twelve-step build order for this milestone. Two of the criteria above need definitions this section does not carry: "denial becomes a structured tool result" gets its field allowlist there, and "cross-tenant approval access is rejected" gets the `approvals.tenant_id` column and the not-found-rather-than-forbidden response it requires. The optional LLM-assisted approval layer remains sequenced after Milestone 6 per Section 21.1 and is not a dependency of this milestone.
 
 ### Milestone 5: HTTP API and SSE
 

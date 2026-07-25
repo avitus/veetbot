@@ -4,6 +4,63 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — Policy engine and approval lifecycle spec
+
+- Added `docs/plan/policy-and-approvals.md`, the authorization design for
+  Sections 8.3, 8.4, 9, 11.2, 13, and 22 and Milestone 4: classification, the
+  deterministic matrix, the hardline layer, and the approval lifecycle. Recorded
+  as ADR-0005 and ADR-0006, constrained by ADR-0017.
+- Defined the five types the plan named as field types but never declared —
+  `SideEffectClass`, `RiskLevel`, `IdempotencyClass`, `ProposedAction`, and
+  `ApprovalStatus` — deriving each value from an existing plan statement rather
+  than inventing a taxonomy: fifteen side-effect classes against Section 9.2's
+  fifteen action categories, four idempotency classes against Section 8.4's four
+  crash-recovery bullets.
+- Rekeyed Section 9.2's matrix on `SideEffectClass` instead of a prose "action
+  category" with no referent, and added a **Condition** column so the three cells
+  holding non-enum decision strings resolve: "Allow with restrictions" and "Allow
+  only in sandbox" become a guarded `ALLOW`, "Deny initially" becomes `DENY` in
+  the `default` profile. **No outcome in the matrix changed.**
+- Made the evaluator a **pure function** — `evaluate_deterministic(action,
+  principal, run, ruleset)` — with time passed in as `evaluated_at` and never
+  read from a clock, so the same inputs produce the same decision on replay.
+- Established restrictiveness as a **total order combined by `max`**: `ALLOW` <
+  `ALLOW_WITH_MODIFICATIONS` < `REQUIRE_APPROVAL` < `DENY`. Section 9.1's "more
+  restrictive wins" was undefined across four decision types; it is now a
+  computation. Hardline is not a rank in that order but a short-circuit.
+- Located the hardline rules that Section 9.3 required but never placed:
+  `src/agent_core/policy/hardline.yaml`, packaged, frozen at import, and
+  deliberately **not** behind a port — a port implies substitution, and these
+  are the rules that must not be substitutable. Every rule carries a mandatory
+  `near_miss` it must permit, so an over-broad pattern fails its own test.
+- Defined `policy_version`, which `ContextPlan` already consumed and nothing
+  produced, as a **content hash** of the profile plus the hardline file
+  (`default@3f2a1c9d4e5b+h7c1e0a92`), making rules version-controlled files
+  frozen per process rather than rows in a table.
+- Generalized approval beyond tool calls with `ActionKind` (tool call, memory
+  write, skill authoring, artifact export), since `approvals.tool_invocation_id`
+  being `NOT NULL` made the other three structurally unapprovable.
+- Gave `approvals` the `tenant_id` and `principal_id` that Milestone 4's
+  cross-tenant rejection criterion requires, three indexes, a unique index for
+  one open approval per action, and a **guarded resolution** that is
+  first-writer-wins: a second caller agreeing gets 200, a second caller
+  disagreeing gets 409, and a cross-tenant caller gets not-found rather than
+  forbidden.
+- Specified the shape of "denial becomes a structured tool result" as a **field
+  allowlist** enforced by test, with a repeated-denial circuit breaker at three,
+  so a denial teaches the model to stop without teaching it what to evade.
+- Mapped Section 22's three trust tiers onto Section 11.2's seven trust labels,
+  with only `PLATFORM`, `TRUSTED_CONFIGURATION`, and `USER` able to authorize.
+- Added `GET /v1/approvals` and `GET /v1/approvals/{id}`, without which Section
+  17's `agent approval list` had no endpoint to call.
+- Added ten hard gates, six tracked metrics, and a twelve-step build order to
+  Milestone 4, keeping the advisory layer sequenced after Milestone 6.
+- Wrote ADR-0006 as **already amended by ADR-0007**, so the distinction between
+  "never persist reasoning" and "may hold provider-opaque continuation in the
+  checkpoint for the life of a tool loop" lives in the record rather than in one
+  trailing sentence of Section 11.4.
+- No product implementation was performed.
+
 ## 2026-07-24 — Event log and persistence spec
 
 - Added `docs/plan/event-log-and-persistence.md`, the persistence design for
