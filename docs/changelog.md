@@ -4,6 +4,104 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — The runtime loop, the step, and the single terminal writer
+
+- Added `docs/plan/runtime-loop.md`, the design for Sections 12 and 13 and the
+  loop-facing halves of 6.4, 6.5, 6.9, 14.1, 14.2, 16, 19, 26, and 27. Recorded
+  as ADR-0023. This is the last of the eight specs and the seam the other seven
+  are called from.
+- Established the finding that drives the document: **Section 12.1's forty-two
+  lines name eleven callables and not one of them is a declared port.** Section
+  7 declares eight port Protocols; the only one the loop touches is
+  `context_builder.build`. Each of the other eleven names is a seam where two
+  specifications' requirements meet, and at most of them the two disagree.
+- Found three places where the loop as written **cannot do what another document
+  requires of it.** It cannot resolve its own agent, because line 1408 reads
+  `agents.get_version(run.agent_id, run.agent_version)` and Section 6.3 puts
+  both fields on `Session`. It cannot suspend, because line 1437 returns bare
+  while Section 27.2 requires the lease released, a checkpoint written, and an
+  event emitted — so a run paused for approval holds its lease until expiry, at
+  which point the queue hands it to a second worker. And it cannot compact,
+  because Section 11.4 requires compaction, Milestone 7 gates it, and no
+  pressure measurement or compactor call exists anywhere in the corpus.
+- Split the runtime into a **`run_loop` that computes a typed `RunOutcome`** and
+  a **`finalize` that performs every terminal action once**. The suspension
+  defect is not fixed by adding a `finally` to the flat loop, which leaves the
+  next `return` free to reopen it; it is fixed by moving the ending somewhere a
+  `return` cannot skip. A structural gate asserts that `RunRepository.transition`
+  and `RunQueue.release` are reachable from exactly one module.
+- Defined **`Step`** as a runtime value object with a persisted identity — one
+  additive column, `model_calls.step_number` — rather than as a counter or a
+  table. Steps that produce no tool calls are currently invisible; they are the
+  ones a terminal turn is made of.
+- Added **nine fields to `Run`**, six of which the event-log spec already
+  introduced as columns and never reflected in the domain model, and three of
+  which — `agent_id`, `agent_version`, `deadline_at` — are denormalized so the
+  run is self-describing and the deadline is indexable by a sweep.
+- Gave **compaction a call site**: `build_with_pressure`, which measures, invokes
+  the compactor if the body will not fit, adopts the checkpoint it returns, and
+  measures again, capped at two per step with `ContextOverflow` permanent on the
+  third. `build()` stays pure, which is what the byte-identical rebuild on the
+  step-retry path depends on.
+- Resolved **budget** into three scopes — run, step, attempt — and ruled that
+  Section 6.5's "after" means *record*: usage is recorded and the limit is
+  evaluated in one transaction, because splitting them opens a window in which
+  the run is over budget and nothing knows.
+- Made the **heartbeat a supervisor task** rather than a statement in the loop,
+  running at a third of the lease interval and watching three things that are
+  all "has the outside world changed its mind": the lease, the deadline, and a
+  cancellation request. `heartbeat` returns `bool`; `False` means fenced. Every
+  non-append write the loop makes is guarded by
+  `WHERE lease_epoch = :lease_epoch`.
+- Specified **cancellation** as one token per run with six observation points
+  shared by the loop, the tool executor, and the sandbox, and one rule about
+  effects: a cancellation observed after a call's `effect_sent_at` watermark is
+  set completes the disposition rather than abandoning a half-sent side effect.
+- Resolved the **checkpoint's two descriptions** as two types rather than a
+  contradiction: Section 6.9's inline `conversation` is what the repository
+  returns, and event references and deltas are what it persists. Added the six
+  triggers, the `full` rule the call site can evaluate, `checkpoints.full` and
+  `checkpoints.base_version`, and `seed_checkpoint` as a function with two call
+  sites so a run whose checkpoints are all deleted still reaches the same
+  terminal state.
+- Specified the **resume ladder**: resumption is a cold process start and a warm
+  pipeline entry. The worker claims a `QUEUED` run from scratch; the pipeline
+  re-enters at step 6 for each pending call, so a call whose watermark was set
+  is not re-executed. `run.resumed` is emitted whenever the execution did not
+  start the run, which covers all four paths without enumerating them.
+- Ruled that an **empty terminal model turn is a failed step**, retried and
+  failing the run with `EmptyModelTurn` on exhaustion, rather than a completed
+  run whose final message is empty.
+- Added **`FailureReason`**, fourteen values, so a `FAILED` run distinguishes a
+  provider outage from an exhausted budget from a policy denial, and named the
+  owner of every retry: the adapter's transport retries, the gateway's attempt
+  loop, and the runtime's step retry, split on `stream_had_output`.
+- Listed and resolved **twenty cross-document contradictions** by number, naming
+  the losing side in each. Three needed argument: `RunUsage` has five token
+  classes and the event log's "unchanged in shape" is about the rollup
+  relationship; Section 6.8's `tool.call.*` names are canonical and the
+  evaluation-harness case asserting `tool.proposed` / `tool.authorized` /
+  `tool.succeeded` is corrected in that document; and Section 27.5's "reject or
+  queue" resolves to reject with HTTP 409, because ADR-0004's partial unique
+  index makes queueing impossible at the database level.
+- Added fourteen hard gates, twenty-five decisions, the events consolidation
+  that introduces no new event type and assigns owners to `run.claimed` and the
+  two `run.waiting_*` events, the three-role deployment shape with the sweeps
+  under advisory locks, and the transaction boundaries of every write the loop
+  makes.
+- Wired the nav, the ADR index, and additive cross-references from Sections 12,
+  13, and 27 and from Milestones 1, 2, 4, 5, and 7. No requirement was
+  rewritten: Section 13's retry table keeps every row and its retryability, the
+  Section 8.3 pipeline steps are not reordered, Section 7's `build()` signature
+  is unchanged, and 27.1's definitions — including that a turn has no domain
+  object — stand.
+- Recorded further decisions in `docs/status/questions-for-review.md` and six
+  open questions in the spec, of which the two with the highest reversal cost
+  are whether cancellation ships in three milestone slices and whether a
+  child-run wait deserves its own run status.
+
+No product implementation was performed.
+
 ## 2026-07-25 — The evaluation harness, the gate mechanism, and ADR-0001
 
 - Added `docs/plan/evaluation-harness.md`, the design for Section 20 and for the

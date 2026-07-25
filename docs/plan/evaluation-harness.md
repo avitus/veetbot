@@ -376,11 +376,11 @@ expected:
       watermark: set
   event_order:
     - run.created
-    - tool.proposed
+    - tool.call.proposed
     - approval.requested
     - approval.granted
-    - tool.authorized
-    - tool.succeeded
+    - tool.call.authorized
+    - tool.call.completed
     - run.completed
   maximum_steps: 4
 ```

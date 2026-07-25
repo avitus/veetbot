@@ -1397,6 +1397,8 @@ Amendment (v2.0): "do not store" refers to durable logs, the event payload, and 
 
 ## 12. Runtime behavior
 
+The detailed design - the eleven callables 12.1 names and the ports or named functions each becomes; `Step` as a value object with a persisted identity on `model_calls.step_number`; the split between a `run_loop` that returns a typed `RunOutcome` and a `finalize` that performs every terminal transition, lease release, and terminal event exactly once; the six cancellation observation points and the rule that a cancellation observed after an effect watermark does not abandon the call; the three budget scopes and why "after" means "record in the same transaction"; the heartbeat as a supervisor task that also watches the deadline and polls for cancellation; the `build_with_pressure` call site that finally gives compaction one; the six checkpoint triggers and the `full` rule; the resume ladder for all four resumption paths; and the twenty cross-document contradictions the loop is where they meet - is specified in [runtime-loop.md](runtime-loop.md) and ADR-0023. That document expands Sections 6.4, 6.5, 6.9, this section, 13, 14.1, 14.2, 15, 16, 19, 26, and 27 and Milestones 1, 2, 4, 5, and 7; it does not replace the requirements below, and it reorders none of the Section 8.3 pipeline steps.
+
 ### 12.1 Main loop
 
 Implement the runtime approximately as follows:
@@ -1562,6 +1564,8 @@ Retry policy:
 Every retry must fit inside the run deadline.
 
 Use exponential backoff with jitter. Keep retry decisions in application code, not in provider adapters alone.
+
+[runtime-loop.md](runtime-loop.md) and ADR-0023 add the loop-facing half of this taxonomy: `FailureReason`, the fourteen-value enum a terminal `FAILED` run records so an operator can distinguish a provider outage from an exhausted budget from a policy denial; `RunFailure` on the run row; the three-way split of retry ownership between the adapter's transport retries, the gateway's attempt loop, and the runtime's step retry, with `stream_had_output` deciding which owns a given failure; the rule that a failed attempt is still charged to budget at the attempt check rather than after it; and the treatment of an empty terminal model turn as a failed step rather than as a completed run with an empty answer. The retry table above is unchanged; every row keeps its retryability and its owner is now named.
 
 ## 14. Durable worker and PostgreSQL queue
 
@@ -2339,6 +2343,8 @@ The tool registry, the execution pipeline, and the two types the `Tool` port nam
 
 [evaluation-harness.md](evaluation-harness.md) and ADR-0022 place the determinism harness in this milestone - the `Clock` and `IdFactory` ports and their pinned implementations, before anything depends on ambient time - along with the case schema, the loader, and the runner. Ten of the twenty-five Section 20.3 cases are writable here, which is what makes "build evaluations before advanced features" a schedule rather than an aspiration. Cases above this milestone are reported as pending, not failed.
 
+[runtime-loop.md](runtime-loop.md) and ADR-0023 specify the loop this milestone builds: the executor and loop split, `RunOutcome` and its five kinds, `Step`, `FailureReason`, the nine additive `Run` fields, and the `Clock` and `IdFactory` ports the harness above depends on - declared here because the runtime is their heaviest consumer. Five of its fourteen hard gates land in this milestone, including the structural gate that only `runtime/executor.py` may call `RunRepository.transition` or `RunQueue.release`. "State transition logic" in the implement list above is the item that document expands.
+
 #### Implement
 
 - Core domain objects
@@ -2416,6 +2422,8 @@ run completes
 
 The persistence design for this milestone - the observation-not-durability contract, watermarked projections and the build sequence that reaches them, upcaster totality, checkpoint dispensability, and exactly-once execution under fencing - is specified in [event-log-and-persistence.md](event-log-and-persistence.md), ADR-0003, and ADR-0004, which add seven hard gates and five tracked metrics to the criteria above.
 
+[runtime-loop.md](runtime-loop.md) and ADR-0023 add the runtime side of the same milestone: the heartbeat supervisor and its lease-interval-over-three cadence, `heartbeat -> bool` with `False` meaning fenced, the `WHERE lease_epoch = :lease_epoch` guard on every non-append write, what a fenced worker does with an in-flight model stream, the six checkpoint triggers with the `full` rule and the two additive `checkpoints` columns it needs, and `seed_checkpoint` as a function with two call sites so that deleting a run's checkpoints and resuming reaches the same terminal state. Four more hard gates land here, of which "the lease is released exactly once, including in the crash and fence cases" is the one the acceptance criterion "two workers do not execute the same claimed run concurrently" turns into a test.
+
 ### Milestone 3: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
 
 #### Implement
@@ -2479,6 +2487,8 @@ The persistence design for this milestone - the observation-not-durability contr
 
 [policy-and-approvals.md](policy-and-approvals.md) expands these criteria into ten hard gates and six tracked metrics, and specifies the twelve-step build order for this milestone. Two of the criteria above need definitions this section does not carry: "denial becomes a structured tool result" gets its field allowlist there, and "cross-tenant approval access is rejected" gets the `approvals.tenant_id` column and the not-found-rather-than-forbidden response it requires. The optional LLM-assisted approval layer remains sequenced after Milestone 6 per Section 21.1 and is not a dependency of this milestone.
 
+[runtime-loop.md](runtime-loop.md) and ADR-0023 specify what "approval creates a durable paused run" means on the runtime side: the suspension outcome, the single `finalize` path that releases the lease before the `run.waiting_for_approval` event is visible to a second worker, the resume ladder that re-enters the tool pipeline at step 6 for each pending call rather than re-proposing it, and the gate that a waiting run holds no lease, no worker slot, and no open transaction and is not reclaimed by the lease sweep. That gate is what makes "approval after worker restart resumes correctly" checkable rather than asserted.
+
 ### Milestone 5: HTTP API and SSE
 
 #### Implement
@@ -2506,6 +2516,8 @@ The persistence design for this milestone - the observation-not-durability contr
 - Production mode cannot start without configured authentication.
 
 Version 0.1 may be considered minimally usable after this milestone, but sandbox execution and artifact support are still required for the full target.
+
+"Cancellation reaches the worker" is specified in [runtime-loop.md](runtime-loop.md) and ADR-0023 as one `CancellationToken` per run, observed at six points and shared by the loop, the tool executor, and the sandbox, with the rule that a cancellation observed after a call's `effect_sent_at` watermark is set completes the disposition rather than abandoning a half-sent side effect. That document proposes splitting cancellation across Milestones 1, 4, and 5 rather than introducing it whole here, and records the split as an open question, since collapsing it back into this milestone is cheap and introducing it late is not.
 
 ### Milestone 6: Isolated execution and artifacts
 
@@ -2571,6 +2583,8 @@ class WorkingState(BaseModel):
 - The runtime does not persist private reasoning.
 
 The assembly design for this milestone - region membership and the prefix hash gate, absolute class caps with history as the only window-scaling class, the yield order, purity of `build()` with compaction as a checkpoint write, elision rather than paraphrase of untrusted spans, and the working-state carry rules - is specified in [context-engine.md](context-engine.md) and ADR-0020, which adds five hard gates and four tracked metrics to the criteria above.
+
+[runtime-loop.md](runtime-loop.md) and ADR-0023 give compaction the call site it has lacked in every prior version of this plan: `build_with_pressure`, which measures pressure, invokes the compactor if the assembled body will not fit, adopts the checkpoint the compactor returns, and measures again, capped at two compactions per step with `ContextOverflow` permanent on the third. The purity of `build()` above is preserved exactly because the write happens at the call site. Two hard gates land here: every `context.build` span is preceded in its step by a pressure measurement, and two builds of one checkpoint produce the same `prefix_sha256`.
 
 ### Milestone 8: Skills and MCP integration
 
@@ -2983,6 +2997,8 @@ The coding agent should not begin Milestone 2 until Milestones 0 and 1 pass all 
 ## 27. Run, turn, and session model
 
 This section resolves the domain’s load-bearing ambiguity: what a run is relative to a conversational turn and a session, where a new run’s prior conversation comes from, how the agent can pause for user input mid-run, and whether a session may have concurrent runs. It expands Sections 6.3, 6.4, 12, and 16, and is recorded as ADR-0009.
+
+[runtime-loop.md](runtime-loop.md) and ADR-0023 supply the mechanism this section specifies the behaviour of: suspension as one mechanism with three kinds, so that entering either `WAITING_*` state releases the lease, checkpoints, and emits an event in one place rather than at each of the loop's five exits; a child-run wait reusing `WAITING_FOR_APPROVAL` with a typed suspension kind rather than adding a fourth non-terminal status, which is recorded as an open question; and 27.5's "reject or queue" resolved to reject, with `ConflictError` and HTTP 409, except where the active run is `WAITING_FOR_USER` and the deterministic routing rule sends the text to that run's input endpoint - because ADR-0004's partial unique index makes queueing impossible at the database level as currently specified. The definitions in 27.1 are unchanged, including that a turn has no domain object.
 
 ### 27.1 Definitions
 

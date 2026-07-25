@@ -714,10 +714,26 @@ Five hard gates on Milestone 7, and four tracked metrics.
 
 ## Open questions
 
-None outstanding for assembly. Two adjacent items are deliberately out of scope:
-the **compaction summarizer's prompt and model tier** is an implementation choice
-to be tuned against the compaction-fidelity eval rather than fixed here, and
-**skill-content injection** (Section 30.4 loads full skill instructions on
-selection) needs its region assignment decided when skills are specified — it is
-mid-session and volatile, so it belongs in Region B, but the caching consequences of
-a large skill body in the turn layer deserve their own treatment.
+None outstanding for assembly. Two adjacent items were left open here and are
+now decided in [runtime-loop.md](runtime-loop.md), which gave compaction its call
+site and therefore had to say what the call resolves to.
+
+The **compaction summarizer's prompt and model tier** resolves through
+`ModelRouter` under a named `compaction` model policy rather than being fixed
+here or chosen at the call site. It defaults to the run's own provider, so
+provider pinning is not broken by a compaction mid-run, at the cheapest tier
+whose context window admits the region being summarized. The prompt is a
+versioned asset and its version is recorded on the checkpoint compaction writes,
+which is what makes a fidelity regression attributable to a prompt change rather
+than to a model change. The tuning itself still belongs to the
+compaction-fidelity eval; what is fixed is where the choice lives and what is
+recorded about it.
+
+**Skill-content injection** (Section 30.4 loads full skill instructions on
+selection) is assigned to **Region B**, as the reasoning above anticipated, with
+one addition that answers the caching objection: a skill body, once selected,
+is **sticky for the remainder of the session** unless the skill is deselected by
+a control tool. A skill that entered and left the prefix on alternating steps
+would invalidate the cached prefix on every one of them, which costs more than
+carrying an unused body. Stickiness is what makes Region B affordable for a
+large body; without it the right answer would have been the turn layer.

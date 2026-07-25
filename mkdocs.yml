@@ -69,6 +69,7 @@ nav:
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
       - Evaluation Harness: plan/evaluation-harness.md
+      - Runtime Loop: plan/runtime-loop.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md
@@ -96,4 +97,5 @@ nav:
       - ADR-0020 Context engine: adr/0020-context-engine.md
       - ADR-0021 Tool execution pipeline and MCP: adr/0021-tool-execution-pipeline-and-mcp.md
       - ADR-0022 The evaluation harness: adr/0022-evaluation-harness.md
+      - ADR-0023 The run loop and the single terminal writer: adr/0023-runtime-loop.md
   - Changelog: changelog.md

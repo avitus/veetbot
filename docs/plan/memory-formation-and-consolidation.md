@@ -421,7 +421,13 @@ The **builtin consolidation path is built to parity first** (steps 1-5); an exte
 
 None outstanding for the formation loop. The next specs off this one raise their
 own: [memory retrieval and ranking](memory-retrieval-and-ranking.md) is written and
-carries none; the temporal entity graph is not yet specified.
+carries none; the **temporal entity graph** is not specified and is deliberately
+not scheduled for version 0.1. Milestone 9 delivers beliefs with scopes,
+provenance, decay, and contradiction handling, which is what the retrieval path
+consumes; an entity graph with valid-time and transaction-time edges is a second
+storage model over the same evidence and would need its own consistency rule
+against the belief store. It is recorded as post-0.1 work rather than as an open
+question, so that nothing in Milestones 0 through 10 depends on it.
 
 Retrieval also closes a loop back into formation: recalled beliefs that are used
 resist decay, subjects that are repeatedly queried with no result queue targeted

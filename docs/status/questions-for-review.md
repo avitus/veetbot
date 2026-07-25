@@ -932,3 +932,293 @@ and the failure is a confusing timeout rather than a clear one.
 infrastructure work in Milestone 0.
 
 **Reversal cost:** cheap.
+
+## Runtime loop (ADR-0023)
+
+### The loop was split into a loop and an executor
+
+**Decided:** `run_loop` computes a `RunOutcome` and performs no terminal action;
+a single `finalize` in `runtime/executor.py` does every transition, lease
+release, and terminal event append, for all five outcome kinds. A structural
+gate asserts that `RunRepository.transition` and `RunQueue.release` are
+reachable from exactly one module.
+
+**Why:** Section 12.1's suspension path returns bare, which under Section 27.2
+leaks the lease of every run that pauses for approval. The minimal fix is a
+`finally`, which closes today's paths and leaves the next `return` free to
+reopen the hole, and offers nothing to gate against.
+
+**Cost:** a run's ending is spread over two modules that must be read together.
+
+**Reversal cost:** moderate. Inlining `finalize` back into the loop is
+mechanical; the gate would have to be retired with it.
+
+### `Step` became a value object with a column, not a table
+
+**Decided:** `model_calls` gains `step_number INTEGER NOT NULL`; there is no
+`steps` table.
+
+**Why:** every step makes at least one model call, so a `steps` table would
+duplicate `model_calls` row for row and need a consistency rule against it. The
+column also makes steps that produce no tool calls visible, which they are not
+today.
+
+**Reversal cost:** cheap before Milestone 2; a migration after.
+
+### Nine fields were added to `Run`
+
+**Decided:** `tenant_id`, `agent_id`, `agent_version`, `lease_epoch`,
+`attempts`, `priority`, `scheduled_for`, `deadline_at`, `failure`.
+
+**Why:** six are columns the event-log spec already introduced and the domain
+model never reflected, so this is bookkeeping. Three are new: `agent_id` and
+`agent_version` because Section 12.1 reads them off `Run` and Section 6.3 puts
+them on `Session`, and `deadline_at` because `RunLimits` declares it as a value
+and the lease sweep needs it as an indexable column.
+
+**Reversal cost:** cheap; they are additive and nothing reads them yet.
+
+### The agent version is pinned at run creation
+
+**Decided:** `agents.get_version` is called once, when the run row is created,
+and the result is never re-resolved — including across a suspension that lasts
+days.
+
+**Why:** an approval is granted against a specific agent's proposed action. A
+deploy landing between the request and the approval would otherwise change what
+the approver authorized.
+
+**Cost:** a long-paused run resumes on an agent version that may since have been
+withdrawn. The alternative is worse.
+
+**Reversal cost:** cheap.
+
+### A child-run wait reuses `WAITING_FOR_APPROVAL`
+
+**Decided:** suspension has three kinds — approval, user, child run — and the
+third maps to `WAITING_FOR_APPROVAL` rather than to a new `WAITING_FOR_CHILD`
+status. Recorded as open question 2 in the spec.
+
+**Why:** the wait behaves identically in every respect that the state machine
+cares about — lease released, no worker slot, resumed by an external event — and
+a fourth non-terminal status means amending four documents that enumerate
+`RunStatus` exhaustively.
+
+**Cost:** an operator looking at a stuck run sees a status that does not mean
+what it says. This is the decision in this document least likely to survive
+Andy's review, which is why the suspension kind is a typed field rather than
+inferred.
+
+**Reversal cost:** moderate, and rising. Cheap now; expensive once the status
+has API consumers.
+
+### Cancellation was split across three milestones
+
+**Decided:** the token and the loop's observation points land in Milestone 1,
+the tool-executor points in Milestone 4, and the API surface and sandbox
+propagation in Milestone 5, where Section 21 places cancellation.
+
+**Why:** Milestone 5's acceptance criterion is "cancellation reaches the
+worker", which is the API half. The token is three lines and threading it later
+means threading it through code that assumed it did not exist.
+
+**Cost:** a partially useful mechanism exists for four milestones.
+
+**Reversal cost:** cheap to collapse back into Milestone 5; expensive to
+introduce late, which is the asymmetry the decision rests on. Recorded as open
+question 1.
+
+### "After every operation" was read as "record in the same transaction"
+
+**Decided:** budget has three scopes — run, step, attempt. Section 6.5's *"check
+limits before and after every model or tool operation"* is implemented as a
+check before and a *record* after, where recording usage and evaluating the
+limit are one operation in one transaction.
+
+**Why:** a literal second check after the operation and a separate write leaves
+a window in which the run is over budget and no query would say so. ADR-0002's
+per-attempt rule and Section 6.5's per-operation rule are then both satisfied
+without a third granularity.
+
+**Reversal cost:** cheap.
+
+### The heartbeat also owns the deadline and the cancellation poll
+
+**Decided:** one supervisor task at a third of the lease interval renews the
+lease, checks `deadline_at`, and polls for a cancellation request.
+
+**Why:** three timers and three queries for three questions that are all "has
+the outside world changed its mind", on a run that is otherwise blocked on a
+provider stream.
+
+**Cost:** cancellation latency is bounded by the heartbeat interval rather than
+being immediate.
+
+**Reversal cost:** cheap.
+
+### A fenced worker aborts its in-flight stream
+
+**Decided:** on `heartbeat` returning `False`, the worker cancels the model
+stream, appends exactly one `run.fenced` event, and writes nothing else.
+
+**Why:** nothing the stream produced could be committed under a stale epoch, so
+finishing it spends tokens on an uncommittable result. The single append is
+legal because the event log is sequence-guarded rather than epoch-guarded.
+
+**Cost:** the output that would have explained the stall is lost. Recorded as
+open question 6.
+
+**Reversal cost:** cheap.
+
+### Compaction was capped at two attempts per step
+
+**Decided:** `build_with_pressure` measures, compacts, and measures again, up to
+`MAX_COMPACTIONS_PER_STEP = 2`, then raises a permanent `ContextOverflow`.
+
+**Why:** an uncapped loop against a compactor that cannot shrink the body — a
+single tool result larger than the budget — spins on a model call per attempt.
+Two is enough for the case where one pass narrowly misses.
+
+**Reversal cost:** cheap; it is a constant.
+
+### The full-snapshot interval is every eighth checkpoint
+
+**Decided:** a checkpoint is full at version 1, every eighth version, and on
+compaction, suspension, and termination.
+
+**Why:** it bounds delta reconstruction at seven reads. The number is otherwise
+arbitrary and is recorded as open question 4.
+
+**Reversal cost:** cheap.
+
+### The evaluation harness's tool event names were corrected
+
+**Decided:** the approval case's `event_order` now reads `tool.call.proposed`,
+`tool.call.authorized`, `tool.call.completed`. It previously read
+`tool.proposed`, `tool.authorized`, `tool.succeeded`.
+
+**Why:** those three names are not events. Section 6.8 declares the `tool.call.*`
+family and ADR-0021 adds no tool event, so the case as written would have failed
+against a correct implementation. This is a correction to a document written
+during this run, not a change to a requirement of Andy's.
+
+**Reversal cost:** none; it was a defect.
+
+### 27.5's "reject or queue" resolves to reject
+
+**Decided:** a message to a session with an active run returns
+`ConflictError` and HTTP 409, except where the active run is
+`WAITING_FOR_USER`, in which case the deterministic routing rule sends the text
+to that run's input endpoint.
+
+**Why:** Section 27.5 permits either, but ADR-0004's partial unique index on
+non-terminal runs per session makes queueing impossible at the database level as
+currently specified. Choosing "queue" would silently require a different
+constraint.
+
+**Cost:** a client that submits during a long run gets an error rather than a
+promise.
+
+**Reversal cost:** moderate; queueing later costs a migration rather than a
+redesign.
+
+### The maintenance sweeps run everywhere under advisory locks
+
+**Decided:** lease expiry, approval expiry, and deadline enforcement run in
+every worker process, each guarded by a PostgreSQL advisory lock, rather than in
+a dedicated reaper deployment.
+
+**Why:** a singleton is an operational burden and a single point of failure for
+three time-based obligations, one of which is a safety property.
+
+**Cost:** every node does a little wasted work every interval. Recorded as open
+question 5.
+
+**Reversal cost:** cheap.
+
+### An empty terminal turn is retried rather than returned
+
+**Decided:** a model turn with no content and no tool calls is treated as a
+failed step, retried under Section 13's rules, and fails the run with
+`EmptyModelTurn` on exhaustion.
+
+**Why:** returning it completes the run with an empty final message, which is
+indistinguishable to a user from the agent having nothing to say.
+
+**Cost:** a second context assembly on a model that just produced nothing.
+Recorded as open question 3.
+
+**Reversal cost:** cheap.
+
+### This document adds no event types
+
+**Decided:** the spec consolidates the fourteen run-lifecycle events introduced
+elsewhere and assigns owners to the three that had none — `run.claimed` and the
+two `run.waiting_*` events — without introducing any.
+
+**Why:** the event vocabulary is a compatibility surface with the projections,
+the SSE transport, and the trajectory export. Adding to it from the last spec
+written would be the least reviewed change in the corpus.
+
+**Reversal cost:** not applicable.
+
+## Deferred questions from earlier specs, now decided
+
+These three were left explicitly open by specs written earlier in this run. The
+mandate was to decide rather than to leave the plan with holes in it, so each is
+decided, recorded here, and reflected in the spec that raised it.
+
+### The compaction summarizer resolves through `ModelRouter` under a `compaction` policy
+
+**Decided:** the summarizer's model is not fixed in the context-engine spec and
+not chosen at the call site. It resolves through `ModelRouter` under a named
+`compaction` model policy, defaulting to the run's own provider at the cheapest
+tier whose context window admits the region being summarized. The prompt is a
+versioned asset and its version is recorded on the checkpoint compaction writes.
+
+**Why:** defaulting to the run's provider keeps ADR-0002's provider pinning
+intact — a compaction mid-run would otherwise send conversation content to a
+second vendor without anything having decided that. Recording the prompt version
+on the checkpoint is what makes a compaction-fidelity regression attributable to
+a prompt change rather than to a model change; without it the eval can detect the
+regression and not locate it.
+
+**Cost:** one more model policy to configure, and a prompt-asset versioning
+convention that did not otherwise exist.
+
+**Reversal cost:** cheap. The tuning question the spec deferred is still
+deferred to the fidelity eval; only the location of the choice is fixed.
+
+### Skill bodies go in Region B and are sticky for the session
+
+**Decided:** Section 30.4's skill instructions are assigned to Region B, and a
+selected skill's body stays in the prefix for the remainder of the session unless
+a control tool deselects it.
+
+**Why:** Region B was already the right region on volatility grounds; the
+objection the spec recorded was the caching consequence of a large body in a
+mid-session layer. Stickiness answers it directly. A body that entered and left
+on alternating steps would invalidate the cached prefix on each of them, which
+costs more than carrying an unused body for the rest of the session.
+
+**Cost:** a session that touches many skills accumulates their bodies until the
+budget forces compaction. The class caps bound this; it is not unbounded.
+
+**Reversal cost:** cheap until skills ship in Milestone 8.
+
+### The temporal entity graph is post-0.1, not an open question
+
+**Decided:** it is recorded as post-0.1 work with nothing in Milestones 0 through
+10 depending on it, rather than left as an unscheduled open question.
+
+**Why:** Milestone 9 delivers beliefs with scopes, provenance, decay, and
+contradiction handling, and that is what the retrieval path consumes. An entity
+graph with valid-time and transaction-time edges is a second storage model over
+the same evidence, and a second model needs a consistency rule against the first.
+Leaving it "not yet specified" invites an implementer to build a partial version
+of it inside the belief store, which is the outcome worth preventing.
+
+**Cost:** temporal queries — "what did I believe about X in March" — are not
+answerable in 0.1 beyond what belief history gives.
+
+**Reversal cost:** cheap; it is additive whenever it is taken up.
