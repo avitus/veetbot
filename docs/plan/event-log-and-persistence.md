@@ -462,7 +462,7 @@ column is removed or retyped.
 ```text
 events
   + payload_schema_version SMALLINT NOT NULL
-  + INDEX (session_id, id)                  -- watermark scans, commit order
+  + INDEX (session_id, id)               -- watermark scans, commit order
 
 runs
   + priority        SMALLINT     NOT NULL DEFAULT 0
@@ -491,7 +491,7 @@ projection_watermarks
   PRIMARY KEY (projection_name, scope)
 
 derived_event_keys
-  derivation_key  TEXT PRIMARY KEY          -- source ids + rule + version
+  derivation_key  TEXT PRIMARY KEY         -- source ids + rule + version
   event_id        BIGINT NOT NULL
   created_at      TIMESTAMPTZ NOT NULL
 ```
@@ -557,7 +557,11 @@ class RunQueue(Protocol):
         self, run_id: UUID, worker_id: str, lease_epoch: int
     ) -> bool: ...                        # False means fenced
     async def release(
-        self, run_id: UUID, worker_id: str, lease_epoch: int, status: RunStatus
+        self,
+        run_id: UUID,
+        worker_id: str,
+        lease_epoch: int,
+        status: RunStatus,
     ) -> None: ...
     async def reclaim_expired(self, limit: int) -> int: ...
 ```

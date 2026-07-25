@@ -4,6 +4,54 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — Cross-document defect sweep before the readiness review
+
+- Read the eleven detailed-design specs against each other rather than against
+  the plan, looking only for places where two documents state the same fact
+  differently or where one names something no document declares. **Ten defects
+  were found and all ten are fixed.** Each is recorded with its reasoning in
+  [questions-for-review.md](status/questions-for-review.md).
+- Declared **`RunStatus`** — seven members — which five documents referenced and
+  none defined. A run blocked on a child waits in `WAITING_FOR_USER` with a
+  suspension record naming the child, rather than in an eighth state that only
+  the suspension record could distinguish.
+- Added the four **`runs` columns** the domain model always implied and the
+  schema never carried: `tenant_id`, `agent_id`, `agent_version`, and a nullable
+  `deadline_at` with a partial index restricted to the three live statuses.
+- Resolved **`tool_invocations.origin_trust`**, declared nullable by
+  `tool-system.md` and `NOT NULL` by `policy-and-approvals.md`, in favour of
+  `NOT NULL`. A call the runtime issues itself carries `PLATFORM`. A nullable
+  column would let an authorization record say "policy did not compute this",
+  which is the one thing it must never be able to say.
+- Renamed the classification column to **`idempotency_class`**, because the same
+  table already carries `idempotency_key` and crash recovery reads both — one to
+  decide whether replay is safe, the other to decide whether it is the same call.
+- Corrected the **step identity** claim: `step_number` is canonical on
+  `model_calls`, not on `tool_invocations`, because a step that proposes no tool
+  calls writes no invocation row and would therefore be skipped by any numbering
+  taken from that table.
+- Completed the **event catalog** at fifty-one types. It had gone stale at the
+  twenty-four of Section 6.8 while five later specs added to it, including seven
+  MCP and bridge events and six memory events. Stating the total makes the next
+  addition visible.
+- Fixed three assertions that name things which do not exist: the harness case
+  `approval_granted_resumes_run` now asserts `run.queued` and
+  `approval.resolved`, and the gate id standardises on the registry spelling
+  `gate.policy.prompt_is_not_authorization`.
+- Recorded, without deleting them, that **`RunRepository.claim_next` and
+  `heartbeat` are superseded** by `RunQueue.claim` and `RunQueue.heartbeat`. The
+  signatures stay in Section 7 as the record of what was replaced.
+- Corrected two cross-references in `model-gateway.md` that cited Section 10.3
+  for the normalized request; it is Section 10.1.
+- Brought every fenced code block in the corpus within the rendered code column.
+  Verified by measuring `scrollWidth` against `clientWidth` for every `pre` on
+  all thirty-nine built pages rather than by counting characters: **zero blocks
+  overflow.** The first-line allowance was re-measured too — the copy control in
+  the current Material release sits in its own navigation bar, so a first line
+  has the same budget as any other line, not a shorter one.
+
+No product implementation was performed.
+
 ## 2026-07-25 — The runtime loop, the step, and the single terminal writer
 
 - Added `docs/plan/runtime-loop.md`, the design for Sections 12 and 13 and the

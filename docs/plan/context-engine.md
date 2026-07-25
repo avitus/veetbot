@@ -330,7 +330,8 @@ So: **the summarizer runs on trusted content only.** Untrusted spans are not
 summarized. They are replaced with a typed pointer:
 
 ```text
-[elided] tool.result 8f21 (external_untrusted, 4,214 bytes) -> artifact:a/9d02
+[elided] tool.result 8f21 (external_untrusted, 4,214 bytes)
+         -> artifact:a/9d02
 ```
 
 The pointer states that content existed, what it was, how large, where it lives,
@@ -508,7 +509,7 @@ class ContextBudget(BaseModel):
     platform_tokens: int
     agent_tokens: int
     tool_tokens: int
-    retrieved_context_tokens: int   # snapshot (frozen) + in-turn (elastic)
+    retrieved_context_tokens: int   # frozen snapshot + elastic in-turn
     history_tokens: int
     # additions
     working_state_tokens: int
@@ -560,7 +561,9 @@ class ContextPlanner(Protocol):
 
     async def current(self, session_id: UUID) -> ContextPlan | None: ...
 
-    async def rotate(self, session_id: UUID, reason: str) -> ContextPlan: ...
+    async def rotate(
+        self, session_id: UUID, reason: str
+    ) -> ContextPlan: ...
 
 class TokenEstimator(Protocol):
     def estimate(
@@ -571,7 +574,9 @@ class TokenEstimator(Protocol):
         self, tools: Sequence[ToolSpec], model_id: str
     ) -> int: ...
 
-    def reconcile(self, model_id: str, estimated: int, actual: int) -> None: ...
+    def reconcile(
+        self, model_id: str, estimated: int, actual: int
+    ) -> None: ...
 
 class Compactor(Protocol):
     async def compact(

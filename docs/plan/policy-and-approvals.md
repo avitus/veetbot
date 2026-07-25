@@ -712,10 +712,10 @@ approvals                                 -- Section 15, extended
   + UNIQUE INDEX (action_id)              -- one open approval per action
 
 tool_invocations                          -- Section 15, extended
-  + side_effect     TEXT NOT NULL         -- classified at decision time
-  + risk            TEXT NOT NULL
-  + idempotency     TEXT NOT NULL         -- crash recovery reads this
-  + origin_trust    TEXT NOT NULL
+  + side_effect       TEXT NOT NULL       -- classified at decision time
+  + risk              TEXT NOT NULL
+  + idempotency_class TEXT NOT NULL       -- crash recovery reads this
+  + origin_trust      TEXT NOT NULL
   + effective_arguments_hash TEXT NULL    -- set if policy modified args
 
 policy_profiles                           -- audit only; rules are files

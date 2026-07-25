@@ -127,26 +127,30 @@ for talking to humans about conversation. Nothing in the runtime reads it.
 system already defines it: *"a step is one model call plus the complete
 disposition of every tool call it produced."* That definition is exactly
 right and it has a consequence nobody drew — a step's identity is its model
-call, because by definition every step has exactly one. Today `step_number`
-is persisted in one place, as a column on `tool_invocations`, which means a
-step that produced no tool calls has no persisted identity at all. That is
-the common case: the last step of every successful run produces text and no
-tool calls, and it is invisible.
+call, because by definition every step has exactly one. Two tables already
+carry a `step_number` column: `tool_invocations` from Section 15, and
+`model_calls` from the model gateway spec. Only the second is written for
+every step, because a step that produced no tool calls writes no invocation
+row at all. That is the common case — the last step of every successful run
+produces text and no tool calls — so on the `tool_invocations` reading the
+final step of most runs has no persisted identity.
 
-The fix is one additive column rather than a table:
+So the identity is chosen rather than invented:
 
 ```text
-# additive column on the model_calls table
+# canonical step identity; the column already exists
 model_calls.step_number  INTEGER NOT NULL
 ```
 
-`model_calls` is introduced by the model gateway spec as one row per model
-attempt. Adding `step_number` to it gives every step a persisted identity,
-makes `runs.step_count` reconcilable against a query rather than trusted,
-and lets an operator ask what a step cost without joining through a tool
-invocation that may not exist. A `steps` table would carry no field that is
-not derivable from `model_calls` and `tool_invocations` and would introduce
-a third row that can disagree with the two that already exist.
+`model_calls` is one row per model attempt, which makes `(run_id,
+step_number)` resolvable for every step that ever ran, lets
+`runs.step_count` be reconciled against a query rather than trusted, and
+lets an operator ask what a step cost without joining through a tool
+invocation that may not exist. `tool_invocations.step_number` keeps its
+meaning as a back-reference to the step a call belonged to. A `steps` table
+would carry no field that is not derivable from `model_calls` and
+`tool_invocations` and would introduce a third row that can disagree with
+the two that already exist.
 
 `Step` also exists as a runtime value object, because the loop needs to pass
 one around:
@@ -259,6 +263,57 @@ class RunFailure(BaseModel):
 as the taxonomy grows. Keeping both means the taxonomy can be extended
 without invalidating a year of aggregates. `message` is subject to the
 secret-scanner gate like every other persisted string.
+
+**`status` gets its enum.** `RunStatus` is used as a type annotation in six
+places across Sections 6.4, 7, and 12 and in
+[event-log-and-persistence.md](event-log-and-persistence.md), and declared
+in none of them. The states exist only as a transition diagram in Section
+6.4. A diagram is not a type, and an implementer reading Section 7's
+`transition(expected_status, new_status)` has to guess the spelling of both
+arguments.
+
+```python
+class RunStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    WAITING_FOR_APPROVAL = "WAITING_FOR_APPROVAL"
+    WAITING_FOR_USER = "WAITING_FOR_USER"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+```
+
+The values are the uppercase names themselves, because they are already
+written that way in Section 6.4's diagram, in the partial-index predicate
+`WHERE status NOT IN ('COMPLETED','FAILED','CANCELLED')`, and in every
+guarded `UPDATE` in this document. Seven values and not eight: a run waiting
+on a delegated child waits in `WAITING_FOR_APPROVAL` carrying a typed
+suspension kind, so there is no `WAITING_FOR_CHILD`.
+
+### The columns behind these fields
+
+Six of the nine fields above are already columns.
+[event-log-and-persistence.md](event-log-and-persistence.md) adds
+`priority`, `attempts`, `scheduled_for`, and `lease_epoch`; `status` and
+`failure` are in Section 15 already. The remaining four have been domain
+fields with no column, which is the same defect in the other direction.
+
+```text
+runs                                 -- Section 15, extended
+  + tenant_id      UUID        NOT NULL
+  + agent_id       UUID        NOT NULL
+  + agent_version  TEXT        NOT NULL
+  + deadline_at    TIMESTAMPTZ NULL
+  + INDEX (deadline_at) WHERE deadline_at IS NOT NULL
+      AND status IN ('RUNNING', 'WAITING_FOR_APPROVAL',
+                     'WAITING_FOR_USER')
+```
+
+`tenant_id` is `NOT NULL` because every scoped repository call takes one and
+a nullable tenant is an authorization hole waiting for a bug. The partial
+index on `deadline_at` is what makes the overdue sweep a range scan over
+live runs rather than a full table scan; a run in a terminal state can no
+longer exceed a deadline, so it does not belong in the index.
 
 ## The ports the loop calls
 
@@ -1218,6 +1273,30 @@ context.budget.exceeded     context-engine.md
 projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
+
+Thirteen more belong to subsystems this document does not touch. They are
+listed here for the same reason: Section 6.8's list is where an implementer
+looks for the vocabulary, and these are not in it either.
+
+```text
+# event                    introduced by
+mcp.server.connected       tool-system.md, ADR-0021
+mcp.server.disconnected    tool-system.md, ADR-0021
+mcp.catalog.changed        tool-system.md, ADR-0021
+mcp.catalog.conflict       tool-system.md, ADR-0021
+mcp.tool.rejected          tool-system.md, ADR-0021
+bridge.session.opened      tool-system.md, ADR-0021
+bridge.session.closed      tool-system.md, ADR-0021
+memory.formed              memory-formation-and-consolidation.md
+memory.promoted            memory-formation-and-consolidation.md
+memory.reinforced          memory-formation-and-consolidation.md
+memory.superseded          memory-formation-and-consolidation.md
+memory.needs_confirmation  memory-formation-and-consolidation.md
+memory.recalled            memory-retrieval-and-ranking.md
+```
+
+Twenty-four in Section 6.8 plus these twenty-seven is the whole vocabulary:
+fifty-one persisted event types, not one of them introduced here.
 
 Two ownership assignments close gaps that were nobody's:
 

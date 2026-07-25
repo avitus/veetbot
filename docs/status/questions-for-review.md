@@ -1222,3 +1222,153 @@ of it inside the belief store, which is the outcome worth preventing.
 answerable in 0.1 beyond what belief history gives.
 
 **Reversal cost:** cheap; it is additive whenever it is taken up.
+
+## Cross-document defects found at readiness review (2026-07-25)
+
+### `RunStatus` is seven members and there is no `WAITING_FOR_CHILD`
+
+**Decided:** `RunStatus` is a `StrEnum` with `QUEUED`, `RUNNING`,
+`WAITING_FOR_APPROVAL`, `WAITING_FOR_USER`, `COMPLETED`, `FAILED`, and
+`CANCELLED`, values equal to their names in uppercase. A run blocked on a child
+run waits in `WAITING_FOR_USER` with a suspension record naming the child.
+
+**Why:** the type was referenced by five documents and declared by none, which
+is the defect a coding agent hits within the first hour of Milestone 1. Seven
+is the smallest set that covers every transition `finalize` can perform. An
+eighth state for child runs was rejected because nothing outside the suspension
+record distinguishes it: the queue treats all three waiting states identically,
+and the resume path already dispatches on suspension kind rather than status.
+
+**Cost:** a query for "runs blocked on a child" reads the suspension record
+rather than filtering on status alone.
+
+**Reversal cost:** moderate. Adding a state after Milestone 2 means a migration
+plus every `status IN (...)` predicate, of which the partial index below is one.
+
+### `runs` gains four columns the domain fields always implied
+
+**Decided:** `tenant_id UUID NOT NULL`, `agent_id UUID NOT NULL`,
+`agent_version TEXT NOT NULL`, `deadline_at TIMESTAMPTZ NULL`, and a partial
+index on `deadline_at` restricted to the three live statuses.
+
+**Why:** every one of these is read by code the plan already requires — tenant
+scoping on every query, the agent version pinned for reproducibility, the
+deadline sweeper — and none of them had a column. `deadline_at` is nullable
+because a run without a deadline is normal; the other three are not, because a
+run without a tenant is not a run.
+
+**Reversal cost:** moderate; it is a migration once Milestone 2 has shipped.
+
+### The step's identity is `model_calls.step_number`, not a new column
+
+**Decided:** the canonical step identity is the existing
+`model_calls.step_number`. `tool_invocations.step_number` remains a foreign
+reference to it, not a second source of truth.
+
+**Why:** an earlier passage in `runtime-loop.md` claimed `step_number` lived
+only on `tool_invocations`, which the model gateway spec had already falsified.
+Only `model_calls` is written for every step: a step that proposes no tool calls
+writes no invocation row at all, so numbering from `tool_invocations` would skip.
+Choosing the column that always exists means the identity is chosen rather than
+invented.
+
+**Reversal cost:** cheap. Both columns already exist; this fixes which one the
+prose points at.
+
+### `tool_invocations.origin_trust` is `NOT NULL`
+
+**Decided:** the column is `NOT NULL`. A call the runtime issues itself — a
+control tool, a maintenance sweep — carries `PLATFORM`.
+
+**Why:** `tool-system.md` declared it nullable and `policy-and-approvals.md`
+declared it `NOT NULL`, and the authorization record is the wrong place to leave
+that ambiguous. A nullable column would mean "policy did not compute the origin
+trust", which is the one thing an authorization row must never be able to say.
+Every path that writes the row runs after a policy decision, so a value always
+exists.
+
+**Reversal cost:** cheap now, moderate after Milestone 4.
+
+### The column is `idempotency_class`, not `idempotency`
+
+**Decided:** `tool_invocations` carries `idempotency_class TEXT NOT NULL`.
+`ToolSpec.idempotency` and `mcp_servers.idempotency` keep their existing names.
+
+**Why:** the same table already carries `idempotency_key`, and two columns
+differing by one suffix is exactly the confusion crash recovery cannot afford —
+the recovery path reads one to decide whether replaying is safe and the other to
+decide whether it is the same call. The field on `ToolSpec` sits in a different
+namespace where no key is present, so renaming it would cost clarity rather than
+buy any.
+
+**Reversal cost:** cheap; the table is not yet created.
+
+### The event catalog is fifty-one types and is now closed
+
+**Decided:** `runtime-loop.md` carries the full catalog: the twenty-four named
+in Section 6.8 plus twenty-seven introduced by later specs, including the seven
+MCP and bridge events from `tool-system.md` and the six memory events from the
+formation and retrieval specs. Nothing new is introduced by the runtime loop
+itself.
+
+**Why:** the consolidated list had gone stale at twenty-four while five specs
+added to it, so a reader had no single place to learn the vocabulary and no way
+to notice a name being coined twice. Stating the total makes the next addition
+visible: a spec that adds an event now has to move the count.
+
+**Cost:** the catalog is a second place to edit when an event is added.
+
+**Reversal cost:** cheap.
+
+### The harness asserts `run.queued` and `approval.resolved`
+
+**Decided:** the `approval_granted_resumes_run` case's `event_order` asserts
+`run.queued` and `approval.resolved`, replacing `run.created` and
+`approval.granted`.
+
+**Why:** neither replaced name is in the catalog. A golden case that asserts a
+non-existent event name fails on the day it is first run, and the failure looks
+like a runtime bug rather than a typo in the fixture. `approval.resolved`
+carries the outcome in its payload, which is why one name covers grant and deny.
+
+**Reversal cost:** cheap.
+
+### The gate id is `gate.policy.prompt_is_not_authorization`
+
+**Decided:** the long registry spelling is canonical; the short
+`gate.policy.prompt_not_auth` used in one illustrative CLI listing was wrong and
+the listing was reflowed to fit the real id.
+
+**Why:** gate ids are matched exactly by the harness and quoted in CI output, so
+a second spelling is a gate that silently never runs. The registry spelling wins
+because it is the one the harness loads.
+
+**Reversal cost:** cheap.
+
+### The plan's superseded port signatures are annotated, not deleted
+
+**Decided:** `RunRepository.claim_next` and `RunRepository.heartbeat` stay in
+Section 7 of `engineering-plan.md`, with a paragraph above them recording that
+ADR-0023 supersedes both with `RunQueue.claim` and `RunQueue.heartbeat`, and
+that `RunQueue` is what gets implemented.
+
+**Why:** the standing instruction is that conversion is additive and existing
+requirements are not rewritten. Deleting the two signatures would be the
+cleanest-looking fix and would also destroy the record of what was replaced,
+which is the part a reviewer needs. Annotating leaves the plan readable as
+history and unambiguous as instruction.
+
+**Reversal cost:** cheap.
+
+### Two citations pointed at the wrong subsection
+
+**Decided:** two references in `model-gateway.md` that cited "Section 10.3" for
+the normalized request now cite Section 10.1. The two other 10.3 references in
+the same file are correct — they point at the fake provider — and were left
+alone.
+
+**Why:** §10.1 is Normalized request and §10.3 is Fake provider. A wrong
+cross-reference in a spec that is meant to be copy-ready sends the implementer
+to the wrong requirement.
+
+**Reversal cost:** cheap.

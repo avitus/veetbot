@@ -1276,9 +1276,17 @@ tool_invocations
   + artifact_id        UUID NULL
   + outcome_status     TEXT NULL       -- ToolOutcomeStatus
   + reason_code        TEXT NULL
-  + origin_trust       TEXT NULL
+  + origin_trust       TEXT NOT NULL   -- PLATFORM when not model-driven
   + parallel_group     UUID NULL       -- shared by one batch
 ```
+
+[policy-and-approvals.md](policy-and-approvals.md) declares `origin_trust`
+on this same table, and it is `NOT NULL` in both places. There is no state
+in which the value is unknown: a call proposed by a model turn carries the
+minimum trust over the context items that produced it, and a call issued by
+the runtime itself — a control tool, a maintenance sweep — carries
+`PLATFORM`. A nullable column here would mean "policy did not compute it",
+which is the one thing the authorization record must never be able to say.
 
 `idempotency_class` is snapshotted onto the row rather than read from the
 registry during recovery. A recovering worker may be running a different

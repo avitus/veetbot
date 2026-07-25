@@ -619,7 +619,7 @@ the events section, because the gateway is what emits them.
 
 ## Routing and capability resolution
 
-`ModelRequest.model_policy` is a bare string in the plan (Section 10.3) and
+`ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
 native tool calling, how much output to reserve. `context-engine.md` line 212
@@ -887,7 +887,7 @@ Two timeouts close that:
 
 ```python
 class ModelRequest(BaseModel):
-    # ... fields from Section 10.3 ...
+    # ... fields from Section 10.1 ...
     timeout_seconds: float = 600.0     # whole call, first byte to last
     stream_idle_seconds: float = 60.0  # gap between two events
 ```

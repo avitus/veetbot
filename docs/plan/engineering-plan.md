@@ -792,6 +792,8 @@ class EventRepository(Protocol):
     ) -> list[EventEnvelope]:
         ...
 ```
+Two methods above are superseded. `RunRepository.claim_next` and `RunRepository.heartbeat` were written before the queue had leases; [event-log-and-persistence.md](event-log-and-persistence.md) replaces them with `RunQueue.claim`, which returns a lease epoch, and `RunQueue.heartbeat`, which returns a boolean so a fenced worker learns it has been fenced. [runtime-loop.md](runtime-loop.md) and ADR-0023 make `RunQueue` the canonical port for both operations and restrict `RunRepository.transition` to a single caller. Implement `RunQueue`; the two signatures above remain here as the record of what they replaced.
+
 Also define ports for:
 
 - Session repository
@@ -1608,7 +1610,7 @@ Create Alembic migrations for at least these tables.
 
 [model-gateway.md](model-gateway.md) adds the two tables Section 6.5's cost precedence and the Milestone 3 usage criteria require and this section does not yet carry: `model_calls`, one row per model attempt with all five token classes, cost, `cost_source`, and the resolved provider, model, and registry version; and `model_prices`, an append-only price history so a recorded cost stays reproducible after a vendor price change. `runs.usage` is unchanged in shape and becomes a rollup of `model_calls` maintained in the same transaction. Both are additive to the tables specified here.
 
-[policy-and-approvals.md](policy-and-approvals.md) likewise adds what Section 9, Section 11.2, and the Milestone 4 acceptance criteria require and this section does not yet carry: `tenant_id`, `principal_id`, `session_id`, `action_kind`, `action_id`, `risk`, `policy_version`, and `revalidated_policy_version` on `approvals`, with `tool_invocation_id` widened to nullable so non-tool actions can be approved, and the indexes the approval list, the resume path, and the expiry reaper each need; the classification columns `side_effect`, `risk`, `idempotency`, `origin_trust`, and `effective_arguments_hash` on `tool_invocations`; and a `policy_profiles` audit table that records which ruleset a `policy_version` refers to. Policy rules themselves are version-controlled files, not rows.
+[policy-and-approvals.md](policy-and-approvals.md) likewise adds what Section 9, Section 11.2, and the Milestone 4 acceptance criteria require and this section does not yet carry: `tenant_id`, `principal_id`, `session_id`, `action_kind`, `action_id`, `risk`, `policy_version`, and `revalidated_policy_version` on `approvals`, with `tool_invocation_id` widened to nullable so non-tool actions can be approved, and the indexes the approval list, the resume path, and the expiry reaper each need; the classification columns `side_effect`, `risk`, `idempotency_class`, `origin_trust`, and `effective_arguments_hash` on `tool_invocations`; and a `policy_profiles` audit table that records which ruleset a `policy_version` refers to. Policy rules themselves are version-controlled files, not rows.
 
 ### `agents`
 

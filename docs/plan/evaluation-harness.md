@@ -375,10 +375,10 @@ expected:
     - tool: demo.external_write
       watermark: set
   event_order:
-    - run.created
+    - run.queued
     - tool.call.proposed
     - approval.requested
-    - approval.granted
+    - approval.resolved
     - tool.call.authorized
     - tool.call.completed
     - run.completed
@@ -1060,14 +1060,14 @@ agent eval promote <run-id>     trajectory to case
 registry exists. Its output answers the question a milestone review asks:
 
 ```text
-Milestone 4 (current)          28 gates    24 pass   0 fail   4 pending
-  gate.policy.totality              pass    property   1000 trials
-  gate.policy.single_gate           pass    structural
-  gate.policy.prompt_not_auth       pass    corpus     47 members
-  gate.tool.watermark_contract      pass    property
-  gate.context.prefix_stability   pending   M7
+Milestone 4 (current)          28 gates  24 pass  0 fail   4 pending
+  gate.policy.totality                    pass   property 1000 trials
+  gate.policy.single_gate                 pass   structural
+  gate.policy.prompt_is_not_authorization pass   corpus   47 members
+  gate.tool.watermark_contract            pass   property
+  gate.context.prefix_stability        pending   M7
   ...
-Milestone 5                    12 gates     0 pass   0 fail  12 pending
+Milestone 5                    12 gates   0 pass  0 fail  12 pending
 ```
 
 Pending is printed, never hidden. A milestone review that cannot see the twelve

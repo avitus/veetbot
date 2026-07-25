@@ -95,7 +95,8 @@ eligible for in-turn injection, and a correction to a belief *inside* the snapsh
 injected as an explicit override in the user turn:
 
 ```text
-correction: [m:8f21] no longer holds as of 2026-07-24; superseded by [m:9d02].
+correction: [m:8f21] no longer holds as of 2026-07-24;
+            superseded by [m:9d02].
 ```
 
 The prefix is never rewritten. The stable platform text tells the model that
@@ -328,7 +329,7 @@ score(b, q) =
     + w_authority · authority(b)          # user > affirmed > inferred
     + w_scope     · scope_affinity(b, q)  # origin match x portability
     + w_utility   · utility(b)            # usefulness when recalled
-    - w_penalty   · penalty(b)            # stale, flagged, near-duplicate
+    - w_penalty   · penalty(b)            # stale, flagged, duplicate
 ```
 
 with:
@@ -393,10 +394,10 @@ is its Region A half and in-turn recall its Region B half, and in-turn recall is
 
 ```text
 <memory as_of="2026-07-24T09:00:00Z" policy="retrieval@3">
-  [m:8f21] Andy prefers concise, prose-first writing.   (user-stated, high)
-  [m:1c07] Andy's current project is veetbot.           (user-stated, high)
-  [m:44b9] Andy's stack is Postgres-backed.             (inferred, medium)
-  [m:7ea5] (learned in atlas) Deploys are gated on CI.  (inferred, low)
+  [m:8f21] Andy prefers concise prose-first writing.  (user-stated, high)
+  [m:1c07] Andy's current project is veetbot.         (user-stated, high)
+  [m:44b9] Andy's stack is Postgres-backed.           (inferred, medium)
+  [m:7ea5] (learned in atlas) Deploys are gated on CI. (inferred, low)
   [m:0d3e] [BLOCKED] withheld: failed injection scan.
 </memory>
 ```
@@ -449,7 +450,7 @@ class RecallQuery(BaseModel):
     principal_id: str                  # isolation boundary, hard filter
     current_scope: str                 # relevance anchor, not a filter
     text: str | None = None            # intent; may be multi-sentence
-    subjects: list[str] = []           # structured anchors, alias-expanded
+    subjects: list[str] = []           # structured anchors, aliased
     belief_types: list[str] = []
     as_of: datetime | None = None      # bi-temporal; None means now
     include_superseded: bool = False   # historical queries only
@@ -494,10 +495,10 @@ class RecallTrace(BaseModel):
     surface_id: str                    # ceiling in force at render time
     sensitivity_ceiling: str
     rendered_sha256: str               # binds the trace to exact bytes
-    arm_latencies_ms: dict[str, int]   # operator tier, nulled after window
+    arm_latencies_ms: dict[str, int]   # per-tier; nulled after window
     candidates: int                    # operator tier
     returned: list[UUID]
-    cited: list[UUID]                  # ids the model referenced -> "used"
+    cited: list[UUID]                  # ids the model cited -> "used"
     dropped_for_budget: list[UUID]     # operator tier
     blocked: list[UUID]
     carried_in: list[UUID]             # promotion candidates
@@ -516,7 +517,7 @@ class TracedBelief(BaseModel):
     learned_at: datetime               # first observed, not last touched
     origin_scope: str
     carried: bool
-    authority: str                     # user-stated | affirmed | inferred
+    authority: str                    # user-stated | affirmed | inferred
     source_episode_id: UUID | None     # "show me where this came from"
     confidence_band: str
     used: bool                         # model cited it this turn
@@ -552,7 +553,9 @@ class Ranker(Protocol):
     ) -> list[RecalledBelief]: ...
 
 class EpisodeSearch(Protocol):
-    async def search(self, query: EpisodeQuery) -> list[EventEnvelope]: ...
+    async def search(
+        self, query: EpisodeQuery
+    ) -> list[EventEnvelope]: ...
 
 class TraceStore(Protocol):
     async def record(self, trace: RecallTrace) -> None: ...

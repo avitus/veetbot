@@ -88,7 +88,7 @@ run per consolidation; stage 8 is background maintenance.
 episodic log ─▶ 1 trigger ─▶ 2 segment & select ─▶ 3 extract candidates
      ▲                                                     │
      │                                                     ▼
- 8 decay / re-derive ◀─ 7 commit ◀─ 6 gate ◀─ 5 resolve ◀─ 4 filter (salience)
+ 8 decay / re-derive ◀─ 7 commit ◀─ 6 gate ◀─ 5 resolve ◀─ 4 filter
 ```
 
 ### 1. Trigger — when consolidation runs
@@ -292,16 +292,18 @@ Extends the Milestone 9 `MemoryRecord`:
 
 ```python
 class MemoryRecord(BaseModel):
-    # ... existing Milestone 9 fields (id, tenant_id, principal_id, scope,
+    # ... existing Milestone 9 fields (id, tenant_id, principal_id,
+    #     scope,
     #     subject, statement, source_event_ids, confidence, sensitivity,
     #     valid_from, expires_at, status) ...
     belief_type: str
     polarity: str                       # "assert" | "retract"
     portability: str                    # portable | contextual | local
-    origin_scopes: list[str]            # every scope that corroborated it
+    origin_scopes: list[str]            # every scope corroborating it
     corroboration_count: int = 1
     last_reinforced_at: datetime
-    valid_to: datetime | None           # bi-temporal: when it stopped holding
+    # bi-temporal: when the belief stopped holding
+    valid_to: datetime | None
     superseded_by: UUID | None
     # `status` (from Milestone 9) carries the lifecycle state:
     #   candidate | provisional | active | superseded | expired
@@ -313,10 +315,13 @@ class BeliefRejection(BaseModel):
     id: UUID
     tenant_id: str
     principal_id: str
-    belief_id: UUID                     # as rejected; ids change on re-derive
-    kind: str                           # untrue | changed | not_here | unspecified
-    subject: str                        # content keys survive re-derivation
-    statement: str | None               # None once the user asked for deletion
+    belief_id: UUID                     # as rejected; ids may change
+    # kind: untrue | changed | not_here | unspecified
+    kind: str
+    # content keys survive re-derivation
+    subject: str
+    # statement is None once the user has asked for deletion
+    statement: str | None
     statement_sha256: str               # the tombstone key
     belief_type: str
     scope: str                          # where the rejection was made
@@ -328,7 +333,8 @@ class ConsolidationRun(BaseModel):
     id: UUID
     tenant_id: str
     principal_id: str
-    trigger: str                        # session | explicit | scheduled | ...
+    # trigger: session | explicit | scheduled | ...
+    trigger: str
     scope: str
     watermark_before: int
     watermark_after: int
