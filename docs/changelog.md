@@ -4,6 +4,56 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-24 — Event log and persistence spec
+
+- Added `docs/plan/event-log-and-persistence.md`, the persistence design for
+  Sections 6.8, 6.9, 12.2, 14, and 15 and Milestone 2: the append transaction,
+  projections, checkpoints, and the run queue. Recorded as ADR-0003 (amended for
+  payload versioning) and ADR-0004.
+- Stated the layer's contract as **observation, not durability** — a committed
+  event no projection ever observed is, to every consumer, an event that did not
+  happen — and wrote the hard gates against that definition.
+- Identified a **silent missing-write hazard**: two appends take sequences 5 and
+  6, the transaction holding 6 commits first, and a projection polling in that
+  window advances past 5 and never sees it. The log stays consistent, `UNIQUE` is
+  satisfied, and every rebuild reproduces the loss identically.
+- Resolved it by establishing that Section 27.5's **one active run per session is
+  load-bearing for projection correctness**, not only for contention, enforced by
+  a partial unique index, with snapshot-aware watermarking
+  (`pg_snapshot_xmin`) specified as the companion change required if that default
+  is ever relaxed.
+- Made **sequence gaps legal**: a rolled-back append burns its number, so
+  consumers read after a watermark and never wait for a specific next sequence.
+- Established `LISTEN`/`NOTIFY` as a **latency hint, never a delivery
+  guarantee** — it is transactional, so no outbox is needed, and at-most-once, so
+  every consumer polls from a watermark first.
+- Added `events.payload_schema_version`, required by Section 6.8 and Milestone 2
+  but absent from Section 15, together with **pure, total upcasters** that may
+  never invent a value, and made an unknown higher version a hard error.
+- Gave projections four properties — deterministic, watermarked, rebuildable,
+  never authoritative — with state and cursor written in one transaction, and
+  gave **derived events deterministic derivation keys** so rebuilds converge
+  instead of multiplying their own output.
+- Made checkpoints **deltas against periodic full snapshots** with the
+  conversation stored as event references, and made *losing checkpoints costs
+  time, not information* an executable test.
+- Added claim **priority classes** (interactive, async, maintenance) with
+  capacity reserved per class rather than aging, which would make latency depend
+  on queue history.
+- Made every worker write **fenced by `lease_epoch`**, since lease expiry is a
+  guess: a zero-row update means stop, not retry, and `heartbeat` returns `False`
+  when fenced rather than raising.
+- Specified queue-level retry that the plan lacked entirely — only lease expiry
+  requeues, `max_attempts` is 3, `runs.failure` is the dead letter — and added
+  the `idempotency_keys` table that Section 16 and Milestone 2 both assume.
+- Added seven hard gates and five tracked metrics to Milestone 2, four ports
+  (`CheckpointRepository`, `ProjectionCursor`, `Projection`, `RunQueue`), and
+  four event types.
+- Created `docs/status/questions-for-review.md` recording every decision taken
+  without review during the plan-completion run, with its reasoning, alternative,
+  and reversal cost.
+- No product implementation was performed.
+
 ## 2026-07-24 — Context engine spec
 
 - Added `docs/plan/context-engine.md`, the assembly design for Section 11 and

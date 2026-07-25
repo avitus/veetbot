@@ -1555,6 +1555,8 @@ Use exponential backoff with jitter. Keep retry decisions in application code, n
 
 ## 14. Durable worker and PostgreSQL queue
 
+The detailed design - the append transaction and why sequence gaps are legal while missing writes are not, projections with watermarks and a rebuild gate, upcasters for payload evolution, delta checkpoints, the claim query with priority classes and reserved capacity, and the `lease_epoch` fencing that makes it safe for lease expiry to guess wrong - is specified in [event-log-and-persistence.md](event-log-and-persistence.md), ADR-0003, and ADR-0004. That document expands Sections 6.8, 6.9, 12.2, 14, and 15 and Milestone 2; it does not replace the requirements below.
+
 ### 14.1 Worker model
 
 Run the API and worker as separate processes, even during local development.
@@ -1587,6 +1589,8 @@ Add a resilience integration test that terminates a worker process after a check
 ## 15. Database schema
 
 Create Alembic migrations for at least these tables.
+
+[event-log-and-persistence.md](event-log-and-persistence.md) adds columns and tables required by Section 6.8, Section 16, Section 27.5, and the Milestone 2 acceptance criteria that are not yet reflected below: `events.payload_schema_version`, the `runs` columns `priority`, `attempts`, `scheduled_for`, and `lease_epoch` with a partial unique index enforcing one non-terminal run per session, and the `idempotency_keys`, `projection_watermarks`, and `derived_event_keys` tables. All are additive to the tables specified here.
 
 ### `agents`
 
@@ -2385,6 +2389,8 @@ run completes
 - Duplicate event sequence numbers are impossible.
 - Idempotent tool calls are not executed twice after recovery.
 - Database transactions are never held across provider or tool I/O.
+
+The persistence design for this milestone - the observation-not-durability contract, watermarked projections and the build sequence that reaches them, upcaster totality, checkpoint dispensability, and exactly-once execution under fencing - is specified in [event-log-and-persistence.md](event-log-and-persistence.md), ADR-0003, and ADR-0004, which add seven hard gates and five tracked metrics to the criteria above.
 
 ### Milestone 3: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
 
