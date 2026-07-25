@@ -617,27 +617,29 @@ signal that tells an operator a deployment is chronically over-subscribed before
 | **Epoch churn** | Routing or policy changes rotate the prefix repeatedly | Epochs are explicit, logged, and counted; epochs-per-session is a tracked metric with target 1.0 |
 | **Reasoning-item leakage** | An opaque provider payload is summarized, logged, or carried across a run | Excluded from compaction input by type; dropped at run boundaries; never rendered into a summary (ADR-0007) |
 
-## Evaluation
+## Hard gates
 
-Five hard gates on Milestone 7, and four tracked metrics.
+Five hard gates. Four are on Milestone 7 with the rest of the engine; the
+first is on Milestone 1, because ADR-0024 places deterministic assembly in
+the vertical slice and a builder whose output is not reproducible cannot be
+built incrementally afterwards.
 
-**Hard gates.**
+1. **Determinism.** `build()` invoked twice on the same checkpoint produces
+   byte-identical output. Property-tested across generated checkpoints. **M1.**
+2. **Prefix stability.** The scripted fifty-turn session — clock crossing
+   midnight, a tool revoked, memory written and corrected, a forced compaction —
+   yields exactly one distinct `prefix_sha256`. **M7.**
+3. **Budget conformance.** No assembled request exceeds the model's window; the
+   output reserve is intact on every request; a synthetic overflow yields in the
+   specified order and no more than necessary. **M7.**
+4. **Tool-pair integrity.** No assembled request, under any yield path, contains
+   an unpaired tool call or tool result. **M7.**
+5. **Trust preservation.** A canary string placed in `EXTERNAL_UNTRUSTED` tool
+   output never appears outside an envelope, and never appears in a compaction
+   summary. Envelope-closing attempts in tool output do not escape the
+   envelope. **M7.**
 
-- **Determinism.** `build()` invoked twice on the same checkpoint produces
-  byte-identical output. Property-tested across generated checkpoints.
-- **Prefix stability.** The scripted fifty-turn session — clock crossing midnight,
-  a tool revoked, memory written and corrected, a forced compaction — yields exactly
-  one distinct `prefix_sha256`.
-- **Budget conformance.** No assembled request exceeds the model's window; the
-  output reserve is intact on every request; a synthetic overflow yields in the
-  specified order and no more than necessary.
-- **Tool-pair integrity.** No assembled request, under any yield path, contains an
-  unpaired tool call or tool result.
-- **Trust preservation.** A canary string placed in `EXTERNAL_UNTRUSTED` tool output
-  never appears outside an envelope, and never appears in a compaction summary.
-  Envelope-closing attempts in tool output do not escape the envelope.
-
-**Tracked metrics.**
+## Tracked metrics
 
 - **Cached prefix ratio** — prefix tokens served from cache after the first request
   of a session. Below roughly 90% means the invariant is leaking somewhere the hash

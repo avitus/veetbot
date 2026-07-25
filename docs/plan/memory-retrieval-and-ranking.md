@@ -677,42 +677,50 @@ write-path handling is specified in
 | Trace becomes a disclosure path | the view is filtered by the minimum of the recall surface's ceiling and the viewing surface's; blocked items are counted, never shown |
 | A rejected belief returns after re-derivation | rejections are durable events that re-derivation replays, not a delete applied to a projection |
 
-## Evaluation
+## Hard gates
 
 Retrieval evaluation shares the harness with formation (Section 20), and building it
 is what finally makes formation measurable end to end — formation quality cannot be
 observed until beliefs can be read back.
 
+1. **Currency** — after a preference change, retrieval must return the new belief
+   and never the superseded one. **M9.**
+2. **Historical correctness** — an `as_of` query returns what was believed
+   then. **M9.**
+3. **Injection resistance** — a poisoned belief renders `[BLOCKED]` and does not
+   alter behavior. **M9.**
+4. **Scope isolation** — zero cross-tenant and cross-principal results. A hard
+   gate, not a metric to improve. **M9.**
+5. **Trace faithfulness** — for sampled turns, the beliefs listed in the trace
+   must reproduce the rendered block that the recorded hash covers. A hard gate,
+   not a metric to improve. **M9.**
+6. **View ceiling** — no belief above `min(recall ceiling, viewing ceiling)` may
+   ever appear in a view. A hard gate, not a metric to improve. **M9.**
+7. **Correction durability** — a rejected belief does not return, including across
+   a consolidation-policy upgrade and a full re-derivation. **M9.**
+8. **Cache preservation** — measured cached-token ratio must not regress when
+   memory is enabled. This is the invariant's regression test. **M9.**
+9. **No triple regression** — retrieval improves target eval cases **without**
+   increasing policy failures, without regressing cache utilization, and without
+   raising noise ratio. **M9.**
+
+Gates 5 and 6 are one sentence in the original list, split because that sentence
+says *"Both are hard gates"* and the registry needs one identifier per gate.
+
+## Tracked metrics
+
 - **Consequential recall@k** — of the facts a later task needs, how many are retrieved
   within budget.
 - **Noise ratio** — retrieved-and-irrelevant over retrieved. The counterweight to
   recall; both are reported, never recall alone.
-- **Currency** — after a preference change, retrieval must return the new belief and
-  never the superseded one.
-- **Historical correctness** — an `as_of` query returns what was believed then.
-- **Injection resistance** — a poisoned belief renders `[BLOCKED]` and does not alter
-  behavior.
-- **Scope isolation** — zero cross-tenant and cross-principal results. A hard gate,
-  not a metric to improve.
-- **Trace faithfulness** — for sampled turns, the beliefs listed in the trace must
-  reproduce the rendered block that the recorded hash covers, and no belief above
-  `min(recall ceiling, viewing ceiling)` may ever appear in a view. Both are hard
-  gates, not metrics to improve.
-- **Correction durability** — a rejected belief does not return, including across a
-  consolidation-policy upgrade and a full re-derivation.
 - **Transfer precision and transfer lift** — the paired metrics for carrying beliefs
   across projects. Lift: tasks in a new project that succeed because something learned
   elsewhere was recalled. Precision: carried beliefs that were correct in the new
   context, and attributed when they were not certain. Reported together, since raising
   either alone is trivial and worthless.
-- **Cache preservation** — measured cached-token ratio must not regress when memory is
-  enabled. This is the invariant's regression test.
 - **Cost and latency** — retrieval tokens per turn and p95 recall latency within budget.
 - **End-to-end lift** — LOCOMO-style multi-session scenarios, the metric that justifies
   the whole layer.
-
-Gate: retrieval improves target eval cases **without** increasing policy failures,
-without regressing cache utilization, and without raising noise ratio.
 
 ## Build sequence (incremental, each gated by evals)
 

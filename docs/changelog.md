@@ -4,6 +4,58 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-25 — Gate milestones and the milestone map
+
+- Added `docs/plan/milestone-map.md`, which decides when each stated
+  requirement must hold and states no requirement of its own. Recorded as
+  ADR-0027. Registry rule 1's docs check is a Milestone 0 deliverable and it
+  could not be written against the corpus: the gate section was spelled three
+  ways, gates were declared two ways, `milestone` was absent from nine of the
+  ten declaring specs, and three gates were declared twice.
+- Assigned a milestone to every declared gate. **Eighty-nine** across ten
+  specs, one more the engineering plan declares, and seven the map declares
+  over the corpus: ninety-seven declarations, **ninety-four registry entries**
+  once the three aliases are subtracted. The rule that produced every
+  assignment is stated so the next gate added has an answer before the
+  argument starts — *a gate lands at the milestone that builds the last thing
+  it observes* — with the deliberate exception that a structural check
+  vacuously true of an empty repository is registered at Milestone 0.
+- Unified the declaration form across ten specs: one heading (`## Hard
+  gates`), one form (numbered items with a bolded lead), one suffix
+  (`**M<n>.**`). Five headings renamed, four bullet lists converted, and
+  seventy-five milestone tokens added. No sentence stating a requirement
+  changed.
+- Separated gates from tracked metrics. Nine bullets carrying eleven metrics
+  moved into new `## Tracked metrics` siblings in five specs, leaving fourteen
+  gates in the two lists that had interleaved them. The split was made on the
+  specs' own words, not on a judgment about which items sounded gate-like.
+- Gave each of the three double-declared gates one owner and an explicit
+  alias. The import-boundary walk is owned by the engineering plan's Milestone
+  0 — the one registry entry whose owner is not a detailed-design spec —
+  and transaction hygiene and checkpoint dispensability are owned by
+  `event-log-and-persistence.md`, with `tool-system.md` and `runtime-loop.md`
+  restating them.
+- Resolved three placements the specs contradicted each other on: the
+  idempotency port is Milestone 1 and its unique index is Milestone 2, with
+  the in-memory adapter declaring the gap rather than simulating a race;
+  Milestone 1 cancellation is a lazily evaluated deadline plus a `SIGINT`
+  handler, with `CancelReason` split by dependency across Milestones 1, 2, and
+  5; and the context engine's determinism gate moves to Milestone 1, where
+  ADR-0024 had already scheduled its subject.
+- Added `optional` to the registry for exactly one gate — the model gateway's
+  live vendor smoke test — bounded in writing to external credentials.
+- Corrected the evaluation harness's own gate table. Its counts covered six
+  specs when six existed; it gains rows for the engineering plan and the map,
+  and its memory-formation count of seven becomes five. **More than half** of
+  the declared gates are not case gates.
+- Two findings reported rather than fixed: **Milestones 6 and 8 add no
+  gates**, and **thirty-eight of ninety-four gates are green before Milestone
+  2**, eleven of them against a repository with no agent in it. The second is
+  the argument for building the in-memory tier as real adapters.
+- Wired the cross-references: Section 20's stale count corrected, and new
+  paragraphs under Section 21, Milestone 0, and Milestone 1. No deliverable or
+  acceptance criterion in the plan changed.
+
 ## 2026-07-25 — The builtin tools
 
 - Added `docs/plan/builtin-tools.md`, the design for the two tools Milestone 1

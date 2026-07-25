@@ -597,35 +597,39 @@ projection.rebuild.completed
 | Non-idempotent double write | A tool left `RUNNING` by a crash is retried | Idempotency class decides; ambiguous cases become `UNCERTAIN` and stop |
 | Watermark/state divergence | Projection state committed separately from its cursor | Both written in one transaction |
 
-## Evaluation
+## Hard gates
 
-**Hard gates on Milestone 2.**
+Milestone 2 does not pass until every one of these holds.
 
-- **Sequence integrity.** A fuzz test appending concurrently across sessions,
-  with injected rollbacks, produces no duplicate `(session_id, sequence)` and no
-  event that any projection failed to observe.
-- **Projection determinism.** For every projection, rebuild-from-zero over a
-  recorded log equals the incrementally built state, field for field, on the
-  same `builder_version`.
-- **Upcaster totality.** Every recorded historical fixture, at every version,
-  decodes to the current shape. An unknown higher version raises.
-- **Exactly-once execution.** Two workers racing on one run: one executes, the
-  other is fenced and writes nothing. Asserted with the sweeper's reclaim
-  interval driven to zero.
-- **Crash recovery.** Terminate a worker after a checkpoint; the run resumes and
-  reaches the same terminal state. Section 14.2 already requires this; it is
-  restated here because the delta-chain reconstruction is new and it is what the
-  test now exercises.
-- **Checkpoint dispensability.** Delete a run's non-terminal checkpoints,
-  resume, and reach the same terminal state.
-- **Transaction hygiene.** A static check plus a runtime assertion: no
-  transaction is open across an `await` that performs provider, tool, or sandbox
-  I/O.
+1. **Sequence integrity.** A fuzz test appending concurrently across sessions,
+   with injected rollbacks, produces no duplicate `(session_id, sequence)` and no
+   event that any projection failed to observe. **M2.**
+2. **Projection determinism.** For every projection, rebuild-from-zero over a
+   recorded log equals the incrementally built state, field for field, on the
+   same `builder_version`. **M2.**
+3. **Upcaster totality.** Every recorded historical fixture, at every version,
+   decodes to the current shape. An unknown higher version raises. **M2.**
+4. **Exactly-once execution.** Two workers racing on one run: one executes, the
+   other is fenced and writes nothing. Asserted with the sweeper's reclaim
+   interval driven to zero. **M2.**
+5. **Crash recovery.** Terminate a worker after a checkpoint; the run resumes and
+   reaches the same terminal state. Section 14.2 already requires this; it is
+   restated here because the delta-chain reconstruction is new and it is what the
+   test now exercises. **M2.**
+6. **Checkpoint dispensability.** Delete a run's non-terminal checkpoints,
+   resume, and reach the same terminal state. Registered as
+   `gate.event.checkpoint_dispensable`, which `runtime-loop.md` #9 restates:
+   this document owns it. **M2.**
+7. **Transaction hygiene.** A static check plus a runtime assertion: no
+   transaction is open across an `await` that performs provider, tool, or sandbox
+   I/O. Registered as `gate.structure.txn_hygiene`, which `runtime-loop.md` #6
+   restates: this document owns it. **M2.**
 
-**Tracked metrics.** Claim latency p99 by priority class, lease reclaim rate
-(a rise means leases are too short or workers are stalling), projection lag in
-sequences and seconds, checkpoint bytes per run, and rebuild duration per
-projection.
+## Tracked metrics
+
+Claim latency p99 by priority class, lease reclaim rate (a rise means leases are
+too short or workers are stalling), projection lag in sequences and seconds,
+checkpoint bytes per run, and rebuild duration per projection.
 
 ## Build sequence
 

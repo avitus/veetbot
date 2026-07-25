@@ -2029,3 +2029,199 @@ decision is exercised.
 
 **Reversal cost:** cheap. A classification field is one table cell and
 one line of a spec.
+
+## Milestone map (ADR-0027)
+
+### One heading, one form, and one `**M<n>.**` suffix across ten specs
+
+**Decided:** every declaring spec spells the section `## Hard gates`,
+declares each gate as a numbered item with a bolded lead, and ends each
+item with a milestone token the docs check reads. Five headings were
+renamed, four bullet lists became numbered lists, and seventy-five
+tokens were added.
+
+**Why:** registry rule 1's docs check is a Milestone 0 deliverable and
+it could not be written against the corpus. The section was spelled
+three ways, declared two ways, and nine of the ten specs stated no
+milestone at all. Teaching the check all three headings and both forms
+was rejected: it makes the check the place where the inconsistency is
+preserved rather than removed, and a parser with three branches is one
+nobody trusts to fail correctly.
+
+**Cost:** ten files edited mechanically. No sentence stating a
+requirement changed, which was checked sentence by sentence rather than
+asserted.
+
+**Reversal cost:** cheap but pointless. Reverting the form means
+rewriting the check to be worse.
+
+### Nine bullets carrying eleven metrics moved out of two gate lists
+
+**Decided:** tracked metrics live in a sibling `## Tracked metrics`
+section. Five specs gained one. The two specs that interleaved gates
+with metrics in a single list keep fourteen gates and lose nine
+bullets.
+
+**Why:** a count over an interleaved list is undefined until somebody
+reads every bullet and decides, which is exactly what rule 1's check
+cannot do. The separation was made on the specs' own words — *"A hard
+gate"*, *"The primary metric"*, *"not a metric to improve"* — rather
+than on my judgment about which items sounded gate-like.
+
+**Reversal cost:** cheap. The bullets moved intact.
+
+### The harness's memory-formation count of seven becomes five
+
+**Decided:** five gates, not seven. Four of that spec's eight bullets
+are the metrics the spec itself calls metrics.
+
+**Why:** the harness's table was written when six specs existed and
+counted a bullet list nobody had yet had to parse. Correcting the count
+was unavoidable once the list was split, because the table is now
+asserted against the registry rather than maintained by hand.
+
+**Reversal cost:** none. It is a derived number.
+
+### `optional` is added to the registry for exactly one gate
+
+**Decided:** a bounded `optional` field, used by the model gateway's
+live vendor smoke test, which may report skipped when its named
+precondition — a credential — is absent.
+
+**Why:** the registry forbids a skip, and this gate cannot run in a
+fork without vendor keys. The alternatives were deleting a gate that
+catches real provider drift or letting a skip pass silently, which is
+the thing the registry exists to prevent. Use is bounded to external
+credentials in writing.
+
+**Question for you:** a second use is a design smell I would rather
+argue in review than legislate now. If you want the field forbidden
+outright, the gate becomes a scheduled job outside the gate set.
+
+**Reversal cost:** moderate. Removing the field means finding another
+home for the gate.
+
+### Milestone 1 cancellation is a deadline plus a `SIGINT` handler
+
+**Decided:** `CancellationToken` is buildable at Milestone 1 as a
+lazily evaluated deadline plus a process signal handler, and
+`CancelReason` splits by dependency — `DEADLINE` at Milestone 1,
+`FENCED` at Milestone 2, `REQUESTED` by poll at Milestone 2 and by
+endpoint at Milestone 5.
+
+**Why:** the runtime loop assigns the token and three observation
+points to Milestone 1 while every writer it names lives in a supervisor
+task Milestone 2 builds. Deferring all cancellation to Milestone 5 —
+Section 21's reading — leaves three observation points unreachable for
+four milestones, and the code that must observe them is written at
+Milestone 1 either way. A deadline and a signal need only `Clock` and
+the process.
+
+**Question for you:** this is the one placement where I overrode a
+milestone the plan states rather than one it leaves silent. It is
+recorded as an open question in the map for that reason.
+
+**Reversal cost:** cheap. Deleting the two writers leaves the
+observation points dead but correct.
+
+### The import-boundary walk is owned by this plan, not by a spec
+
+**Decided:** `gate.structure.import_boundary` has one owner, the
+engineering plan's Milestone 0, and `tool-system.md` keeps its sentence
+as a declared alias. Two other gates were declared twice and are owned
+by `event-log-and-persistence.md`, with `runtime-loop.md` restating
+them.
+
+**Why:** a count check that does not know about a double declaration
+double-counts, and an implementer who does not know writes the same
+assertion twice under two names. The non-owning spec keeps its sentence
+because a reader of the tool system should still learn that the import
+boundary is checked; what changed is that the sentence now says it is
+the same gate. Ownership follows declaration, which put one registry
+entry outside the detailed-design specs.
+
+**Reversal cost:** cheap. Ownership is one column.
+
+### The map declares seven gates of its own, raising the registry to 94
+
+**Decided:** the milestone map's seven checks over the corpus are
+registry entries in the `harness` area — token presence, map bijection,
+alias arithmetic, anchor resolution, identifier grammar, a derived
+census, and milestone ordering. Six are Milestone 0 and one is
+Milestone 1.
+
+**Why:** I found this by running the map's own gate 2 against the map:
+seven gates were stated under its hard-gates heading and absent from
+its census, its gate table, and the harness's kind table, so the
+document failed its own bijection check. Registering them is the only
+resolution that does not weaken a gate. They take the `harness` area
+because the harness owns the registry and the docs check that reads it;
+the map declares them because each is a check over the scheduling
+record, which is what the map is.
+
+**Cost:** the registry goes from eighty-seven entries to ninety-four
+and Milestone 0 goes from five gates to eleven. Every derived count in
+two documents was recomputed.
+
+**Reversal cost:** moderate. Unregistering them reopens the bijection
+failure.
+
+### Tool-system build step 3 splits at the unique index
+
+**Decided:** the idempotency port, its semantics, and its contract
+suite are Milestone 1; the unique index that makes deduplication
+correct under concurrency is Milestone 2. The in-memory adapter
+declares the gap against the capability table rather than simulating
+it.
+
+**Why:** the tool system places persistence at step 3 and calls steps 1
+through 5 Milestone 1, while the plan forbids PostgreSQL persistence
+until the in-memory slice is complete. This is ADR-0024's
+repository-versus-storage separation applied a second time, and its
+reason for rejecting an in-memory `RunQueue` applies unchanged: a
+simulation of a unique index passes its own test and teaches the wrong
+lesson about what the port guarantees.
+
+**Reversal cost:** cheap. The port does not change; one gate moves.
+
+### Context-engine gate 1 moves from Milestone 7 to Milestone 1
+
+**Decided:** the deterministic-assembly gate and build-sequence step 1
+are Milestone 1. The other four gates stay at Milestone 7.
+
+**Why:** the spec states Milestone 7 once for the whole section, and
+ADR-0024 decision 10 had already scheduled that gate's subject — the
+minimal context builder and `prefix_sha256` — into the vertical slice.
+This is the evidence that a section-level milestone is not good enough,
+and it is why the form is now per-gate.
+
+**Reversal cost:** none. The gate follows the code that was already
+scheduled.
+
+### Milestones 6 and 8 add no gates, reported rather than fixed
+
+**Decided:** report the shape. No gates were invented to fill the two
+empty columns.
+
+**Why:** every invariant those two milestones strengthen is already
+registered against an earlier milestone, so the columns are empty for a
+defensible reason rather than an oversight. Inventing a gate to fill a
+column produces a check written to exist rather than to fail.
+
+**Question for you:** this is worth a look when you are back. If
+isolated execution and skills genuinely warrant new invariants, they
+should be stated in those specs and land in the registry from there,
+not be back-filled from the map.
+
+**Reversal cost:** none. Adding a gate later is the normal path.
+
+### Thirty-eight of ninety-four gates are green before Milestone 2
+
+**Decided:** reported as a finding, not acted on.
+
+**Why:** it was not knowable before the gates were counted, and it is
+the strongest argument in the corpus for building the in-memory tier as
+real adapters rather than as test doubles. Eleven of the thirty-eight
+hold against a repository with no agent in it.
+
+**Reversal cost:** not applicable; it is an observation.

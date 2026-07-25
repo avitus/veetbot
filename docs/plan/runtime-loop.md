@@ -1567,7 +1567,10 @@ registry with identifiers, like every other gate.
    than after the attempt. **M1.**
 6. **No transaction across external I/O.** No `await` on a call that
    reaches a provider, tool, or sandbox adapter occurs inside an open
-   session context. Asserted by AST walk, not by convention. **M2.**
+   session context. Asserted by AST walk, not by convention. Registered
+   once as `gate.structure.txn_hygiene`, owned by
+   `event-log-and-persistence.md` #7: this is the same gate, not a second
+   one. **M2.**
 7. **The lease is released exactly once.** In every case in the suite,
    including the crash and fence cases, the count of `release` calls per run
    execution is at most one, and a suspended run's lease is released before
@@ -1577,7 +1580,10 @@ registry with identifiers, like every other gate.
    than the single `run.fenced` append. **M2.**
 9. **Checkpoint dispensability.** Deleting all of a run's non-terminal
    checkpoints and resuming reaches the same terminal state, including for a
-   run whose version 1 was deleted. **M2.**
+   run whose version 1 was deleted. Registered once as
+   `gate.event.checkpoint_dispensable`, owned by
+   `event-log-and-persistence.md` #6: this is the same gate, not a second
+   one. **M2.**
 10. **Resume is idempotent on the pipeline boundary.** Resuming a run whose
     checkpoint carries `pending_tool_calls` re-enters the pipeline at step 6
     and produces no duplicate `tool.call.proposed` event and no second

@@ -35,3 +35,4 @@ implementation without one.
 - [ADR-0024 — The composition root and the configuration layers](0024-bootstrap-and-composition.md)
 - [ADR-0025 — The development toolchain and the meaning of `make check`](0025-development-toolchain.md)
 - [ADR-0026 — The builtin tool roster and the two Milestone 1 tools](0026-builtin-tools.md)
+- [ADR-0027 — Gate milestones, the declaration form, and the milestone map](0027-milestone-map.md)

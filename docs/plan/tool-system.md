@@ -1531,26 +1531,34 @@ gets a structured result it can act on rather than an exception.
 
 These fail the build.
 
-1. Every registered `ToolSpec` passes registration validation: name grammar,
-   reserved domains, schema dialect, no remote `$ref`, `maximum_output_bytes`
-   under the global ceiling, `output_trust` present.
-2. The forced-trust table holds: no tool with `source` in `{mcp, device,
-   sandbox}` has `output_trust` above `EXTERNAL_UNTRUSTED` after registration.
-3. Every `NON_IDEMPOTENT` and `CONDITIONALLY_IDEMPOTENT` builtin sets the
-   effect watermark before its first outbound operation.
-4. The outcome object serializes to exactly six fields for all four statuses,
-   and `message` matches the checked-in table for every `reason_code`.
-5. No external text appears in `message` for any failure path, asserted with a
-   fake MCP server that returns a hostile error string.
-6. The import-boundary walk passes.
-7. A recorded crash at each of the fourteen pipeline steps recovers to the
-   state the recovery table specifies, asserted as a resilience test.
-8. Two concurrent submissions of the same call produce one execution.
-9. Normalization is stable: a property test asserts the canonical form and
-   hash are invariant under key reordering and Unicode recomposition.
-10. `mcp.{server}.{name}` collides with no builtin domain, asserted by a test
-    that attempts to register a builtin in a reserved domain and expects a
-    startup error.
+1.  Every registered `ToolSpec` passes registration validation: name
+    grammar, reserved domains, schema dialect, no remote `$ref`,
+    `maximum_output_bytes` under the global ceiling, `output_trust`
+    present. **M1.**
+2.  The forced-trust table holds: no tool with `source` in `{mcp, device,
+    sandbox}` has `output_trust` above `EXTERNAL_UNTRUSTED` after
+    registration. **M1.**
+3.  Every `NON_IDEMPOTENT` and `CONDITIONALLY_IDEMPOTENT` builtin sets the
+    effect watermark before its first outbound operation. **M1.**
+4.  The outcome object serializes to exactly six fields for all four
+    statuses, and `message` matches the checked-in table for every
+    `reason_code`. **M1.**
+5.  No external text appears in `message` for any failure path, asserted
+    with a fake MCP server that returns a hostile error string. **M1.**
+6.  The import-boundary walk passes. Registered once as
+    `gate.structure.import_boundary`, owned by the engineering plan's
+    Milestone 0: this is the same gate, not a second one. **M0.**
+7.  A recorded crash at each of the fourteen pipeline steps recovers to
+    the state the recovery table specifies, asserted as a resilience test.
+    **M2.**
+8.  Two concurrent submissions of the same call produce one execution.
+    **M2.**
+9.  Normalization is stable: a property test asserts the canonical form
+    and hash are invariant under key reordering and Unicode recomposition.
+    **M1.**
+10. `mcp.{server}.{name}` collides with no builtin domain, asserted by a
+    test that attempts to register a builtin in a reserved domain and
+    expects a startup error. **M1.**
 
 ## Build order
 

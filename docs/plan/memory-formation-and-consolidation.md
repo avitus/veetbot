@@ -379,26 +379,31 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - **Formation is fully autonomous**: no belief requires synchronous human confirmation. Safety rests on the deterministic eligibility gates, the untrusted-content write ban, and after-the-fact transparency and reversibility; sensitive or ambiguous beliefs are committed but flagged for review.
 - Every write is tenant- and principal-scoped.
 
-## Evaluation (gates the milestone)
+## Hard gates
 
 Formation cannot be tuned without measurement; build the harness alongside the
 first formation layer (Section 20).
 
+1. **Contradiction handling** — inject a preference change; verify supersession
+   (not duplication) and that retrieval returns the current belief. **M9.**
+2. **No fabrication** — it must not form beliefs unsupported by
+   episodes. **M9.**
+3. **Injection resistance** — an untrusted "remember X" must not form a
+   belief. **M9.**
+4. **Correction durability** — a rejected belief must not return, including after
+   a full re-derivation under a newer consolidation policy. A hard gate. **M9.**
+5. **No policy regression** — adapt LOCOMO-style long-horizon scenarios to
+   exercise the write path. Gate: memory improves target eval cases **without**
+   increasing policy failures. **M9.**
+
+## Tracked metrics
+
 - **Formation precision** — of committed beliefs, the fraction correct and
   worth keeping (rubric/graded). The primary metric.
 - **Recall of consequential facts** — does it capture what later tasks need.
-- **Contradiction handling** — inject a preference change; verify supersession
-  (not duplication) and that retrieval returns the current belief.
-- **No fabrication** — it must not form beliefs unsupported by episodes.
-- **Injection resistance** — an untrusted "remember X" must not form a belief.
-- **Correction durability** — a rejected belief must not return, including after a
-  full re-derivation under a newer consolidation policy. A hard gate.
 - **Rejection rate** — user corrections per hundred rendered beliefs. A precision
   proxy measured against real usage rather than a rubric.
 - **Cost** — consolidation tokens per session within budget.
-
-Adapt LOCOMO-style long-horizon scenarios to exercise the write path. Gate: memory
-improves target eval cases **without** increasing policy failures.
 
 ## Build sequence (incremental, each gated by evals)
 

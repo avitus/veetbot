@@ -849,40 +849,42 @@ rule that fired.
 | Tool spec reclassified after a run | Audit shows the wrong classification | Classification denormalized at decision time |
 | Cross-tenant approval probed | Existence disclosed | Not-found, never forbidden |
 
-## Evaluation
+## Hard gates
 
 Section 20's harness gates Milestone 4 on these. Each is a hard gate: failing
 one blocks the milestone, not a warning.
 
 1. **Totality.** Every `SideEffectClass` value has exactly one rule in every
    loaded profile, and every Section 9.2 row maps to exactly one value. A
-   profile missing a rule fails to load rather than defaulting.
+   profile missing a rule fails to load rather than defaulting. **M4.**
 2. **Determinism.** The same `(action, principal, run, ruleset)` evaluated one
    thousand times returns byte-identical output including `reason_code` and
    `policy_version`. The evaluator's module imports nothing from
-   `infrastructure` and calls no clock.
+   `infrastructure` and calls no clock. **M4.**
 3. **Single gate.** Exactly one function transitions a tool invocation from
    `PROPOSED` to `AUTHORIZED`, asserted by an import-boundary test, and the
-   sandbox bridge and device channel both reach it.
+   sandbox bridge and device channel both reach it. **M4.**
 4. **Monotonicity.** Over the full cross product of deterministic and advisory
-   outputs, the combined rank is never below the deterministic rank.
+   outputs, the combined rank is never below the deterministic rank. **M4.**
 5. **Hardline immutability and precision.** The loaded set cannot be mutated
    after import; every rule blocks its target *and* permits its declared
-   `near_miss`.
+   `near_miss`. **M4.**
 6. **Revalidation.** Each of the four changes in the revalidation table
-   produces its stated consequence, including after a worker restart.
+   produces its stated consequence, including after a worker restart. **M4.**
 7. **Cross-tenant.** Get, list, and resolve against another tenant's approval
-   all return not-found.
+   all return not-found. **M4.**
 8. **No leakage.** The serialized denial result matches the field allowlist
-   exactly, for every `reason_code`.
+   exactly, for every `reason_code`. **M4.**
 9. **Idempotent resolution.** Two concurrent identical resolutions produce one
    state change and two successes; two concurrent differing resolutions produce
-   one state change and one conflict.
+   one state change and one conflict. **M4.**
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
-    an approval request in every case and an execution in none.
+    an approval request in every case and an execution in none. **M4.**
 
-Tracked metrics, extending Section 19's `approval_requests_total`:
+## Tracked metrics
+
+Extending Section 19's `approval_requests_total`:
 
 - Approval request rate by `side_effect`, and approval latency p50 and p95.
 - Expiry rate — a rising number means the expiry defaults are wrong or the

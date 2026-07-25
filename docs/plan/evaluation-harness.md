@@ -168,24 +168,39 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-The six written specs declare their gates in prose. Sorting them by kind is what
-tells an implementer which harness facility each one needs, and it is the first
-concrete deliverable of this document.
+Eleven specs and one engineering-plan section declare gates, and they declare
+them in prose. Sorting them by kind is what tells an implementer which harness
+facility each one needs, and it is the first concrete deliverable of this
+document.
 
-| Spec | Case | Property | Corpus | Structural | Total |
+The itemization is [milestone-map.md](milestone-map.md), which names every gate
+and assigns it a milestone; the table below is a count over that itemization and
+is asserted against the registry rather than maintained by hand. `Owned` is the
+registry entry count, which is lower than the declared count where a spec
+restates a gate another spec owns.
+
+| Spec | Case | Property | Corpus | Structural | Owned |
 | --- | --- | --- | --- | --- | --- |
-| Event log and persistence | 3 | 2 | 0 | 2 | 7 |
-| Policy and approvals | 6 | 2 | 1 | 1 | 10 |
-| Model gateway | 6 | 1 | 1 | 2 | 10 |
-| Tool system | 5 | 2 | 1 | 2 | 10 |
+| Runtime loop | 7 | 2 | 0 | 3 | 12 |
+| Tool system | 4 | 1 | 1 | 3 | 9 |
+| Builtin tools | 3 | 3 | 0 | 3 | 9 |
+| Model gateway | 8 | 0 | 0 | 2 | 10 |
+| Policy and approvals | 5 | 3 | 1 | 1 | 10 |
+| Event log and persistence | 4 | 2 | 0 | 1 | 7 |
 | Context engine | 2 | 2 | 1 | 0 | 5 |
-| Memory formation | 5 | 1 | 1 | 0 | 7 |
+| Memory formation | 3 | 0 | 2 | 0 | 5 |
+| Memory retrieval | 6 | 2 | 1 | 0 | 9 |
+| Evaluation harness | 2 | 0 | 0 | 8 | 10 |
+| Engineering plan | 0 | 0 | 0 | 1 | 1 |
+| Milestone map | 0 | 0 | 0 | 7 | 7 |
+| **Total** | **44** | **15** | **6** | **29** | **94** |
 
-The counts are the useful output, not the individual assignments: **roughly a
-third of the declared gates are not case gates**, and a harness that only runs
-cases would report a green build with a third of the plan's stated invariants
-unchecked. Two of the four kinds — property and structural — need no runtime at
-all and can be built in Milestone 0, before there is an agent to evaluate.
+The counts are the useful output, not the individual assignments: **more than
+half of the declared gates are not case gates**, and a harness that only runs
+cases would report a green build with half of the plan's stated invariants
+unchecked. Two of
+the four kinds — property and structural — need no runtime at all and can be
+built in Milestone 0, before there is an agent to evaluate.
 
 ### The gate registry
 
@@ -197,7 +212,7 @@ that implement them.
 - id: gate.policy.totality
   milestone: 4
   kind: property
-  spec: docs/plan/policy-and-approvals.md#evaluation
+  spec: docs/plan/policy-and-approvals.md#hard-gates
   statement: >
     Every SideEffectClass value has exactly one rule in every loaded
     profile, and every 9.2 row maps to exactly one value.
@@ -209,7 +224,7 @@ that implement them.
 - id: gate.policy.prompt_is_not_authorization
   milestone: 4
   kind: corpus
-  spec: docs/plan/policy-and-approvals.md#evaluation
+  spec: docs/plan/policy-and-approvals.md#hard-gates
   statement: >
     Across the injection corpus, untrusted content instructing a
     REQUIRE_APPROVAL action produces an approval request in every
@@ -1259,25 +1274,27 @@ These fail the build. They are the harness's own, and by construction they are
 the ones nothing else can check.
 
 1. Every hard gate declared in a spec's gate section appears in the registry
-   with a resolvable `check`, asserted by the docs check.
-2. No registered gate at or past its milestone reports skipped.
+   with a resolvable `check`, asserted by the docs check. **M0.**
+2. No registered gate at or past its milestone reports skipped. **M0.**
 3. Every port in `agent_core/ports/` has a contract module, and every
-   registered implementation of that port runs it.
+   registered implementation of that port runs it. **M0.**
 4. No module under `agent_core` outside `agent_core.evals` imports
-   `agent_core.evals`, asserted by the import-graph walk.
+   `agent_core.evals`, asserted by the import-graph walk. **M0.**
 5. No policy profile, principal, or tenant whose name begins with `eval.` or
    `tenant_eval` loads when the deployment mode is production, asserted by a
-   test that runs the production loader against the eval configuration root.
+   test that runs the production loader against the eval configuration
+   root. **M1.**
 6. Every case file validates against the case schema at collection, and every
    `model_fixture` resolves to a file that parses as the current
-   `FakeModelScript` shape.
+   `FakeModelScript` shape. **M1.**
 7. The deterministic suite completes with no network access, asserted by
-   running job 3 with egress blocked rather than by inspection.
-8. Every corpus gate has at least `minimum_members` members.
+   running job 3 with egress blocked rather than by inspection. **M1.**
+8. Every corpus gate has at least `minimum_members` members. **M4.**
 9. At least one case in the suite carries `source: trajectory`, from
-   Milestone 3 onward.
+   Milestone 3 onward. **M3.**
 10. Every `reason_code` produced by any case maps to exactly one message in
     the checked-in message table, and no message contains external text.
+    **M1.**
 
 Gate 7 is the mechanical form of the definition of done's eighteenth item.
 "Without requiring an API key" is usually implemented as "we did not configure
