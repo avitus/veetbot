@@ -80,7 +80,7 @@ rather than smoothed.
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
-| 8 | Skills and MCP integration | Ready with named gaps | 10 | MCP auth scheme; the mock server |
+| 8 | Skills and MCP integration | Ready with named gaps | 14 | MCP auth scheme |
 | 9 | Long-term memory and knowledge | Ready with named gaps | 14 | Knowledge documents |
 | 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | No acceptance criteria exist |
 
@@ -97,8 +97,11 @@ afterwards, which is the same correlation running the other way.
 Milestone 6's eleven arrived the same way, from
 [sandbox-isolation.md](sandbox-isolation.md), and took one of the two
 zeros in the table that belonged to a milestone doing real work.
-[skills.md](skills.md) took the other, giving Milestone 8 ten. Its
-six at Milestone 10 are a different case: they are the authoring
+[skills.md](skills.md) took the other, giving Milestone 8 ten; the
+four that bring it to fourteen came later, from the pass that noticed
+build step 9 of the tool system had nothing observing it, and they
+are the reason the mock-server gap this table first named is gone.
+Its six at Milestone 10 are a different case: they are the authoring
 loop's gates, registered against a milestone whose own acceptance
 criteria still do not exist, which is why that row's verdict is
 unchanged.

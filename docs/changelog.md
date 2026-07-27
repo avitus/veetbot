@@ -4,6 +4,34 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — The verdict table, re-derived
+
+- Corrected Milestone 8's row in the verdict table of
+  [readiness.md](plan/readiness.md) from ten registry entries to
+  fourteen, and its named gap from *"MCP auth scheme; the mock
+  server"* to *"MCP auth scheme"*. The four MCP gates added on the
+  previous pass registered at Milestone 8, and the column counts
+  registry entries whose `milestone` field names that milestone, so
+  the number was wrong the moment they were written. The Milestone 8
+  section four hundred lines below already said fourteen and named
+  only the auth gap — a live document disagreeing with itself.
+- Re-derived every row of that table from the registry rather than
+  reading it. The other ten agree. The totals reconcile three ways:
+  one hundred and thirty-eight registry entries from one hundred and
+  forty-one declarations across thirteen specifications, the
+  per-milestone census, and the kind split of seventy-four case,
+  seventeen property, seven corpus, and forty structural.
+- Did not add a mechanical check for this one, and the reason is
+  recorded rather than assumed. `gate.harness.census_derived` already
+  requires a test that computes the census from the registry and
+  compares it to the written table, and it is a Milestone 0 gate with
+  a home in the evaluation harness. Writing it into
+  `scripts/check_docs.py` now would implement a milestone gate ahead
+  of its milestone, against the standing constraint. The open
+  question — widen that gate to cover the verdict table, or delete
+  the column and send the reader to the census — is in
+  [questions-for-review.md](status/questions-for-review.md).
+
 ## 2026-07-27 — Harness case gaps, MCP gates, and citation integrity
 
 - Closed the three structural gaps the milestone map's census made

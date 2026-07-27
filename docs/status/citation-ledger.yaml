@@ -57,7 +57,7 @@ citations:
     excerpt: "enabled_skills: list[str] = []"
   - cite: "docs/plan/skills.md#docs/plan/policy-and-approvals.md:137"
     excerpt: "Section 30.3 requires that authoring a skill be gated by pol"
-  - cite: "docs/plan/skills.md#docs/plan/readiness.md:528"
+  - cite: "docs/plan/skills.md#docs/plan/readiness.md:531"
     excerpt: "`engineering-plan.md:2692` had no design behind it — and no "
   - cite: "docs/plan/skills.md#docs/plan/tool-system.md:1102-1149"
     excerpt: "## Skills, and the line between a skill and a tool"

@@ -3330,3 +3330,49 @@ it is asserted, and the two are written in different files.
 
 **Reversal cost:** low now — one table row and two totals — and higher
 once the harness is built against the wrong kind.
+
+### The readiness verdict table held a gate count four short, and no check reads it
+
+**Decided:** Milestone 8's row in the verdict table of
+[readiness.md](../plan/readiness.md) is corrected from ten registry
+entries to fourteen, and its named gap from *"MCP auth scheme; the
+mock server"* to *"MCP auth scheme"*. The prose under the table now
+says where the other four came from. The Milestone 8 section further
+down was already right; only the summary row was stale.
+
+**Why:** the four MCP gates added on this pass landed at Milestone 8,
+and the table's own stated rule is that the column counts registry
+entries whose `milestone` field names that milestone. The number was
+therefore derived, written by hand, and wrong the moment the gates
+were registered. It was found by re-deriving all eleven rows from the
+registry tables rather than by reading the document — every other row
+agrees, and the totals agree three ways: one hundred and thirty-eight
+registry entries, the census, and the kind split of seventy-four case,
+seventeen property, seven corpus, and forty structural.
+
+**Note:** this is the same failure as the drifted citations recorded
+above, in a different disguise: a number derived by a stated rule but
+maintained by memory. The difference is that this one already has a
+gate. `gate.harness.census_derived` requires a test that computes the
+census from the registry and compares it to the written table, and it
+is a Milestone 0 gate.
+
+**Alternative:** implement that check now, inside `check_docs.py`,
+the way the citation check was implemented. Rejected, and the
+distinction is worth stating because the two cases look alike.
+The citation hazard had no gate, no milestone, and no owner — it was
+pure documentation maintenance, which is inside this assignment.
+The census check *is* a declared Milestone 0 gate with a specified
+home in the evaluation harness, reading a gate registry that does not
+exist as data yet. Writing it here would implement a milestone gate
+ahead of its milestone and in the wrong place, against the standing
+constraint not to begin Milestone 0 work.
+
+**Question for you:** the verdict table's column is derived from the
+registry and drifted within one working pass. Should
+`gate.harness.census_derived` be widened to cover it — the same test,
+one more table — or should the column be removed from
+[readiness.md](../plan/readiness.md) and the reader sent to the
+census, which is the one place the number is stated by derivation?
+
+**Reversal cost:** low. One table cell and one sentence.
