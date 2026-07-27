@@ -957,30 +957,30 @@ one clause and closes the one case where a builtin can be a conduit.
 
 These fail the build.
 
-1.  All seven registration steps pass for the checked-in builtin
-    specs, asserted as a static test with nothing else constructed.
-2.  A test registers a builtin whose domain is `mcp` and expects a
-    startup error.
+1.  All seven registration steps pass for the checked-in builtin specs,
+    asserted as a static test with nothing else constructed. **M1.**
+2.  A test registers a builtin whose domain is `mcp` and expects a startup
+    error. **M1.**
 3.  `math.calculate` on `17 * 23` returns exactly `391` with
-    `result_exact` true, asserted on the rendered bytes.
-4.  A property test over generated expressions asserts that every
-    input either parses and evaluates within the bounds, or returns
-    one of the eight reason codes — and never raises, never returns
-    a non-`Decimal`, and never runs longer than the declared timeout.
-5.  `9**9**9`, `9^9^9`, a 1025-character expression, and a
-    33-deep nesting each return their specific reason code in under
-    fifty milliseconds.
+    `result_exact` true, asserted on the rendered bytes. **M1.**
+4.  A property test over generated expressions asserts that every input
+    either parses and evaluates within the bounds, or returns one of the
+    eight reason codes — and never raises, never returns a non-`Decimal`,
+    and never runs longer than the declared timeout. **M1.**
+5.  `9**9**9`, `9^9^9`, a 1025-character expression, and a 33-deep nesting
+    each return their specific reason code in under fifty milliseconds.
+    **M1.**
 6.  A differential test asserts `//` and `%` agree with Python's `int`
     operators on every combination of signs, which is the flooring
-    semantics this document chose over `Decimal`'s.
-7.  `0.1 + 0.2` returns exactly `0.3`. This is the regression test for
-    the entire reason the numeric type is `Decimal`.
-8.  `system.current_time` under a fixed `Clock` returns identical
-    bytes across two invocations, and the module containing it does
-    not appear in the ambient-time static check's allowed set.
+    semantics this document chose over `Decimal`'s. **M1.**
+7.  `0.1 + 0.2` returns exactly `0.3`. This is the regression test for the
+    entire reason the numeric type is `Decimal`. **M1.**
+8.  `system.current_time` under a fixed `Clock` returns identical bytes
+    across two invocations, and the module containing it does not appear
+    in the ambient-time static check's allowed set. **M1.**
 9.  Every `reason_code` this document declares has an entry in the
-    checked-in outcome message table, and every entry's message
-    contains no interpolation.
+    checked-in outcome message table, and every entry's message contains
+    no interpolation. **M1.**
 
 ## Conflicts this document resolves
 

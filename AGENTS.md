@@ -46,11 +46,12 @@ Read, in this order, before starting an assignment:
 | Memory formation, tiers, consolidation | `memory-formation-and-consolidation.md` |
 | Memory retrieval, ranking, the recall trace | `memory-retrieval-and-ranking.md` |
 | Evaluation cases, gates, the harness | `evaluation-harness.md` |
+| HTTP routes, error codes, scopes, the event stream | `http-api-and-streaming.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
-The HTTP API, sandbox isolation, and skills have **no** such document. Sections
-16, 28, and 30 of the engineering plan are all that exists for them.
+Sandbox isolation and skills have **no** such document. Sections 28 and 30 of
+the engineering plan are all that exists for them.
 
 ## Authority and conflicts
 

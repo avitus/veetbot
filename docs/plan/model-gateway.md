@@ -1220,28 +1220,29 @@ telemetry the day it appears without producing one log line per token.
 
 Milestone 3 does not pass until every one of these holds.
 
-1. The import-boundary test passes: no provider SDK is reachable from the
-   runtime, and neither vendor SDK is reachable from the other's adapter.
-2. The contract suite passes identically against fake, recorded, OpenAI,
-   Anthropic and `chat_completions`. Identical means the assembled
-   `ModelTurn` matches on content, tool calls, `call_id` values and
-   `stop_reason`; usage and cost may differ.
-3. Tool-call ids round-trip byte-for-byte through a two-step tool loop on
-   every adapter.
-4. A stream that violates any of the six invariants is rejected by the
-   validator, with a test per invariant.
-5. No API key, authorization header, or raw provider error body appears in
-   any log line, event payload, span attribute or persisted row. Tested by a
-   scanner over captured output, not by inspection.
-6. Malformed tool arguments produce an error tool result and the loop
-   continues, on every adapter.
-7. A killed and resumed run keeps its provider pin and its continuation
-   payload, and does not switch providers.
-8. Cost is recorded for failed attempts, and a run whose retries exhaust its
-   budget stops with `BUDGET_EXCEEDED`.
-9. The Ollama calculator scenario passes with no network cost.
-10. A live one-call smoke test against each vendor passes when credentials
-    are present and skips cleanly when they are not.
+1.  The import-boundary test passes: no provider SDK is reachable from the
+    runtime, and neither vendor SDK is reachable from the other's adapter.
+    **M3.**
+2.  The contract suite passes identically against fake, recorded, OpenAI,
+    Anthropic and `chat_completions`. Identical means the assembled
+    `ModelTurn` matches on content, tool calls, `call_id` values and
+    `stop_reason`; usage and cost may differ. **M3.**
+3.  Tool-call ids round-trip byte-for-byte through a two-step tool loop on
+    every adapter. **M3.**
+4.  A stream that violates any of the six invariants is rejected by the
+    validator, with a test per invariant. **M3.**
+5.  No API key, authorization header, or raw provider error body appears
+    in any log line, event payload, span attribute or persisted row.
+    Tested by a scanner over captured output, not by inspection. **M3.**
+6.  Malformed tool arguments produce an error tool result and the loop
+    continues, on every adapter. **M3.**
+7.  A killed and resumed run keeps its provider pin and its continuation
+    payload, and does not switch providers. **M3.**
+8.  Cost is recorded for failed attempts, and a run whose retries exhaust
+    its budget stops with `BUDGET_EXCEEDED`. **M3.**
+9.  The Ollama calculator scenario passes with no network cost. **M3.**
+10. A live one-call smoke test against each vendor passes when
+    credentials are present and skips cleanly when they are not. **M3.**
 
 ## Build order
 

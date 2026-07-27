@@ -10,15 +10,20 @@ This document answers one question: can an implementer open this
 corpus and start writing code, and if so, how far can they get before
 the corpus runs out?
 
-The answer is that Milestones 0 through 4 are implementable from the
-documents alone, Milestone 5 is implementable from the engineering
-plan but from no detailed-design specification, and Milestones 6
-through 10 are not implementable without design work that has not
-been done. The boundary is sharp and it falls in a useful place,
-because Section 21 forbids working on more than one milestone at a
-time and five milestones of runway is more than any first
-implementation will consume before the missing documents can be
-written.
+The answer is that Milestones 0 through 5 are implementable from the
+documents alone and Milestones 6 through 10 are not implementable
+without design work that has not been done. The boundary is sharp and
+it falls in a useful place, because Section 21 forbids working on
+more than one milestone at a time and six milestones of runway is
+more than any first implementation will consume before the missing
+documents can be written.
+
+Milestone 5 crossed that boundary after this review was written, and
+it crossed because of it. The finding was that the API had a plan
+section and no specification below it, and the finding is kept below
+rather than deleted, because it is the evidence for why
+[http-api-and-streaming.md](http-api-and-streaming.md) was written and
+the record of what writing it turned up.
 
 This document owns no requirement. It states what is covered and what
 is not, and where it finds a conflict between two documents it names
@@ -59,7 +64,7 @@ Three things are deliberately not treated as evidence of absence.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
 independent check on every verdict below. It was derived mechanically
-from ten specifications, the plan, and the map, without reference to
+from the specifications, the plan, and the map, without reference to
 this review, and where the two disagree the disagreement is reported
 rather than smoothed.
 
@@ -72,7 +77,7 @@ rather than smoothed.
 | 2 | PostgreSQL persistence and durable worker | Ready | 12 | Migration authoring conventions |
 | 3 | Model adapters and normalized streaming | Ready with named gaps | 11 | Provider response metadata |
 | 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 12 | Four deferred tools; scope vocabulary |
-| 5 | HTTP API and SSE | Plan only | 1 | No specification below the plan |
+| 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Not ready | 0 | No sandbox specification exists |
 | 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
 | 8 | Skills and MCP integration | Split | 0 | MCP ready; skills undesigned |
@@ -82,9 +87,14 @@ rather than smoothed.
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
 the strongest single piece of corroboration in this review, and it was
-not constructed to produce that correlation. Milestone 5 registers one
-gate and Milestone 6 registers none, which is what a corpus looks like
-when nobody has written down what those milestones must be true of.
+not constructed to produce that correlation. When this review was
+written Milestone 5 registered one gate and Milestone 6 registered
+none, which is what a corpus looks like when nobody has written down
+what those milestones must be true of. Milestone 5's eleven are the
+ten the API specification declares plus the one it already had, and
+they arrived with that document rather than being added to it
+afterwards, which is the same correlation running the other way.
+Milestone 6 still registers none.
 
 ## Milestone 0: ready
 
@@ -124,8 +134,9 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Thirty-eight of ninety-four gates are green before Milestone 2
-begins**, eleven of them against a repository with no agent in it.
+**Thirty-eight of one hundred and four gates are green before
+Milestone 2 begins**, eleven of them against a repository with no
+agent in it.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test
 doubles: the invariants that hold for the slice hold for the durable
@@ -260,10 +271,11 @@ string, a hierarchy, or a pattern. Relatedly,
 the services `build` returns, and no document gives it a method
 signature.
 
-## Milestone 5: the plan is the specification
+## Milestone 5: ready
 
-One registry entry — the fewest of any milestone that adds work — and
-that number is the finding.
+Eleven registry entries. There was one when this review was written —
+the fewest of any milestone that adds work — and that number was the
+finding.
 
 Section 16 of the engineering plan, at lines 1791 through 1943,
 designs the API more thoroughly than a summary of this milestone's
@@ -276,13 +288,13 @@ streaming; the five cooperative cancellation observation points; the
 error envelope; and the readiness constraint that a probe must not
 call a provider.
 
-What does not exist is any expansion of that section. No
-detailed-design specification covers the API layer. The only HTTP
-routes designed outside the plan are three in
+What did not exist was any expansion of that section. No
+detailed-design specification covered the API layer. The only HTTP
+routes designed outside the plan were three in
 `policy-and-approvals.md` — the two approvals reads at lines 819 and
 820 and the resolve at line 829 — and one reference in
-`runtime-loop.md:1165` to `POST /runs/{id}/input` that routes to an
-endpoint it does not design.
+`runtime-loop.md:1165` to `POST /runs/{id}/input` that routed to an
+endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
 merely a summary, because every comparable section in this corpus was
@@ -290,11 +302,12 @@ expanded exactly once and every expansion found conflicts the plan had
 not noticed. ADR-0024 found two outright milestone contradictions in
 the bootstrap path. The milestone map found three gates declared
 twice and a required field absent from most of the corpus. There is no
-reason to believe Section 16 is the one section that will survive
-expansion unchanged, and several specific reasons to believe it will
-not.
+reason to believe Section 16 was the one section that would survive
+expansion unchanged, and several specific reasons to believe it would
+not. It did not: the expansion found nine contradictions and recorded
+each of them in a table of its own.
 
-Six things are visibly unsettled inside it.
+Six things were visibly unsettled inside it.
 
 1.  **The error envelope has one worked example and no code list.**
     A stable error contract is the part of an API that clients depend
@@ -326,11 +339,30 @@ Six things are visibly unsettled inside it.
     mechanism.** `runtime-loop.md` specifies the token, the six
     observation points, and the `effect_sent_at` rule completely. What
     turns an HTTP `POST` into an observation by a worker in another
-    process is not specified anywhere.
+    process is not specified. The worker half is — the poller, its
+    cadence, and its query are all in `runtime-loop.md`. It is the API
+    half that is missing, and it is one column write.
 
-The verdict is that coding can reach this milestone and should not
-enter it until an API specification exists. That is the single most
-valuable document not yet written.
+The verdict on that evidence was that coding could reach this
+milestone and should not enter it until an API specification existed,
+and that this was the single most valuable document not yet written.
+It exists now.
+[http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028
+settle all six. The code list is the error taxonomy already in the
+corpus, snake-cased, rather than a second vocabulary that would have
+to be kept in step with the first. Request identifiers get four rules,
+of which the load-bearing one is that an identifier a client supplies
+is never trusted with anything. The two idempotency keys are separated
+as two mechanisms that share an unfortunate name, with different
+scopes, tables, and milestones. The consumer side of the stream is
+specified down to the subscribe-before-read handoff that makes replay
+gapless and duplicate-free. Authentication is specified at what it
+produces and not only at what it refuses. And the cancel path gets the
+one sentence it was missing.
+
+The same document supplies response bodies for the twelve routes that
+had none, and declares ten hard gates, which is what took this
+milestone's gate column from one to eleven. The verdict is ready.
 
 ## Milestone 6: not ready
 
@@ -579,7 +611,8 @@ mechanisms they exercise are designed, and impossible to write before.
 ## Conflicts this document resolves
 
 This document resolves none. It reports four and defers each to the
-document that owns the subject.
+document that owns the subject. One has since been resolved by the
+document it was deferred to, and the resolution is recorded under it.
 
 1.  **`sandbox.run_command` at Milestone 5 or Milestone 6.**
     `builtin-tools.md:909` against the plan's Milestone 6 implement
@@ -595,7 +628,8 @@ document that owns the subject.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
     header at Milestone 5 and as a tool-call port at Milestone 1.
     Whether these are one mechanism or two is undecided, and belongs
-    to the API specification.
+    to the API specification. Resolved there as two: two scopes, two
+    tables, two milestones, one unfortunate name.
 4.  **The container-escape test and the case table.**
     `engineering-plan.md:3209` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
@@ -632,14 +666,15 @@ document that owns the subject.
 ## Open questions for review
 
 1.  **Is the API specification the next document, or does the API get
-    built from Section 16?** This review's recommendation is that it
-    is the next document, on the evidence that every other section
-    expanded exactly once and every expansion found a conflict. The
-    counter-argument is real: Section 16 is more detailed than the
-    sections that turned out to hide contradictions, HTTP has stronger
-    conventions than composition roots do, and the six unsettled items
-    listed above are individually small. Reversal cost is low before
-    coding starts and high after clients exist.
+    built from Section 16?** Answered by writing it. The
+    recommendation was that it should be the next document, on the
+    evidence that every other section expanded exactly once and every
+    expansion found a conflict. The counter-argument was real: Section
+    16 is more detailed than the sections that turned out to hide
+    contradictions, HTTP has stronger conventions than composition
+    roots do, and the six unsettled items listed above are
+    individually small. The expansion found nine contradictions, which
+    settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
     come first: `tool-system.md:977` already depends on an egress

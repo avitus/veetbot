@@ -73,6 +73,7 @@ nav:
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
       - Evaluation Harness: plan/evaluation-harness.md
       - Runtime Loop: plan/runtime-loop.md
+      - HTTP API & Streaming: plan/http-api-and-streaming.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
   - Project State:
@@ -107,4 +108,5 @@ nav:
       - ADR-0025 The development toolchain and make check: adr/0025-development-toolchain.md
       - ADR-0026 The builtin tool roster: adr/0026-builtin-tools.md
       - ADR-0027 Gate milestones and the milestone map: adr/0027-milestone-map.md
+      - ADR-0028 The HTTP API surface: adr/0028-http-api-and-streaming.md
   - Changelog: changelog.md

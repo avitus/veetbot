@@ -168,7 +168,7 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-Eleven specs and one engineering-plan section declare gates, and they declare
+Twelve specs and one engineering-plan section declare gates, and they declare
 them in prose. Sorting them by kind is what tells an implementer which harness
 facility each one needs, and it is the first concrete deliverable of this
 document.
@@ -191,9 +191,10 @@ restates a gate another spec owns.
 | Memory formation | 3 | 0 | 2 | 0 | 5 |
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 2 | 0 | 0 | 8 | 10 |
+| HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
 | Engineering plan | 0 | 0 | 0 | 1 | 1 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **44** | **15** | **6** | **29** | **94** |
+| **Total** | **51** | **15** | **6** | **32** | **104** |
 
 The counts are the useful output, not the individual assignments: **more than
 half of the declared gates are not case gates**, and a harness that only runs

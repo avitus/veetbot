@@ -36,3 +36,4 @@ implementation without one.
 - [ADR-0025 — The development toolchain and the meaning of `make check`](0025-development-toolchain.md)
 - [ADR-0026 — The builtin tool roster and the two Milestone 1 tools](0026-builtin-tools.md)
 - [ADR-0027 — Gate milestones, the declaration form, and the milestone map](0027-milestone-map.md)
+- [ADR-0028 — The HTTP API surface, the error vocabulary, and the event stream](0028-http-api-and-streaming.md)

@@ -7,9 +7,10 @@ canonical: true
 # Milestone map
 
 The gate registry makes `milestone` a required field on every gate. Ten
-specifications declare eighty-nine gates between them. One of the ten
-supplies that field per gate, four supply it once for a whole section,
-and five do not supply it at all.
+specifications declared eighty-nine gates between them when this
+document was written. One of the ten supplied that field per gate, four
+supplied it once for a whole section, and five did not supply it at
+all.
 
 That is not a formatting complaint. Registry rule 1 says a docs check
 parses the hard-gate section of each spec, counts the declared gates,
@@ -26,6 +27,14 @@ assignment for the five build sequences that carry no tags. It also
 closes two smaller reconciliations that turned up in the same sweep:
 what the tool system's persistence build step means inside an in-memory
 milestone, and what cancels a run at Milestone 1.
+
+[http-api-and-streaming.md](http-api-and-streaming.md) was written after
+this document and declares ten more gates, in the form fixed here and
+with a milestone on each — which is what fixing the form was for. Its
+gates appear in the table and the census below and needed no
+reconciliation. The counts throughout this document are the corpus as
+it now stands: ninety-nine declared across eleven specs, one hundred and
+four registry entries.
 
 ## What this document is responsible for
 
@@ -137,7 +146,7 @@ and given a grammar.
 gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
-      event, context, memory, harness
+      event, context, memory, harness, api
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -182,11 +191,12 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-Eighty-nine gates declared across ten specs, one more declared in the
-engineering plan, and seven this document declares over the corpus:
-ninety-seven declarations, ninety-four registry entries once the three
-aliases are subtracted. Each table gives the gate's number in its own
-spec, its registry identifier, its kind, and its milestone.
+Ninety-nine gates declared across eleven specs, one more declared in
+the engineering plan, and seven this document declares over the corpus:
+one hundred and seven declarations, one hundred and four registry
+entries once the three aliases are subtracted. Each table gives the
+gate's number in its own spec, its registry identifier, its kind, and
+its milestone.
 
 ```text
 id                              kind        M   declared in
@@ -471,6 +481,35 @@ same class of reason: each needs something the vertical slice builds.
 Gate 8 is Milestone 4 with the corpora, and gate 9 says its own
 milestone.
 
+### HTTP API and streaming, ten gates
+
+Ten gates, all Milestone 5, all new. The spec tags each one, so the
+assignment is the spec's own rather than derived. They are the reason
+Milestone 5 stops being the milestone with one gate and the largest
+externally visible surface.
+
+```text
+#   id                              kind         M
+--  ------------------------------  -----------  --
+1   gate.api.code_vocabulary        case         5
+2   gate.api.status_map_total       structural   5
+3   gate.api.no_request_tenant      structural   5
+4   gate.api.cross_tenant_404       case         5
+5   gate.api.scope_declared         structural   5
+6   gate.api.transient_no_id        case         5
+7   gate.api.replay_exact           case         5
+8   gate.api.cancel_observed        case         5
+9   gate.api.submit_idempotent      case         5
+10  gate.api.artifact_attachment    case         5
+```
+
+Gates 2, 3, and 5 are structural because they are assertions about the
+shape of the code rather than about a run: a mapping that must be
+total, an AST walk that must find no binding of `tenant_id` from a
+request, and a walk over the route table that must find a declared
+scope on every route but the two health probes. The remaining seven
+need a running API and are cases.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -512,11 +551,12 @@ milestone  new gates  cumulative  the earliest of them
 2                 12          50  persistence, fencing, resume
 3                 11          61  five adapters, trajectories
 4                 12          73  policy, approvals, corpora
-5                  1          74  cancellation keeps effects
-6                  0          74  --
-7                  6          80  budgeting and compaction
-8                  0          80  --
-9                 14          94  formation and retrieval
+5                 11          84  the API surface, the stream,
+                                  cancellation keeps effects
+6                  0          84  --
+7                  6          90  budgeting and compaction
+8                  0          90  --
+9                 14         104  formation and retrieval
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -531,15 +571,15 @@ leaving for someone to notice.
     ones whose acceptance rests entirely on their own section's
     criteria in the engineering plan, and it is worth a look during
     each milestone's planning to decide whether that is right.
-2.  **Thirty-eight of ninety-four gates are green before Milestone
-    2.** More than a third of the plan's stated invariants are
+2.  **Thirty-eight of one hundred and four gates are green before
+    Milestone 2.** More than a third of the plan's stated invariants are
     checkable against the in-memory slice, and eleven of them against a
     repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches ninety-four, which is every registry
-entry, at Milestone 9. Milestones 10 and 11 add none: scheduling,
+The cumulative column reaches one hundred and four, which is every
+registry entry, at Milestone 9. Milestones 10 and 11 add none: scheduling,
 routing, and subagents are covered by gates registered against the
 runtime loop and the policy engine, and the same question this document
 raises about Milestones 6 and 8 applies to them.

@@ -4,6 +4,64 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — The HTTP API, the event stream, and the error vocabulary
+
+- Added `docs/plan/http-api-and-streaming.md`, the specification the readiness
+  review named as the single most valuable document not yet written. It expands
+  Section 16 of the engineering plan, the three approval routes in
+  `policy-and-approvals.md`, and `POST /v1/runs/{id}/input` from ADR-0009 into
+  one contract: thirteen routes, each with a request shape, a response shape, a
+  status code, a required scope, and an error mapping.
+- Wrote response bodies for the twelve routes that had none. Only the session
+  created by `POST /v1/sessions` had one anywhere in the corpus.
+- Derived the wire error vocabulary from the error taxonomy that already exists
+  rather than inventing a second one. Section 16's single worked example,
+  `tool_validation_error`, is `ToolValidationError` snake-cased; applying that
+  convention to the thirty-one classes produces the code list, and four
+  API-specific codes cover conditions that have no domain class. Four classes
+  deliberately never cross the boundary, and an unmapped class is
+  `internal_error` and 500.
+- Specified authentication at what it produces — a `Principal` — and not only
+  at what it refuses. No handler reads a tenant from a request. Scopes are
+  exact-match strings over a closed dotted vocabulary, with no hierarchy in
+  which `run.write` implies `run.read`. A resource in another tenant is 404,
+  never 403, and scope is checked before tenancy so that no principal can probe
+  for existence by watching 403 become 404.
+- Specified the consumer side of the event stream. Transient frames carry no
+  `id`, because the EventSource specification advances a client's last-event-ID
+  only on a frame that has one, and a synthetic id on a token delta silently
+  corrupts every later reconnect. Replay subscribes before it reads, buffers
+  arrivals, reads the persisted prefix, and drains the buffer by sequence,
+  which is what makes it gapless and duplicate-free.
+- Closed the cross-process cancel path. The endpoint writes
+  `runs.cancel_requested_at` and returns 202 for a `RUNNING` run, and
+  transitions `QUEUED` and both `WAITING_*` states directly to `CANCELLED` with
+  200 — which is safe only because those states hold no lease.
+- Separated the two mechanisms called "idempotency key": the HTTP header on
+  submission, and `tool_invocations.idempotency_key`. Different scopes,
+  different tables, different milestones, one unfortunate name.
+- Declared `SessionStatus`, which Section 5 references and no document
+  declared. Uppercase, to match `RunStatus` and the guarded updates in the DDL.
+  Section 16's lowercase sample is read as illustrative and Section 16 is not
+  edited; the disagreement is recorded as an open question.
+- Added one route, `GET /v1/sessions/{session_id}`, so that a client
+  reconnecting with only a session identifier can learn the session's status
+  and find its active run.
+- Recorded nine contradictions the expansion found, in the document's own
+  `Contradictions resolved` table. One of them narrows the readiness review:
+  the cross-process cancel path was not unspecified, only its API half was.
+- Added `docs/adr/0028-http-api-and-streaming.md` — seventeen decisions, eight
+  consequences, fourteen alternatives considered.
+- Declared ten hard gates, all at Milestone 5, taking that milestone from one
+  gate to eleven and adding an eleventh area, `api`, to the registry. Registry
+  entries go from ninety-four to one hundred and four. Updated the milestone
+  map's area grammar, gate table, and census, the harness's gate table, and the
+  three counts in the engineering plan. ADR-0027 is not updated, because its
+  arithmetic is a record of what was true when it was decided.
+- Updated `docs/plan/readiness.md`: Milestone 5 moves from plan-only to ready.
+  The original finding is kept rather than deleted, because it is the evidence
+  for why the document was written and the record of what writing it turned up.
+
 ## 2026-07-25 — The readiness review
 
 - Added `docs/plan/readiness.md`, which traces every `#### Implement` bullet,

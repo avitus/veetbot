@@ -2299,6 +2299,13 @@ than the sections that turned out to hide contradictions, HTTP has
 stronger conventions than composition roots do, and the six items are
 individually small.
 
+**Note:** since written. It is
+[http-api-and-streaming.md](../plan/http-api-and-streaming.md) and
+ADR-0028, and the expansion found nine contradictions, which settles
+the argument above on evidence rather than on the prediction. The
+decisions taken while writing it are recorded under
+[HTTP API and streaming](#http-api-and-streaming-adr-0028) below.
+
 **Reversal cost:** low now, high after clients exist.
 
 ### The sandbox specification is named as the second document
@@ -2335,3 +2342,350 @@ because renumbering milestones touches every document in the corpus and
 that is your call rather than mine.
 
 **Reversal cost:** high once made, which is why it is a question.
+
+## HTTP API and streaming (ADR-0028)
+
+### The wire error vocabulary is the existing taxonomy, snake-cased
+
+**Decided:** the code list is Section 13's twenty-three error classes
+and the runtime loop's eight, mechanically snake-cased, plus four
+API-specific codes for conditions with no domain class —
+`malformed_request`, `unsupported_media_type`, `payload_too_large`,
+`rate_limited`.
+
+**Why:** Section 16's only worked example is `tool_validation_error`,
+which is `ToolValidationError` snake-cased. The convention was already
+chosen; the document applies it rather than picking a second one. A
+hand-maintained mapping between an internal taxonomy and a separate
+client vocabulary is a thing that drifts, and the drift is silent.
+
+**Alternative:** a small vocabulary designed for clients, which is
+what most APIs have and which reads better. It costs a mapping table
+somebody owns.
+
+**Reversal cost:** moderate. Renaming a code after a client depends on
+it is a breaking change, and the codes are the part of an API that is
+hardest to change.
+
+### Four error classes deliberately never reach a client
+
+**Decided:** `WorkerFenced` and `EmptyModelTurn` are internal, two
+further classes have no client-actionable meaning, and any class not
+in the map resolves to `internal_error` and 500.
+
+**Why:** a fenced worker is not a run failure and an empty model turn
+is retried internally, so surfacing either would describe an event the
+client cannot act on and did not cause. The catch-all exists so that
+adding a class to the taxonomy cannot leak a class name onto the wire.
+
+**Cost:** a genuinely new client-facing condition will arrive as
+`internal_error` until somebody maps it. The gate that every returned
+code is in the vocabulary catches the leak, not the omission.
+
+**Reversal cost:** cheap.
+
+### Scopes are exact-match strings over a closed dotted vocabulary
+
+**Decided:** eight scopes, matched by string equality. No wildcards,
+no prefixes, no hierarchy in which `run.write` implies `run.read`.
+Roles are bundles resolved at authentication and the API never checks
+a role.
+
+**Why:** a hierarchy needs a grammar, a grammar has an evaluation
+order, and an evaluation order can be subtly wrong in the direction of
+granting access. Exact match cannot be subtly wrong.
+`engineering-plan.md:459` names scopes and no document had stated
+their grammar.
+
+**Cost:** callers list every scope they need, and adding a route may
+mean adding a scope to existing principals.
+
+**Reversal cost:** cheap while the vocabulary is closed; adding a
+hierarchy later is compatible with exact-match tokens already issued.
+
+### A resource in another tenant is 404, never 403
+
+**Decided:** generalized from the rule the policy spec already fixes
+for approvals. Scope is checked before tenancy.
+
+**Why:** 403 is the more informative answer and that is the problem —
+it confirms the resource exists, which turns identifier enumeration
+into a working attack. Checking scope first means a principal with no
+scope cannot watch 403 become 404 and learn the same thing.
+
+**Cost:** a caller with a genuine permission problem sees the same
+response as a caller with a typo. The structured log distinguishes
+them; the wire does not.
+
+**Reversal cost:** cheap.
+
+### `SessionStatus` is declared uppercase, against Section 16's sample
+
+**Decided:** `ACTIVE` and `CLOSED`, matching `RunStatus` and the
+guarded updates in the DDL. Section 16's sample shows `"active"` and
+Section 16 is not edited.
+
+**Why:** the type is referenced in Section 5 and declared nowhere, so
+something had to declare it. Every other status in the corpus is
+uppercase. Lowercase session status beside uppercase run status on one
+wire is what a client library encodes as two enums and a comment.
+
+**Question for you:** editing Section 16's one-line sample would
+settle this in a character, and the conversion rules forbid editing
+the plan's requirements during conversion. This is the one place the
+new document and the plan disagree on a literal value.
+
+**Reversal cost:** cheap now, expensive after a client parses it.
+
+### The two things called "idempotency key" are two mechanisms
+
+**Decided:** the HTTP `Idempotency-Key` header on message submission
+and `tool_invocations.idempotency_key` are unrelated. Different
+scopes, different tables, different milestones.
+
+**Why:** the milestone map schedules the tool key as a Milestone 1
+port on `ToolInvocationRepository`, which is a tool-call concern,
+while the `idempotency_keys` table is Milestone 2 and carries a
+`request_hash` for an HTTP body. Unifying them would put a table at a
+milestone whose DDL does not exist. The readiness review left this
+undecided and deferred it here.
+
+**Cost:** two mechanisms with one name is a naming problem that will
+be rediscovered. The document names both explicitly for that reason.
+
+**Reversal cost:** cheap.
+
+### A repeated submission with a different body is a conflict
+
+**Decided:** a repeat of an `Idempotency-Key` whose `request_hash`
+matches returns the original run with 200; a repeat whose hash differs
+returns 409.
+
+**Why:** returning the original run for a different body would answer
+a question the client did not ask, silently. A client that reuses a
+key by accident has a bug, and 409 makes the bug loud at the point it
+happens rather than at the point its consequences are noticed.
+
+**Reversal cost:** cheap.
+
+### A second message to a `WAITING_FOR_USER` run is routed, not rejected
+
+**Decided:** routed to input delivery, returning 202. Every other
+non-terminal run status returns 409.
+
+**Why:** Section 27.3 permits either and requires one to be
+configured. Routing is what a user answering a question expects, and
+rejecting makes every client re-implement a rule the server already
+has the state to apply.
+
+**Question for you:** the counter-argument is that rejecting is more
+explicit and a client that meant to start a new run gets told so. The
+plan calls this a configured policy, so both remain reachable; this
+sets the default.
+
+**Reversal cost:** cheap. It is a configuration default.
+
+### Transient stream frames carry no `id` field
+
+**Decided:** token deltas and other non-persisted frames are sent
+without `id`. Only frames backed by a persisted event carry one.
+
+**Why:** the EventSource specification advances a client's
+last-event-ID only on a frame that carries `id`. A synthetic id on a
+transient frame therefore sets the client's resume point to a value
+the server cannot resolve, and every subsequent reconnect is wrong.
+This is the most tempting wrong decision in the document, because
+uniform framing looks tidier.
+
+**Reversal cost:** cheap to state, expensive to discover late — the
+failure is silent and appears only after a reconnect.
+
+### Replay subscribes before it reads
+
+**Decided:** `LISTEN` first, buffer arrivals, read the persisted
+prefix, note the high-water mark, drain the buffer discarding at or
+below it, then go live.
+
+**Why:** the obvious order is to read the log and then subscribe, and
+it drops every event committed in the window between the two. The
+window is small and it is not empty. Subscribe-before-read is what
+makes the handoff gapless; discarding by sequence is what makes it
+duplicate-free. Eval case 22 tests exactly this.
+
+**Reversal cost:** cheap now. It is an ordering inside one function.
+
+### Overflow closes the stream with a resumable marker
+
+**Decided:** a client too slow to drain gets its stream closed with a
+marker it can resume from, rather than an unbounded buffer or a silent
+drop.
+
+**Why:** unbounded buffering makes one slow client a server-wide
+memory problem, and silent dropping breaks the only guarantee the
+stream makes. Closing is recoverable because the durable log is the
+source of truth and the client reconnects against it.
+
+**Reversal cost:** cheap.
+
+### Artifact content is always served as an attachment
+
+**Decided:** `Content-Disposition: attachment` for every media type,
+with no inline exceptions.
+
+**Why:** an artifact is model-influenced content served from the API
+origin. Serving it inline is stored cross-site scripting. A list of
+media types deemed safe is a thing that grows by argument, and the
+argument happens in a pull request rather than in a threat model.
+
+**Cost:** a browser client that wants to display an image fetches it
+and creates an object URL. That is a few lines in the client.
+
+**Reversal cost:** cheap to relax, and relaxing it is the direction
+that carries the risk.
+
+### Health is the only unauthenticated surface, and it says little
+
+**Decided:** `/health/live` and `/health/ready` need no credential,
+and their bodies carry no version, host, dependency name, or count.
+
+**Why:** an unauthenticated endpoint that reports the database is
+unreachable, or which version is deployed, is reconnaissance. Being
+unauthenticated is safe only if there is nothing there.
+
+**Cost:** an operator debugging readiness reads logs rather than the
+probe body.
+
+**Reversal cost:** cheap.
+
+### The four application service signatures are fixed here
+
+**Decided:** `SessionService`, `RunService`, `ApprovalService`, and
+`ArtifactService` get their method signatures in this document, each
+method taking `Principal` first and returning view types rather than
+rows.
+
+**Why:** `bootstrap-and-composition.md` names all four as what `build`
+returns and gives none of them a signature, and the readiness review
+found `ApprovalService` in that state. Section 17 makes the CLI a
+second caller, and two callers discovering a signature independently
+is how the CLI ends up importing a web framework.
+
+**Reversal cost:** cheap. Nothing implements them yet.
+
+### One route is added: `GET /v1/sessions/{session_id}`
+
+**Decided:** added. Thirteen routes rather than twelve.
+
+**Why:** a client reconnecting with only a session identifier
+otherwise cannot learn the session's status or find its active run.
+It exposes no capability a client holding its own records lacked.
+
+**Question for you:** `GET /v1/runs`, a list of runs in a session, is
+the obvious next route and was not added, because nothing in 0.1 needs
+it and `active_run_id` covers reconnect. Say if you want it.
+
+**Reversal cost:** cheap.
+
+### 413 and 429 get response shapes now and mechanisms later
+
+**Decided:** both codes are in the vocabulary with defined bodies;
+neither has a mechanism in 0.1. Section 22 owns rate limiting.
+
+**Why:** rate-limit numbers should come from operational data that
+does not exist. Fixing the shape means a client written against 0.1
+already handles the day the mechanism arrives, which costs nothing and
+avoids inventing a mechanism blind.
+
+**Reversal cost:** cheap.
+
+### One authentication token, with no rotation without a restart
+
+**Decided:** `auth_token` stays the single `SecretStr` that
+`bootstrap-and-composition.md` declares. Comparison is
+constant-time. Dev mode is bound to loopback.
+
+**Why:** changing a declared `Settings` field is a change to another
+document's design, which this assignment does not do unilaterally.
+
+**Question for you:** should `auth_token` become a list, so a token
+can be rotated by adding the new one, deploying, and removing the old?
+As it stands the only rotation procedure drops in-flight requests.
+This is the API's most operationally awkward decision.
+
+**Reversal cost:** cheap now — one field, one comparison loop.
+
+### The stream is per run, and heartbeats are every fifteen seconds
+
+**Decided:** the event stream endpoint is per run. Fifteen seconds
+between heartbeats when no event is flowing.
+
+**Why:** ADR-0010 fixed stream ids as the session sequence, so a run's
+stream is deliberately non-contiguous and clients must not infer a gap
+from it — which the document states as a rule because it looks like a
+bug. Fifteen seconds sits under common proxy idle timeouts and is
+otherwise arbitrary.
+
+**Question for you:** a session-scoped stream route is nearly free,
+since the ids are already per session, and no client in 0.1 wants one.
+Worth adding now or later?
+
+**Reversal cost:** cheap.
+
+### The policy rule behind an approval is not exposed to clients
+
+**Decided:** not exposed. The approval view carries what the policy
+spec already permits and no rule identifier.
+
+**Why:** the policy spec withholds it deliberately, and this document
+does not overturn another document's security decision as a
+side-effect of writing a response body.
+
+**Question for you:** an operator debugging a denial currently has
+only the structured log. An operator-scoped field would fix that
+without widening the client surface. That is a policy decision rather
+than an API one, which is why it is asked rather than taken.
+
+**Reversal cost:** cheap to add, expensive to remove.
+
+### Event retention is left unbounded and is flagged
+
+**Decided:** no retention rule is introduced.
+
+**Why:** the corpus bounds checkpoints, memory, and artifacts, and
+never bounds `events`. Introducing a retention rule here would be
+inventing a durability policy inside an API document.
+
+**Question for you:** replay depends on the log being complete for a
+session's lifetime, so any future retention rule interacts directly
+with the reconnect guarantee this document makes. It should be decided
+where durability is owned, and it is currently decided nowhere.
+
+**Reversal cost:** the decision is cheap; the migration that
+implements it will not be.
+
+### The readiness review is narrowed rather than left standing
+
+**Decided:** the review's claim that the cross-process cancel path
+"is not specified anywhere" is corrected in place. The worker half was
+specified all along in `runtime-loop.md`; only the API half was
+missing, and it was one column write.
+
+**Why:** the review is a live statement of what the corpus covers, and
+an overstatement in it would send an implementer looking for a design
+that already exists.
+
+**Reversal cost:** none.
+
+### Historical records are not rewritten when the gate count changes
+
+**Decided:** ADR files, this file's existing entries, and the
+changelog keep the numbers that were true when they were written. The
+milestone map, the harness gate table, the engineering plan's routing
+paragraphs, and the readiness review are updated, because they are
+statements of current fact.
+
+**Why:** an ADR is a record of a decision at a point in time and
+rewriting its arithmetic destroys that. ADR-0028 states the new total
+instead, which is where a reader looking for the change will be.
+
+**Reversal cost:** none.
