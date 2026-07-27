@@ -80,9 +80,9 @@ rather than smoothed.
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
-| 8 | Skills and MCP integration | Split | 0 | MCP ready; skills undesigned |
+| 8 | Skills and MCP integration | Ready with named gaps | 10 | MCP auth scheme; the mock server |
 | 9 | Long-term memory and knowledge | Ready with named gaps | 14 | Knowledge documents |
-| 10 | Scheduling, routing, and subagents | Not a milestone yet | 0 | No acceptance criteria exist |
+| 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | No acceptance criteria exist |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -95,8 +95,13 @@ ten the API specification declares plus the one it already had, and
 they arrived with that document rather than being added to it
 afterwards, which is the same correlation running the other way.
 Milestone 6's eleven arrived the same way, from
-[sandbox-isolation.md](sandbox-isolation.md), and took the only zero
-in the table that belonged to a milestone doing real work.
+[sandbox-isolation.md](sandbox-isolation.md), and took one of the two
+zeros in the table that belonged to a milestone doing real work.
+[skills.md](skills.md) took the other, giving Milestone 8 ten. Its
+six at Milestone 10 are a different case: they are the authoring
+loop's gates, registered against a milestone whose own acceptance
+criteria still do not exist, which is why that row's verdict is
+unchanged.
 
 ## Milestone 0: ready
 
@@ -139,8 +144,9 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty of one hundred and eighteen gates are green before Milestone
-2 begins**, twelve of them against a repository with no agent in it.
+**Forty of one hundred and thirty-four gates are green before
+Milestone 2 begins**, twelve of them against a repository with no
+agent in it.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test
 doubles: the invariants that hold for the slice hold for the durable
@@ -481,10 +487,11 @@ Two shortfalls.
     harness specifies how to add cases and the gate exists; what does
     not exist is the case.
 
-## Milestone 8: split
+## Milestone 8: ready with named gaps
 
-Zero registry entries, and the two halves of this milestone are in
-completely different states.
+Ten registry entries, all ten from [skills.md](skills.md), which was
+written after this review and closes the half that was missing. The
+verdict below is the review as it stood, followed by what changed.
 
 **MCP is substantively covered.** [tool-system.md](tool-system.md)
 designs nine of eleven bullets: server configuration and lifecycle,
@@ -496,19 +503,35 @@ refresh or re-auth path, and the mock MCP server the acceptance
 criteria require is never designed, with no MCP fixture format in the
 harness and no Milestone 8 row in the case table.
 
-**Skills have no specification at all.** No document outside the plan
-and ADR-0013 mentions `SKILL.md`. There is no package format, no
-manifest schema, no selection algorithm, no loading or sandboxing
-rule, and no versioning scheme. The acceptance criterion *"A selected
-skill is version-pinned in the run"* at `engineering-plan.md:2684` has
-no design anywhere in the corpus — not a partial one, none. The
-`#### Skills` subsection is also one of the few major subsections with
-no cross-reference paragraph pointing outward, which is consistent:
-there is nothing to point at.
+**Skills had no specification below the tool system.** The stronger
+claim this review first made — that skills have no specification at
+all — was wrong, and the correction matters because it changes what
+had to be written. `tool-system.md:1102-1149` draws the line between
+a skill and a tool, fixes the metadata block at four fields, puts
+`required_tools` checking at load rather than at authoring, assigns
+trust by author, and classifies `skill_manage`. That is real design.
+What was missing was everything underneath it: no package format, no
+manifest schema, no types, no storage, no reference grammar, no
+context accounting, and no gates. The acceptance criterion *"A
+selected skill is version-pinned in the run"* at
+`engineering-plan.md:2690` had no design behind it — and no document
+outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
+and remains the sharper of the two observations.
 
-Section 30, self-improving skills, compounds this. It is referenced
+Section 30, self-improving skills, compounded this. It is referenced
 from eleven places in the corpus as though the mechanism it describes
 were settled.
+
+**What changed.** [skills.md](skills.md) supplies the package format,
+the manifest schema, the `SkillRef` grammar, two tables and an
+archive, the session-open catalog with its caps, `skill.load` and its
+stickiness, two new context classes, the authoring loop at Milestone
+10, and sixteen gates in a new `skill` area — ten of them here. It
+also corrects `skill_manage`'s classification, which
+`tool-system.md` had called a control tool while giving it a write
+scope, and settles the scope's spelling. The MCP half is unchanged
+and its two partial bullets — the auth scheme and the mock server —
+are the named gaps in the verdict above.
 
 ## Milestone 9: ready with named gaps
 
@@ -565,8 +588,11 @@ more are partial.
 
 The honest verdict is that this is a direction rather than a
 milestone, and the plan says as much. It is listed here for
-completeness and because its zero in the gate column, unlike Milestone
-6's, is not an anomaly to explain.
+completeness and because its gate column is no longer zero:
+[skills.md](skills.md) registers six gates here for the skill-authoring
+loop. Those gates come from a section of the plan rather than from
+this milestone's own criteria, which it still does not have, so the
+verdict is unchanged by them.
 
 ## The three plan sections no specification expands
 
@@ -604,12 +630,25 @@ and it is the right call for a Milestone 10-adjacent concern. The
 ### 30. Self-improving skills
 
 Forty-three lines, ADR-0013, **eleven inbound consuming references**,
-and no expansion. The reference count is what makes this notable. Ten
-other documents treat the skill mechanism as settled and build on top
-of it, and the mechanism does not exist below the plan. Combined with
-the Milestone 8 finding — no package format, no manifest schema, no
-selection algorithm — this is now the largest undesigned area in the
-corpus, and the one with the most load already resting on it.
+and no expansion. The reference count is what made this notable. Ten
+other documents treated the skill mechanism as settled and built on
+top of it, and the mechanism did not exist below the plan. Combined
+with the Milestone 8 finding, this was the largest undesigned area in
+the corpus and the one with the most load already resting on it.
+
+[skills.md](skills.md) and ADR-0030 close it. Section 30's six
+subsections keep their content: 30.1's milestone placement, 30.2's
+two authoring paths, 30.3's six governance guarantees — versioning,
+provenance, gating, restricted review, injection resistance, and
+sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
+criterion, and 30.6's constraints are each carried forward rather
+than reinterpreted. Two citation errors are corrected in the process.
+One is this review's: the version-pinning criterion is at line 2690,
+not 2684, and 2684 is an MCP trust-labelling bullet. One the corpus
+carried: `policy-and-approvals.md` attributes the policy-and-approval
+gating requirement to Section 30.4, which Section 30.3 states.
+What remains open is a threshold for 30.5's eval delta, which is a
+number nobody has yet had the data to choose.
 
 ### 31. Trajectory capture and export
 
@@ -754,8 +793,10 @@ under the conflict it settles.
     zero from a Milestone 8 with no registered invariant, and the
     sandbox specification is the natural place to fix it. It did:
     thirteen gates in a new `sandbox` area, eleven of them at
-    Milestone 6. Milestones 8 and 10 keep their zeros, and both are
-    the honest kind — nothing is designed there to assert about.
+    Milestone 6. Milestones 8 and 10 kept theirs until
+    [skills.md](skills.md), which closed both the same way and for
+    the same reason: there is something designed there now to assert
+    about.
 4.  **Does Milestone 10 need acceptance criteria, or is it correctly
     an open direction?** It is the only milestone with neither an
     implement list nor acceptance criteria, and the plan calls its

@@ -134,9 +134,12 @@ historical `ToolSpec` version at recovery time.
 ### `ActionKind`, and actions that are not tool calls
 
 The plan's approval object hangs off `tool_invocation_id`, non-nullable. But
-Section 30.4 requires that authoring a skill be gated by policy and approval,
-and the memory specs require governance on the write path. Neither is a tool
-invocation. Rather than inventing a synthetic tool invocation for each — which
+Section 30.3 requires that authoring a skill be gated by policy and approval,
+and the memory specs require governance on the write path. A memory write is
+not a tool invocation at all. Skill authoring is one — `skill_manage`, a
+capability tool, per [skills.md](skills.md) — but its approval carries a diff
+rather than an argument blob, and the payload is selected by the action kind.
+Rather than inventing a synthetic tool invocation for the memory case — which
 would put rows in `tool_invocations` that no tool ever executed, and corrupt
 every metric computed over that table — the action becomes the general case and
 the tool call becomes the common one.
@@ -149,9 +152,10 @@ class ActionKind(str, Enum):
     ARTIFACT_EXPORT = "artifact_export"
 ```
 
-`tool_invocation_id` becomes nullable and is populated only when `kind` is
-`TOOL_CALL`; a new `action_id` carries the reference in every case. Nothing
-about the tool path changes.
+`tool_invocation_id` becomes nullable and is populated only when the action
+has one behind it, which is every `TOOL_CALL` and every `SKILL_AUTHORING`;
+a new `action_id` carries the reference in every case. Nothing about the tool
+path changes.
 
 ### `ApprovalStatus`
 

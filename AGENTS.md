@@ -48,11 +48,9 @@ Read, in this order, before starting an assignment:
 | Evaluation cases, gates, the harness | `evaluation-harness.md` |
 | HTTP routes, error codes, scopes, the event stream | `http-api-and-streaming.md` |
 | Isolated execution, egress, the artifact store | `sandbox-isolation.md` |
+| Skill packages, the catalog, the authoring loop | `skills.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
-
-Skills have **no** such document. Section 30 of the engineering plan is all
-that exists for that subject.
 
 ## Authority and conflicts
 
@@ -73,10 +71,9 @@ that exists for that subject.
 - Work only on the **active** milestone or an explicitly authorized one
   (see project state; currently Milestones 0 and 1).
 - Do not begin later milestones speculatively.
-- Milestones 0 through 7 are implementable from the documentation as it
-  stands, as is Milestone 9. Milestone 8's skills half has no design at all.
-  Do not begin it by inventing the missing design: report what is missing and
-  stop.
+- Milestones 0 through 9 are implementable from the documentation as it
+  stands. Milestone 10 has a design for its skill-authoring half and no
+  acceptance criteria of its own; do not begin it.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).

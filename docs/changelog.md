@@ -4,6 +4,80 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — The skill package, the catalog, and authoring
+
+- Added `docs/plan/skills.md`, the expansion of Section 30 and of
+  Milestone 8's skills half. The readiness review counted eleven
+  inbound references to Section 30 and no expansion under it, and
+  called it the largest undesigned area in the corpus. Recorded as
+  ADR-0030.
+- Corrected the readiness verdict it was written against. Skills did
+  not have "no design at all": `tool-system.md:1102-1149` is
+  forty-eight lines of real design that settles the metadata
+  boundary, the trust label on skill content, the `required_tools`
+  check, and the rule that a skill's script is not a tool. This
+  document was written to fit inside that section rather than on top
+  of it, and the verdict is corrected where it is stated.
+- Declared seven types the corpus had never named — `SkillSource`,
+  `SkillStatus`, `SkillManifest`, `SkillRevision`, `SkillRef`,
+  `SkillPin`, and `CatalogEntry` — with two ports,
+  `SkillRepository` and `SkillPackageStore`, and two tables. Nothing
+  referenced-and-undeclared was resolved here; unlike the sandbox
+  work, these are named for the first time.
+- Pinned the catalog at session open. A skill published mid-session
+  cannot change what a run already sees, which is what lets the
+  byte-stable prefix survive a publish and gives rollback the same
+  shape it has for `AgentSpec`.
+- Reclassified `skill_manage` from a control tool to a capability
+  tool at `risk: HIGH` and `CONDITIONALLY_IDEMPOTENT`, requiring the
+  `skill.write` scope and denied when `origin_trust` is below
+  `USER`. Section 30.2 calls it a control tool; `tool-system.md`
+  draws the control-tool line at durable state that outlives the
+  run, and a skill revision is durable tenant state. Three lines of
+  `tool-system.md` change and the control-tool table stays at four
+  entries.
+- Moved the context prefix ceiling from 13,500 to 15,000 tokens and
+  added two classes to the assembly order: a pinned catalog capped
+  at twenty entries and 1,500 tokens, and loaded skill bodies capped
+  at two and 6,000 tokens. A third load fails rather than evicting
+  the first, and a loaded body is sticky for the session.
+- Added harness case 27, a Milestone 8 case that asserts a skill
+  changes the outcome: a second run succeeds where the first fails,
+  the first run's prefix contains no part of the body, and the two
+  runs' policy dispositions do not differ. Section 30.5 asks for
+  this evidence and the twenty-six-case table never carried it. The
+  threshold it should be measured against is left open.
+- Declared sixteen gates in a new thirteenth registry area, `skill`.
+  Registry entries go from one hundred and eighteen to one hundred
+  and thirty-four and declarations from one hundred and twenty-one
+  to one hundred and thirty-seven. Milestone 8 goes from zero gates
+  to ten and Milestone 10 from zero to six — the last two zeros
+  belonging to milestones with work in them, and the first gates any
+  document has declared at Milestone 10. Case gates go from
+  fifty-nine to seventy-one, property from sixteen to seventeen,
+  corpus from six to seven, and structural from thirty-seven to
+  thirty-nine.
+- Widened the gate token grammar from `**M<digit>.**` to
+  `**M<number>.**`. Milestone 10 has two digits, and the docs check
+  the map specifies would not have parsed it.
+- Added `skill.write` to the API scope vocabulary. It appears in no
+  route row because the policy engine checks it on a tool call, not
+  at the boundary. There is no `skill.read`: reading the catalog is
+  what a session already does at open.
+- Updated the readiness review, the milestone map, the harness, the
+  context engine, the tool system, the policy spec, the API spec,
+  the composition root, `AGENTS.md`, `CLAUDE.md`, the toolchain
+  document, and `project-state.yaml`. Milestone 8 moves from *split*
+  to *ready with named gaps*, and Milestones 0 through 9 are now
+  implementable from the documentation as it stands.
+- Corrected two citation errors that propagate. The version-pinning
+  acceptance criterion is at `engineering-plan.md` line 2690, not
+  2684. And the policy-and-approval gating requirement is Section
+  30.3, not Section 30.4, which is loading and lifecycle —
+  `policy-and-approvals.md` is corrected; ADR-0005 and the questions
+  file keep theirs, per the rule that a record states what was true
+  when it was written.
+
 ## 2026-07-27 — Isolated execution, egress, and the artifact store
 
 - Added `docs/plan/sandbox-isolation.md`, the expansion of the last

@@ -101,13 +101,19 @@ Assembly order is fixed and total:
 | 2 | A | Framing: how to treat memory, tool output, and untrusted spans | `PLATFORM` |
 | 3 | A | Agent instructions (pinned `AgentSpec` version) | `TRUSTED_CONFIGURATION` |
 | 4 | A | Tool definitions (filtered, canonically serialized) | `TRUSTED_CONFIGURATION` |
-| 5 | A | Session-open memory snapshot | `MEMORY` |
-| 6 | B | Compacted history summary, if any | `PLATFORM` (see below) |
-| 7 | B | Retained conversation items, oldest to newest | per item |
-| 8 | B | Working-state block | per entry |
-| 9 | B | In-turn recall and correction lines | `MEMORY` |
-| 10 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
-| 11 | B | The current user message | `USER` |
+| 5 | A | Skill catalog (pinned at session open) | per entry |
+| 6 | A | Session-open memory snapshot | `MEMORY` |
+| 7 | B | Compacted history summary, if any | `PLATFORM` (see below) |
+| 8 | B | Retained conversation items, oldest to newest | per item |
+| 9 | B | Loaded skill bodies, in load order | per skill |
+| 10 | B | Working-state block | per entry |
+| 11 | B | In-turn recall and correction lines | `MEMORY` |
+| 12 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
+| 13 | B | The current user message | `USER` |
+
+Rows 5 and 9 are added by [skills.md](skills.md), which owns their content,
+their caps, and their trust derivation. They are listed here because assembly
+order is fixed and total, and a table that omits two of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -203,7 +209,9 @@ ceiling.
 | A | Platform policy | 2,000 | No | Never — fails at plan time |
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 6,000 tokens | No | Only at an epoch boundary |
+| A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
+| B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
 | B | Working state | 1,000 | No | Never |
 | B | In-turn recall | 2,000 | No | First |
 | B | Tool results | 25% of body | Partly | Second |
@@ -215,9 +223,12 @@ Tool definitions carry an **item cap as the primary limit**, exactly as the snap
 does and for exactly the same reason: selection accuracy degrades with the number of
 candidates, not with their token weight. Thirty tools is already generous; a
 deployment that needs more needs tool filtering or skills (Section 30.4, where only
-skill metadata enters ordinary context), not a bigger allowance.
+skill metadata enters ordinary context), not a bigger allowance. The skill catalog
+carries an item cap for the same reason and is capped at twenty;
+[skills.md](skills.md) argues that number and the 6,000-token body class beside
+it, which never yields because a third `skill.load` fails instead.
 
-The prefix classes sum to a hard ceiling of 13,500 tokens. If a plan exceeds it,
+The prefix classes sum to a hard ceiling of 15,000 tokens. If a plan exceeds it,
 **the session fails to open with a structured error naming the offending class**.
 It does not silently truncate the agent's instructions. A truncated system prompt
 is an agent that behaves subtly wrong forever, which is far worse than a session
@@ -493,6 +504,7 @@ class ContextPlan(BaseModel):
     tool_schema_sha256: str
     snapshot_id: UUID | None
     snapshot_watermark: int         # retrieval spec: the recall delta
+    skill_pins: tuple[SkillPin, ...]  # skills spec: pinned at open
     cache_breakpoints: list[CacheBreakpoint]
     policy_version: str
     builder_version: str
@@ -509,6 +521,8 @@ class ContextBudget(BaseModel):
     platform_tokens: int
     agent_tokens: int
     tool_tokens: int
+    skill_catalog_tokens: int       # skills spec: Region A metadata
+    skill_body_tokens: int          # skills spec: Region B, loaded
     retrieved_context_tokens: int   # frozen snapshot + elastic in-turn
     history_tokens: int
     # additions
@@ -744,3 +758,7 @@ a control tool. A skill that entered and left the prefix on alternating steps
 would invalidate the cached prefix on every one of them, which costs more than
 carrying an unused body. Stickiness is what makes Region B affordable for a
 large body; without it the right answer would have been the turn layer.
+[skills.md](skills.md) takes this decision as given and supplies the rest:
+the caps, the loading tool, the trust derivation, and the rule that a body
+never yields. It also settles the one thing this paragraph left open — a
+skill is never deselected, and a third load fails rather than evicting.

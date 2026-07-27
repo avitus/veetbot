@@ -324,6 +324,7 @@ session.read      session.write
 run.read          run.write        run.cancel
 approval.read     approval.resolve
 artifact.read
+skill.write
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow
@@ -368,6 +369,14 @@ because submitting is what creates a run; `session.write` gates creating
 the session itself. `run.cancel` is separate from `run.write` because a
 surface that may stop work is not necessarily a surface that may start
 it — an operator console is the obvious case.
+
+`skill.write` is in the vocabulary and in no row of the table, because it
+is checked by the policy engine on a tool call rather than by the API on a
+route. It is enumerated here because the vocabulary is closed and a scope
+the policy engine checks against a string this document does not contain
+is a scope that gets misspelled. [skills.md](skills.md) owns what it
+governs. There is no `skill.read`: nothing reads skills over the API in
+0.1, and an uncheckable scope is worse than a missing one.
 
 ### Tenancy is a repository argument, never a filter applied afterwards
 

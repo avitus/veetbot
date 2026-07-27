@@ -70,8 +70,9 @@ and a test-only bypass has a bypass.
 
 What follows completes Section 20 without changing any requirement in it. The
 twenty-five cases stay twenty-five cases — a twenty-sixth is added later, by
-[sandbox-isolation.md](sandbox-isolation.md), for a requirement Section 20.3
-never enumerated, and none of Section 20's own cases are changed — the sixteen
+[sandbox-isolation.md](sandbox-isolation.md), and a twenty-seventh by
+[skills.md](skills.md), each for a requirement Section 20.3 never enumerated,
+and none of Section 20's own cases are changed — the sixteen
 assertion types stay and gain the four the specs since written have made
 necessary, the capability track stays non-blocking, and the deterministic suite
 still runs in CI with no API key.
@@ -196,9 +197,10 @@ restates a gate another spec owns.
 | Evaluation harness | 2 | 0 | 0 | 8 | 10 |
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
 | Sandbox and artifacts | 8 | 1 | 0 | 4 | 13 |
+| Skills | 12 | 1 | 1 | 2 | 16 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **59** | **16** | **6** | **37** | **118** |
+| **Total** | **71** | **17** | **7** | **39** | **134** |
 
 The counts are the useful output, not the individual assignments: **more than
 half of the declared gates are not case gates**, and a harness that only runs
@@ -872,6 +874,36 @@ escape proves nothing, so the case is skipped rather than passed when the
 configured mechanism is `fake`, and the skip is a failure at Milestone 6.
 Cases 19 and 26 are the pair: 19 asserts the workspace boundary holds against
 a path, 26 asserts the sandbox boundary holds against a kernel.
+
+### Case 27, and the number Section 30.5 asks for
+
+The second addition comes from [skills.md](skills.md), for the same kind of
+reason: a requirement stated as a test with no row to carry it. Section 30.5
+makes rollout of the authoring loop conditional on self-authored skills
+"improving defined eval cases without increasing policy failures". A delta
+needs two measurements of the same thing, and until a case exists in which a
+skill can change the outcome at all, there is nothing to measure a delta
+against.
+
+| # | Case | M | Kind | What only this case proves |
+| --- | --- | --- | --- | --- |
+| 27 | A skill changes the outcome | 8 | Case | A procedure reaches the model and moves the result |
+
+The case runs one scripted task twice against the same fixed transcript
+harness — once with no skill enabled, once with a skill whose body contains
+the procedure the task needs — and asserts three things: the second run
+succeeds where the first fails, the first run's prefix contains no part of
+the body, and neither run's policy dispositions differ. The third assertion
+is the "without increasing policy failures" half, and it is in the case
+rather than in a separate one because a skill that buys a better outcome by
+provoking a denial has not improved anything.
+
+It is Milestone 8, not Milestone 10, because it tests the substrate rather
+than the authoring loop. At Milestone 10 the same case runs with the skill
+written by the background review instead of by the fixture, and the delta
+Section 30.5 wants is the difference between those two runs. What the case
+does not supply is the threshold — how much improvement is enough — which
+`skills.md` records as an open question.
 
 Numbering stops there. A case added later takes the next integer and no case
 is ever renumbered, because case numbers appear in gate statements, in

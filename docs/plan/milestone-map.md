@@ -35,9 +35,11 @@ gates appear in the table and the census below and needed no
 reconciliation.
 [sandbox-isolation.md](sandbox-isolation.md) was written later still
 and declares thirteen more, in the same form and in a new twelfth
-area. The counts throughout this document are the corpus as it now
-stands: one hundred and twelve declared across twelve specs, one
-hundred and eighteen registry entries.
+area. [skills.md](skills.md) was written last and declares sixteen
+more, in a new thirteenth area, and is the first spec to declare
+gates at Milestone 10. The counts throughout this document are the
+corpus as it now stands: one hundred and twenty-eight declared across
+thirteen specs, one hundred and thirty-four registry entries.
 
 ## What this document is responsible for
 
@@ -135,7 +137,9 @@ One heading, one form, one suffix.
     check reads.
 4.  **The docs check reads the token, not the prose.** Its parse is:
     find `## Hard gates`, take every top-level numbered item, take the
-    trailing `**M<digit>.**`, and fail if any item lacks one. This is
+    trailing `**M<number>.**`, and fail if any item lacks one. The
+    token holds a number rather than a single digit, because
+    [skills.md](skills.md) declares gates at Milestone 10. This is
     the weak count-and-identifier check registry rule 1 describes, and
     it is weak on purpose.
 5.  **The `spec` field in the registry points at `#hard-gates`.** The
@@ -152,7 +156,7 @@ and given a grammar.
 gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
-      event, context, memory, harness, api, sandbox
+      event, context, memory, harness, api, sandbox, skill
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -171,6 +175,13 @@ because an area names a subject and security is a property of many of
 them — the secret scanner, the import boundary, and the cross-tenant
 404 would all have a claim on it, and none of them belongs with a
 sandbox escape.
+
+`skill` is the thirteenth and follows the same precedent for the same
+reason. The alternative considered was splitting its gates across
+`context`, `tool`, and `policy`, which was rejected because one spec
+owns all sixteen and because two halves of one governance story —
+what reaches the prefix, and who may write a skill — would otherwise
+land in different areas.
 
 ## Ownership: the three gates declared twice
 
@@ -209,12 +220,12 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and twelve gates declared across twelve specs, two more
-declared in the engineering plan, and seven this document declares over
-the corpus: one hundred and twenty-one declarations, one hundred and
-eighteen registry entries once the three aliases are subtracted. Each
-table gives the gate's number in its own spec, its registry identifier,
-its kind, and its milestone.
+One hundred and twenty-eight gates declared across thirteen specs, two
+more declared in the engineering plan, and seven this document declares
+over the corpus: one hundred and thirty-seven declarations, one hundred
+and thirty-four registry entries once the three aliases are subtracted.
+Each table gives the gate's number in its own spec, its registry
+identifier, its kind, and its milestone.
 
 ```text
 id                                   kind        M   declared in
@@ -579,6 +590,46 @@ need a real sandbox and are cases. One of them, gate 8, is the
 red-team escape test Section 28.7 has required since version 2.0 and
 the harness had no case for.
 
+### Skills, sixteen gates
+
+Sixteen gates, all new, in a new thirteenth area. Ten are Milestone 8
+and six are Milestone 10 — the two milestones in the plan that had
+none, and Milestone 10 is the first milestone past 9 to acquire a
+census row. The split is the substrate against the authoring loop:
+everything that decides what a skill is, where it lives, and what it
+may reach is Milestone 8, and everything that lets an agent write one
+is Milestone 10. The spec tags each one.
+
+```text
+#   id                              kind         M
+--  ------------------------------  -----------  --
+1   gate.skill.metadata_only        case         8
+2   gate.skill.catalog_pinned       case         8
+3   gate.skill.no_tool_from_skill   structural   8
+4   gate.skill.untrusted_body       case         8
+5   gate.skill.revision_pinned      case         8
+6   gate.skill.missing_tool_loads   case         8
+7   gate.skill.catalog_capped       case         8
+8   gate.skill.validation_total     property     8
+9   gate.skill.body_cap             case         8
+10  gate.skill.mcp_read_only        case         8
+11  gate.skill.authoring_trust      corpus      10
+12  gate.skill.authoring_scope      case        10
+13  gate.skill.review_confined      case        10
+14  gate.skill.review_never_fatal   case        10
+15  gate.skill.provenance_complete  structural  10
+16  gate.skill.edit_conflict        case        10
+```
+
+Gates 3 and 15 are structural because each is an assertion about the
+shape of the code rather than about a run: a walk that must find no
+path from the skills package to the tool registry's write path, and
+an insert path with no branch that can omit provenance. Gate 8 is the
+corpus's seventeenth property test. Gate 11 is a corpus gate because
+"an untrusted turn" is a family of turns rather than one, and a
+single case would prove only the one it wrote. The remaining twelve
+need a running session and are cases.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -625,35 +676,39 @@ milestone  new gates  cumulative  the earliest of them
                                   cancellation keeps effects
 6                 11          98  isolation, egress, artifacts
 7                  6         104  budgeting and compaction
-8                  0         104  --
-9                 14         118  formation and retrieval
+8                 10         114  the pinned catalog, the metadata
+                                  boundary, package validation
+9                 14         128  formation and retrieval
+10                 6         134  the authoring loop and the
+                                  background review
 ```
 
 Two facts fall out of the table and both are worth stating rather than
 leaving for someone to notice.
 
-1.  **Milestone 8 adds no gates.** Every gate its work strengthens is
-    already registered against an earlier milestone: the MCP work adds
-    corpus members to gates 2 and 5 of the tool system. This is a
-    finding, not a design. It says Milestone 8 is the one whose
-    acceptance rests entirely on its own section's criteria in the
-    engineering plan, and it is worth a look during that milestone's
-    planning to decide whether that is right. Milestone 6 was the
-    other until [sandbox-isolation.md](sandbox-isolation.md) was
-    written; it now carries eleven, which is what a milestone that
-    creates a new trust boundary should carry.
-2.  **Forty of one hundred and eighteen gates are green before
-    Milestone 2.** More than a third of the plan's stated invariants are
+1.  **No milestone with work in it adds zero gates.** Milestones 6, 8,
+    and 10 were the three exceptions, each resting entirely on its own
+    section's criteria in the engineering plan.
+    [sandbox-isolation.md](sandbox-isolation.md) gave Milestone 6
+    eleven, and [skills.md](skills.md) gave Milestone 8 ten and
+    Milestone 10 six, which is what milestones that add a new trust
+    boundary, a new context class, and a new write path should
+    carry. Milestone 8's MCP half still contributes no
+    gate of its own; its work adds corpus members to gates 2 and 5 of
+    the tool system, which is the right shape for a milestone that
+    widens an existing surface rather than opening a new one.
+2.  **Forty of one hundred and thirty-four gates are green before
+    Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and twelve of them against a
     repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and eighteen, which is every
-registry entry, at Milestone 9. Milestones 10 and 11 add none: scheduling,
-routing, and subagents are covered by gates registered against the
-runtime loop and the policy engine, and the same question this document
-raises about Milestone 8 applies to them.
+The cumulative column reaches one hundred and thirty-four, which is
+every registry entry, at Milestone 10. Milestone 11 adds none: routing
+and subagents are covered by gates registered against the runtime loop
+and the policy engine, and the question this document used to raise
+about Milestone 8 now applies only to it.
 
 ## Build-sequence milestones
 
@@ -804,7 +859,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
 
 1.  **Every gate in every spec carries a milestone token.** The docs
     check parses each `## Hard gates` section and fails on a numbered
-    item with no trailing `**M<digit>.**`. **M0.**
+    item with no trailing `**M<number>.**`. **M0.**
 2.  **Every gate identifier in this document appears exactly once in
     `evals/gates/*.yaml`, and every registry entry appears here**,
     compared as sets and not as counts. **M0.**
@@ -815,7 +870,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the twelve. **M0.**
+    of the thirteen. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**
@@ -899,13 +954,15 @@ tracked metrics move to a sibling `## Tracked metrics` section.
 8.  **The census is generated.** A written table drifts; a derived one
     fails the build when it disagrees. The table above is the expected
     output, not the source.
-9.  **Milestones 6 and 8 adding no gates is reported, not fixed.**
-    The honest finding is that their acceptance rests on the
-    engineering plan's own criteria, and inventing gates to fill a
-    column would be worse than naming the shape. Milestone 6's zero
-    was closed the way the decision implies it should be: by a
-    specification that had gates to declare, not by the column.
-    Milestone 8's remains open and waits on the same thing.
+9.  **Milestones 6, 8, and 10 adding no gates was reported, not
+    fixed.** The honest finding was that their acceptance rested on
+    the engineering plan's own criteria, and inventing gates to fill a
+    column would have been worse than naming the shape. All three
+    zeros were closed the way the decision implies they should be: by
+    specifications that had gates to declare, not by the column —
+    [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
+    [skills.md](skills.md) for Milestones 8 and 10. The decision
+    stands for the next milestone that shows a zero.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —
@@ -939,14 +996,16 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     milestone, they are gates and need thresholds, which no document
     states. Reversal cost: low now, high after the harness is written
     against one reading.
-3.  **Whether Milestone 8 should acquire gates of its own.** It does
-    substantial work — skills and MCP — and adds no registered
-    invariant. It may be right, since its risks are covered by gates
-    registered earlier, and it may be an omission that only shows up
-    when a skill does something no gate was watching. Milestone 6 was
-    the other half of this question and it is answered: it has eleven,
-    and the sentence about something in a sandbox going wrong with no
-    gate watching turned out to be describing a real hole.
+3.  **Whether Milestone 8 should acquire gates of its own** —
+    answered yes, by [skills.md](skills.md), which gave it ten and
+    gave Milestone 10 six. The sentence about a skill doing something
+    no gate was watching turned out to describe a real hole, as the
+    same sentence about the sandbox had. What remains of the question
+    is the MCP half, which still registers no invariant of its own
+    and instead adds corpus members to two tool-system gates. That
+    may be right — MCP widens a surface the tool pipeline already
+    gates — and it is the part worth a look during the milestone's
+    planning.
 4.  **Whether the `optional` field is worth its precedent.** One gate
     uses it. The alternative is a live smoke test that is not a gate
     at all but a manually run script, which is honest about its status

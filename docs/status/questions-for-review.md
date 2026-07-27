@@ -2947,3 +2947,217 @@ changes in each spec"* table, because `http-api-and-streaming.md` is
 not in it either.
 
 **Reversal cost:** low.
+
+### `skill_manage` is a capability tool, not a control tool
+
+**Decided:** Section 30.2 calls `skill_manage` a control tool. It is
+reclassified as a capability tool, `risk: HIGH`,
+`CONDITIONALLY_IDEMPOTENT`, requiring the `skill.write` scope, and
+denied when `origin_trust` is below `USER`. `skill.load` stays a
+control tool.
+
+**Why:** `tool-system.md` draws the control-tool line at state that
+does not outlive the run — the four control tools it lists change the
+runtime's own state and take no approval, no scope, and no policy
+row. A skill revision is a durable row in a tenant's schema. Keeping
+the label would have meant relaxing all three constraints for one
+tool, which empties the category for the four that belong in it.
+
+**Alternative:** keep it a control tool and write "except
+`skill_manage`" into each of the three constraints.
+
+**Note:** this is the only place where a word in the engineering plan
+is contradicted rather than expanded, and it is contradicted by a
+specification that eleven documents already build on. Section 30.2's
+two authoring paths, its four operations, and its "nothing is
+auto-registered as a tool" are unchanged.
+
+**Reversal cost:** low now — three lines in `tool-system.md` and a
+heading in `skills.md`. Moderate after Milestone 8, when the registry
+entry and its policy rows exist.
+
+### The scope is `skill.write`, and there is no `skill.read`
+
+**Decided:** one new scope, `skill.write`, added to the closed dotted
+vocabulary in `http-api-and-streaming.md`. It gates `skill_manage`
+only. No `skill.read` scope is created, and `skill.write` appears in
+no route row.
+
+**Why:** the API specification closes the scope list and matches
+scopes exactly with no hierarchy, so a scope that is never checked at
+the boundary would still have to be declared to be checkable at the
+tool call. Reading the catalog is not an action a principal takes: it
+is what a session already does at open, for every session, and a
+scope that is granted to everyone is a column rather than a control.
+ADR-0013 spells it `skills:write`, which is not the dotted form the
+vocabulary uses.
+
+**Alternative:** a `skill.read` scope gating catalog visibility, which
+would make an agent with no skills indistinguishable from an agent
+whose skills were withheld.
+
+**Reversal cost:** low. Adding a scope to a closed list is a one-line
+change and a row in the route table.
+
+### `skill` is a thirteenth gate area
+
+**Decided:** the sixteen gates go in a new `gate.skill.*` area rather
+than being split across `context`, `tool`, and `policy`.
+
+**Why:** the grammar's rule is that an area names a subject one
+specification owns, which is the precedent `memory` and `sandbox`
+both set, and a `security` area was rejected earlier for naming a
+cross-cutting property instead. One document owns all sixteen. The
+split would also have put `gate.skill.metadata_only` and
+`gate.skill.authoring_trust` in different areas when they are two
+halves of one governance argument.
+
+**Alternative:** three gates in `context`, eight in `tool`, five in
+`policy`, and no new area.
+
+**Note:** this answers the milestone map's own open question 3 —
+whether Milestone 8 should acquire gates — with yes, and closes the
+last two milestone rows that showed zero.
+
+**Reversal cost:** low before Milestone 0's docs check is written,
+because a gate identifier is a string in four places. Moderate after,
+because the check parses the area.
+
+### The prefix ceiling moves from 13,500 to 15,000 tokens
+
+**Decided:** two context classes are added — a pinned skill catalog
+at twenty entries and 1,500 tokens, and loaded skill bodies at two
+skills and 6,000 tokens — and the prefix ceiling that four documents
+state as 13,500 becomes 15,000.
+
+**Why:** the catalog is a prefix-region class by construction, since
+it is pinned at session open and never changes within a session, and
+1,500 tokens of it will not fit under a ceiling that was set before
+it existed. 15,000 is 13,500 plus the catalog, rounded to the nearest
+five hundred; the 6,000-token body class sits in Region B and is not
+under the ceiling.
+
+**Cost:** four edits in `bootstrap-and-composition.md` and one in
+`context-engine.md`. No gate anchors to the number.
+
+**Alternative:** hold 13,500 and take the catalog out of the prefix,
+which would invalidate the cached prefix on every session whose
+catalog differs — which is every session.
+
+**Question for you:** 15,000 is a rounding, not a measurement. The
+first real model fixture will say whether it is generous or tight.
+
+**Reversal cost:** low. It is a constant in five places and a startup
+constraint row.
+
+### A third skill load fails rather than evicting the first
+
+**Decided:** at most two skill bodies are loaded per session. A third
+`skill.load` returns a structured failure; it does not evict.
+
+**Why:** a loaded body is sticky for the session precisely so the
+prefix stays byte-stable, and eviction is the one operation that
+would undo that. A failure the model can see and route around is
+cheaper than a cache invalidation it cannot.
+
+**Alternative:** least-recently-used eviction, which is what a cache
+would do and what a prefix must not.
+
+**Note:** the 3,000-token body limit is half the 6,000-token class, so
+the two-body cap holds by arithmetic rather than by policy. That
+limit is derived from the cap rather than from any procedure anyone
+has written, which is the wrong direction for a number to come from
+and is `skills.md` open question 4.
+
+**Reversal cost:** low.
+
+### The authoring loop is Milestone 10 and takes its first gates
+
+**Decided:** the static substrate — package, catalog, load, storage —
+is Milestone 8. `skill_manage`, the background review, and rollback
+are Milestone 10. Six of the sixteen gates land there, the first any
+document has declared at Milestone 10.
+
+**Why:** Section 30.5 says to ship the substrate first and enable
+authoring when the evidence supports it, and Milestone 8 is where the
+substrate is named. Nothing in Milestones 8 or 9 needs the write
+path.
+
+**Note:** Milestone 10 still has no acceptance criteria of its own,
+which `readiness.md` reports as an open question and this does not
+answer. Its gate column is no longer zero, but the gates come from a
+plan section rather than from the milestone's own criteria.
+`AGENTS.md` says Milestones 0 through 9 are implementable and
+Milestone 10 is not to be begun.
+
+**Reversal cost:** low. The milestone is a field on each gate.
+
+### Harness case 27 is a Milestone 8 case with no threshold
+
+**Decided:** one new evaluation case, *"A skill changes the
+outcome"*, at Milestone 8. Three assertions: the second run succeeds
+where the first fails, the first run's prefix contains no part of the
+body, and the two runs' policy dispositions do not differ. No
+numeric improvement threshold is set.
+
+**Why:** Section 30.5 gates the authoring rollout on evidence that
+self-authored skills improve eval cases without increasing policy
+failures, and the corpus had no case behind that sentence. The case
+belongs at Milestone 8 because it tests the substrate — a static
+skill is enough to prove a skill can change an outcome — and putting
+it at Milestone 10 would leave the substrate untested for two
+milestones.
+
+**Question for you:** what improvement counts? Two percent? Five? The
+case proves the mechanism; it does not answer whether a given delta
+should turn authoring on for a tenant. This is `skills.md` open
+question 8 and it is the one number in that document nobody has the
+data to choose yet.
+
+**Reversal cost:** low. Cases are never renumbered, so 27 stays 27
+even if its content changes.
+
+### The readiness verdict on skills is corrected, not carried forward
+
+**Decided:** `readiness.md` says skills have no specification at all
+and that no document outside the plan and ADR-0013 mentions
+`SKILL.md`. The second half is true; the first is not, and the
+verdict is rewritten where it is stated rather than footnoted.
+
+**Why:** `tool-system.md:1102-1149` is forty-eight lines of real
+design — the metadata boundary, the trust label on skill content, the
+`required_tools` check as a note rather than a refusal, and the rule
+that a skill's script is not a tool. `skills.md` had to be written to
+fit inside that section rather than on top of it, and a verdict that
+says the section does not exist would have made the fit look
+optional.
+
+**Note:** the review's own miss is stated in the document rather than
+quietly removed, because `readiness.md` is a live statement of the
+corpus's condition and its value depends on it being corrected in
+place.
+
+**Reversal cost:** low.
+
+### Two citation errors are fixed in live documents and left in records
+
+**Decided:** the version-pinning acceptance criterion is at
+`engineering-plan.md` line 2690, not 2684, and the policy-and-approval
+gating requirement is Section 30.3, not Section 30.4.
+`readiness.md` and `policy-and-approvals.md` are corrected;
+`docs/adr/0005-two-stage-policy-and-approval-model.md` and the
+2026-07-25 entry in this file are not.
+
+**Why:** the corpus already separates live statements of current fact
+from records of what was true at a point in time, and an ADR whose
+citations are silently updated stops being a record.
+
+**Note:** the reverse correction was made and undone during this
+work. Section 30.4 is loading and lifecycle and it is the right cite
+for "only skill metadata enters ordinary context"; Section 30.3 is
+governance and it is the right cite for gating, provenance,
+versioning, restricted review, injection resistance, and sandboxed
+scripts. Two `context-engine.md` citations were changed to 30.3 in
+error and are back at 30.4.
+
+**Reversal cost:** low.

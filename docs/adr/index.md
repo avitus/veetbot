@@ -38,3 +38,4 @@ implementation without one.
 - [ADR-0027 — Gate milestones, the declaration form, and the milestone map](0027-milestone-map.md)
 - [ADR-0028 — The HTTP API surface, the error vocabulary, and the event stream](0028-http-api-and-streaming.md)
 - [ADR-0029 — Isolated execution, the egress boundary, and the artifact store](0029-sandbox-isolation-and-artifacts.md)
+- [ADR-0030 — The skill package, the pinned catalog, and the authoring loop](0030-skills-and-the-authoring-loop.md)

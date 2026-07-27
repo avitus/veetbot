@@ -1140,13 +1140,19 @@ the byte-stable prefix, and is enveloped like any other untrusted span. This
 is stricter than Section 30.3's "skill content is scanned at load" and it is
 stricter on purpose: scanning is a heuristic and labelling is a fact.
 
-`skill.load` and `skill_manage` are control tools. `skill_manage` is
-classified `risk: HIGH`, `idempotency: NON_IDEMPOTENT`, requires the
-`skills:write` scope, and — this is Section 30.3's injection-resistance
-bullet made mechanical — is **denied when `origin_trust` is below `USER`**.
+`skill.load` is a control tool. `skill_manage` is not: it writes durable
+tenant state that outlives the run, which is the line this section draws,
+and the control-tool table above does not list it. It is a capability tool,
+classified `risk: HIGH`, `idempotency: CONDITIONALLY_IDEMPOTENT`, requiring
+the `skill.write` scope, and — this is Section 30.3's injection-resistance
+bullet made mechanical — **denied when `origin_trust` is below `USER`**.
 An agent whose turn saw untrusted content cannot write a skill in that turn.
 The mechanism already exists: `origin_trust` is computed for every proposed
 action, and this is one policy rule reading it.
+
+[skills.md](skills.md) carries this classification, the idempotency key that
+justifies the class, the four operations, and everything underneath the four
+paragraphs above. Nothing in this section is reversed there.
 
 ## The programmatic orchestration bridge
 

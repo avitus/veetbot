@@ -75,6 +75,7 @@ nav:
       - Runtime Loop: plan/runtime-loop.md
       - HTTP API & Streaming: plan/http-api-and-streaming.md
       - Sandbox Isolation & Artifacts: plan/sandbox-isolation.md
+      - Skills: plan/skills.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
   - Project State:
@@ -111,4 +112,5 @@ nav:
       - ADR-0027 Gate milestones and the milestone map: adr/0027-milestone-map.md
       - ADR-0028 The HTTP API surface: adr/0028-http-api-and-streaming.md
       - ADR-0029 Sandbox isolation and artifacts: adr/0029-sandbox-isolation-and-artifacts.md
+      - ADR-0030 Skills and the authoring loop: adr/0030-skills-and-the-authoring-loop.md
   - Changelog: changelog.md
