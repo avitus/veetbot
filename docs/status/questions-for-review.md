@@ -2689,3 +2689,73 @@ rewriting its arithmetic destroys that. ADR-0028 states the new total
 instead, which is where a reader looking for the change will be.
 
 **Reversal cost:** none.
+
+## The gate registry (no ADR)
+
+### The secret scanner is a gate, and it is registered
+
+**Decided:** `gate.structure.no_committed_secrets`, structural,
+Milestone 0, owned by the engineering plan. It was specified in full in
+`bootstrap-and-composition.md`, carried a gate identifier there, ran in
+`make check`, and failed the build — and it was in no registry table.
+
+**Why:** the corpus's own definition of a hard gate is that it fails
+the build, and every other check named in the engineering plan's
+Milestone 0 acceptance criteria is a registry entry. Leaving this one
+out is exactly the drift `gate.harness.registry_complete` exists to
+catch, arriving before there is any code to catch it in.
+
+**Cost:** the registry goes from one hundred and four entries to one
+hundred and five and every cumulative figure from Milestone 0 onward
+rises by one, one day after ADR-0028 fixed the totals at one hundred
+and four.
+
+**Alternative:** demote it — change *Gate id* to *check id* in
+`bootstrap-and-composition.md` and correct the map's *three gates* to
+*two*. Cheaper by about a dozen edits and defensible, since the four
+AST rules in the same section are explicitly not gates. Rejected
+because those four are assertions about module structure that hold
+vacuously in an empty repository, and this one is a scan of committed
+text that can fail on the first commit.
+
+**Reversal cost:** low. One registry row and the arithmetic that
+counts it.
+
+### The area is `structure`, not `security`
+
+**Decided:** the identifier's area changes from `security` to
+`structure`. No twelfth area is added.
+
+**Why:** `security` appears in exactly one identifier in the whole
+corpus and in no grammar. `structure` is defined as the structural
+statements about the repository that no single subject spec owns,
+which describes a repository-wide scan precisely. The map already
+claimed three `structure` gates while only two existed, so this makes a
+sentence true rather than making a vocabulary bigger.
+
+**Note:** if security-specific gates accumulate later — egress
+enforcement and sandbox escape are the obvious candidates, and the
+sandbox specification is the next document — a `security` area may
+earn its place. One gate does not.
+
+**Question for you:** the sandbox specification will register gates for
+egress and isolation. Should those take a new `security` area, or stay
+in `structure` and `tool`?
+
+**Reversal cost:** low, while nothing consumes the identifier.
+
+### The engineering plan owns it, not the spec that specifies it
+
+**Decided:** the `spec` field points at the engineering plan's
+Milestone 0 acceptance criteria, the same place
+`gate.structure.import_boundary` points. `bootstrap-and-composition.md`
+continues to declare no gates.
+
+**Why:** the plan already names the secret scanner in that list, and
+the map already explains that a plan-owned entry is what happens when a
+requirement belongs to no subject spec. Giving
+`bootstrap-and-composition.md` a `## Hard gates` section for one gate
+would make the map's *two specs declare no gates at all* false and
+change the declaration-form arithmetic, to record the same fact.
+
+**Reversal cost:** low.

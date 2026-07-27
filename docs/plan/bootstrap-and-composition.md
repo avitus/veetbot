@@ -956,7 +956,14 @@ the property the milestone paragraph asks for.
 
 ### The secret scanner
 
-Gate id `gate.security.no_committed_secrets`. It scans committed text —
+Gate id `gate.structure.no_committed_secrets`, registered at Milestone 0.
+The engineering plan's Milestone 0 acceptance criteria declare it, in the
+same breath as the import-boundary walk; this section specifies it. The
+area is `structure` rather than `security` because the identifier grammar
+in [milestone-map.md](milestone-map.md) defines no `security` area, and a
+repository-wide scan owned by no subject spec is what `structure` is for.
+
+It scans committed text —
 everything under `src/`, `tests/`, `evals/`, `migrations/`, `docs/`, plus
 `.env.example` and any committed fixture — and fails the build on a match.
 

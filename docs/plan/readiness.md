@@ -72,7 +72,7 @@ rather than smoothed.
 
 | M | Subject | Verdict | Gates | What stands between it and code |
 | --- | --- | --- | --- | --- |
-| 0 | Repository and engineering foundation | Ready | 11 | Nothing |
+| 0 | Repository and engineering foundation | Ready | 12 | Nothing |
 | 1 | In-memory vertical slice | Ready | 27 | Nothing |
 | 2 | PostgreSQL persistence and durable worker | Ready | 12 | Migration authoring conventions |
 | 3 | Model adapters and normalized streaming | Ready with named gaps | 11 | Provider response metadata |
@@ -134,8 +134,8 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Thirty-eight of one hundred and four gates are green before
-Milestone 2 begins**, eleven of them against a repository with no
+**Thirty-nine of one hundred and five gates are green before
+Milestone 2 begins**, twelve of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test

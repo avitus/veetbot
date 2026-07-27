@@ -4,6 +4,40 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — The secret scanner joins the gate registry
+
+- Registered the secret scanner as `gate.structure.no_committed_secrets`
+  at Milestone 0. `bootstrap-and-composition.md` specified it in full —
+  five rule families, an allowlist that requires a reason, a report that
+  never prints the match — and gave it a gate identifier, but the
+  identifier's area was `security`, which the identifier grammar in
+  `milestone-map.md` does not define, and no registry entry existed. A
+  check that fails the build and sits outside the registry is the drift
+  the registry exists to prevent, and it was there before any code was
+  written.
+- Corrected the identifier's area to `structure`. That area is defined
+  as the structural statements about the repository that no single
+  subject spec owns, which is what a repository-wide scan is. The
+  milestone map already said `structure` held three gates while only two
+  existed; it now names all three.
+- Gave the gate the engineering plan as its owner rather than
+  `bootstrap-and-composition.md`, because the plan's Milestone 0
+  acceptance criteria already declare it in the same breath as the
+  import-boundary walk. `bootstrap-and-composition.md` still declares no
+  gates of its own; it supplies the mechanism, not the requirement.
+- Registry entries go from one hundred and four to one hundred and five
+  and declarations from one hundred and seven to one hundred and eight.
+  Milestone 0 goes from eleven gates to twelve and every cumulative
+  figure after it rises by one. Structural gates go from thirty-two to
+  thirty-three. The milestone map, the harness gate table, and the
+  readiness review are updated; ADR-0027 and ADR-0028 are not, per the
+  rule that an ADR's arithmetic is a record of what was true when it was
+  decided.
+- Corrected a stale count of my own: the milestone map's gate 5 required
+  a gate identifier's area to be *one of the ten*, which stopped being
+  true when the API specification added `api` as an eleventh. The
+  grammar block listed eleven and the gate that enforces it said ten.
+
 ## 2026-07-27 — The HTTP API, the event stream, and the error vocabulary
 
 - Added `docs/plan/http-api-and-streaming.md`, the specification the readiness

@@ -34,7 +34,7 @@ with a milestone on each — which is what fixing the form was for. Its
 gates appear in the table and the census below and needed no
 reconciliation. The counts throughout this document are the corpus as
 it now stands: ninety-nine declared across eleven specs, one hundred and
-four registry entries.
+five registry entries.
 
 ## What this document is responsible for
 
@@ -85,7 +85,10 @@ Two specs, `bootstrap-and-composition.md` and
 `development-toolchain.md`, declare no gates at all. That is correct
 and stays correct: both describe construction rather than behaviour,
 and the four static checks bootstrap adds are declared as Milestone 0
-consequences rather than as gates of their own.
+consequences rather than as gates of their own. The secret scanner
+`bootstrap-and-composition.md` specifies is a gate, but the engineering
+plan declares it; bootstrap supplies the mechanism, not the
+requirement.
 
 ### Forms
 
@@ -150,9 +153,11 @@ area  one of: structure, runtime, tool, builtin, model, policy,
 slug  lowercase, underscore-separated, unique within its area
 ```
 
-The area is not the filename. `structure` exists because three gates
-are structural statements about the repository that no single subject
-spec owns, and `memory` covers both memory specs because formation and
+The area is not the filename. `structure` exists because three gates —
+the import-boundary walk, the transaction-hygiene check, and the secret
+scanner — are structural statements about the repository that no single
+subject spec owns, and `memory` covers both memory specs because
+formation and
 retrieval share a harness and their gates cross-reference each other.
 
 ## Ownership: the three gates declared twice
@@ -170,12 +175,13 @@ gate.structure.txn_hygiene       event-log #7     runtime-loop #6
 gate.event.checkpoint_dispens..  event-log #6     runtime-loop #9
 ```
 
-The generic import-boundary walk is the one registry entry whose owner
-is not a detailed-design spec. It is declared in the engineering plan's
-Milestone 0 acceptance criteria, alongside the transaction-hygiene
-check, the secret scanner, and contract-module coverage, and its
-`spec` field points there. `tool-system.md` #6 restates it in one
-sentence and is its only alias.
+The generic import-boundary walk is one of the two registry entries
+whose owner is not a detailed-design spec. It is declared in the
+engineering plan's Milestone 0 acceptance criteria, alongside the
+transaction-hygiene check, the secret scanner, and contract-module
+coverage, and its `spec` field points there. `tool-system.md` #6
+restates it in one sentence and is its only alias. The secret scanner
+is the other, and the gate table below says why.
 
 `model-gateway.md` #1, `policy-and-approvals.md` #3, and
 `evaluation-harness.md` #4 also run on the import-boundary walk and are
@@ -191,18 +197,32 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-Ninety-nine gates declared across eleven specs, one more declared in
+Ninety-nine gates declared across eleven specs, two more declared in
 the engineering plan, and seven this document declares over the corpus:
-one hundred and seven declarations, one hundred and four registry
+one hundred and eight declarations, one hundred and five registry
 entries once the three aliases are subtracted. Each table gives the
 gate's number in its own spec, its registry identifier, its kind, and
 its milestone.
 
 ```text
-id                              kind        M   declared in
-------------------------------  ----------  --  ----------------
-gate.structure.import_boundary  structural  0   plan, Milestone 0
+id                                   kind        M   declared in
+-----------------------------------  ----------  --  ----------------
+gate.structure.import_boundary       structural  0   plan, Milestone 0
+gate.structure.no_committed_secrets  structural  0   plan, Milestone 0
 ```
+
+The second is specified in
+[bootstrap-and-composition.md](bootstrap-and-composition.md), which
+gives its five rule families and the three properties that matter more
+than its patterns. It is declared here rather than there for the same
+reason as the first: both are named in the engineering plan's Milestone
+0 acceptance criteria, and neither is a statement about a subject that
+a detailed-design spec owns. It was carrying an identifier in a
+`security` area that this document's grammar does not define, which is
+how it went unregistered; the identifier is corrected to `structure`
+and the arithmetic above absorbs it. ADR-0027 and ADR-0028 are not
+amended — their totals are records of what was true when each was
+decided, and this document is where the current one is stated.
 
 ### Runtime loop, fourteen gates
 
@@ -544,19 +564,20 @@ alias restatements.
 ```text
 milestone  new gates  cumulative  the earliest of them
 ---------  ---------  ----------  -----------------------------
-0                 11          11  the import boundary and ten
-                                  checks over documents
-1                 27          38  the vertical slice, both
+0                 12          12  the import boundary, the secret
+                                  scanner, and ten checks over
+                                  documents
+1                 27          39  the vertical slice, both
                                   builtins, deterministic build
-2                 12          50  persistence, fencing, resume
-3                 11          61  five adapters, trajectories
-4                 12          73  policy, approvals, corpora
-5                 11          84  the API surface, the stream,
+2                 12          51  persistence, fencing, resume
+3                 11          62  five adapters, trajectories
+4                 12          74  policy, approvals, corpora
+5                 11          85  the API surface, the stream,
                                   cancellation keeps effects
-6                  0          84  --
-7                  6          90  budgeting and compaction
-8                  0          90  --
-9                 14         104  formation and retrieval
+6                  0          85  --
+7                  6          91  budgeting and compaction
+8                  0          91  --
+9                 14         105  formation and retrieval
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -571,14 +592,14 @@ leaving for someone to notice.
     ones whose acceptance rests entirely on their own section's
     criteria in the engineering plan, and it is worth a look during
     each milestone's planning to decide whether that is right.
-2.  **Thirty-eight of one hundred and four gates are green before
+2.  **Thirty-nine of one hundred and five gates are green before
     Milestone 2.** More than a third of the plan's stated invariants are
-    checkable against the in-memory slice, and eleven of them against a
+    checkable against the in-memory slice, and twelve of them against a
     repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and four, which is every
+The cumulative column reaches one hundred and five, which is every
 registry entry, at Milestone 9. Milestones 10 and 11 add none: scheduling,
 routing, and subagents are covered by gates registered against the
 runtime loop and the policy engine, and the same question this document
@@ -744,7 +765,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the ten. **M0.**
+    of the eleven. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**

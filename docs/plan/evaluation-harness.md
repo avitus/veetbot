@@ -192,9 +192,9 @@ restates a gate another spec owns.
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 2 | 0 | 0 | 8 | 10 |
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
-| Engineering plan | 0 | 0 | 0 | 1 | 1 |
+| Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **51** | **15** | **6** | **32** | **104** |
+| **Total** | **51** | **15** | **6** | **33** | **105** |
 
 The counts are the useful output, not the individual assignments: **more than
 half of the declared gates are not case gates**, and a harness that only runs
