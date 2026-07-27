@@ -2759,3 +2759,191 @@ would make the map's *two specs declare no gates at all* false and
 change the declaration-form arithmetic, to record the same fact.
 
 **Reversal cost:** low.
+
+## Sandbox isolation and artifacts (ADR-0029)
+
+### The gates take a new `sandbox` area, not `security` and not both
+
+**Decided:** the thirteen gates the sandbox specification declares take
+a new twelfth area, `sandbox`. The registry's area vocabulary becomes
+`structure, runtime, tool, builtin, model, policy, event, context,
+memory, harness, api, sandbox`.
+
+**Why:** this answers the question left open under the gate registry
+above — *"the sandbox specification will register gates for egress and
+isolation. Should those take a new `security` area, or stay in
+`structure` and `tool`?"* — and the answer is a third option that was
+not on the list when the question was asked.
+
+`security` was rejected on the same ground the single secret-scanner
+gate was: an area names a subject some document owns, not a
+cross-cutting property. Egress, isolation, limits, and artifacts are
+not the only security-relevant gates in the corpus — cross-tenant
+denial, the injection corpus, and credential scrubbing all live
+elsewhere — so a `security` area would either pull those out of the
+areas that own them or be a `security` area that does not contain the
+security gates.
+
+Splitting them across `structure` and `tool` was rejected because it is
+false to the registry's own rule. One specification declares all
+thirteen, and `memory` is the precedent: the two memory specifications
+took one `memory` area between them, fourteen gates, rather than
+distributing them into `event` and `context`.
+
+**Cost:** the area list grows by one, and every document that states
+the area count changes. The map, the harness gate table, and this file
+are the three.
+
+**Reversal cost:** low, while nothing consumes the identifiers.
+Renaming an area is one column plus three sentences of prose.
+
+### The workspace is a cache held for a lease, not state held for a run
+
+**Decided:** a run's workspace exists for a worker's lease on that run,
+not for the run's logical lifetime. It is created lazily at the first
+sandbox-targeted call, held across steps and across an approval hold
+shorter than `approval_hold_seconds`, and destroyed with the sandbox
+when the lease ends. A run that resumes gets a fresh, empty workspace,
+and anything that must survive is an artifact.
+
+**Why:** the plan requires a workspace and never says how long one
+lives, and the two candidate answers are not close. A durable per-run
+workspace needs shared storage between execution hosts, which puts back
+the cross-tenant blast radius that one sandbox per run removes; it
+makes the workspace a second piece of state whose consistency with the
+event log nobody owns; and it turns crash-resume into recovery. With
+the workspace as a cache, resume needs no recovery at all — the sandbox
+is gone, so there is nothing to reconcile.
+
+**Cost:** a tool that writes a file and expects to find it after a long
+approval hold will not find it. The specification makes that explicit
+rather than incidental, and `artifact.export` is the way to keep
+something.
+
+**Question for you:** the hold threshold is `approval_hold_seconds`,
+which is 300. A workspace survives a five-minute approval and is
+dropped past it. If real approvals routinely take longer than that, the
+number is what to revisit, not the rule.
+
+**Reversal cost:** high once tools are written against it. The rule
+shapes what `sandbox.run_command` is allowed to promise.
+
+### `sandbox.run_command` is Milestone 6; `builtin-tools.md` was wrong
+
+**Decided:** the tool ships at Milestone 6. The five places in
+`builtin-tools.md` that put it at Milestone 5 are corrected — the
+roster, the classification argument, and the two prose passages that
+called Milestone 5 the sandbox milestone.
+
+**Why:** Section 8.2 says the tool arrives *"only after the sandbox
+milestone"*, and Section 21 names Milestone 5 *"HTTP API and SSE"* and
+Milestone 6 *"Isolated execution and artifacts"*. `builtin-tools.md`
+read "the sandbox milestone" as 5 and said so twice. That is a
+transcription error against the plan's own milestone list rather than a
+scheduling disagreement, so correcting the spec reverses nobody's
+decision.
+
+The readiness review reported this conflict and deferred it here,
+because the real question was whether the tool could ship early against
+the development sandbox mechanism and gain container backing later. It
+cannot: that mechanism refuses to start when the environment is
+production, and a tool that only works in development is not a
+milestone deliverable.
+
+**Note:** the argument `builtin-tools.md` was making survives the
+correction and is kept. `artifact.export` and `sandbox.run_command` both
+touch a workspace and must not be merged into one tool — one is
+`IDEMPOTENT` and runs in process, the other is neither.
+
+**Reversal cost:** low. Nothing is built.
+
+### The red-team escape test becomes case 26, and nothing is renumbered
+
+**Decided:** the container escape Section 28.7 demands becomes harness
+case 26, a security case at Milestone 6 backed by
+`gate.sandbox.escape_denied`. The twenty-five existing cases keep their
+numbers and their text, and the heading that names them stays.
+
+**Why:** the harness promises that Section 20's twenty-five cases stay
+twenty-five, and `gate.harness.anchor_resolves` asserts that a case
+number resolves to a stable anchor. Renumbering to slot a security case
+in beside case 19 would break both to gain tidiness. Appending costs
+nothing, and the rule it sets down — a case added later takes the next
+integer and no case is ever renumbered — is worth having in writing
+before there are a hundred cases.
+
+**Note:** the case is skipped rather than passed when the configured
+mechanism is `fake`, and the skip is a failure at Milestone 6. A fake
+that reports no escape proves nothing, and a security case that passes
+because it did not run is worse than no case.
+
+**Reversal cost:** low.
+
+### Artifacts expire after thirty days by default
+
+**Decided:** `expires_at` is written at creation as thirty days out,
+and a sweeper deletes what has passed. Deletion is by `expires_at`
+alone, never by reference counting.
+
+**Why:** the plan requires a retention rule and gives no number. Thirty
+days is long enough that an artifact outlives the run that produced it
+and any review of that run, and short enough that a tenant's store does
+not grow without bound from the first day. Reference counting was
+rejected because an artifact referenced by an event that is itself kept
+forever is never collectable, which is a retention rule that does not
+retain.
+
+**Question for you:** this is the one default in the document that
+silently deletes something a user might expect to keep, and thirty days
+is a guess at what is really a product decision. If artifacts are meant
+to be durable — the output of a long task somebody comes back to a
+month later — the number is wrong, and the right answer is probably
+per-tenant configuration with a floor.
+
+**Reversal cost:** low before Milestone 6 and low after. It is a column
+default and a sweep interval.
+
+### `fake` is a fourth sandbox mechanism and a real adapter
+
+**Decided:** `SandboxMechanism` gains a fourth value, `fake`, which
+runs commands in a temporary directory with no isolation at all. It is
+a production adapter in the same sense the in-memory repositories are:
+it runs the `ExecutionEnvironment` contract suite unchanged, and the
+composition root refuses it when the environment is production, by the
+same startup check that refuses `docker`.
+
+**Why:** the contract suite has to run in CI with no container runtime
+available, and the alternative is a test double that lives in the test
+tree and drifts from the port it doubles. The in-memory tier at
+Milestone 1 is the precedent the corpus already set.
+
+**Note:** two of the thirteen gates exist because this value exists —
+the startup refusal at Milestone 1, and the rule that the security
+cases run against a real runtime and never against `fake`.
+
+**Reversal cost:** low.
+
+### Section 28 is not edited, and the specification is subordinate to it
+
+**Decided:** `sandbox-isolation.md` expands Sections 18 and 28 without
+changing either. Where it is more specific than the plan — the
+allowlist grammar, the three-tier environment, the workspace lifetime —
+it is filling in what those sections left open, not deciding against
+them.
+
+**Why:** the conversion rules forbid materially rewriting the
+engineering requirements, and every specification before this one has
+been subordinate to the section it expands the way `runtime-loop.md` is
+subordinate to Section 12. Nothing in Section 28 turned out to be
+wrong, which made this easy.
+
+**Note:** two things were left undone on purpose, both following a
+convention the corpus already had rather than a rule anyone wrote down.
+ADR-0029 is not added to the engineering plan's *"Version 2.0 adds
+these ADRs"* list, because ADRs 0021 through 0028 are not in it either
+— that list is a record of the 2.0 revision rather than an index. And
+`sandbox-isolation.md` is not added to the milestone map's *"What
+changes in each spec"* table, because `http-api-and-streaming.md` is
+not in it either.
+
+**Reversal cost:** low.

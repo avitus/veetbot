@@ -60,19 +60,19 @@ documentation:
 readiness:
   review: docs/plan/readiness.md
   summary: >-
-    Milestones 0 through 5 are implementable from the corpus alone.
-    Milestones 6 through 10 require design work that has not been done.
-    Milestone 5 moved into the covered set when
-    docs/plan/http-api-and-streaming.md was written; the review's
-    original finding is retained in the review itself.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5]
+    Milestones 0 through 7 and Milestone 9 are implementable from the
+    corpus alone. Milestone 8 is split: its MCP half is covered and its
+    skills half has no design at all. Milestone 10 has no acceptance
+    criteria and is a direction rather than a milestone. Milestones 5
+    and 6 moved into the covered set when
+    docs/plan/http-api-and-streaming.md and
+    docs/plan/sandbox-isolation.md were written; the review's original
+    findings are retained in the review itself.
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 9]
   documents_required_before_coding_reaches_them:
-    - subject: Sandbox isolation
-      blocks_milestone: 6
-      expands: engineering-plan.md section 28
     - subject: Skills
       blocks_milestone: 8
       expands: engineering-plan.md section 30
 
-last_updated: 2026-07-27T21:34:00Z
-last_reviewed_commit: 480cc21
+last_updated: 2026-07-27T23:10:00Z
+last_reviewed_commit: 6adc0c9

@@ -4,6 +4,66 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — Isolated execution, egress, and the artifact store
+
+- Added `docs/plan/sandbox-isolation.md`, the expansion of the last
+  unexpanded plan section whose failure mode is a trust boundary rather
+  than a missing feature. It expands Sections 18 and 28 and changes
+  neither, and is recorded as ADR-0029. Milestone 6 was the only
+  milestone in the corpus with no specification, no gates, and eight
+  implement bullets with no design outside the plan.
+- Declared the eight types the corpus named and never defined —
+  `EnvironmentSpec`, `ResourceLimits`, `EnvironmentHandle`,
+  `ExecutionCommand`, `ExecutionResult`, `FileChange`,
+  `ArtifactMetadata`, and `ArtifactRef` — together with
+  `WorkspaceHandle`, `ArtifactWriter`, and `CredentialResolver` from
+  `ToolExecutionContext`, and `KillReason`, which `ExecutionResult`
+  needs and nothing had. The API specification had named
+  `ArtifactMetadata` and `ArtifactRef` as the last two
+  referenced-and-undeclared types in the corpus; there are now none.
+- Gave the egress allowlist a grammar, an owner, and two enforcement
+  points. `tool-system.md` has depended by name on *"the egress
+  allowlist the sandbox spec establishes"* since before there was a
+  sandbox spec. The grammar has no open mode and no IP destination
+  form, the proxy resolves the name itself and dials the address it
+  resolved, and a fixed private-range denylist runs first and cannot be
+  waived by an allowlist entry.
+- Settled workspace lifetime with a rule rather than a mechanism: the
+  workspace is a cache held for a worker's lease on a run, not state
+  held for the run's logical lifetime. Cleanup and crash-resume become
+  the same operation, and anything that must survive is an artifact.
+- Corrected `builtin-tools.md`, which placed `sandbox.run_command` at
+  Milestone 5 and twice called Milestone 5 the sandbox milestone.
+  Section 21 names Milestone 5 *"HTTP API and SSE"* and Milestone 6
+  *"Isolated execution and artifacts"*, and Milestone 6's implement
+  list names the tool. Five places are corrected; the constraint the
+  document was defending — that `artifact.export` and
+  `sandbox.run_command` must not merge into one tool — survives as a
+  constraint rather than as a milestone argument.
+- Added harness case 26, a Milestone 6 security case for the container
+  escape Section 28.7 has required since version 2.0 and the
+  twenty-five-case table never carried. None of the twenty-five is
+  renumbered, and the rule that no case is ever renumbered is now
+  written down.
+- Declared thirteen gates in a new twelfth registry area, `sandbox`.
+  Registry entries go from one hundred and five to one hundred and
+  eighteen and declarations from one hundred and eight to one hundred
+  and twenty-one. Milestone 1 goes from twenty-seven gates to
+  twenty-eight, Milestone 4 from twelve to thirteen, and Milestone 6
+  from zero to eleven — Milestone 8 is now the only zero belonging to a
+  milestone that does work. Case gates go from fifty-one to fifty-nine
+  and structural from thirty-three to thirty-seven. The milestone map,
+  the harness gate table, and the readiness review are updated; the
+  ADRs are not, per the rule that an ADR's arithmetic records what was
+  true when it was decided.
+- Updated the readiness review: Milestone 6 moves from *not ready* to
+  *ready*, the four plan sections no specification expands become
+  three, two of the four reported conflicts are marked resolved, and
+  two of the five open questions are answered.
+- Corrected two stale counts in the engineering plan's routing
+  paragraphs that predate this work and had missed the secret scanner's
+  registration.
+
 ## 2026-07-27 — The secret scanner joins the gate registry
 
 - Registered the secret scanner as `gate.structure.no_committed_secrets`

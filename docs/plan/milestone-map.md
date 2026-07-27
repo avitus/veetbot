@@ -32,9 +32,12 @@ milestone, and what cancels a run at Milestone 1.
 this document and declares ten more gates, in the form fixed here and
 with a milestone on each — which is what fixing the form was for. Its
 gates appear in the table and the census below and needed no
-reconciliation. The counts throughout this document are the corpus as
-it now stands: ninety-nine declared across eleven specs, one hundred and
-five registry entries.
+reconciliation.
+[sandbox-isolation.md](sandbox-isolation.md) was written later still
+and declares thirteen more, in the same form and in a new twelfth
+area. The counts throughout this document are the corpus as it now
+stands: one hundred and twelve declared across twelve specs, one
+hundred and eighteen registry entries.
 
 ## What this document is responsible for
 
@@ -149,7 +152,7 @@ and given a grammar.
 gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
-      event, context, memory, harness, api
+      event, context, memory, harness, api, sandbox
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -159,6 +162,15 @@ scanner — are structural statements about the repository that no single
 subject spec owns, and `memory` covers both memory specs because
 formation and
 retrieval share a harness and their gates cross-reference each other.
+
+`sandbox` is the twelfth and it follows the `memory` precedent rather
+than the `structure` one: one spec owns all thirteen, and they are
+statements about a subject rather than about the repository. The
+alternative considered was a `security` area, which was rejected
+because an area names a subject and security is a property of many of
+them — the secret scanner, the import boundary, and the cross-tenant
+404 would all have a claim on it, and none of them belongs with a
+sandbox escape.
 
 ## Ownership: the three gates declared twice
 
@@ -197,12 +209,12 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-Ninety-nine gates declared across eleven specs, two more declared in
-the engineering plan, and seven this document declares over the corpus:
-one hundred and eight declarations, one hundred and five registry
-entries once the three aliases are subtracted. Each table gives the
-gate's number in its own spec, its registry identifier, its kind, and
-its milestone.
+One hundred and twelve gates declared across twelve specs, two more
+declared in the engineering plan, and seven this document declares over
+the corpus: one hundred and twenty-one declarations, one hundred and
+eighteen registry entries once the three aliases are subtracted. Each
+table gives the gate's number in its own spec, its registry identifier,
+its kind, and its milestone.
 
 ```text
 id                                   kind        M   declared in
@@ -530,6 +542,43 @@ request, and a walk over the route table that must find a declared
 scope on every route but the two health probes. The remaining seven
 need a running API and are cases.
 
+### Sandbox isolation and artifacts, thirteen gates
+
+Thirteen gates, all new, in a new twelfth area. Eleven are Milestone 6,
+which had none; one is Milestone 1 and one is Milestone 4, because a
+gate lands at the milestone that builds the last thing it observes and
+those two observe code written before the sandbox exists. The spec
+tags each one.
+
+```text
+#   id                              kind         M
+--  ------------------------------  -----------  --
+1   gate.sandbox.production_refu..  structural   1
+2   gate.sandbox.no_runtime_in_w..  structural   6
+3   gate.sandbox.spec_has_no_hos..  structural   6
+4   gate.sandbox.no_credential_r..  case         6
+5   gate.sandbox.network_denied     case         6
+6   gate.sandbox.egress_allowlis..  case         6
+7   gate.sandbox.limits_enforced    case         6
+8   gate.sandbox.escape_denied      case         6
+9   gate.sandbox.workspace_isola..  case         6
+10  gate.sandbox.no_orphans         case         6
+11  gate.sandbox.artifact_checksum  case         6
+12  gate.sandbox.artifact_key_op..  structural   6
+13  gate.sandbox.workspace_conta..  property     4
+```
+
+Gate 1 is Milestone 1 because the composition root refuses the
+development mechanism from the first startup that has a mechanism to
+choose, and gate 13 is Milestone 4 because `WorkspaceHandle` is what
+the three `workspace.` tools resolve paths through. Gates 2, 3, and 12
+are structural for the usual reason — an import walk, a check over
+declared field types, and a check over a function's parameters — and
+gate 13 is the corpus's sixteenth property test. The remaining eight
+need a real sandbox and are cases. One of them, gate 8, is the
+red-team escape test Section 28.7 has required since version 2.0 and
+the harness had no case for.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -567,43 +616,44 @@ milestone  new gates  cumulative  the earliest of them
 0                 12          12  the import boundary, the secret
                                   scanner, and ten checks over
                                   documents
-1                 27          39  the vertical slice, both
+1                 28          40  the vertical slice, both
                                   builtins, deterministic build
-2                 12          51  persistence, fencing, resume
-3                 11          62  five adapters, trajectories
-4                 12          74  policy, approvals, corpora
-5                 11          85  the API surface, the stream,
+2                 12          52  persistence, fencing, resume
+3                 11          63  five adapters, trajectories
+4                 13          76  policy, approvals, corpora
+5                 11          87  the API surface, the stream,
                                   cancellation keeps effects
-6                  0          85  --
-7                  6          91  budgeting and compaction
-8                  0          91  --
-9                 14         105  formation and retrieval
+6                 11          98  isolation, egress, artifacts
+7                  6         104  budgeting and compaction
+8                  0         104  --
+9                 14         118  formation and retrieval
 ```
 
 Two facts fall out of the table and both are worth stating rather than
 leaving for someone to notice.
 
-1.  **Milestones 6 and 8 add no gates.** Every gate their work
-    strengthens is already registered against an earlier milestone:
-    Milestone 6's sandbox and artifacts extend `gate.tool.no_external_
-    text` and the model gateway's secret scanner, and Milestone 8's MCP
-    work adds corpus members to gates 2 and 5 of the tool system. This
-    is a finding, not a design. It says those two milestones are the
-    ones whose acceptance rests entirely on their own section's
-    criteria in the engineering plan, and it is worth a look during
-    each milestone's planning to decide whether that is right.
-2.  **Thirty-nine of one hundred and five gates are green before
+1.  **Milestone 8 adds no gates.** Every gate its work strengthens is
+    already registered against an earlier milestone: the MCP work adds
+    corpus members to gates 2 and 5 of the tool system. This is a
+    finding, not a design. It says Milestone 8 is the one whose
+    acceptance rests entirely on its own section's criteria in the
+    engineering plan, and it is worth a look during that milestone's
+    planning to decide whether that is right. Milestone 6 was the
+    other until [sandbox-isolation.md](sandbox-isolation.md) was
+    written; it now carries eleven, which is what a milestone that
+    creates a new trust boundary should carry.
+2.  **Forty of one hundred and eighteen gates are green before
     Milestone 2.** More than a third of the plan's stated invariants are
     checkable against the in-memory slice, and twelve of them against a
     repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and five, which is every
+The cumulative column reaches one hundred and eighteen, which is every
 registry entry, at Milestone 9. Milestones 10 and 11 add none: scheduling,
 routing, and subagents are covered by gates registered against the
 runtime loop and the policy engine, and the same question this document
-raises about Milestones 6 and 8 applies to them.
+raises about Milestone 8 applies to them.
 
 ## Build-sequence milestones
 
@@ -765,7 +815,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the eleven. **M0.**
+    of the twelve. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**
@@ -852,7 +902,10 @@ tracked metrics move to a sibling `## Tracked metrics` section.
 9.  **Milestones 6 and 8 adding no gates is reported, not fixed.**
     The honest finding is that their acceptance rests on the
     engineering plan's own criteria, and inventing gates to fill a
-    column would be worse than naming the shape.
+    column would be worse than naming the shape. Milestone 6's zero
+    was closed the way the decision implies it should be: by a
+    specification that had gates to declare, not by the column.
+    Milestone 8's remains open and waits on the same thing.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —
@@ -886,12 +939,14 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     milestone, they are gates and need thresholds, which no document
     states. Reversal cost: low now, high after the harness is written
     against one reading.
-3.  **Whether Milestones 6 and 8 should acquire gates of their own.**
-    Both milestones do substantial work — sandboxing, artifacts,
-    skills, MCP — and neither adds a registered invariant. It may be
-    right, since their risks are covered by gates registered earlier,
-    and it may be an omission that only shows up when something in a
-    sandbox goes wrong and no gate was watching.
+3.  **Whether Milestone 8 should acquire gates of its own.** It does
+    substantial work — skills and MCP — and adds no registered
+    invariant. It may be right, since its risks are covered by gates
+    registered earlier, and it may be an omission that only shows up
+    when a skill does something no gate was watching. Milestone 6 was
+    the other half of this question and it is answered: it has eleven,
+    and the sentence about something in a sandbox going wrong with no
+    gate watching turned out to be describing a real hole.
 4.  **Whether the `optional` field is worth its precedent.** One gate
     uses it. The alternative is a live smoke test that is not a gate
     at all but a manually run script, which is honest about its status

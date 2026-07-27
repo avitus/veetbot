@@ -69,9 +69,12 @@ write is reachable from production. A policy engine with a deterministic gate
 and a test-only bypass has a bypass.
 
 What follows completes Section 20 without changing any requirement in it. The
-twenty-five cases stay twenty-five cases, the sixteen assertion types stay and
-gain the four the specs since written have made necessary, the capability track
-stays non-blocking, and the deterministic suite still runs in CI with no API key.
+twenty-five cases stay twenty-five cases — a twenty-sixth is added later, by
+[sandbox-isolation.md](sandbox-isolation.md), for a requirement Section 20.3
+never enumerated, and none of Section 20's own cases are changed — the sixteen
+assertion types stay and gain the four the specs since written have made
+necessary, the capability track stays non-blocking, and the deterministic suite
+still runs in CI with no API key.
 
 ## Two suites and one overloaded word
 
@@ -168,10 +171,10 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-Twelve specs and one engineering-plan section declare gates, and they declare
-them in prose. Sorting them by kind is what tells an implementer which harness
-facility each one needs, and it is the first concrete deliverable of this
-document.
+Thirteen specs and one engineering-plan section declare gates, and they
+declare them in prose. Sorting them by kind is what tells an implementer
+which harness facility each one needs, and it is the first concrete
+deliverable of this document.
 
 The itemization is [milestone-map.md](milestone-map.md), which names every gate
 and assigns it a milestone; the table below is a count over that itemization and
@@ -192,9 +195,10 @@ restates a gate another spec owns.
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 2 | 0 | 0 | 8 | 10 |
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
+| Sandbox and artifacts | 8 | 1 | 0 | 4 | 13 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **51** | **15** | **6** | **33** | **105** |
+| **Total** | **59** | **16** | **6** | **37** | **118** |
 
 The counts are the useful output, not the individual assignments: **more than
 half of the declared gates are not case gates**, and a harness that only runs
@@ -843,6 +847,37 @@ nothing to restart into. Ten of the twenty-five are writable in Milestone 1,
 which is what makes "build evaluations before advanced features" a real
 instruction rather than an aspiration — the suite starts on the first vertical
 slice and grows with the milestones.
+
+### Case 26, and why the twenty-five are still twenty-five
+
+Section 20.3 requires twenty-five cases and this document converted all
+twenty-five without dropping, merging, or reinterpreting one. A twenty-sixth
+is added by [sandbox-isolation.md](sandbox-isolation.md), and it is added for
+a reason worth stating rather than a preference.
+
+Section 28.7 has required, since version 2.0, that "a container escape in a
+test harness cannot reach secrets or another tenant's workspace (red-team
+test)". That is an acceptance criterion phrased as a test, and Section 20.3
+never enumerated it, so the requirement existed with no row to carry it. The
+sandbox specification registers it as `gate.sandbox.escape_denied` and the
+case suite gains the row:
+
+| # | Case | M | Kind | What only this case proves |
+| --- | --- | --- | --- | --- |
+| 26 | Container escape attempt | 6 | Security | The isolation boundary holds |
+
+It is the second security case, after case 19, and it is the only case in the
+suite that must never run against a fake adapter — a fake that reports no
+escape proves nothing, so the case is skipped rather than passed when the
+configured mechanism is `fake`, and the skip is a failure at Milestone 6.
+Cases 19 and 26 are the pair: 19 asserts the workspace boundary holds against
+a path, 26 asserts the sandbox boundary holds against a kernel.
+
+Numbering stops there. A case added later takes the next integer and no case
+is ever renumbered, because case numbers appear in gate statements, in
+`interventions` fixtures, and in this document's own cross-references.
+
+
 ## The capability track
 
 Section 20 establishes the track and gives six properties: live models, outside

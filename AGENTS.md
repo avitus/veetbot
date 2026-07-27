@@ -47,11 +47,12 @@ Read, in this order, before starting an assignment:
 | Memory retrieval, ranking, the recall trace | `memory-retrieval-and-ranking.md` |
 | Evaluation cases, gates, the harness | `evaluation-harness.md` |
 | HTTP routes, error codes, scopes, the event stream | `http-api-and-streaming.md` |
+| Isolated execution, egress, the artifact store | `sandbox-isolation.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
-Sandbox isolation and skills have **no** such document. Sections 28 and 30 of
-the engineering plan are all that exists for them.
+Skills have **no** such document. Section 30 of the engineering plan is all
+that exists for that subject.
 
 ## Authority and conflicts
 
@@ -72,10 +73,10 @@ the engineering plan are all that exists for them.
 - Work only on the **active** milestone or an explicitly authorized one
   (see project state; currently Milestones 0 and 1).
 - Do not begin later milestones speculatively.
-- Milestones 0 through 4 are implementable from the documentation as it stands.
-  Milestone 5 has no API specification, Milestone 6 has no sandbox
-  specification, and Milestone 8's skills half has no design at all. Do not
-  begin those by inventing the missing design: report what is missing and stop.
+- Milestones 0 through 7 are implementable from the documentation as it
+  stands, as is Milestone 9. Milestone 8's skills half has no design at all.
+  Do not begin it by inventing the missing design: report what is missing and
+  stop.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).

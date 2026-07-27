@@ -66,7 +66,8 @@ It is not responsible for the pipeline those tools run inside, which is
 [tool-system.md](tool-system.md), or for the approval behaviour of
 `demo.external_write`, which is
 [policy-and-approvals.md](policy-and-approvals.md), or for the sandbox
-`sandbox.run_command` executes in, which is Section 28 and ADR-0008.
+`sandbox.run_command` executes in, which is Section 28, ADR-0008, and
+[sandbox-isolation.md](sandbox-isolation.md).
 
 ## The roster
 
@@ -97,7 +98,7 @@ workspace.read_text   workspace  4          classification, here
 workspace.write_text  workspace  4          classification, here
 workspace.list_files  workspace  4          classification, here
 demo.external_write   demo       4          classification, here
-sandbox.run_command   sandbox    5          classification, here
+sandbox.run_command   sandbox    6          classification, here
 artifact.export       artifact   6          classification, here
 ```
 
@@ -106,7 +107,8 @@ Milestone 1's implement list names `math.calculate` and
 `system.current_time`. Milestone 4's implement list names the three
 `workspace.` tools and `demo.external_write`. Section 8.2 says to add
 `sandbox.run_command` "only after the sandbox milestone", which is
-Milestone 5. `artifact.export` is the one assignment the plan does not
+Milestone 6 — Milestone 5 is the HTTP API and SSE.
+`artifact.export` is the one assignment the plan does not
 make, and it is placed at Milestone 6 below with its reason.
 
 ### Why `artifact.export` is Milestone 6
@@ -123,10 +125,22 @@ model-callable entry point to that store before the store's own
 retention, scoping, and cross-tenant rules are exercised puts the model
 in front of a component that has only ever been driven by the executor.
 
-Milestone 5 is wrong for a narrower reason: Milestone 5 is the sandbox,
-and the tool most likely to want export is `sandbox.run_command`, which
-means placing them together invites the two designs to merge. They
-should not. Exporting a file is not a property of having run a command.
+Milestone 5 is wrong for a narrower reason, and it is the more
+tempting placement of the two, because Milestone 5 is the HTTP API and
+the artifact routes a client reads land there. A route a client calls
+and a tool the model calls are different surfaces with different
+callers, different authorization, and different failure modes, and
+building the second because the first exists is how a tool acquires a
+shape borrowed from HTTP. The narrower objection is decisive on its
+own: the tool takes a workspace path, and no workspace exists until
+Milestone 6.
+
+Sharing a milestone with `sandbox.run_command` carries its own hazard,
+and it is worth naming so that the two designs are not allowed to
+merge. Exporting a file is not a property of having run a command.
+`artifact.export` takes a workspace path, is `IDEMPOTENT`, and runs
+`in_process`; `sandbox.run_command` is none of those. They share a
+milestone and nothing else.
 
 Milestone 6 is right because Milestone 6 is where the model gains
 control tools and the programmatic bridge — the first point at which
@@ -906,8 +920,10 @@ milestone:
     [policy-and-approvals.md](policy-and-approvals.md) already uses it
     in three worked examples. What it owes is small: an argument shape,
     and the record of what would have been written.
-3.  **`sandbox.run_command`, at Milestone 5.** Everything about it is
-    Section 28 and ADR-0008. The one thing fixed here is that its
+3.  **`sandbox.run_command`, at Milestone 6.** Everything about it is
+    Section 28, ADR-0008, and
+    [sandbox-isolation.md](sandbox-isolation.md), which gives the tool
+    its full `ToolSpec`. The one thing fixed here is that its
     `output_trust` is `EXTERNAL_UNTRUSTED` and cannot be raised.
 4.  **`artifact.export`, at Milestone 6.** The argument shape, the
     `ArtifactRef` it returns, the size ceiling, and the

@@ -73,12 +73,12 @@ rather than smoothed.
 | M | Subject | Verdict | Gates | What stands between it and code |
 | --- | --- | --- | --- | --- |
 | 0 | Repository and engineering foundation | Ready | 12 | Nothing |
-| 1 | In-memory vertical slice | Ready | 27 | Nothing |
+| 1 | In-memory vertical slice | Ready | 28 | Nothing |
 | 2 | PostgreSQL persistence and durable worker | Ready | 12 | Migration authoring conventions |
 | 3 | Model adapters and normalized streaming | Ready with named gaps | 11 | Provider response metadata |
-| 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 12 | Four deferred tools; scope vocabulary |
+| 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 13 | Four deferred tools; scope vocabulary |
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
-| 6 | Isolated execution and artifacts | Not ready | 0 | No sandbox specification exists |
+| 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
 | 8 | Skills and MCP integration | Split | 0 | MCP ready; skills undesigned |
 | 9 | Long-term memory and knowledge | Ready with named gaps | 14 | Knowledge documents |
@@ -94,11 +94,13 @@ what those milestones must be true of. Milestone 5's eleven are the
 ten the API specification declares plus the one it already had, and
 they arrived with that document rather than being added to it
 afterwards, which is the same correlation running the other way.
-Milestone 6 still registers none.
+Milestone 6's eleven arrived the same way, from
+[sandbox-isolation.md](sandbox-isolation.md), and took the only zero
+in the table that belonged to a milestone doing real work.
 
 ## Milestone 0: ready
 
-Eleven registry entries, every deliverable expanded.
+Twelve registry entries, every deliverable expanded.
 
 [development-toolchain.md](development-toolchain.md) and ADR-0025
 specify the Makefile target bodies, the compose service, the CI
@@ -119,8 +121,11 @@ decide.
 
 ## Milestone 1: ready
 
-Twenty-seven registry entries, the largest count of any milestone, and
-every implement bullet has a body.
+Twenty-eight registry entries, the largest count of any milestone, and
+every implement bullet has a body. The twenty-eighth arrived later,
+with [sandbox-isolation.md](sandbox-isolation.md): the composition
+root refuses to build the development sandbox mechanism when the
+environment is production.
 
 The three bullets ADR-0024 found empty — in-memory repositories, the
 inline run dispatcher, the minimal context builder — now have one.
@@ -134,9 +139,8 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Thirty-nine of one hundred and five gates are green before
-Milestone 2 begins**, twelve of them against a repository with no
-agent in it.
+**Forty of one hundred and eighteen gates are green before Milestone
+2 begins**, twelve of them against a repository with no agent in it.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test
 doubles: the invariants that hold for the slice hold for the durable
@@ -232,13 +236,16 @@ Three items fall short, one of them completely.
 
 ## Milestone 4: ready with named gaps
 
-Twelve registry entries.
+Thirteen registry entries.
 [policy-and-approvals.md](policy-and-approvals.md) covers the
 deterministic decision function, the hardline set, profile compilation
 and freezing, `policy_version`, the approval record and its lifecycle,
 expiry, resume revalidation, and the injection corpus.
 [tool-system.md](tool-system.md) covers the execution pipeline
-end to end.
+end to end. The thirteenth entry arrived later, with
+[sandbox-isolation.md](sandbox-isolation.md): a property test over
+`WorkspaceHandle.resolve`, which acquires its first callers at this
+milestone.
 
 Two things are outstanding.
 
@@ -364,9 +371,11 @@ The same document supplies response bodies for the twelve routes that
 had none, and declares ten hard gates, which is what took this
 milestone's gate column from one to eleven. The verdict is ready.
 
-## Milestone 6: not ready
+## Milestone 6: ready
 
-Zero registry entries, and eight of twelve implement bullets have no
+Eleven registry entries. There were none when this review was written
+— the only zero in the table belonging to a milestone that does work
+— and eight of twelve implement bullets had no
 design outside the plan: the container-backed execution adapter,
 workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
@@ -374,10 +383,11 @@ metadata and content endpoints, and workspace cleanup.
 
 Section 28 of the plan is not empty — it runs from line 3136 to line
 3212, states a six-item threat model that assumes model-generated code
-is hostile, and is recorded as ADR-0008. But it was never expanded,
-and two specifications point at the expansion as though it exists.
-`tool-system.md:977` constrains MCP server URLs by *"the egress
-allowlist the sandbox spec establishes"*. There is no sandbox spec.
+is hostile, and is recorded as ADR-0008. But it was not expanded,
+and two specifications pointed at the expansion as though it already
+existed. `tool-system.md:977` constrains MCP server URLs by *"the
+egress allowlist the sandbox spec establishes"*, and there was no
+sandbox spec.
 `bootstrap-and-composition.md:180` and `:183` assign ownership of
 `ArtifactStore` and `ExecutionEnvironment` to the engineering plan
 itself, which is the corpus recording that nothing below the plan owns
@@ -387,7 +397,7 @@ Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:708`, and the programmatic orchestration
 bridge Section 8.5 requires is specified from `tool-system.md:1161`.
 
-Two further items deserve naming.
+Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
     `engineering-plan.md:3209` requires a container-escape attempt as
@@ -396,20 +406,58 @@ Two further items deserve naming.
 2.  **`sandbox.run_command` is placed at two milestones.**
     `builtin-tools.md:909` says Milestone 5; the plan's Milestone 6
     implement list contains it. The map follows the plan. This is
-    reported rather than resolved, because the right answer depends on
-    the sandbox specification that does not exist: if the tool can
+    reported rather than resolved, because the right answer depended
+    on a sandbox specification that did not exist: if the tool can
     ship against the development mechanism at Milestone 5 and gain
     container backing at Milestone 6, both documents are right about
     different things.
 
-The zero in the gate column is worth dwelling on. Milestone 6 is the
-milestone whose failure mode is a container escape, and it is one of
-two milestones that register no gate at all. Every invariant its work
-strengthens is registered against an earlier milestone, which means
-the gate registry currently contains no statement that becomes true
-because the sandbox was built. That is recorded as an open question in
-the map and is repeated here because the sandbox is where it matters
-most.
+The zero in the gate column was worth dwelling on. Milestone 6 is the
+milestone whose failure mode is a container escape, and it was one of
+two milestones that registered no gate at all. Every invariant its
+work strengthens was registered against an earlier milestone, which
+meant the gate registry contained no statement that becomes true
+because the sandbox was built.
+
+### What closed it
+
+[sandbox-isolation.md](sandbox-isolation.md) and ADR-0029 exist now,
+and they settle the eight uncovered bullets, both named items, and the
+zero.
+
+The eight types the corpus referenced and never declared are declared:
+`EnvironmentSpec`, `ResourceLimits`, `EnvironmentHandle`,
+`ExecutionCommand`, `ExecutionResult`, `ArtifactMetadata`,
+`ArtifactRef`, and the `FileChange` and `KillReason` that
+`ExecutionResult` needs, together with `WorkspaceHandle`,
+`ArtifactWriter`, and `CredentialResolver` from
+`ToolExecutionContext`. That removes the last of the
+referenced-and-undeclared types the API specification named as
+remaining. The egress allowlist `tool-system.md:977` depends on by
+name gets a grammar, an owner, and two enforcement points, of which
+the address denylist runs first and no allowlist entry can waive it.
+Workspace lifecycle is settled by a rule rather than a mechanism —
+the workspace is a cache held for a worker's lease, not state held
+for a run — which makes cleanup and crash-resume the same operation.
+Resource limits become numbers with operator ceilings. Artifacts get
+a derived storage key, a checksum verified on the way out, and a
+retention rule.
+
+Item 1 is closed by harness case 26, a security case at Milestone 6
+registered as `gate.sandbox.escape_denied`, added without renumbering
+any of the twenty-five. Item 2 is closed against `builtin-tools.md`:
+Section 8.2's *"only after the sandbox milestone"* is Milestone 6, and
+the spec's Milestone 5 was an off-by-one against a milestone list in
+which 5 is the HTTP API. The tool does not ship early against the
+development mechanism, because the development mechanism refuses to
+run in production and a tool that only works in development is not a
+milestone deliverable.
+
+The zero is closed by thirteen gates in a new twelfth registry area,
+`sandbox`, of which eleven are Milestone 6. One is Milestone 1, where
+the composition root learns to refuse the development mechanism, and
+one is Milestone 4, where `WorkspaceHandle` acquires its first
+callers. The verdict is ready.
 
 ## Milestone 7: ready with named gaps
 
@@ -520,22 +568,22 @@ milestone, and the plan says as much. It is listed here for
 completeness and because its zero in the gate column, unlike Milestone
 6's, is not an anomaly to explain.
 
-## The four plan sections no specification expands
+## The three plan sections no specification expands
 
-Sections 28 through 31 are the only major sections of the engineering
+Sections 29 through 31 are the only major sections of the engineering
 plan with no outward cross-reference paragraph. A scan of lines 3136
-through 3364 for links to other documents returns nothing, where every
-other major section acquired one during the specification work. Three
-of the four are genuinely unexpanded; the fourth is half-expanded from
-the consuming side.
+through 3364 for links to other documents returned nothing when this
+review was written, where every other major section acquired one
+during the specification work. Two of the three are genuinely
+unexpanded; the third is half-expanded from the consuming side.
 
-### 28. Sandbox isolation architecture
-
-Seventy-seven lines, ADR-0008, a threat model, and no expansion.
-Covered above under Milestone 6. This is the highest-consequence gap
-in the corpus: it is the only unexpanded section whose failure mode is
-an escape from the trust boundary rather than a feature that does not
-work.
+Section 28 was the fourth, and it is expanded now, by
+[sandbox-isolation.md](sandbox-isolation.md), which gives it the
+outward paragraph the scan looked for. It was the
+highest-consequence gap in the corpus while it lasted — the only
+unexpanded section whose failure mode was an escape from the trust
+boundary rather than a feature that does not work — and it is covered
+above under Milestone 6.
 
 ### 29. Multi-device operation and the shared core
 
@@ -560,13 +608,12 @@ and no expansion. The reference count is what makes this notable. Ten
 other documents treat the skill mechanism as settled and build on top
 of it, and the mechanism does not exist below the plan. Combined with
 the Milestone 8 finding — no package format, no manifest schema, no
-selection algorithm — this is the second-largest undesigned area in
-the corpus after the sandbox, and the one with the most load already
-resting on it.
+selection algorithm — this is now the largest undesigned area in the
+corpus, and the one with the most load already resting on it.
 
 ### 31. Trajectory capture and export
 
-Twenty-two lines, ADR-0016, and the only one of the four with real
+Twenty-two lines, ADR-0016, and the only one of the three with real
 design outside the plan — on one side.
 [evaluation-harness.md](evaluation-harness.md) fully specifies the
 consumption path: the conversion from a captured run to a case, the
@@ -584,8 +631,10 @@ together by whoever writes this.
 
 ## What the evaluation suite does not reach
 
-The twenty-five initial cases carry milestones 1, 2, 4, 5, and 6.
-Milestones 3, 7, 8, 9, and 10 have no case rows at all.
+The twenty-five initial cases carry milestones 1, 2, 4, 5, and 6, and
+so does the twenty-sixth, added later by
+[sandbox-isolation.md](sandbox-isolation.md). Milestones 3, 7, 8, 9,
+and 10 have no case rows at all.
 
 For Milestone 3 this is defensible: provider adapters are covered by
 contract suites and live smoke tests rather than by end-to-end cases,
@@ -598,10 +647,14 @@ evaluation improvement — *"Memory improves defined evaluation cases
 without increasing policy failures"* — against a case set that
 contains no memory case.
 
-Two additional holes are worth naming because a criterion exists and
-nothing can check it: the container-escape red-team test Section 28
-demands, and the path-traversal algorithm case 19 exercises but no
-document specifies.
+Two additional holes were worth naming because a criterion existed
+and nothing could check it: the container-escape red-team test
+Section 28 demands, and the path-traversal algorithm case 19
+exercises but no document specified. Both are closed by
+[sandbox-isolation.md](sandbox-isolation.md) — the first by case 26
+and `gate.sandbox.escape_denied`, the second by the five-rule
+containment function `WorkspaceHandle.resolve` and the property gate
+`gate.sandbox.workspace_containment` over generated paths.
 
 The harness is not at fault here. It specifies how cases are written,
 what the sixteen assertion types are, and how a case declares its
@@ -611,15 +664,20 @@ mechanisms they exercise are designed, and impossible to write before.
 ## Conflicts this document resolves
 
 This document resolves none. It reports four and defers each to the
-document that owns the subject. One has since been resolved by the
-document it was deferred to, and the resolution is recorded under it.
+document that owns the subject. Three have since been resolved by the
+documents they were deferred to, and each resolution is recorded
+under the conflict it settles.
 
 1.  **`sandbox.run_command` at Milestone 5 or Milestone 6.**
     `builtin-tools.md:909` against the plan's Milestone 6 implement
     list. The map follows the plan. Resolution belongs to the sandbox
     specification, because whether the tool can ship against the
     development mechanism before container backing exists is a sandbox
-    question.
+    question. Resolved there in the plan's favour: the development
+    mechanism refuses to start in production, so a tool that only
+    works against it is not a milestone deliverable, and the spec's
+    Milestone 5 was an off-by-one against a list in which 5 is the
+    HTTP API. `builtin-tools.md` is corrected.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2444` against
     `model-gateway.md:1259` and `milestone-map.md:561`. The map
@@ -633,7 +691,10 @@ document it was deferred to, and the resolution is recorded under it.
 4.  **The container-escape test and the case table.**
     `engineering-plan.md:3209` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
-    harness together.
+    harness together. Resolved by both: the case set gains a
+    twenty-sixth row, a Milestone 6 security case backed by
+    `gate.sandbox.escape_denied`, and none of the twenty-five is
+    renumbered.
 
 ## Decisions
 
@@ -681,12 +742,20 @@ document it was deferred to, and the resolution is recorded under it.
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two
-    documents get written.
+    documents get written. Answered by writing it early. The
+    expansion found the egress allowlist had no grammar and no
+    owner, that eight types the corpus referenced were never
+    declared, and that `builtin-tools.md` had the tool at the wrong
+    milestone — none of which would have surfaced by building
+    Milestone 5 first.
 3.  **Should Milestone 6 acquire gates before it is built?** The map
     reported the zero rather than inventing entries, which was right.
     But a sandbox with no registered invariant is a different kind of
     zero from a Milestone 8 with no registered invariant, and the
-    sandbox specification is the natural place to fix it.
+    sandbox specification is the natural place to fix it. It did:
+    thirteen gates in a new `sandbox` area, eleven of them at
+    Milestone 6. Milestones 8 and 10 keep their zeros, and both are
+    the honest kind — nothing is designed there to assert about.
 4.  **Does Milestone 10 need acceptance criteria, or is it correctly
     an open direction?** It is the only milestone with neither an
     implement list nor acceptance criteria, and the plan calls its

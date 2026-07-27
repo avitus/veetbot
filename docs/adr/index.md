@@ -37,3 +37,4 @@ implementation without one.
 - [ADR-0026 — The builtin tool roster and the two Milestone 1 tools](0026-builtin-tools.md)
 - [ADR-0027 — Gate milestones, the declaration form, and the milestone map](0027-milestone-map.md)
 - [ADR-0028 — The HTTP API surface, the error vocabulary, and the event stream](0028-http-api-and-streaming.md)
+- [ADR-0029 — Isolated execution, the egress boundary, and the artifact store](0029-sandbox-isolation-and-artifacts.md)
