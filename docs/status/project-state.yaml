@@ -53,6 +53,7 @@ documentation:
   detailed_design_directory: docs/plan/
   gate_milestones: docs/plan/milestone-map.md
   readiness_review: docs/plan/readiness.md
+  citation_ledger: docs/status/citation-ledger.yaml
 
 # Derived from docs/plan/readiness.md. This block records what the
 # documentation covers; it does not authorize work. Authorization is
@@ -71,5 +72,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-27T23:10:00Z
-last_reviewed_commit: 6adc0c9
+last_updated: 2026-07-27T23:59:00Z
+last_reviewed_commit: c97c9bf

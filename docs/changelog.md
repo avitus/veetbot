@@ -4,6 +4,48 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — Harness case gaps, MCP gates, and citation integrity
+
+- Closed the three structural gaps the milestone map's census made
+  visible. Build step 9 of the tool system — the MCP adapter — was
+  the only build step in any specification with no gate observing
+  it, and Milestone 8's MCP half carried none of its own. It now
+  carries four: `gate.tool.mcp_pipeline_parity`,
+  `gate.tool.mcp_disconnect`, `gate.tool.mcp_sdk_confined`, and
+  `gate.harness.mcp_no_socket`. Each asserts that the widened
+  surface is the same surface — no path around the fourteen-step
+  pipeline, no failure outside the outcome vocabulary, no SDK type
+  leaking upward.
+- Added harness cases 28 through 31, for the long-session, MCP, and
+  memory-recall gates that had no case behind them, and gave the
+  case schema `arms`, `carry`, and `delta`. Case 27 had described
+  "runs one task twice and compares" in prose since it was written,
+  with no schema that could express it; two memory gates and Section
+  30.5's rollout criterion are stated the same way. The assertion
+  vocabulary gains a fifth type, cross-arm metric relation, and
+  ADR-0022's "gain four" is left as the record it is.
+- Designed the scripted MCP server as a fourth fixture kind. The
+  plan's *"Mock MCP server tests"* implement bullet had no design
+  under it. The fixture is authored YAML, loaded at collection time,
+  and opens no socket and starts no subprocess.
+- Corrected the gate arithmetic. One hundred and thirty-eight
+  registry entries from one hundred and forty-one declarations, and
+  a kind split of seventy-four case, seventeen property, seven
+  corpus, and forty structural — derived twice, once from the
+  census and once from the harness's own kind table, and reconciled.
+  The claim that *"more than half"* of declared gates are not case
+  gates was false when written and is replaced with the count.
+- Added `scripts/check_citations.py`, a generated ledger at
+  `docs/status/citation-ledger.yaml`, and a `make citations-fix`
+  target. The specifications cite each other by line number, and an
+  insertion above a cited line moves it silently. A sweep found nine
+  wrong citations across five documents, two of them created by this
+  session's own edits; all nine are corrected. `make docs-check` now
+  fails when a citation no longer holds the text it was recorded
+  against, and `make citations-fix` repoints one whose text has
+  merely moved. A citation whose text is gone or now ambiguous is
+  reported rather than guessed.
+
 ## 2026-07-27 — The skill package, the catalog, and authoring
 
 - Added `docs/plan/skills.md`, the expansion of Section 30 and of

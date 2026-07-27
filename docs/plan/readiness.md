@@ -59,7 +59,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1665` states that device tools are *"a reserved
+    `tool-system.md:1690` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -144,7 +144,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty of one hundred and thirty-four gates are green before
+**Forty of one hundred and thirty-eight gates are green before
 Milestone 2 begins**, twelve of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -201,7 +201,7 @@ than after.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2444`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2448`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -331,7 +331,7 @@ Six things were visibly unsettled inside it.
     to the trace identifier the observability section requires.
 3.  **`Idempotency-Key` handling is named in two places and specified
     in neither.** It appears as a header at
-    `engineering-plan.md:1830` and as an implement bullet, and the
+    `engineering-plan.md:1833` and as an implement bullet, and the
     idempotency port the map schedules at Milestone 1 is a tool-call
     concern rather than an HTTP one. Whether these are the same
     mechanism is undecided.
@@ -487,11 +487,20 @@ Two shortfalls.
     harness specifies how to add cases and the gate exists; what does
     not exist is the case.
 
+**What changed.** Shortfall 2 is closed.
+[evaluation-harness.md](evaluation-harness.md) case 28 gives this
+milestone its first row: the fifty-turn session with one distinct
+`prefix_sha256`, which is `gate.context.prefix_stability` given
+something to run. Shortfall 1 stands and is the one to close first,
+because a selection order with no predicate is the kind of gap that
+looks specified until two runs disagree.
+
 ## Milestone 8: ready with named gaps
 
-Ten registry entries, all ten from [skills.md](skills.md), which was
-written after this review and closes the half that was missing. The
-verdict below is the review as it stood, followed by what changed.
+Fourteen registry entries: ten from [skills.md](skills.md), which was
+written after this review and closes the half that was missing, and
+four added later still for the MCP half. The verdict below is the
+review as it stood, followed by what changed.
 
 **MCP is substantively covered.** [tool-system.md](tool-system.md)
 designs nine of eleven bullets: server configuration and lifecycle,
@@ -499,9 +508,11 @@ tool discovery and namespacing, the trust labeling that makes MCP
 results `EXTERNAL_UNTRUSTED`, failure isolation, timeouts, and the
 reserved-domain collision rules. Two are partial: authentication
 configuration has a `credential_ref` column and no auth scheme and no
-refresh or re-auth path, and the mock MCP server the acceptance
-criteria require is never designed, with no MCP fixture format in the
-harness and no Milestone 8 row in the case table.
+refresh or re-auth path, and the mock MCP server the *"Mock MCP
+server tests"* implement bullet requires is never designed, with no
+MCP fixture format in the harness and no Milestone 8 row in the case
+table. The bullet, not a criterion: this review said "acceptance
+criteria" and the acceptance criteria say nothing about mocks.
 
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
@@ -514,7 +525,7 @@ What was missing was everything underneath it: no package format, no
 manifest schema, no types, no storage, no reference grammar, no
 context accounting, and no gates. The acceptance criterion *"A
 selected skill is version-pinned in the run"* at
-`engineering-plan.md:2690` had no design behind it — and no document
+`engineering-plan.md:2692` had no design behind it — and no document
 outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
 and remains the sharper of the two observations.
 
@@ -529,9 +540,30 @@ stickiness, two new context classes, the authoring loop at Milestone
 10, and sixteen gates in a new `skill` area — ten of them here. It
 also corrects `skill_manage`'s classification, which
 `tool-system.md` had called a control tool while giving it a write
-scope, and settles the scope's spelling. The MCP half is unchanged
-and its two partial bullets — the auth scheme and the mock server —
-are the named gaps in the verdict above.
+scope, and settles the scope's spelling. Harness case 27 gives this
+milestone its first row in the case table, so the clause above about
+having none is true only of the review as it stood.
+
+The MCP half was closed on a later pass, after the milestone map's
+census made it visible that build step 9 of the tool system was the
+only step in that document with no gate observing it.
+[tool-system.md](tool-system.md) gains three gates —
+`gate.tool.mcp_pipeline_parity`, `gate.tool.mcp_disconnect`, and
+`gate.tool.mcp_sdk_confined`, the last of which promotes the *"no
+direct dependency on MCP SDK types"* criterion from prose to a walk
+over the import graph — and
+[evaluation-harness.md](evaluation-harness.md) gains a fourth fixture
+kind, the scripted MCP server, plus `gate.harness.mcp_no_socket` and
+cases 29 and 30. The mock server the implement bullet asked for is
+that fixture kind: authored YAML, loaded at collection time, no socket
+and no subprocess.
+
+One named gap survives, and it is the smaller one: authentication
+configuration still has a `credential_ref` column, no auth scheme, and
+no refresh or re-auth path. It is a Milestone 8 implementation
+question rather than a design hole in the corpus, because the broker
+that resolves the reference is specified and only the scheme it
+resolves is not.
 
 ## Milestone 9: ready with named gaps
 
@@ -621,8 +653,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1238` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1665` states that device tools are *"a reserved seam,
+`tool-system.md:1244` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1690` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. The
 `Device` model itself still has no home.
@@ -643,8 +675,11 @@ provenance, gating, restricted review, injection resistance, and
 sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
 criterion, and 30.6's constraints are each carried forward rather
 than reinterpreted. Two citation errors are corrected in the process.
-One is this review's: the version-pinning criterion is at line 2690,
-not 2684, and 2684 is an MCP trust-labelling bullet. One the corpus
+One is this review's: the version-pinning criterion is at line 2692,
+not 2686, and 2686 is an MCP trust-labelling bullet. Both numbers are
+two higher than the pair originally recorded, because a heading was
+later inserted above them; a line-number citation into the plan is
+correct only until the plan is next edited. One the corpus
 carried: `policy-and-approvals.md` attributes the policy-and-approval
 gating requirement to Section 30.4, which Section 30.3 states.
 What remains open is a threshold for 30.5's eval delta, which is a
@@ -670,21 +705,38 @@ together by whoever writes this.
 
 ## What the evaluation suite does not reach
 
-The twenty-five initial cases carry milestones 1, 2, 4, 5, and 6, and
-so does the twenty-sixth, added later by
-[sandbox-isolation.md](sandbox-isolation.md). Milestones 3, 7, 8, 9,
-and 10 have no case rows at all.
+The twenty-five initial cases carried milestones 1, 2, 4, 5, and 6,
+and so did the twenty-sixth, added later by
+[sandbox-isolation.md](sandbox-isolation.md). The twenty-seventh,
+added by [skills.md](skills.md), was the first Milestone 8 row.
+Milestones 3, 7, 9, and 10 had no case rows at all, which was this
+section's finding.
 
-For Milestone 3 this is defensible: provider adapters are covered by
-contract suites and live smoke tests rather than by end-to-end cases,
-and the harness says so. For Milestones 7, 8, and 9 it is a real gap,
-and it lines up exactly with the gaps found by reading the specs.
-Milestone 7 has a long-session gate with no case behind it. Milestone
-8's acceptance criteria require a mock MCP server that is not
-designed. Milestone 9's memory criteria are stated in terms of
-evaluation improvement — *"Memory improves defined evaluation cases
-without increasing policy failures"* — against a case set that
-contains no memory case.
+For Milestone 3 that is defensible and stays: provider adapters are
+covered by contract suites and live smoke tests rather than by
+end-to-end cases, and the harness says so. Milestone 10 keeps its
+empty row deliberately, since the authoring loop is an optional
+extension. Milestones 7 and 9 were real gaps and lined up exactly with
+the gaps found by reading the specs: Milestone 7 had a long-session
+gate with no case behind it, and Milestone 9's memory criteria are
+stated in terms of evaluation improvement — *"Memory improves defined
+evaluation cases without increasing policy failures"* — against a case
+set that contained no memory case. Milestone 8's gap was half of one,
+its MCP side having a bullet and no row.
+
+**All three are closed.** Cases 28 through 31 were added to
+[evaluation-harness.md](evaluation-harness.md) on the pass that
+followed the milestone map's census, which is what made the three
+holes countable rather than merely noticed. Case 28 is the fifty-turn
+prefix-stability run at Milestone 7. Cases 29 and 30 are the MCP round
+trip and the mid-call disconnect at Milestone 8, both against a
+scripted server fixture. Case 31 is the memory delta at Milestone 9,
+and it needed a mechanism the harness did not have: a case that
+declares two arms and asserts a relation between them rather than a
+number, because *"without increasing policy failures"* is a comparison
+and no single run can express it. That mechanism — `arms`, `carry`,
+and `delta` — is also what case 27 had been describing in prose
+without a schema to write it in.
 
 Two additional holes were worth naming because a criterion existed
 and nothing could check it: the container-escape red-team test
@@ -695,10 +747,12 @@ and `gate.sandbox.escape_denied`, the second by the five-rule
 containment function `WorkspaceHandle.resolve` and the property gate
 `gate.sandbox.workspace_containment` over generated paths.
 
-The harness is not at fault here. It specifies how cases are written,
-what the sixteen assertion types are, and how a case declares its
-milestone. What is missing is cases, which are cheap to add once the
-mechanisms they exercise are designed, and impossible to write before.
+The harness was not at fault. It specifies how cases are written, what
+the assertion types are, and how a case declares its milestone. What
+was missing was cases, which are cheap to add once the mechanisms they
+exercise are designed and impossible to write before — which is
+exactly why they arrived last, and why two of the four needed a
+schema change rather than only a table row.
 
 ## Conflicts this document resolves
 
@@ -718,8 +772,8 @@ under the conflict it settles.
     Milestone 5 was an off-by-one against a list in which 5 is the
     HTTP API. `builtin-tools.md` is corrected.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2444` against
-    `model-gateway.md:1259` and `milestone-map.md:561`. The map
+    Milestone 3.** `engineering-plan.md:2448` against
+    `model-gateway.md:1259` and `milestone-map.md:748`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -733,7 +787,9 @@ under the conflict it settles.
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
     `gate.sandbox.escape_denied`, and none of the twenty-five is
-    renumbered.
+    renumbered. The same shape repeated four more times afterwards,
+    for cases 28 through 31, and the rule held each time: the case set
+    grows at the end and Section 20's own numbering never moves.
 
 ## Decisions
 

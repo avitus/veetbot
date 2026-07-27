@@ -7,7 +7,7 @@
 
 PYTHON ?= python
 
-.PHONY: docs docs-serve docs-check check
+.PHONY: docs docs-serve docs-check citations-fix check
 
 ## docs: build the MkDocs site (site/) and the single HTML document (dist/).
 docs:
@@ -20,6 +20,13 @@ docs-serve:
 ## docs-check: run deterministic documentation validation and a strict build.
 docs-check:
 	$(PYTHON) scripts/check_docs.py
+
+## citations-fix: repoint line-number citations that an edit has moved.
+## Run this after editing a document other documents cite into, then
+## review the diff: a citation whose text moved is repointed automatically,
+## and one whose text is gone or now ambiguous is reported for a human.
+citations-fix:
+	$(PYTHON) scripts/check_citations.py --update
 
 ## check: aggregate repository checks. Extend this as implementation tooling is
 ## added (formatting, linting, type checking, tests). Today it runs docs-check.

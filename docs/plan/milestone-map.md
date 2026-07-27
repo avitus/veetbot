@@ -38,8 +38,8 @@ and declares thirteen more, in the same form and in a new twelfth
 area. [skills.md](skills.md) was written last and declares sixteen
 more, in a new thirteenth area, and is the first spec to declare
 gates at Milestone 10. The counts throughout this document are the
-corpus as it now stands: one hundred and twenty-eight declared across
-thirteen specs, one hundred and thirty-four registry entries.
+corpus as it now stands: one hundred and thirty-two declared across
+thirteen specs, one hundred and thirty-eight registry entries.
 
 ## What this document is responsible for
 
@@ -220,10 +220,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and twenty-eight gates declared across thirteen specs, two
+One hundred and thirty-two gates declared across thirteen specs, two
 more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and thirty-seven declarations, one hundred
-and thirty-four registry entries once the three aliases are subtracted.
+over the corpus: one hundred and forty-one declarations, one hundred and
+thirty-eight registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -271,7 +271,7 @@ the two aliases are visible.
 14  gate.runtime.build_stable       property     7
 ```
 
-### Tool system, ten gates
+### Tool system, thirteen gates
 
 The section carried no milestone. The assignment follows the build
 order the same document already tags — steps 1 through 5 are Milestone
@@ -291,10 +291,14 @@ Milestone 8 — by asking which build step each gate observes.
 8   gate.tool.dedup_concurrent      case         2   3
 9   gate.tool.normalization_stable  property     1   2
 10  gate.tool.reserved_domains      structural   1   1
+11  gate.tool.mcp_pipeline_parity   case         8   9
+12  gate.tool.mcp_disconnect        case         8   9
+13  gate.tool.mcp_sdk_confined      structural   8   9
 ```
 
-Three of these need their reasoning stated, because the milestone is
-not the one a first reading gives.
+Gates 11, 12, and 13 are step 9's and say so themselves, so they need
+no derivation. Three of the rest need their reasoning stated, because
+the milestone is not the one a first reading gives.
 
 1.  **Gate 5 is Milestone 1, not Milestone 8.** The statement is *"No
     external text appears in `message` for any failure path"*, and the
@@ -318,6 +322,15 @@ not the one a first reading gives.
     in-memory adapter asserts the single-process half — a second
     submission in the same process returns the first result — and the
     concurrent half arrives with the index.
+
+Gates 11 through 13 were added after the first pass over this document,
+when the census made it visible that build step 9 was the only step in
+the tool system with no gate observing it. They assert that the MCP
+adapter added no path around the pipeline, that a disconnect stays
+inside the outcome vocabulary, and that the SDK stops at the adapter
+boundary. The third is the engineering plan's last Milestone 8
+acceptance criterion promoted from prose to a walk over the import
+graph.
 
 ### Builtin tools, nine gates
 
@@ -487,7 +500,7 @@ view. They fail for different reasons and are separated here.
 Moved to `## Tracked metrics`: consequential recall@k, noise ratio,
 transfer precision, transfer lift, cost, latency, and end-to-end lift.
 
-### Evaluation harness, ten gates
+### Evaluation harness, eleven gates
 
 The harness's own gates are the ones nothing else can check, and they
 are the earliest in the corpus: four run against a repository with no
@@ -506,6 +519,7 @@ agent in it.
 8   gate.harness.corpus_minimum     structural   4
 9   gate.harness.trajectory_source  structural   3
 10  gate.harness.reason_code_table  structural   1
+11  gate.harness.mcp_no_socket      case         8
 ```
 
 Gates 1 through 4 are Milestone 0 and three of them are vacuously true
@@ -522,7 +536,10 @@ production loader, and the loader is the composition root's refuse
 phase, which is Milestone 1. Gates 6, 7, and 10 are Milestone 1 for the
 same class of reason: each needs something the vertical slice builds.
 Gate 8 is Milestone 4 with the corpora, and gate 9 says its own
-milestone.
+milestone. Gate 11 is Milestone 8 because it needs MCP cases to run
+against, and it is a case gate rather than a structural one for the
+same reason gate 7 is: an offline fixture layer is proven by running
+the cases with egress blocked, not by reading them.
 
 ### HTTP API and streaming, ten gates
 
@@ -676,10 +693,11 @@ milestone  new gates  cumulative  the earliest of them
                                   cancellation keeps effects
 6                 11          98  isolation, egress, artifacts
 7                  6         104  budgeting and compaction
-8                 10         114  the pinned catalog, the metadata
-                                  boundary, package validation
-9                 14         128  formation and retrieval
-10                 6         134  the authoring loop and the
+8                 14         118  the MCP adapter, the pinned
+                                  catalog, the metadata boundary,
+                                  package validation
+9                 14         132  formation and retrieval
+10                 6         138  the authoring loop and the
                                   background review
 ```
 
@@ -693,18 +711,21 @@ leaving for someone to notice.
     eleven, and [skills.md](skills.md) gave Milestone 8 ten and
     Milestone 10 six, which is what milestones that add a new trust
     boundary, a new context class, and a new write path should
-    carry. Milestone 8's MCP half still contributes no
-    gate of its own; its work adds corpus members to gates 2 and 5 of
-    the tool system, which is the right shape for a milestone that
-    widens an existing surface rather than opening a new one.
-2.  **Forty of one hundred and thirty-four gates are green before
+    carry. Milestone 8's MCP half was the last to be covered: it
+    contributed corpus members to gates 2 and 5 of the tool system and
+    nothing of its own, which reads as the right shape for a milestone
+    that widens an existing surface until you notice it leaves build
+    step 9 unobserved. It now carries four — three in the tool system
+    and one in the harness — and they are the ones that say the widened
+    surface is still the same surface.
+2.  **Forty of one hundred and thirty-eight gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and twelve of them against a
     repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and thirty-four, which is
+The cumulative column reaches one hundred and thirty-eight, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise

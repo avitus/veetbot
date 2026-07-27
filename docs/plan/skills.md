@@ -1159,7 +1159,7 @@ something.
 8  the prefix ceiling was 13,500      15,000, a fifth class
 9  authoring "is not a tool call"     it is; the kind stays
 10 Section 30.4 cited for gating      Section 30.3 states it
-11 readiness.md cites line 2684       the criterion is at 2690
+11 readiness.md cites line 2686       the criterion is at 2692
 12 the gate token grammar says digit  a number; M10 has two
 ```
 
@@ -1182,10 +1182,22 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 and 141, and `docs/status/questions-for-review.md:245` — attribute
 the policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:503` cites `engineering-plan.md:2684` for the
-version-pinning acceptance criterion, which is at 2690; line 2684 is
+`readiness.md:528` cited `engineering-plan.md:2686` for the
+version-pinning acceptance criterion, which is at 2692; line 2686 is
 an MCP trust-labelling bullet. The ADR and the questions file are
 historical records and are not edited. The two live statements are.
+Both numbers moved by two after an `#### Acceptance criteria` heading
+was inserted above them, which is the general hazard: a line-number
+citation is correct only until the cited file is next edited, and an
+insertion anywhere above the target moves it silently. A sweep of the
+whole corpus found nine such citations already wrong, in five
+documents, most of them predating this one. They are corrected, and
+the hazard is now checked rather than remembered:
+`scripts/check_citations.py` records the text each cited line held and
+fails the docs check when it no longer holds it, and `make
+citations-fix` repoints a citation whose text has merely moved. What
+it cannot do is decide what a citation means when the text it named is
+gone, so that case is reported rather than guessed.
 
 Row 12 is a grammar correction. `milestone-map.md` writes the
 per-gate milestone token as `**M<digit>.**` and describes the docs

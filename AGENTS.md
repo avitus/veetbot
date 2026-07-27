@@ -85,9 +85,17 @@ Read, in this order, before starting an assignment:
 Run the checks that exist in the repository today:
 
 ```bash
-make docs-check   # validates documentation and builds it in strict mode
-make check        # currently runs docs-check; will grow as tooling is added
+make docs-check     # validates documentation and builds it in strict mode
+make check          # runs docs-check; will grow as tooling is added
+make citations-fix  # repoints line-number citations an edit has moved
 ```
+
+The specifications cite each other by line number, and an insertion
+anywhere above a cited line moves it. `make docs-check` fails when a
+citation no longer holds the text it was recorded against. After editing
+a document that others cite into, run `make citations-fix` and review the
+diff; a citation whose text is gone or now ambiguous is reported rather
+than guessed, and needs a human.
 
 As implementation tooling is added in later milestones, this section and
 `make check` must also require formatting, linting, type checking, and tests.

@@ -672,7 +672,7 @@ class ModelCapabilities(BaseModel):
 class ModelLimits(BaseModel):
     context_window_tokens: int
     max_output_tokens: int       # the model's own cap
-    default_output_reserve: int  # context-engine.md:212's second half
+    default_output_reserve: int  # context-engine.md:189's second half
     max_cache_breakpoints: int   # 4 on Anthropic, 0 on OpenAI
     max_tool_count: int | None
 ```

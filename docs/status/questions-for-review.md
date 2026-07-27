@@ -3161,3 +3161,172 @@ scripts. Two `context-engine.md` citations were changed to 30.3 in
 error and are back at 30.4.
 
 **Reversal cost:** low.
+
+## Harness case gaps and citation integrity (no ADR)
+
+### Line-number citations are checked mechanically rather than remembered
+
+**Decided:** `scripts/check_citations.py` and a generated ledger,
+`docs/status/citation-ledger.yaml`, were added. `make docs-check` now
+fails when a `file.md:LINE` citation no longer holds the text it was
+recorded against, and `make citations-fix` repoints a citation whose
+text has merely moved. Nine wrong citations across five documents were
+corrected first, so the ledger records a correct state rather than
+blessing the current one.
+
+**Why:** `skills.md` had just been written to say that a line-number
+citation is correct only until the cited file is next edited and that
+nothing checks it. A sweep proved the point harder than intended:
+thirty-eight citations exist in the live specifications and nine of
+them were already wrong, most predating this session's edits. Two of
+the nine were induced by insertions made during it. Writing the hazard
+down and leaving it unchecked would have been the worst of the three
+available outcomes.
+
+**Cost:** one script, one generated YAML file, one Makefile target, and
+about six lines in `AGENTS.md`. The check is pure Python over the
+repository and adds no dependency.
+
+**Alternative:** delete every line number and cite by section heading
+instead. That is more robust and was rejected because it would have
+meant rewriting thirty-eight sentences across five specifications
+during a conversion that is explicitly forbidden from rewriting
+requirements, and because several citations point into code blocks and
+tables that have no heading to name.
+
+**Note:** the repair is deliberately partial. A citation whose text
+moved is repointed automatically; a citation whose text is gone, or now
+appears twice, is reported and left alone, because deciding what such a
+citation now means is a judgment and not a substitution.
+
+**Question for you:** do you want the line numbers at all? They are
+precise and they rot. Heading-relative citations would survive edits
+and would need no tooling, at the cost of a wide rewrite. My
+recommendation is to keep them now, since the check makes the rot
+visible, and to drop them if the check ever starts failing on churn
+rather than on error.
+
+**Reversal cost:** low. Deleting the script, the ledger, the Makefile
+target, and the paragraph in `AGENTS.md` restores the previous state,
+and the nine corrected citations are correct either way.
+
+### The citation check is not written into the Milestone 0 toolchain spec
+
+**Decided:** `docs/plan/development-toolchain.md` is left unedited. It
+specifies the implementation-era `Makefile` — `lint`, `typecheck`,
+`test-fast`, and the rest — and reconciles a target count against
+Sections 21, 24, and 25. The citation check exists in the repository's
+current documentation `Makefile` and is recorded in `AGENTS.md`.
+
+**Why:** adding a seventh target to a table the specification
+introduces as "six targets exist that Section 21 does not list" would
+have meant re-deriving that reconciliation for a docs-only check, and
+the constraint against rewriting settled requirements applies.
+
+**Note:** this is a real risk and it is being flagged rather than
+solved. When Milestone 0 replaces the documentation `Makefile` with the
+implementation one, the citation check will be dropped unless someone
+carries it across. `AGENTS.md` is the only thing that will remember.
+
+**Question for you:** should `development-toolchain.md` name it, at the
+cost of moving the count from six to seven?
+
+**Reversal cost:** low now, higher after Milestone 0 ships a Makefile
+without it.
+
+### `delta` is promoted to a fifth assertion type, and ADR-0022 says four
+
+**Decided:** the harness assertion vocabulary gains a fifth entry,
+cross-arm metric relation, with `arms`, `carry`, and `delta` fields on
+the case schema. ADR-0022 says the vocabulary gains four and is left
+as written.
+
+**Why:** two memory gates and Section 30.5's rollout criterion are
+stated as comparisons between two runs — better on the metric, no
+worse on policy. A vocabulary of predicates over a single run cannot
+express that, so the harness could not assert three of its own hard
+gates. Case 27 already described "runs one task twice and compares" in
+prose with no schema behind it, and case 31 needed the same shape.
+
+**Alternative:** express the comparison outside the harness, in a
+one-off script per gate. Rejected because a gate asserted by a script
+nobody runs is not asserted.
+
+**Note:** ADR-0022 is a record of a decision at a point in time and is
+not rewritten, per the rule already established for the gate count. The
+divergence between "gain four" there and "gain five" in
+`evaluation-harness.md` is deliberate and is logged here so it is not
+later read as an error.
+
+**Reversal cost:** moderate. The three fields are schema, and the
+schema has not been implemented; after Milestone 8 it is a migration.
+
+### "More than half the gates are not case gates" was arithmetic, and wrong
+
+**Decided:** the claim is replaced with the exact count. Sixty-four of
+one hundred and thirty-eight declared gates are not case gates.
+
+**Why:** it was false when written — at one hundred and thirty-four
+declared gates, sixty-three were non-case — and it stayed false as the
+count grew. The sentence's purpose is to justify building the
+structural and property tracks in Milestone 0, and a count does that
+better than a fraction that has to be re-checked every time a gate is
+added.
+
+**Note:** two independent derivations now agree on the kind split:
+seventy-four case, seventeen property, seven corpus, forty structural.
+One comes from the milestone map's census of registry entries, the
+other from the harness's own kind table. They were reconciled rather
+than assumed.
+
+**Note:** an earlier entry in this file is headed *"Roughly a third of
+the declared gates are not case gates"*. It was right when written and
+is left as the record it is. The ratio has moved twice as gates were
+added, which is the argument for a count rather than a fraction: a
+count is wrong loudly and a fraction is wrong quietly.
+
+**Reversal cost:** low.
+
+### `gate.tool.mcp_disconnect` is named for the column, not for clarity
+
+**Decided:** the gate asserting that a mid-call server disconnect
+yields `unavailable` with `tool.server_unreachable` is named
+`gate.tool.mcp_disconnect` rather than
+`gate.tool.mcp_disconnect_structured`.
+
+**Why:** gate identifiers sit in a thirty-character column in the
+milestone map's tables, and the corpus already truncates two of them
+with a trailing `..`. A third truncation to buy one adjective is a bad
+trade, and the shorter name is not ambiguous — there is one disconnect
+gate.
+
+**Note:** the thirty-character ceiling is a table-formatting artifact
+that has started shaping identifiers. It is worth deciding whether the
+column should widen before it truncates a name that matters.
+
+**Question for you:** widen the column and un-truncate
+`gate.sandbox.workspace_isola..` and
+`gate.event.checkpoint_dispens.`, or keep the ceiling?
+
+**Reversal cost:** low.
+
+### `gate.harness.mcp_no_socket` is a case gate, not a structural one
+
+**Decided:** the gate asserting that the MCP fixture layer opens no
+socket is kind `case`. It was first written as `structural`, and the
+harness kind table and totals were corrected before the count
+propagated.
+
+**Why:** the gate statement asserts the property by running the MCP
+cases with egress blocked, not by inspecting the fixture code. That
+makes it the same shape as `gate.harness.no_egress`, which is already
+a case gate for the same reason. Kind follows how the gate is
+asserted, not what it is about.
+
+**Note:** this was caught by re-reading the gate statement against the
+kind definitions rather than by any check. Nothing in the corpus
+validates that a gate's declared kind matches how its statement says
+it is asserted, and the two are written in different files.
+
+**Reversal cost:** low now — one table row and two totals — and higher
+once the harness is built against the wrong kind.

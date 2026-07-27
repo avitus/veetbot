@@ -1565,6 +1565,17 @@ These fail the build.
 10. `mcp.{server}.{name}` collides with no builtin domain, asserted by a
     test that attempts to register a builtin in a reserved domain and
     expects a startup error. **M1.**
+11. An MCP tool call traverses the same fourteen steps in the same order
+    as a builtin call, asserted by comparing the recorded step sequence
+    for an MCP call against the sequence for a builtin call rather than
+    by asserting the steps individually. **M8.**
+12. A server that disconnects mid-call yields `unavailable` with
+    `tool.server_unreachable` and a run that continues, asserted against
+    a scripted server that drops the connection rather than against a
+    mocked exception. **M8.**
+13. No module outside `adapters.mcp` imports an MCP SDK type, asserted by
+    the import-graph walk rather than by grep, because the import this
+    catches is transitive through a shared helper. **M8.**
 
 ## Build order
 
@@ -1591,6 +1602,14 @@ The dependency order that keeps every step independently testable.
 
 Steps 1 through 5 are Milestone 1. Step 6 is Milestone 4. Steps 7 and 8 are
 Milestone 6. Step 9 is Milestone 8.
+
+Gates 11, 12, and 13 are step 9's, and they are the reason step 9 can be last
+without being unobserved. Each one asserts a property of the adapter that only
+becomes checkable once the adapter exists: that it added no path around the
+pipeline, that its worst ordinary failure stays inside the outcome vocabulary,
+and that it did not leak its SDK upward into the runtime. A milestone that
+widens an existing surface still owes the corpus the evidence that the surface
+is the same one.
 
 ## Decisions
 
