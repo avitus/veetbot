@@ -189,7 +189,7 @@ restates a gate another spec owns.
 | --- | --- | --- | --- | --- | --- |
 | Runtime loop | 7 | 2 | 0 | 3 | 12 |
 | Tool system | 6 | 1 | 1 | 4 | 12 |
-| Builtin tools | 3 | 3 | 0 | 3 | 9 |
+| Builtin tools | 7 | 4 | 0 | 4 | 15 |
 | Model gateway | 8 | 0 | 1 | 3 | 12 |
 | Policy and approvals | 5 | 3 | 1 | 1 | 10 |
 | Event log and persistence | 9 | 2 | 0 | 3 | 14 |
@@ -202,11 +202,11 @@ restates a gate another spec owns.
 | Skills | 12 | 1 | 1 | 2 | 16 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **79** | **17** | **8** | **43** | **147** |
+| **Total** | **83** | **18** | **8** | **44** | **153** |
 
-The counts are the useful output, not the individual assignments: **sixty-eight
-of the hundred and forty-seven declared gates are not case gates**, and a
-harness that only runs cases would report a green build with those sixty-eight
+The counts are the useful output, not the individual assignments: **seventy
+of the hundred and fifty-three declared gates are not case gates**, and a
+harness that only runs cases would report a green build with those seventy
 of the plan's stated invariants unchecked. Two of the four kinds — property and
 structural — need no runtime at all and can be built in Milestone 0, before
 there is an agent to evaluate.

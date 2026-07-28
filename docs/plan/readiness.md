@@ -54,8 +54,9 @@ Three things are deliberately not treated as evidence of absence.
     milestone's mechanisms were expanded once more after the plan
     stated them, and the expansions found real conflicts each time.
 2.  **An explicit deferral is not a gap.** `builtin-tools.md` has a
-    section titled *"The six tools this document does not design"*
-    that names each one, assigns it a milestone, and lists what it
+    section titled *"The two tools this document does not design"* —
+    six when this review ran, four of which have since been designed
+    — that names each one, assigns it a milestone, and lists what it
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
@@ -76,7 +77,7 @@ rather than smoothed.
 | 1 | In-memory vertical slice | Ready | 28 | Nothing |
 | 2 | PostgreSQL persistence and durable worker | Ready | 16 | Nothing |
 | 3 | Model adapters and normalized streaming | Ready | 15 | Nothing |
-| 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 13 | Four deferred tools; scope vocabulary |
+| 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 19 | Scope vocabulary |
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
@@ -157,7 +158,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and forty-seven gates are green before
+**Forty-one of one hundred and fifty-three gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -306,7 +307,7 @@ somebody writes down what it must be true of. The verdict is ready.
 
 ## Milestone 4: ready with named gaps
 
-Thirteen registry entries.
+Nineteen registry entries.
 [policy-and-approvals.md](policy-and-approvals.md) covers the
 deterministic decision function, the hardline set, profile compilation
 and freezing, `policy_version`, the approval record and its lifecycle,
@@ -315,29 +316,30 @@ expiry, resume revalidation, and the injection corpus.
 end to end. The thirteenth entry arrived later, with
 [sandbox-isolation.md](sandbox-isolation.md): a property test over
 `WorkspaceHandle.resolve`, which acquires its first callers at this
-milestone.
+milestone. The last six arrived later still, from the pass that closed
+the first of the two gaps below.
 
-Two things are outstanding.
+Two things were outstanding.
 
-**Four builtin tools are classified but not designed**, and the
-document says so. `builtin-tools.md` names `workspace.read_text`,
+**Four builtin tools were classified but not designed**, and the
+document said so. `builtin-tools.md` named `workspace.read_text`,
 `workspace.write_text`, `workspace.list_files`, and
-`demo.external_write`, assigns each to Milestone 4, and lists what
-each still owes: path resolution and traversal rejection, encoding and
+`demo.external_write`, assigned each to Milestone 4, and listed what
+each still owed: path resolution and traversal rejection, encoding and
 binary-file rules, the checksum algorithm, the listing's limit and
 ordering, and the `WorkspaceHandle` the execution context already
-carries. It also fixes two constraints in advance rather than leaving
+carries. It also fixed two constraints in advance rather than leaving
 them to be noticed — the reader lowers `output_trust` to
 `EXTERNAL_UNTRUSTED` for any file whose provenance in the run is not
 established, and the establishing set is what this run's
 `workspace.write_text` produced.
 
-This is a bounded and well-understood hole, but one consequence should
-be stated plainly: the Milestone 4 acceptance criterion *"Path
-traversal is rejected"* and eval case 19 both stand on an algorithm
-that no document contains. A rejection rule is exactly the kind of
-thing that is written three different ways by three implementers, two
-of which are subtly wrong.
+That was a bounded and well-understood hole, but one consequence was
+worth stating plainly: the Milestone 4 acceptance criterion *"Path
+traversal is rejected"* and eval case 19 both stood on an algorithm
+that no document then contained. A rejection rule is exactly the kind
+of thing that is written three different ways by three implementers,
+two of which are subtly wrong.
 
 **Principal scopes are half-designed.** The `Principal` model lives
 only at `engineering-plan.md:459`, the policy spec identifies where
@@ -347,6 +349,46 @@ string, a hierarchy, or a pattern. Relatedly,
 `bootstrap-and-composition.md:450` names `ApprovalService` as one of
 the services `build` returns, and no document gives it a method
 signature.
+
+### What closed it
+
+The first of the two. The second is untouched.
+
+The traversal half closed first and separately.
+[sandbox-isolation.md](sandbox-isolation.md) specifies
+`WorkspaceHandle.resolve` as a five-step containment rule, says for
+each step why it rejects rather than normalizes, and registers
+`gate.sandbox.workspace_containment` at this milestone — the
+thirteenth entry counted above. The sentence about an algorithm no
+document contained was true when it was written and stopped being
+true with that document, which is why it is now in the past tense.
+
+What remained was the tool half, and
+[builtin-tools.md](builtin-tools.md) now designs all four: the
+prohibition that no `workspace.` tool resolves a path at all, strict
+UTF-8 with a NUL byte as the binary test, a SHA-256 checksum over the
+encoded bytes, a listing capped at a thousand entries and ordered so
+that a truncated one is a prefix of the full one, six JSON schemas,
+four reason codes, and `demo.external_write`'s record as the
+`structured` result the pipeline already persists.
+
+Two of its answers are more than transcription. Provenance became a
+property of the workspace rather than a repository query, because
+`ToolExecutionContext` deliberately carries no database session:
+`WorkspaceHandle` gains one method and one enum, `write` records
+`TOOL_WRITTEN` in the same operation that writes the bytes, and
+Milestone 6's `SANDBOX_WRITTEN` is defined two milestones early so
+that it cannot later be treated as establishing trust. And the reader
+has no size-limit failure of its own, deferring instead to the
+execution pipeline's excerpt-and-artifactize step, because a second
+ceiling is a second truncation policy to keep in agreement with the
+first.
+
+Six gates, all at Milestone 4: `gate.builtin.handle_only`,
+`gate.builtin.text_only`, `gate.builtin.write_idempotent`,
+`gate.builtin.listing_stable`, `gate.builtin.provenance`, and
+`gate.builtin.demo_records`. The scope vocabulary is unchanged, so
+the verdict is.
 
 ## Milestone 5: ready
 
@@ -473,14 +515,14 @@ Two further items deserved naming.
     `engineering-plan.md:3215` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
-2.  **`sandbox.run_command` is placed at two milestones.**
-    `builtin-tools.md:909` says Milestone 5; the plan's Milestone 6
-    implement list contains it. The map follows the plan. This is
-    reported rather than resolved, because the right answer depended
-    on a sandbox specification that did not exist: if the tool can
-    ship against the development mechanism at Milestone 5 and gain
-    container backing at Milestone 6, both documents are right about
-    different things.
+2.  **`sandbox.run_command` was placed at two milestones.**
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1399`
+    now says Milestone 6; the plan's Milestone 6 implement list
+    contains it. The map follows the plan. This was reported rather
+    than resolved, because the right answer depended on a sandbox
+    specification that did not exist: if the tool can ship against the
+    development mechanism at Milestone 5 and gain container backing at
+    Milestone 6, both documents are right about different things.
 
 The zero in the gate column was worth dwelling on. Milestone 6 is the
 milestone whose failure mode is a container escape, and it was one of
@@ -855,19 +897,19 @@ document that owns the subject. Three have since been resolved by the
 documents they were deferred to, and each resolution is recorded
 under the conflict it settles.
 
-1.  **`sandbox.run_command` at Milestone 5 or Milestone 6.**
-    `builtin-tools.md:909` against the plan's Milestone 6 implement
-    list. The map follows the plan. Resolution belongs to the sandbox
+1.  **`sandbox.run_command` at Milestone 5 or Milestone 6.** The
+    spec against the plan's Milestone 6 implement list. The map
+    follows the plan. Resolution belongs to the sandbox
     specification, because whether the tool can ship against the
     development mechanism before container backing exists is a sandbox
     question. Resolved there in the plan's favour: the development
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md` is corrected.
+    HTTP API. `builtin-tools.md:1399` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:786`. The map
+    `model-gateway.md:1735` and `milestone-map.md:797`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

@@ -3713,3 +3713,125 @@ origin whose contents are a function of a whole run rather than of a
 single act inside it.
 
 **Reversal cost:** none.
+
+## The Milestone 4 builtin tools (no ADR)
+
+### No `workspace.` tool resolves a path
+
+**Decided:** all three take a `path` argument and none of them joins
+it, normalizes it, compares it against a root, or opens anything.
+Each hands the string to `WorkspaceHandle` and lets the execution
+service resolve it. A structural gate asserts the prohibition by
+inspection: the three modules import no `os`, `os.path`, `pathlib`,
+`shutil`, or `glob`, call no `open`, and reach the filesystem only
+through `ToolExecutionContext.workspace`.
+
+**Why:** the alternative is three implementations of one containment
+rule, and a traversal test that passes because two of the three got
+it right is exactly the failure being designed out. Three tools
+written by three people over one sprint is the ordinary case, not a
+hypothetical.
+
+**Cost:** the tools cannot do anything clever with paths, which is
+the point.
+
+**Reversal cost:** none; loosening it later is a deletion.
+
+### Provenance lives on `WorkspaceHandle`, not in a repository
+
+**Decided:** `WorkspaceHandle` gains one method and one enum.
+`write` records the resolved path as `TOOL_WRITTEN` in the same
+operation that writes the bytes; `provenance` reports it;
+`workspace.read_text` returns `INTERNAL_TOOL` for `TOOL_WRITTEN` and
+`EXTERNAL_UNTRUSTED` for everything else.
+
+**Why:** the obvious design is a query against the run's tool
+invocations, and it is not available. `ToolExecutionContext`
+deliberately carries no database session, no `EventRepository`, and
+no `ToolRegistry`, and adding one to answer this question would undo
+a boundary that exists for good reasons. The port that owns the
+volume is the only thing that can answer honestly anyway.
+
+**Alternative:** carry provenance on `listdir` entries rather than
+answering per path. Rejected because it widens `FileChange`, which
+several other things read, to serve one caller.
+
+**Note:** `SANDBOX_WRITTEN` is defined at Milestone 4, two milestones
+before anything can produce it, so that the Milestone 6 implementer
+inherits the answer instead of choosing it. Bytes produced by code we
+did not write are the case `EXTERNAL_UNTRUSTED` exists for, and
+passing through this port does not launder them.
+
+**Reversal cost:** low now, high after the first sandbox adapter.
+
+### A listing is `INTERNAL_TOOL` only when every entry is
+
+**Decided:** `workspace.list_files` returns `INTERNAL_TOOL` only when
+every entry it returns is `TOOL_WRITTEN`, and `EXTERNAL_UNTRUSTED`
+otherwise.
+
+**Why:** a filename is attacker-controlled whenever the file is. An
+archive extracted into a workspace can create
+`URGENT_instructions_for_the_assistant.md`, and a listing that
+renders that as trusted platform text is a prompt injection with a
+very small payload.
+
+**Cost:** in practice almost every listing at Milestone 4 will be
+untrusted, because almost nothing fills a workspace yet. That is the
+correct default and it means the rule is exercised from the start.
+
+**Reversal cost:** none.
+
+### The reader has no size-limit failure of its own
+
+**Decided:** `workspace.read_text` declares no `too_large` reason
+code. A large file becomes a large result and the execution
+pipeline's existing excerpt-and-artifactize step handles it.
+
+**Why:** a second ceiling is a second truncation policy to keep in
+agreement with the first, and the two would drift the first time
+either moved.
+
+**Cost:** the model learns a file was truncated from the pipeline's
+notice rather than from the tool's failure, which is one indirection.
+
+**Reversal cost:** cheap.
+
+### `demo.external_write` has no destination and no failures
+
+**Decided:** it writes nowhere, has no side table, and cannot fail.
+Its record is the `structured` result the pipeline already persists
+on `tool_invocations` at step 13, and it carries no timestamp.
+
+**Why:** its entire purpose is to exercise the approval path. Every
+byte of machinery beyond that is a second thing to operate for a tool
+whose value is that it does nothing.
+
+**Question for you:** whether it should be registered outside
+development at all. The approval path is exactly what is worth
+exercising in production, and a production catalog containing a tool
+that does nothing is either honest or confusing depending on who is
+reading it.
+
+**Reversal cost:** cheap either way.
+
+### The Milestone 4 gap was narrower than the review said
+
+**Decided:** the readiness review's sentence that *"Path traversal is
+rejected"* stood on *"an algorithm that no document contains"* is
+now in the past tense, and the finding around it re-tensed with it.
+
+**Why:** `sandbox-isolation.md` was written after that review and
+specifies `WorkspaceHandle.resolve` as a five-step containment rule
+with a property gate over it. The claim was true when written and
+stopped being true with that document. Only the tool-level half was
+still missing, and that is what this pass wrote.
+
+**Note:** two citations into `builtin-tools.md:909` broke, both from
+the readiness review and both pointing at the `sandbox.run_command`
+Milestone 5 transcription error that `sandbox-isolation.md` corrected
+long ago. They are repointed to `builtin-tools.md:1399`, where the
+corrected statement lives, and the surrounding prose re-tensed to
+match.
+
+**Reversal cost:** none.

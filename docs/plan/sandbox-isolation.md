@@ -521,6 +521,12 @@ workspace volume, implemented by the execution service, which owns
 the volume and can read it without entering the sandbox.
 
 ```python
+class WorkspaceProvenance(StrEnum):
+    UNKNOWN = "unknown"
+    TOOL_WRITTEN = "tool_written"
+    SANDBOX_WRITTEN = "sandbox_written"
+
+
 class WorkspaceHandle(Protocol):
     @property
     def root(self) -> PurePosixPath:
@@ -536,6 +542,9 @@ class WorkspaceHandle(Protocol):
         ...
 
     async def listdir(self, path: str) -> Sequence[FileChange]:
+        ...
+
+    async def provenance(self, path: str) -> WorkspaceProvenance:
         ...
 ```
 
@@ -565,6 +574,53 @@ can change between check and use is a check with a race in it.
 The property gate below tests `resolve` against generated inputs
 rather than a list of known-bad strings, because the list is always
 missing one.
+
+### Provenance, and why the handle answers it
+
+`provenance` reports which of three things put a file where it is.
+It exists because [builtin-tools.md](builtin-tools.md) needs the
+answer to decide whether `workspace.read_text` hands its bytes back
+labelled `INTERNAL_TOOL` or `EXTERNAL_UNTRUSTED`, and the decision
+has to be made from something more durable than the tool's own
+memory of the current turn.
+
+The record is written by `write`, in the same operation that writes
+the bytes, and by nothing else. That is the entire mechanism; the
+three properties below follow from it rather than from rules stated
+alongside it.
+
+`write` records `TOOL_WRITTEN`. A tool ran, the call came from the
+platform's own code through the execution pipeline, and a run
+reading back what it wrote is reading its own working memory.
+
+The Milestone 6 adapter records `SANDBOX_WRITTEN` for anything a
+container leaves behind. The value is defined at Milestone 4, before
+anything can produce it, precisely so that the Milestone 6
+implementer inherits it rather than deciding it. Bytes produced by
+code we did not write are the case `EXTERNAL_UNTRUSTED` exists for,
+and passing through this port does not launder them.
+
+Everything else is `UNKNOWN` — a file a fixture placed, a file an
+archive extracted, a file whose writer predates the record.
+`UNKNOWN` is also what the port returns for a path it has never
+seen, so a missing record and an untrusted file give the same
+answer and a lost record fails in the safe direction.
+
+The record lives with the volume and dies with it. There is no table
+and no migration: a workspace that is gone has no provenance to
+report, and a read against it fails before anyone asks. Keeping the
+knowledge here rather than in a repository is also what lets
+`ToolExecutionContext` go on carrying no database session, which
+[tool-system.md](tool-system.md) is deliberate about.
+
+`listdir` does not carry provenance on its entries. A caller that
+needs it asks per path, which is cheap: the record is a map the
+execution service holds beside the volume, so a thousand-entry
+listing costs a thousand lookups and no syscalls.
+
+Both adapters — the Milestone 4 local directory and the Milestone 6
+volume — run one contract suite over `resolve` and `provenance`
+together, for the same reason the containment rule is written once.
 
 ### `ArtifactWriter`
 
@@ -1254,7 +1310,7 @@ already says. The table exists for the three items that are not.
 ```text
 # capability                                milestone
 SandboxMechanism setting, startup refusal   M1
-WorkspaceHandle and the containment rule    M4
+WorkspaceHandle, containment, provenance   M4
 ExecutionEnvironment port and its types     M6
 fake adapter and the contract suite         M6
 kernel-isolating adapter, gvisor or microVM M6
@@ -1287,7 +1343,9 @@ are, and at Milestone 4 it is implemented over a plain local
 directory: no sandbox exists yet and none is needed for the port to
 be real. Milestone 6 supplies a second adapter over the execution
 service's volume. The containment rule and its property test are
-written once, at Milestone 4, and both adapters use them.
+written once, at Milestone 4, and both adapters use them. The
+provenance record ships with it, able to hold only `TOOL_WRITTEN`
+and `UNKNOWN` until there is a sandbox to produce the third value.
 
 The worker-side egress guard ships at Milestone 6 with the policy it
 evaluates, even though its first caller — tenant-configured MCP
@@ -1556,6 +1614,13 @@ build failure.
     artifact referenced by an event resolves to a 404 after
     expiry, which is honest. The alternative is a distributed
     garbage collector nobody asked for.
+23. **Provenance is recorded by `write` and lives with the volume.**
+    One method and one enum on `WorkspaceHandle`, with no table and
+    no migration behind them, because who put these bytes here is
+    answerable only where the bytes are written and is meaningless
+    once the workspace is gone. `SANDBOX_WRITTEN` is defined two
+    milestones before anything can produce it so that the question
+    is settled rather than inherited.
 
 ## Open questions for review
 

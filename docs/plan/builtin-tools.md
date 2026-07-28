@@ -14,9 +14,11 @@ bullets include the word "deterministic" and the instruction to accept a
 timezone, which are the two hardest things about it and are stated as
 though they were the easy ones.
 
-This document specifies both, completely, and gives every other builtin
+This document specifies both, completely. It gives every other builtin
 the classification fields that registration validation requires before
-the process will start.
+the process will start, and it specifies the four Milestone 4 tools —
+the three `workspace.` ones and `demo.external_write` — as completely as
+the first two, on a later pass than the one that classified them.
 
 The distinction it draws throughout is between **classification** and
 **behaviour**. A tool's classification — what it may touch, how risky
@@ -24,15 +26,17 @@ it is, whether repeating it is safe, what trust its output carries —
 is what policy sorts on, what the 9.2 matrix is keyed by, and what hard
 gate 1 in [tool-system.md](tool-system.md) refuses to start without. A
 tool's behaviour is what it does with its arguments. The eight builtins
-get their classification here, all of it, at once. Two of them get their
-behaviour here as well, because Milestone 1 cannot be written without
-it. The other six get a pointer to the milestone that owes them a
-design, which is a smaller debt than it sounds like: a tool whose
-classification is fixed cannot surprise the policy engine later.
+get their classification here, all of it, at once. Six of them get their
+behaviour here as well: the two Milestone 1 tools, because Milestone 1
+cannot be written without them, and the four Milestone 4 tools, which
+were a pointer on the first pass and are designed here on a later one.
+The remaining two are Milestone 6's, and a pointer is a smaller debt
+than it sounds like: a tool whose classification is fixed cannot
+surprise the policy engine later.
 
 ## What this document is responsible for
 
-It is responsible for six things.
+It is responsible for seven things.
 
 1.  **The roster.** Which tools are builtin, what each is called, and
     which milestone ships it. Section 8.1 and Section 8.2 disagree about
@@ -53,10 +57,16 @@ It is responsible for six things.
     and the contract it forces onto the `Clock` port — which
     [runtime-loop.md](runtime-loop.md) declares as returning `datetime`
     without saying whether that datetime is aware.
-5.  **The registration check.** What happens at startup, in what order,
+5.  **The four Milestone 4 tools, completely.** What each does with the
+    `WorkspaceHandle` the containment rule already lives on, the
+    encoding and binary-file rules, the checksum and what it is taken
+    over, the listing's limit and its ordering, the provenance record
+    that decides what trust a read carries back, and the record
+    `demo.external_write` leaves behind.
+6.  **The registration check.** What happens at startup, in what order,
     and what a builtin has to get wrong for the process to refuse to
     start.
-6.  **The failure-message rule for builtins.** Hard gate 4 requires a
+7.  **The failure-message rule for builtins.** Hard gate 4 requires a
     static message per `reason_code`. For a builtin whose arguments the
     model wrote, a static message that omits what went wrong leaves the
     model unable to correct itself, and the fix is not to echo the
@@ -94,10 +104,10 @@ name                  domain     milestone  ships as
 --------------------  ---------  ---------  ----------------------
 math.calculate        math       1          full design, here
 system.current_time   system     1          full design, here
-workspace.read_text   workspace  4          classification, here
-workspace.write_text  workspace  4          classification, here
-workspace.list_files  workspace  4          classification, here
-demo.external_write   demo       4          classification, here
+workspace.read_text   workspace  4          full design, here
+workspace.write_text  workspace  4          full design, here
+workspace.list_files  workspace  4          full design, here
+demo.external_write   demo       4          full design, here
 sandbox.run_command   sandbox    6          classification, here
 artifact.export       artifact   6          classification, here
 ```
@@ -899,33 +909,499 @@ unknown_timezone
 tool has: the clock cannot fail, the conversion cannot fail once the
 zone resolves, and the output cannot exceed its byte limit.
 
-## The six tools this document does not design
+## The three `workspace.` tools
+
+Section 8.2 gives the three of them nine bullets. Six are
+classification and are in the table above. The other three — "Reject
+absolute paths and path traversal", "Return file metadata and
+checksum", and "Enforce result limits" — name three algorithms in
+eleven words.
+
+One of the three is already written, and it is the one that mattered
+most. [sandbox-isolation.md](sandbox-isolation.md) specifies
+`WorkspaceHandle.resolve` as a five-step containment rule, states for
+each step why it rejects rather than normalizes, and declares a
+property gate over it at Milestone 4 — this milestone, because these
+are the tools that first call it. Nothing below restates that
+algorithm. What is below is the half that document does not own: what
+these three tools do with the handle, and what they hand back.
+
+### None of the three resolves a path
+
+All three take a `path` argument. None of them joins it, normalizes
+it, compares it against a root, or opens anything. Each passes the
+string it was given to `WorkspaceHandle.read`, `write`, or `listdir`
+and lets the handle resolve it on the execution service's side of the
+boundary, which is where [sandbox-isolation.md](sandbox-isolation.md)
+puts the check so that it cannot race a filesystem the tool does not
+own.
+
+This is a prohibition rather than a convention because the alternative
+is three implementations of one rule. The structural gate below
+asserts it by inspection: the three modules import no `os`, `os.path`,
+`pathlib`, `shutil`, or `glob`, call no `open`, and reach the
+filesystem only through `ToolExecutionContext.workspace`. A traversal
+test that passes because two of three tools got it right is precisely
+the failure being designed out, and it is not a hypothetical — three
+tools written by three people over one sprint is the ordinary case.
+
+`WorkspaceEscape` is not caught. It propagates past the tool body and
+the pipeline maps it to `ToolValidationError`, the class step 4 of the
+execution pipeline already raises, so a rejected path is a failed
+invocation with a validation shape rather than a tool-authored failure
+that each of the three would word differently. Milestone 4's
+acceptance criterion *"Path traversal is rejected"* is therefore one
+behaviour with one message across all three tools; harness case 19
+exercises them, and `gate.sandbox.workspace_containment` exercises the
+function underneath them.
+
+### The workspace is a cache, and `write_text` says so
+
+[sandbox-isolation.md](sandbox-isolation.md) holds the workspace for a
+worker's lease rather than for a run's logical lifetime. A run that
+pauses for an approval and resumes on another worker gets an empty
+one, and that document already requires `sandbox.run_command`'s
+description to tell the model that files worth keeping should be
+exported.
+
+`workspace.write_text`'s description carries the same sentence, for
+the same reason and with more force, because writing a file is the
+operation whose entire point is that something persists. A model that
+writes `notes.md`, requests an approval, and reads `notes.md` back
+after the resume gets `no_such_path`, and the only place that outcome
+can be prevented is the description it read before it wrote.
+
+### Text, encoding, and what makes a file binary
+
+All three are text tools. Two say so in their names and the third
+inherits the consequence, which is that none of them is a path by
+which arbitrary bytes enter or leave a workspace. Moving bytes is
+`artifact.export`'s job and running code that produces them is
+`sandbox.run_command`'s, both at Milestone 6, and both governed in
+ways a text reader is not.
+
+**The encoding is UTF-8 and it is not an argument.** No `encoding`
+parameter, no BOM handling, no `latin-1` fallback, and no detection
+library. An encoding argument makes the tool's output depend on a
+guess the model made about a file it has not read, and the failure
+mode of a wrong guess is not an error — it is mojibake that the model
+then reasons about confidently.
+
+**Reading decodes strictly.** A file that does not decode as UTF-8 is
+`not_text`. The tool does not fall back, does not substitute
+replacement characters, and does not return the prefix that decoded. A
+partial decode is the worst of the three available outcomes because it
+looks like content, so nothing downstream treats it as a failure.
+
+**A NUL byte is binary even when it decodes.** U+0000 is valid UTF-8
+and appears in essentially no text file, which makes its presence the
+cheapest binary detector available, and it is checked on the bytes
+before the decode rather than on the decoded string. A file containing
+one is `not_text` with the same message as a file that fails to
+decode, because the difference between them is not one the model can
+act on differently.
+
+That is the entire binary rule: NUL, then strict decode. There is no
+extension list, no magic-number table, and no heuristic over the first
+few kilobytes. Each of those is a second definition of "binary" that
+would then have to agree with this one, and the two-part test already
+rejects every file a text tool has any business refusing.
+
+Reading is incremental, and the two checks run as the bytes arrive: an
+incremental decoder that carries a partial multi-byte sequence across
+chunk boundaries, and a NUL scan per chunk. Reading the whole file
+into memory before checking either would make the size ceiling depend
+on the check rather than the other way around.
+
+**Writing encodes strictly and normalizes nothing.** The argument is
+a JSON string, so it is already text. It is encoded UTF-8 with no BOM,
+no line-ending translation, and no inserted trailing newline. A tool
+that appends a newline the model did not write is a tool whose
+checksum is not the checksum of what the model sent.
+
+### The size ceiling is the pipeline's, not this document's
+
+`workspace.read_text` declares `maximum_output_bytes` of 1,048,576 and
+enforces no separate limit of its own. A file between that and the
+hard ceiling is excerpted head-and-tail and artifactized by step 12 of
+the execution pipeline; a file past the hard ceiling is cancelled with
+`OUTPUT_TOO_LARGE` and its partial output artifactized. Both are
+[tool-system.md](tool-system.md)'s rules, already written, already
+gated, and already applied to every other tool.
+
+Building a second ceiling here would produce two truncation shapes for
+one problem, and the tool's would be the one without the elision
+marker, the artifact reference, or the trust-envelope rule. The reader
+therefore has no `too_large` reason code, which is a deliberate
+absence rather than an oversight.
+
+`workspace.write_text` bounds its input the other way, in the schema:
+`content` has a `maxLength` of 1,048,576, matching the reader's
+ceiling so that a write and a read of the same file are symmetric.
+Over-long content is a schema failure at step 4 and never reaches the
+tool.
+
+### The checksum
+
+Section 8.2 requires `workspace.write_text` to "Return file metadata
+and checksum" and does not say of what.
+
+**The checksum is the lowercase hex SHA-256 of the encoded bytes,
+prefixed `sha256:`** — of the bytes written, not of the string
+argument as the model sent it and not of the file re-read afterwards.
+Three things make that the right one.
+
+1.  **SHA-256 is already the corpus's hash.** `FileChange.sha256`, the
+    artifact store's content addressing, and
+    `gate.sandbox.artifact_checksum` all use it. A second algorithm
+    here would be a second thing to reconcile the moment a workspace
+    file becomes an artifact, which is exactly what `artifact.export`
+    does at Milestone 6.
+2.  **The prefix is not decoration.** A bare sixty-four-character hex
+    string is indistinguishable from the next algorithm's, and the
+    migration that adds a second one is the migration that discovers
+    nothing recorded which was which.
+3.  **Hashing the encoded bytes rather than re-reading makes the value
+    independent of the filesystem.** A re-read returns the same value
+    in every case that works and a confusing one in the cases that do
+    not, and the cases that do not are the ones somebody will be
+    debugging.
+
+`workspace.read_text` returns the same field, computed the same way
+over the bytes it read. Equality between a write's checksum and a
+later read's is then a meaningful comparison, and it is the one a
+model doing anything careful will make.
+
+### Provenance, and the trust a read carries back
+
+The classification table declares `workspace.read_text` as
+`INTERNAL_TOOL` and notes that the tool will often have to lower
+itself. This is that rule, stated as an algorithm, because it decides
+whether the context engine wraps what comes back in an untrusted
+envelope.
+
+**Provenance is a property of the workspace, and the handle answers
+it.** [sandbox-isolation.md](sandbox-isolation.md) adds one method and
+one enum to `WorkspaceHandle` for this: `write` records the resolved
+path as `TOOL_WRITTEN` in the same operation that writes the bytes,
+and `provenance` reports it. Recording it there rather than in the
+tool is what makes it survive the tool's process, and asking the port
+rather than a repository is what keeps `ToolExecutionContext` free of
+the database session it deliberately does not carry.
+
+`workspace.read_text` returns `output_trust = INTERNAL_TOOL` for a
+path whose provenance is `TOOL_WRITTEN` and `EXTERNAL_UNTRUSTED` for
+every other value. `ToolResult.output_trust` may only lower and the
+executor clamps, so the tool cannot get this wrong in the direction
+that matters.
+
+Four consequences are worth stating, because each is a place where a
+reasonable implementer would otherwise decide something else.
+
+1.  **Writes establish provenance; reads do not.** Reading a file is
+    not evidence about who wrote it. If reads established it, the
+    first read would launder the file for every read after it.
+2.  **Provenance does not survive a resume**, because the workspace
+    does not either. A run that wrote a file before an approval and
+    reads it afterwards gets `no_such_path` from an empty workspace,
+    not `INTERNAL_TOOL` from a record that outlived its volume.
+3.  **A sandbox write never establishes it.** The enum's third value
+    exists at Milestone 6 precisely so that the Milestone 6
+    implementer cannot quietly decide otherwise: bytes produced by
+    code we did not write are the case `EXTERNAL_UNTRUSTED` was
+    defined for, and a file is not laundered by having been written
+    through a handle.
+4.  **A parent run's writes do not establish a child run's reads.**
+    Each run answers for itself, for the same reason each run exports
+    its own trajectory: "who produced these bytes" has one honest
+    answer per run.
+
+At Milestone 4 the record is nearly always empty and the answer is
+nearly always `EXTERNAL_UNTRUSTED`, because no sandbox exists yet and
+nothing else fills a workspace. That is the correct default, and it is
+the argument for building the rule now rather than at the milestone
+that makes it interesting: by Milestone 6 it is already exercised.
+
+`workspace.list_files` returns names and metadata, never contents, and
+it follows the same rule for a reason that is easy to miss. A filename
+is attacker-controlled whenever the file is — an archive extracted
+into a workspace can create
+`URGENT_instructions_for_the_assistant.md`, and a listing that renders
+that as trusted platform text is a prompt injection with a very small
+payload. A listing is `INTERNAL_TOOL` only when every entry it returns
+is `TOOL_WRITTEN`, and `EXTERNAL_UNTRUSTED` otherwise.
+
+### The listing: limit, ordering, and what an entry carries
+
+Section 8.2's "Enforce result limits" is the third algorithm.
+
+**The limit is one thousand entries and it is a constant, not an
+argument.** A limit the model sets is a limit the model raises. The
+real bound is the tool's `maximum_output_bytes` of 262,144, which a
+thousand entries at a hundred bytes each already approaches; the entry
+cap exists so that the overflow is a clean `truncated` flag rather
+than the pipeline's excerpt machinery cutting a JSON document in half.
+
+**Ordering is bytewise ascending on the full relative path.** Not
+modification time, not size, not directories first, and not locale
+collation. Bytewise because it is the only order that is identical on
+every host and under every locale, which is what makes a listing
+reproducible in the deterministic harness and what the property gate
+asserts.
+
+**Truncation drops the tail of that order and never the middle**, so a
+truncated listing is always a prefix of the untruncated one. A model
+that receives a thousand entries and `truncated: true` knows exactly
+which part of the workspace it has seen and can ask for a
+subdirectory, which is not true of a listing sampled or elided in the
+middle.
+
+An entry carries a relative path, whether it is a file or a directory,
+and a size. Nothing else.
+
+No modification time: it is ambient state, it changes the result bytes
+under a fixed clock, and it is the field most likely to be used for a
+decision the model should be making from content. No checksum, because
+hashing every file in a listing turns a directory read into a full
+read of the directory, which is the cost the tool exists to avoid.
+
+A symlink is neither followed nor listed. Inside a workspace it is a
+second name for something the listing already contains under the real
+one, and pointing outward it is an escape `resolve` rejects at read
+time anyway. Resolving link targets is where containment gets hard,
+and a directory listing is not the place to be doing containment.
+
+### The schemas
+
+`workspace.read_text` input and output:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string", "maxLength": 4096}
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+```
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string"},
+    "content": {"type": "string"},
+    "byte_count": {"type": "integer"},
+    "checksum": {"type": "string"}
+  },
+  "required": ["path", "content", "byte_count", "checksum"],
+  "additionalProperties": false
+}
+```
+
+`workspace.write_text` input and output:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string", "maxLength": 4096},
+    "content": {"type": "string", "maxLength": 1048576}
+  },
+  "required": ["path", "content"],
+  "additionalProperties": false
+}
+```
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string"},
+    "byte_count": {"type": "integer"},
+    "checksum": {"type": "string"},
+    "created": {"type": "boolean"}
+  },
+  "required": ["path", "byte_count", "checksum", "created"],
+  "additionalProperties": false
+}
+```
+
+`workspace.list_files` input and output:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string", "maxLength": 4096, "default": ""},
+    "recursive": {"type": "boolean", "default": false}
+  },
+  "required": [],
+  "additionalProperties": false
+}
+```
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {"type": "string"},
+    "entries": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "kind": {"enum": ["file", "directory"]},
+          "byte_count": {"type": "integer"}
+        },
+        "required": ["path", "kind", "byte_count"],
+        "additionalProperties": false
+      }
+    },
+    "truncated": {"type": "boolean"}
+  },
+  "required": ["path", "entries", "truncated"],
+  "additionalProperties": false
+}
+```
+
+`created` on the write result is `true` when the path did not exist
+before the call. It is the one field that distinguishes two calls the
+`IDEMPOTENT` classification says are otherwise interchangeable, and it
+is reported rather than suppressed because a model that meant to
+create and instead overwrote should be able to tell.
+
+### Failures
+
+Four reason codes across the three tools, each with its static
+model-facing message:
+
+```text
+tool.not_found.no_such_path
+  No such path in the workspace.
+tool.invalid_arguments.not_text
+  Not a UTF-8 text file. This tool reads text only.
+tool.invalid_arguments.not_a_file
+  That path is a directory. Use workspace.list_files.
+tool.invalid_arguments.not_a_directory
+  That path is a file. Use workspace.read_text.
+```
+
+`no_such_path` is `NOT_FOUND`, which the vocabulary documents as "the
+target, not the tool", and a path is the target. It is `retryable =
+False`: the workspace does not change between a call and its retry
+unless something else wrote to it, and something else writing to it is
+a different call rather than a retry of this one.
+
+The other three are `INVALID_ARGUMENTS`, also non-retryable. A binary
+file is arguably not an argument problem, and `OUTPUT_INVALID` is the
+tempting alternative, but `OUTPUT_INVALID` is the tool blaming its own
+output for the caller's choice of file. The path is the argument, and
+the argument named something this tool does not read.
+
+The two directory codes name the tool to use instead. That is the same
+tradeoff `math.calculate` makes in the other direction: the message
+carries the remedy and never the input, and a sibling tool's name is
+remedy rather than input.
+
+## `demo.external_write`
+
+Section 8.2 gives it three bullets: always requires approval, records
+what would have been written, does not call an actual external
+service. The first belongs to
+[policy-and-approvals.md](policy-and-approvals.md), which already uses
+this tool in its worked denial example. The other two are the design,
+and it is as small as the roster note promised.
+
+### It has no destination
+
+The `destination` argument is a string, and it is never resolved,
+parsed, connected to, or checked against anything. It is recorded
+verbatim, bounded at 256 characters by the schema, and that is the
+whole of its treatment.
+
+A demo tool that validated destinations would be a demo tool with a
+URL parser in it, and a URL parser reachable by a model that has just
+been told this operation requires approval is a strange thing to have
+built for a fixture. The tool's purpose is to be denied and approved,
+not to be correct about addresses.
+
+### The record is the result
+
+There is no side table. The tool returns a `structured` result, and
+step 13 of the execution pipeline persists it on the
+`tool_invocations` row where every other tool's result already goes.
+The record is therefore durable, tenant-scoped, queryable, and covered
+by the retention the invocation row already has, none of which a new
+table would acquire for free.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "destination": {"type": "string", "maxLength": 256},
+    "content": {"type": "string", "maxLength": 4096}
+  },
+  "required": ["destination", "content"],
+  "additionalProperties": false
+}
+```
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "recorded": {"const": true},
+    "destination": {"type": "string"},
+    "byte_count": {"type": "integer"},
+    "checksum": {"type": "string"}
+  },
+  "required": ["recorded", "destination", "byte_count", "checksum"],
+  "additionalProperties": false
+}
+```
+
+`checksum` is the same `sha256:` form the workspace tools use, over
+the UTF-8 encoding of `content`. The content itself is recorded on the
+row and is not returned to the model, which already has it.
+
+`recorded` is a constant rather than a status field. There is no
+second value it could take, and a field that is always `true` is
+easier to reason about than one that is a status whose failure branch
+does not exist.
+
+The result carries no timestamp. The invocation row carries the
+timing, and a second one inside the payload would be a second thing to
+keep consistent with it.
+
+### It has no failures
+
+It reaches nothing that can fail: no network, no filesystem, no clock,
+no parser. The only way a call does not succeed is that policy denied
+it, and a denial is not a `ToolResult` — it is a `PolicyDecision`
+rendered by the pipeline, which is the whole reason this tool is the
+approvals fixture. A test that pauses on `demo.external_write` and
+resumes is testing the approval path and nothing else, because there
+is nothing else in the tool for the test to be accidentally
+exercising.
+
+## The two tools this document does not design
 
 Each has its classification above, which is what registration validation
-and the policy engine need. What each still owes, and to which
-milestone:
+and the policy engine need. Both are Milestone 6; the four Milestone 4
+tools this section deferred on its first pass — the three `workspace.`
+ones and `demo.external_write` — are designed above. What the remaining
+two still owe:
 
-1.  **`workspace.read_text`, `workspace.write_text`, and
-    `workspace.list_files`, at Milestone 4.** Path resolution and the
-    traversal rejection Section 8.2 requires, the encoding and
-    binary-file rules, the checksum algorithm, the listing's result
-    limit and its ordering, and the `WorkspaceHandle` the
-    `ToolExecutionContext` already carries. Two constraints are added
-    here rather than left to be noticed: the reader must lower
-    `output_trust` to `EXTERNAL_UNTRUSTED` for any file whose
-    provenance within the run is not established, and the establishing
-    set is the paths this run's `workspace.write_text` produced.
-2.  **`demo.external_write`, at Milestone 4.** Its whole purpose is to
-    exercise approvals, and
-    [policy-and-approvals.md](policy-and-approvals.md) already uses it
-    in three worked examples. What it owes is small: an argument shape,
-    and the record of what would have been written.
-3.  **`sandbox.run_command`, at Milestone 6.** Everything about it is
+1.  **`sandbox.run_command`, at Milestone 6.** Everything about it is
     Section 28, ADR-0008, and
     [sandbox-isolation.md](sandbox-isolation.md), which gives the tool
     its full `ToolSpec`. The one thing fixed here is that its
     `output_trust` is `EXTERNAL_UNTRUSTED` and cannot be raised.
-4.  **`artifact.export`, at Milestone 6.** The argument shape, the
+2.  **`artifact.export`, at Milestone 6.** The argument shape, the
     `ArtifactRef` it returns, the size ceiling, and the
     same-path-same-run identity that makes its `IDEMPOTENT`
     classification true.
@@ -997,6 +1473,32 @@ These fail the build.
 9.  Every `reason_code` this document declares has an entry in the
     checked-in outcome message table, and every entry's message contains
     no interpolation. **M1.**
+10. The three `workspace.` modules import no `os`, `os.path`,
+    `pathlib`, `shutil`, or `glob`, call no `open`, and name no
+    attribute of `ToolExecutionContext` other than `workspace` when
+    they touch a file. Asserted over the import graph and the call
+    graph, in the same walk the import-boundary check already
+    performs. **M4.**
+11. `workspace.read_text` over a file whose bytes are `61 00 62`
+    returns `not_text`, and over a file whose bytes are a valid UTF-8
+    sequence split across the reader's chunk boundary returns the
+    decoded text. The second half is the one that regresses. **M4.**
+12. `workspace.write_text` called twice with identical `path` and
+    `content` returns the identical `checksum` and `byte_count` both
+    times, `created` true then false, and leaves one file. **M4.**
+13. A property test over generated workspaces asserts that a listing
+    is bytewise ascending on `path`, that a truncated listing is a
+    prefix of the untruncated one, and that no entry names a symlink.
+    **M4.**
+14. A run writes `a.md` through `workspace.write_text` and reads both
+    `a.md` and a `b.md` placed in the workspace by the fixture. The
+    first read returns `output_trust = INTERNAL_TOOL`, the second
+    `EXTERNAL_UNTRUSTED`, and a `list_files` that returns both is
+    `EXTERNAL_UNTRUSTED`. **M4.**
+15. An approved `demo.external_write` persists its record as the
+    `structured` result on `tool_invocations` and writes to no other
+    table, asserted by a row count over the schema before and after.
+    **M4.**
 
 ## Conflicts this document resolves
 
@@ -1105,6 +1607,52 @@ These fail the build.
     pure and testable with nothing else constructed, and hard gate 2 is
     restated over `target_kind` so `sandbox.run_command` cannot evade
     it.
+21. **No `workspace.` tool resolves a path.** All three hand the
+    caller's string to `WorkspaceHandle` and let the execution service
+    resolve it, which keeps one containment rule instead of three and
+    keeps the check on the side of the boundary that owns the volume.
+    The prohibition is structural, not advisory.
+22. **`WorkspaceEscape` is not caught**, so a rejected path becomes
+    `ToolValidationError` — the class step 4 of the pipeline already
+    raises — and Milestone 4's *"Path traversal is rejected"* is one
+    behaviour with one message across all three tools.
+23. **`workspace.write_text`'s description says the workspace is a
+    cache.** The model is the only party that can avoid losing a file
+    to a resume, and the description is the only thing it reads before
+    it writes.
+24. **Encoding is UTF-8, strict, and not an argument.** A NUL byte
+    anywhere in the read decides binary before decoding starts, and
+    decoding runs through an incremental decoder so a character split
+    across a chunk boundary is not read as a malformed one. Writing
+    normalizes nothing: no newline translation, no trailing newline,
+    no BOM.
+25. **There is no `too_large` reason code.** A large file is a large
+    result, and the pipeline's excerpt-and-artifactize step already
+    owns that. A second ceiling in the tool would be a second
+    truncation policy to keep in agreement with the first.
+26. **The checksum is lowercase hex SHA-256 over the encoded bytes,
+    prefixed `sha256:`.** The prefix makes the algorithm legible in a
+    stored result, and hashing the bytes rather than the string means
+    a reader and a writer agree without either knowing the other's
+    string representation.
+27. **Provenance lives on `WorkspaceHandle`.** `write` records
+    `TOOL_WRITTEN` in the same operation that writes the bytes, and
+    `provenance` reports it. A repository lookup was the alternative
+    and is not available: `ToolExecutionContext` deliberately carries
+    no database session.
+28. **A listing is capped at 1000 entries, ordered bytewise ascending
+    on the relative path, and truncated from the tail**, so a
+    truncated listing is a prefix of the full one and two listings of
+    an unchanged workspace are byte-identical.
+29. **`workspace.list_files` is `INTERNAL_TOOL` only when every entry
+    is `TOOL_WRITTEN`.** A filename is attacker-controlled whenever
+    the file is, and a listing rendered as trusted platform text is a
+    prompt injection with a very small payload.
+30. **`demo.external_write` has no destination, no side table, and no
+    failures.** Its record is the `structured` result the pipeline
+    already persists on `tool_invocations`, which is what makes it a
+    faithful rehearsal of the approval path without becoming a second
+    thing to operate.
 
 ## Open questions for review
 
@@ -1132,3 +1680,21 @@ These fail the build.
     the cost of `exp` and `ln`. Raising it is a one-line change with a
     cost nobody would notice; lowering it is not, once results have
     been rendered.
+6.  **Whether the 1000-entry listing cap should be an argument.** A
+    constant keeps the tool's cost bounded without the model having to
+    reason about it, and a prefix is a usable answer. The argument
+    against is that a model looking for one file in a large workspace
+    has no way to page. Adding `limit` later is compatible; adding it
+    now invents paging state nothing has asked for.
+7.  **Whether provenance should descend from a parent run to a child
+    run.** This document says no, on the same reasoning that keeps
+    trajectory exports flat. The case for yes is that a parent that
+    writes a file and delegates its analysis currently gets the
+    analysis back as untrusted, which is correct in the general case
+    and pedantic in that one.
+8.  **Whether `demo.external_write` should be registered outside
+    development.** It exists to exercise approvals, and the approval
+    path is exactly the thing worth exercising in production. Leaving
+    it registered means a production registry contains a tool that
+    does nothing, which is either honest or confusing depending on who
+    is reading the catalog.

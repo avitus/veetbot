@@ -4,6 +4,58 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Milestone 4's first gap is closed
+
+- Designed the four remaining builtin tools in
+  [builtin-tools.md](plan/builtin-tools.md) — the three `workspace.`
+  ones and `demo.external_write` — which the readiness review named as
+  the first of Milestone 4's two gaps. The section that deferred them
+  is now *"The two tools this document does not design"*, and both of
+  those are Milestone 6.
+- Established that no `workspace.` tool resolves a path. All three
+  hand the caller's string to `WorkspaceHandle` and let the execution
+  service resolve it on its own side of the boundary, so there is one
+  containment rule rather than three. `gate.builtin.handle_only`
+  asserts it structurally: the three modules import no `os`,
+  `os.path`, `pathlib`, `shutil`, or `glob`, call no `open`, and reach
+  the filesystem only through `ToolExecutionContext.workspace`.
+- Fixed the encoding rules — UTF-8 strict, a NUL byte as the binary
+  test, an incremental decoder so a character split across a chunk
+  boundary is not read as a malformed one — the SHA-256 checksum over
+  the encoded bytes, a listing capped at a thousand entries and
+  ordered so that a truncated one is a prefix of the full one, six
+  JSON schemas, and four reason codes.
+- Gave `WorkspaceHandle` a `provenance` method and a
+  `WorkspaceProvenance` enum in
+  [sandbox-isolation.md](plan/sandbox-isolation.md). `write` records
+  `TOOL_WRITTEN` in the same operation that writes the bytes, so
+  `workspace.read_text` can decide between `INTERNAL_TOOL` and
+  `EXTERNAL_UNTRUSTED` without a database session
+  `ToolExecutionContext` deliberately does not carry.
+  `SANDBOX_WRITTEN` is defined two milestones before anything can
+  produce it, so the Milestone 6 implementer inherits the answer
+  rather than choosing it.
+- Declined to give the reader a size-limit failure of its own. A large
+  file is a large result and the pipeline's excerpt-and-artifactize
+  step already owns that; a second ceiling is a second truncation
+  policy to keep in agreement with the first.
+- Registered six gates, all at Milestone 4:
+  `gate.builtin.handle_only`, `gate.builtin.text_only`,
+  `gate.builtin.write_idempotent`, `gate.builtin.listing_stable`,
+  `gate.builtin.provenance`, and `gate.builtin.demo_records`. The
+  census is one hundred and fifty-three registry entries from one
+  hundred and fifty-six declarations; Milestone 4 goes from thirteen
+  to nineteen and the cumulative column reaches one hundred and
+  fifty-three.
+- Corrected a readiness finding that had gone stale. The review said
+  the acceptance criterion *"Path traversal is rejected"* stood on an
+  algorithm no document contained; `sandbox-isolation.md` was written
+  afterwards and contains it. The finding is re-tensed and a *"What
+  closed it"* subsection added, and two citations into
+  `builtin-tools.md:909` — both pointing at a `sandbox.run_command`
+  milestone error corrected long ago — are repointed to the line that
+  now carries the corrected statement.
+
 ## 2026-07-28 — Milestone 3's three gaps are closed
 
 - Closed the readiness review's three Milestone 3 gaps, each in a

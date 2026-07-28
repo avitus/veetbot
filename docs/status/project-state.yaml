@@ -72,9 +72,13 @@ readiness:
     three named gaps closed when model-gateway.md and
     event-log-and-persistence.md gained the provider-metadata key
     discipline, the provider-profile schema, and the redacted
-    trajectory export; its verdict is now ready.
+    trajectory export; its verdict is now ready. The first of
+    Milestone 4's two gaps closed when builtin-tools.md designed the
+    four remaining builtins and sandbox-isolation.md gave
+    WorkspaceHandle a provenance record; the scope vocabulary remains
+    open, so that verdict is unchanged.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
 last_updated: 2026-07-28T12:00:00Z
-last_reviewed_commit: 43d7e7f
+last_reviewed_commit: d8f0e11

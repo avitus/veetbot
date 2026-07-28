@@ -41,8 +41,8 @@ gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
 gained two more on a later pass, all four at Milestone 3. The counts
 throughout this document are the corpus as it now stands: one hundred
-and forty-one declared across thirteen specs, one hundred and
-forty-seven registry entries.
+and forty-seven declared across thirteen specs, one hundred and
+fifty-three registry entries.
 
 ## What this document is responsible for
 
@@ -223,10 +223,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and forty-one gates declared across thirteen specs, two
+One hundred and forty-seven gates declared across thirteen specs, two
 more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and fifty declarations, one hundred and
-forty-seven registry entries once the three aliases are subtracted.
+over the corpus: one hundred and fifty-six declarations, one hundred and
+fifty-three registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -335,10 +335,14 @@ boundary. The third is the engineering plan's last Milestone 8
 acceptance criterion promoted from prose to a walk over the import
 graph.
 
-### Builtin tools, nine gates
+### Builtin tools, fifteen gates
 
-All nine observe `math.calculate` or `system.current_time`, both of
-which ship at Milestone 1.
+The first nine observe `math.calculate` or `system.current_time`,
+both of which ship at Milestone 1. The last six arrived with the pass
+that designed the four remaining builtins, and observe the three
+`workspace.` tools and `demo.external_write` at Milestone 4. Gate 10
+is structural and runs over the import and call graphs; the rest
+observe behaviour.
 
 ```text
 #   id                              kind         M
@@ -352,6 +356,12 @@ which ship at Milestone 1.
 7   gate.builtin.decimal_exact      case         1
 8   gate.builtin.clock_stability    case         1
 9   gate.builtin.message_table      structural   1
+10  gate.builtin.handle_only        structural   4
+11  gate.builtin.text_only          case         4
+12  gate.builtin.write_idempotent   case         4
+13  gate.builtin.listing_stable     property     4
+14  gate.builtin.provenance         case         4
+15  gate.builtin.demo_records       case         4
 ```
 
 ### Model gateway, twelve gates
@@ -726,16 +736,17 @@ milestone  new gates  cumulative  the earliest of them
 3                 15          72  five adapters, the profile schema,
                                   the closed metadata key set, the
                                   redacted export
-4                 13          85  policy, approvals, corpora
-5                 11          96  the API surface, the stream,
+4                 19          91  policy, approvals, corpora, the
+                                  four remaining builtins
+5                 11         102  the API surface, the stream,
                                   cancellation keeps effects
-6                 11         107  isolation, egress, artifacts
-7                  6         113  budgeting and compaction
-8                 14         127  the MCP adapter, the pinned
+6                 11         113  isolation, egress, artifacts
+7                  6         119  budgeting and compaction
+8                 14         133  the MCP adapter, the pinned
                                   catalog, the metadata boundary,
                                   package validation
-9                 14         141  formation and retrieval
-10                 6         147  the authoring loop and the
+9                 14         147  formation and retrieval
+10                 6         153  the authoring loop and the
                                   background review
 ```
 
@@ -756,14 +767,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries four — three in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and forty-seven gates are green before
+2.  **Forty-one of one hundred and fifty-three gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and forty-seven, which is
+The cumulative column reaches one hundred and fifty-three, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise
