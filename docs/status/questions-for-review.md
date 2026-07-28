@@ -3376,3 +3376,149 @@ one more table — or should the column be removed from
 census, which is the one place the number is stated by derivation?
 
 **Reversal cost:** low. One table cell and one sentence.
+
+## Persistence authoring (ADR-0031)
+
+### Both Milestone 2 gaps are closed inside the persistence spec, not in a twentieth document
+
+**Decided:** the ORM surface and the Alembic conventions are written
+into
+[event-log-and-persistence.md](../plan/event-log-and-persistence.md)
+as two new sections rather than into a new specification, and recorded
+as [ADR-0031](../adr/0031-persistence-authoring.md).
+
+**Why:** that document already owns the schema, the `gate.event.*`
+area, and `gate.structure.txn_hygiene`. A twentieth spec would need
+either a fourteenth gate area or a gate area owned by two documents,
+and the readiness review calls both gaps tooling rather than
+architecture — they are two sections of material, not a subject.
+
+**Alternative:** a `persistence-adapter.md` alongside the others. It
+would read more discoverably in the nav and would split ownership of
+the schema from ownership of the migrations that build it.
+
+**Reversal cost:** cheap. Two sections move to a new file, the ADR is
+re-pointed, and the gate ids do not change.
+
+### The ORM shape was forced by the dependency rules, not chosen
+
+**Decided:** row classes are separate declarative types confined to
+`adapters/persistence/`, translation is two hand-written functions per
+table in a `mappers.py`, and a repository is constructed with a live
+session and never commits.
+
+**Why:** declarative mapping of a domain type puts SQLAlchemy inside
+`domain` and fails Section 5's first rule on the import walk.
+Imperative mapping avoids the import and fails the seventh rule
+silently instead — a mapped class carries instrumentation, so the
+domain object *becomes* the ORM object and every repository return
+value violates the rule at the moment the signature check has nothing
+left to reject. Pydantic and SQLAlchemy also carry conflicting
+metaclasses, so the runtime agrees with the rules.
+
+**Cost:** roughly twenty tables acquire two boring functions each, all
+of them needing a test. That is the honest price, and it buys a schema
+and a wire contract that move independently, and an upcaster with a
+function to live in.
+
+**Note:** `mappers.py` is one module more than Section 4's tree lists.
+It is introduced as an addition rather than presented as though it
+were always there.
+
+**Question for you:** the generic field-name mapper is the version
+nobody has to write. It was rejected because it turns a column rename
+into a `KeyError` at runtime rather than a type error at check time,
+and because it is exactly the mechanism by which a schema change leaks
+into an API payload with no one writing a line. Is that trade the one
+you want at twenty tables?
+
+**Reversal cost:** moderate before Milestone 2 ships and expensive
+after. The mapping shape is set by the first repository written.
+
+### Five gates were added, and four of them observe criteria that already existed
+
+**Decided:** `gate.structure.migration_graph` at Milestone 0, and
+`gate.event.migration_clean`, `gate.event.migration_stepwise`,
+`gate.event.revision_pinned`, and `gate.structure.orm_confined` at
+Milestone 2. The registry goes from one hundred and thirty-eight
+entries to one hundred and forty-three.
+
+**Why:** Section 24 makes *"Database migrations upgrade from a clean
+database"* and *"Database migrations upgrade from the previous
+revision"* conditions of **every** milestone, and nothing evaluated
+either of them. That is the same defect the milestone map found by
+counting gates, reached from the other direction: an acceptance
+criterion no check evaluates is a sentence, not a criterion.
+
+**Note:** every id is at or under thirty characters, which is the
+width the milestone-map table column allows before an id truncates.
+
+**Reversal cost:** cheap while they are prose. Each id appears in the
+declaring spec, the registry block, the census, and the kind table.
+
+### The migration-graph walk registers at Milestone 0, four milestones before the migrations
+
+**Decided:** `gate.structure.migration_graph` is a Milestone 0
+registry entry, tagged `**M0.**` inside an otherwise all-Milestone-2
+hard-gates list in the persistence spec, and the milestone-map section
+prose now explains two qualifications where it used to explain one.
+
+**Why:** Milestone 0's own acceptance criteria already require that an
+empty Alembic migration runs, which is a graph with one node. A walk
+that only begins once a dozen revisions exist has already missed the
+branch it exists to prevent, and a check added against existing
+violations gets relaxed rather than obeyed. This follows ADR-0024's
+precedent, where the transaction-hygiene *check* is a Milestone 0
+deliverable and its *gate* is a Milestone 2 criterion.
+
+**Alternative:** register it at Milestone 2 with the four others and
+keep the list uniform. Cheaper to describe, and it would leave the
+first six migrations unwatched, which is exactly the window in which
+the conventions get set.
+
+**Reversal cost:** cheap. One field in the registry and two
+paragraphs.
+
+### Two mis-numbered cross-references were corrected in live specifications
+
+**Decided:** `bootstrap-and-composition.md` cited *"Section 3"* for
+the `AsyncSession` unit-of-work rule, which is Section 2.2, and
+`model-gateway.md` cited *"Section 3"* for the import-boundary tests,
+which are required by Section 5. Both are corrected. The engineering
+plan's Milestone 0 pointer paragraph, which named eleven registry
+entries and one plan-owned gate, is corrected to thirteen and two —
+it predates the secret-scanner gate becoming plan-declared.
+
+**Why:** they are live statements of current fact, not records at a
+point in time, and both were found by grounding rather than by
+reading. Section 3 is *"Version 0.1 definition of done"* and says
+nothing about either subject, so both citations pointed a reader at a
+section that would not answer them.
+
+**Note:** the ADR files and this file are not edited to match. They
+are records of what was believed when they were written.
+
+**Reversal cost:** cheap.
+
+### A skills.md sentence carried bare line numbers that drift silently
+
+**Decided:** the finding paragraph in [skills.md](../plan/skills.md)
+that reads *"which is at 2692; line 2686 is an MCP trust-labelling
+bullet"* now names `engineering-plan.md:2696` as a backticked citation
+and refers to the other line by description rather than by number.
+One ledger excerpt was repointed by hand.
+
+**Why:** the citation checker only sees `file.md:NNN`. A bare number
+in prose is invisible to it, so this pass moved the checked citation
+and left the unchecked one behind — the two ended up naming different
+lines in the same sentence. The paragraph is *about* citation drift,
+which makes it the worst place in the corpus to carry an unchecked
+number.
+
+**Note:** the hand repoint was needed because a citation inside a
+cited excerpt takes two `--update` passes to settle, and the second
+pass cannot resolve by content once the excerpt itself has changed.
+That is a real limitation of the checker and it is worth knowing
+before someone hits it again.
+
+**Reversal cost:** cheap.

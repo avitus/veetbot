@@ -72,9 +72,9 @@ rather than smoothed.
 
 | M | Subject | Verdict | Gates | What stands between it and code |
 | --- | --- | --- | --- | --- |
-| 0 | Repository and engineering foundation | Ready | 12 | Nothing |
+| 0 | Repository and engineering foundation | Ready | 13 | Nothing |
 | 1 | In-memory vertical slice | Ready | 28 | Nothing |
-| 2 | PostgreSQL persistence and durable worker | Ready | 12 | Migration authoring conventions |
+| 2 | PostgreSQL persistence and durable worker | Ready | 16 | Nothing |
 | 3 | Model adapters and normalized streaming | Ready with named gaps | 11 | Provider response metadata |
 | 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 13 | Four deferred tools; scope vocabulary |
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
@@ -108,7 +108,7 @@ unchanged.
 
 ## Milestone 0: ready
 
-Twelve registry entries, every deliverable expanded.
+Thirteen registry entries, every deliverable expanded.
 
 [development-toolchain.md](development-toolchain.md) and ADR-0025
 specify the Makefile target bodies, the compose service, the CI
@@ -122,6 +122,12 @@ four of which are true of an empty repository.
 [evaluation-harness.md](evaluation-harness.md) supplies the four
 harness gates. The map supplies six of its own, all of them statements
 about documents rather than about a running system.
+[event-log-and-persistence.md](event-log-and-persistence.md) supplies
+the thirteenth, and it is the one gate here that belongs to a later
+milestone's subject: the migration-graph walk registers at Milestone 0
+because Milestone 0 already requires that an empty Alembic migration
+runs, and a walk that only begins once twelve revisions exist has
+already missed the branch it exists to prevent.
 
 Nothing here is blocked. This is the milestone the corpus has been
 examined against most often, and it is the one with the least left to
@@ -147,8 +153,8 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty of one hundred and thirty-eight gates are green before
-Milestone 2 begins**, twelve of them against a repository with no
+**Forty-one of one hundred and forty-three gates are green before
+Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test
@@ -169,42 +175,61 @@ recorded as an open question in
 
 ## Milestone 2: ready
 
-Twelve registry entries. Nine of eleven implement bullets are fully
-covered by [event-log-and-persistence.md](event-log-and-persistence.md)
-and [runtime-loop.md](runtime-loop.md): the append-only event store,
-the projections and their rebuild, `FOR UPDATE SKIP LOCKED` claim,
+Sixteen registry entries. Nine of eleven implement bullets were
+covered on the first pass by
+[event-log-and-persistence.md](event-log-and-persistence.md) and
+[runtime-loop.md](runtime-loop.md): the append-only event store, the
+projections and their rebuild, `FOR UPDATE SKIP LOCKED` claim,
 `lease_epoch` fencing, checkpoint and resume, the reaper, and the
 transaction-hygiene gate ADR-0024 separated from its Milestone 0
 check.
 
-Two bullets are partial, and both are tooling rather than
-architecture.
+Two bullets were partial, and both were tooling rather than
+architecture. Both are closed now, in the document that already owns
+the schema and the `gate.event.*` area rather than in a twentieth
+specification, and recorded as
+[ADR-0031](../adr/0031-persistence-authoring.md).
 
-1.  **The SQLAlchemy adapter has no ORM surface.** The schema is
-    fully specified, table by table, but no document states whether
+1.  **The SQLAlchemy adapter had no ORM surface.** The schema was
+    fully specified, table by table, but no document stated whether
     mappings are declarative or imperative, where the session factory's
     boundary sits relative to the unit of work, or what the repository
-    method bodies look like against it. ADR-0024 fixes the one
-    property that matters — a factory is constructed, never a session,
-    and no `AsyncSession` exists at module scope — and leaves the rest
-    to whoever writes it.
-2.  **Alembic has no authoring conventions.**
+    method bodies look like against it. ADR-0024 fixed the one
+    property that could be checked without any of that — a factory is
+    constructed, never a session, and no `AsyncSession` exists at
+    module scope. *"The ORM surface"* answers the rest, and answers
+    it by elimination rather than by preference: declarative mapping
+    of a domain type fails rule 1 on the import walk, imperative
+    mapping fails rule 7 silently, and what survives is a separate row
+    class per table, two hand-written translation functions beside it,
+    and a repository constructed with a live session that never
+    commits. `gate.structure.orm_confined` asserts the confinement.
+2.  **Alembic had no authoring conventions.**
     `engineering-plan.md:1619` says *"Create Alembic migrations for at
     least these tables"* and `development-toolchain.md:183` supplies
-    the `make migrate` target. Between them there is no statement of
+    the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
     schema migrations, and no design for how the composition root
     asserts the revision it refuses to start without — which ADR-0024
-    decision 6 requires and does not specify.
+    decision 6 requires and does not specify. *"Authoring
+    migrations"* supplies all four: a linear graph with one head,
+    slugged file names that carry no order, structural and data
+    revisions kept separate, and `EXPECTED_REVISION` as a constant
+    rather than a head computed at runtime from the migrations that
+    shipped alongside the code.
 
-Neither blocks the milestone. Both are the kind of decision an
-implementer makes correctly on the first attempt and expensively on
-the third, which is the argument for writing them down before rather
-than after.
+Closing the second bullet surfaced a defect this review had missed.
+Two of Section 24's criteria — migrations upgrade from a clean
+database, and migrations upgrade from the previous revision — are
+conditions of *every* milestone, and nothing evaluated either of them.
+That is the same class of finding the milestone map produced by
+counting gates, arrived at from the opposite direction, and it is why
+four of the five gates added here observe migrations rather than the
+ORM.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2448`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2450`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -334,7 +359,7 @@ Six things were visibly unsettled inside it.
     to the trace identifier the observability section requires.
 3.  **`Idempotency-Key` handling is named in two places and specified
     in neither.** It appears as a header at
-    `engineering-plan.md:1833` and as an implement bullet, and the
+    `engineering-plan.md:1835` and as an implement bullet, and the
     idempotency port the map schedules at Milestone 1 is a tool-call
     concern rather than an HTTP one. Whether these are the same
     mechanism is undecided.
@@ -409,7 +434,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1161`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3209` requires a container-escape attempt as
+    `engineering-plan.md:3215` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` is placed at two milestones.**
@@ -528,7 +553,7 @@ What was missing was everything underneath it: no package format, no
 manifest schema, no types, no storage, no reference grammar, no
 context accounting, and no gates. The acceptance criterion *"A
 selected skill is version-pinned in the run"* at
-`engineering-plan.md:2692` had no design behind it — and no document
+`engineering-plan.md:2696` had no design behind it — and no document
 outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
 and remains the sharper of the two observations.
 
@@ -775,8 +800,8 @@ under the conflict it settles.
     Milestone 5 was an off-by-one against a list in which 5 is the
     HTTP API. `builtin-tools.md` is corrected.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2448` against
-    `model-gateway.md:1259` and `milestone-map.md:748`. The map
+    Milestone 3.** `engineering-plan.md:2450` against
+    `model-gateway.md:1259` and `milestone-map.md:767`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -785,7 +810,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     tables, two milestones, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3209` requires a test the harness's case set
+    `engineering-plan.md:3215` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

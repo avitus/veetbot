@@ -4,6 +4,67 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-27 — The ORM surface and the migration conventions
+
+- Closed both partial bullets the readiness review named against
+  Milestone 2, inside
+  [event-log-and-persistence.md](plan/event-log-and-persistence.md)
+  rather than in a twentieth specification, and recorded the reasoning
+  as [ADR-0031](adr/0031-persistence-authoring.md). That document
+  already owns the schema and the `gate.event.*` area; a new spec
+  would have needed a fourteenth gate area or a shared one.
+- Added *"The ORM surface"*. Row classes are separate declarative
+  types confined to `adapters/persistence/`, translation is two
+  hand-written functions per table in a `mappers.py` beside them, a
+  repository is constructed with a live session and never commits, and
+  every repository method returns a domain type, a `domain` read
+  model, a scalar, or `None` under a concrete annotation. The shape is
+  forced rather than chosen: declarative mapping of a domain type
+  fails rule 1 on the import walk, and imperative mapping fails rule 7
+  silently because the domain object becomes the ORM object.
+- Added *"Authoring migrations"*. One head and no merge revisions;
+  `<revision>_<slug>.py` names that carry no order because ordering
+  lives in `down_revision`; structure and data in separate revisions;
+  autogenerate as a draft kept honest by an empty-diff round trip;
+  lock-taking DDL alone in a non-transactional revision; a revision
+  may add to `events` and may never rewrite one; and
+  `EXPECTED_REVISION` as a module constant rather than a head computed
+  at runtime, which is the mechanism ADR-0024 decision 6 required and
+  left open.
+- Added five hard gates. `gate.structure.migration_graph` registers at
+  Milestone 0, because the empty Alembic migration that milestone
+  already requires is a graph and a walk that begins after a dozen
+  revisions has already missed the branch it exists to prevent.
+  `gate.event.migration_clean`, `gate.event.migration_stepwise`,
+  `gate.event.revision_pinned`, and `gate.structure.orm_confined`
+  register at Milestone 2. Four of the five observe Section 24
+  criteria that were conditions of every milestone with nothing
+  evaluating them.
+- Re-derived every affected count. One hundred and forty-three
+  registry entries from one hundred and forty-six declarations, one
+  hundred and thirty-seven of them across thirteen specifications; the
+  kind split becomes seventy-seven case, seventeen property, seven
+  corpus, and forty-two structural; the per-milestone census becomes
+  13, 28, 16, 11, 13, 11, 11, 6, 14, 14, 6. Forty-one gates are green
+  before Milestone 2, thirteen of them against a repository with no
+  agent in it.
+- Milestone 2's verdict row moves from *"Migration authoring
+  conventions"* to *"Nothing"*, which makes Milestones 0 through 2 the
+  first run of three consecutive milestones ready with nothing
+  outstanding.
+- Corrected three mis-numbered cross-references found while grounding.
+  `bootstrap-and-composition.md` cited Section 3 for the
+  `AsyncSession` unit-of-work rule, which is Section 2.2;
+  `model-gateway.md` cited Section 3 for the import-boundary tests,
+  which Section 5 requires; and the plan's Milestone 0 pointer
+  paragraph named eleven registry entries and one plan-owned gate,
+  which are thirteen and two.
+- Replaced two bare line numbers in a [skills.md](plan/skills.md)
+  finding paragraph with a checked citation. The citation checker only
+  sees `file.md:NNN`, so this pass updated the backticked number and
+  left the bare one behind, in the one paragraph in the corpus that is
+  about citation drift.
+
 ## 2026-07-27 — The verdict table, re-derived
 
 - Corrected Milestone 8's row in the verdict table of

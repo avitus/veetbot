@@ -1121,7 +1121,7 @@ class ModelGateway:
 apply the pin, enforce the conversation invariants, record the attempt, emit
 the two events, and translate errors. Adapters do none of that.
 
-Import boundaries, enforced by the boundary tests Section 3 requires:
+Import boundaries, enforced by the boundary tests Section 5 requires:
 
 | Module | May import | Must not import |
 | --- | --- | --- |

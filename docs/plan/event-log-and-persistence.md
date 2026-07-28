@@ -6,14 +6,15 @@ canonical: true
 
 # The event log and persistence layer
 
-This expands Sections 6.8, 6.9, 12.2, 14, and 15 of the
+This expands Sections 2.2, 5, 6.8, 6.9, 12.2, 14, 15, 23, and 24 of the
 [engineering plan](engineering-plan.md), and Milestone 2. It does not replace
 them. Where this document adds a table, a column, or a rule, it is an addition
 of the kind Section 15 already sanctions when it says to create migrations for
 *at least* the tables it lists.
 
-Recorded as [ADR-0003](../adr/0003-event-log-and-projections.md) and
-[ADR-0004](../adr/0004-postgres-run-queue.md).
+Recorded as [ADR-0003](../adr/0003-event-log-and-projections.md),
+[ADR-0004](../adr/0004-postgres-run-queue.md), and
+[ADR-0031](../adr/0031-persistence-authoring.md).
 
 ## Why persistence is not a persistence problem
 
@@ -502,6 +503,176 @@ an unrelated run. Section 16 requires that a repeated key return the original
 run; it does not say what a reused key with new content means, and returning
 someone else's run because a client reused a key is worse than an error.
 
+## Authoring migrations
+
+The plan requires migrations in four places. Section 15 says *"Create
+Alembic migrations for at least these tables"*. Section 23 rule 16 says
+*"Add a migration for every schema change"*. Section 24 makes two of
+them conditions of every milestone: migrations upgrade from a clean
+database, and migrations upgrade from the previous revision. Section 25
+lists *"Run migrations"* as a step and
+[development-toolchain.md](development-toolchain.md) gives it `make
+migrate`. Between all of that there is a directory name, a Makefile
+target, and no statement of what a migration looks like when someone
+writes one.
+
+That is a cheap gap to leave and an expensive one to close later,
+because the first six migrations set the conventions for the rest
+whether or not anyone decided them.
+
+### One head, always
+
+The revision graph is linear. Merge revisions are not written, and
+`alembic merge` is not used. Two branches that both descend from the
+same revision are resolved by rebasing the later one onto the earlier
+before it merges — that is, by changing its `down_revision` and
+re-testing it — not by adding a third revision that joins them.
+
+The reason is that two of the plan's own statements stop being
+well-defined otherwise. `alembic upgrade head` in Section 25 and `make
+migrate` both name *a* head; with two, the command is ambiguous and
+resolves by luck. And *"migrations upgrade from the previous
+revision"* has no referent in a graph where a revision has two
+predecessors.
+
+Linearity is a merge-time cost paid by whoever loses the race, which is
+the correct place for it, and it is asserted by
+`gate.structure.migration_graph`.
+
+### Revision identifiers carry no order, and neither do file names
+
+A migration file is named `<revision>_<slug>.py`, where `<revision>` is
+the hex identifier Alembic generates and `<slug>` is an imperative
+phrase naming the change: `a3f19c2b7d04_add_lease_epoch_to_runs.py`.
+
+Ordering lives in `down_revision` and nowhere else. Hand-numbered
+prefixes — `0007_`, `0008_` — are specifically not used, because two
+revisions written the same week both become `0007` in two branches, and
+the file listing then shows an order that the graph does not have. A
+name that cannot express order cannot express the wrong order.
+
+The slug names the change, not the milestone and not the ticket. A
+reader of `git log --name-only` three years from now is looking for the
+migration that added a column, and *"m2 schema"* does not help them.
+
+### Autogenerate drafts; a person writes
+
+`alembic revision --autogenerate` is where a migration starts and never
+what gets committed. Every generated revision is read and edited before
+it is reviewed, because autogenerate does not see:
+
+1. Server defaults and the backfill an existing row needs.
+2. Partial and conditional indexes. This document requires three of
+   them — the queued-run index, the single-active-run unique index, and
+   the events commit-order index — and a generated migration will
+   produce the unfiltered form of at least the first two.
+3. Enum value additions, which PostgreSQL applies with `ALTER TYPE ...
+   ADD VALUE` and which cannot run inside a transaction block.
+4. Anything about data.
+
+What keeps the edited file honest is not review but
+`gate.event.migration_clean`: after `upgrade head` against an empty
+database, an autogenerate run against the same metadata must produce an
+empty diff. A hand-edit that drifts from the mapped tables fails that
+gate rather than being discovered by the next person to autogenerate.
+
+### Structure and data are separate revisions
+
+A revision either changes structure or moves rows. It does not do both.
+
+Three consequences make this worth the extra file. A backfill over a
+large table takes minutes or takes a lock, and a structural change
+mixed into it cannot ship until the backfill finishes. A structural
+change is reversible and a backfill usually is not, so a combined
+revision's `downgrade()` is a partial truth. And the two want different
+transaction shapes: structure in one transaction, a backfill in batches
+that commit as they go.
+
+The three-step pattern for a column that must end up `NOT NULL` is a
+structural revision that adds it nullable, a data revision that fills
+it, and a structural revision that sets the constraint. At Milestone 2
+no table has production rows in it and all three could be one
+statement; the pattern is written down now because the migration that
+needs it is written by someone reading the ones that came before.
+
+### Downgrade is written, and it is not an operational promise
+
+Every structural revision implements `downgrade()`. The reason is the
+round-trip in `gate.event.migration_clean` rather than an intention to
+run it: a downgrade that was never written is a downgrade that was
+never checked, and the check is what catches a revision that creates an
+object it does not name.
+
+Rolling a deployed schema backwards is a restore from backup, not a
+downgrade, and this document does not pretend otherwise. A data
+revision's `downgrade()` raises `NotImplementedError` with a sentence
+saying what would be lost.
+
+### Lock-taking DDL is split, and says so
+
+`CREATE INDEX CONCURRENTLY` cannot run inside a transaction, and neither
+can `ALTER TYPE ... ADD VALUE`. A revision containing either declares
+itself non-transactional rather than relying on Alembic's default, and
+contains nothing else, so that a failure leaves one incomplete object
+and not a half-applied revision.
+
+An index on a populated table is created concurrently. An index on a
+table created by the same revision is not, because there are no rows
+and no lock to avoid.
+
+### A migration may add to `events`; it may never rewrite one
+
+The failure-modes table above names *"History rewritten by
+migration"* and answers it with immutable payloads and upcasters. It is
+repeated here because the person who would write that `UPDATE` is a
+migration author reading migration conventions, and this is the page
+they are on. A revision may add a column to `events`, add an index, or
+create a table that reads from it. A revision that writes to
+`events.payload` is a defect, whatever it is trying to fix.
+
+### The revision the code expects is a constant
+
+ADR-0024 decision 6 fixes the behavior — the composition root never
+runs migrations, asserts the schema revision, and refuses to start on a
+mismatch — and leaves open where the expected value comes from. Two
+answers are available and only one of them is a check.
+
+`EXPECTED_REVISION` is a module-level string constant in the
+persistence adapter, updated by the same commit that adds the
+migration. Startup phase 3 reads the single row of `alembic_version` and
+compares. On mismatch it names both revisions and exits non-zero; it
+does not migrate, and it does not start in a degraded mode.
+
+The alternative is to read the head out of the migrations directory at
+runtime with `ScriptDirectory`. It is rejected because it makes the
+assertion vacuous in the one deployment that matters: the code and its
+migrations always ship together, so the computed head always equals the
+code's expectation, and the mismatch the assertion exists to catch —
+new code against an un-migrated database — is exactly the case where
+both sides come from the same image and agree.
+
+A static check asserts that `EXPECTED_REVISION` equals the single head
+of the revision graph, so the constant cannot drift from the
+migrations in the repository. That check is part of
+`gate.structure.migration_graph`; the runtime refusal is
+`gate.event.revision_pinned`.
+
+### Where the plan's four statements land
+
+| Statement | Source | Where it becomes checkable |
+| --- | --- | --- |
+| Migrations exist for the tables | §15 | The tables are created by revisions, not by `create_all` |
+| A migration for every schema change | §23 rule 16 | `gate.event.migration_clean`: a mapped table with no revision fails the empty-diff check |
+| Upgrade from a clean database | §24 | `gate.event.migration_clean` |
+| Upgrade from the previous revision | §24 | `gate.event.migration_stepwise` |
+
+`create_all` deserves its own sentence, because it is the shortcut every
+test suite reaches for. Schema in tests is created by running the
+migrations, not by `metadata.create_all`. A suite that creates its
+schema the fast way is a suite in which no migration is ever exercised
+until deployment, and Section 24's two criteria become statements
+nothing evaluates.
+
 ## Ports and data model
 
 Section 7's `RunRepository` and `EventRepository` are unchanged. Section 7 names
@@ -580,6 +751,178 @@ projection.rebuild.started
 projection.rebuild.completed
 ```
 
+## The ORM surface
+
+Section 2.2 chooses SQLAlchemy's async interface and states the rule that
+governs it: *"never share one `AsyncSession` across concurrent tasks. Each
+request, worker operation, or parallel tool invocation must receive its own
+unit of work and database session."* Section 4 names four modules under
+`adapters/persistence/`. Section 7 names the repositories. Rules 1, 7, and
+13 constrain what may cross out of them.
+
+What none of that says is what a mapping looks like. That is decided once,
+by whoever writes the first repository, and then copied into every
+repository written after it — which is the argument for deciding it here.
+
+The answer below is mostly forced. Two of the dependency rules, read
+together, eliminate every option but one, and this section is largely the
+work of showing that.
+
+### Row classes are not domain types
+
+The tempting shape is to map `Run`, `Session`, and the event envelope
+directly, so that one class is both the domain object and the row. Both
+ways of doing that are ruled out already.
+
+**Declarative mapping** of a domain type puts `from sqlalchemy.orm import
+...` inside `domain`, and rule 1 confines `domain` to the standard library
+and Pydantic. This is the version that fails loudly: the import walk that
+is a Milestone 0 deliverable rejects it on the first run.
+
+**Imperative mapping** — `registry.map_imperatively(Run, runs_table)` —
+avoids the import, which is what makes it worth naming rather than
+dismissing. It fails a different rule and fails it silently. Mapping
+attaches instrumentation to the class: the mapped type gains identity-map
+membership, lazy-load behavior on attribute access, and a relationship to
+the session that loaded it. The domain object *becomes* the ORM object.
+Rule 7 — *"SQLAlchemy ORM objects must never be returned from
+repositories"* — is then unenforceable, because every repository return
+value is one, and the static check ADR-0001 assigns to that rule resolves
+signatures, so it has nothing left to reject at the exact moment the
+violation is total. Rule 1's own note anticipates this by naming *"ORM
+modes"* among the Pydantic-only behaviors to keep out of the domain.
+
+The runtime agrees with the rules, as it happens: Pydantic's `BaseModel`
+and SQLAlchemy's declarative base carry different metaclasses, so a class
+that is both does not exist without writing a third metaclass to reconcile
+them.
+
+So row classes are separate types. One declarative class per table, in
+`adapters/persistence/sqlalchemy_models.py`, and no instance of one is ever
+returned, yielded, logged, or passed out of that package.
+
+### Translation is a function, not a feature
+
+Each table gets two translation functions, and they are written by hand:
+
+```python
+def to_domain(row: EventRow) -> EventEnvelope: ...
+def values(event: NewEvent) -> dict[str, Any]: ...
+```
+
+They live in `adapters/persistence/mappers.py`, beside the row classes and
+inside the same confinement — one module more than Section 4's tree lists,
+added because the alternative is translation code scattered through the
+repository bodies where nothing can find it.
+
+The direction is asymmetric on purpose. Reading produces a domain object.
+Writing produces a `dict` of column values, which the repository passes to
+an `insert()` or an `update()`; it does not produce a row object for the
+caller to hold, because a row object in a caller's hand is the thing this
+whole section exists to prevent.
+
+Three shortcuts are specifically not taken. `model_validate` with
+`from_attributes=True` is the ORM mode rule 1 excludes, and it works by
+attribute access, which on a mapped class is what triggers a lazy load.
+A generic field-name-matching mapper turns a column rename into a missing
+key at runtime instead of a type error at check time. And returning
+`Row` or `RowMapping` and letting the caller subscript it puts the schema
+in the caller.
+
+The cost is real and worth stating plainly: roughly twenty tables, two
+functions each, all of them boring, all of them needing a test. What it
+buys is that the database schema and the wire contract move independently
+— adding a column is not an API change until someone writes the line that
+makes it one — and that the upcaster has somewhere to stand.
+`to_domain` for an event is where `payload_schema_version` is read and the
+upcaster chain runs, which is only possible because there is a function
+there at all.
+
+### A repository is constructed with a session, not with a factory
+
+ADR-0024 settles the module-scope half of rule 13: a factory is
+constructed in phase 3, a session never is. The call-scope half is this
+one, and it is the more consequential of the two.
+
+If a repository holds the `async_sessionmaker` and opens a session per
+method, then every method is its own transaction. Two writes that must
+commit together cannot; the *"persist intent, commit, do I/O, persist
+result, commit"* shape Section 12.2 requires cannot be expressed from
+outside, because the caller has no way to say which of its calls belong to
+the same commit; and the append path above — three statements, one
+transaction — has no way to be three statements in one transaction.
+
+So a repository is constructed with a live `AsyncSession` and holds no
+factory. The caller that owns the unit of work opens the session and
+constructs the repositories over it. `unit_of_work.py` holds one async
+context manager that does exactly that: open a session from the factory,
+expose the repositories built over it, commit on clean exit, roll back on
+exception.
+
+Repository methods do not commit. A method that commits internally makes
+every caller's transaction boundary a fiction, and it is invisible at the
+call site, which is the combination that makes it expensive later.
+
+The benefit beyond correctness is that the transaction boundary becomes a
+construction site — a literal `async with` with a body — rather than an
+emergent property of which methods happened to commit. That is what makes
+`gate.structure.txn_hygiene` decidable: the check has a syntactic region to
+look inside, and the question *"is there provider, tool, or sandbox I/O in
+this region"* has an answer.
+
+### Where a unit of work begins and ends
+
+Three shapes cover the system, and naming them is cheaper than
+rediscovering them:
+
+1. **An API request.** One unit of work, committed before the response is
+   written. Dispatch happens after it commits, never inside it —
+   [bootstrap-and-composition.md](bootstrap-and-composition.md) makes that
+   absolute, and the inline dispatcher asserts no unit of work is open when
+   it is called.
+2. **A claim.** The claim query is its own unit of work and commits before
+   execution starts. It must: holding it open would hold a row lock across
+   the entire turn, which is Section 12.2's prohibition in its most
+   expensive form.
+3. **A turn.** Not one unit of work but a sequence of short ones —
+   read and commit, call the provider, append and commit. Section 12.2 is
+   the rule; the append path is what it looks like when followed.
+
+Parallel tool invocations get one unit of work each rather than sharing
+the turn's, which is Section 2.2's sentence about `AsyncSession` and
+concurrent tasks arriving at the implementer.
+
+### What crosses the boundary
+
+Rule 7 states the prohibition. Its positive form, which is what someone
+writing a repository method actually needs, is: **a repository method
+returns a domain type, a Pydantic model declared in `domain`, a scalar, or
+`None`.**
+
+That covers the case rule 7 does not obviously reach. A projection query
+computes something no domain aggregate names — a per-session count, a lag
+figure, three columns from a join. The answer is not a tuple and not a
+`dict`; it is a small Pydantic read model declared in `domain` beside the
+aggregates. Declaring it there costs a class and buys a name that the
+`api` layer and the harness can both refer to.
+
+Return annotations are concrete for the same reason. `-> dict[str, Any]`
+and `-> Any` are not violations of rule 7 so much as evasions of the check
+that enforces it, which resolves signatures and can only reject what a
+signature names.
+
+`gate.structure.orm_confined` makes the confinement mechanical: no module
+outside `adapters/persistence/` imports `sqlalchemy`, and no name defined
+in `sqlalchemy_models.py` appears in a signature outside that package.
+
+There is a second reason for all of this, beyond hygiene. Milestone 1
+ships five in-memory repository adapters that Section 21 calls *"production
+adapters run against the same contract suites as their PostgreSQL
+counterparts, not test doubles."* A port whose return types are the
+domain's has two implementations. A port whose return types are rows has
+one, and the contract suite that was supposed to hold both honest becomes
+a test of the only adapter that can satisfy it.
+
 ## Failure modes and defenses
 
 | Failure | How it happens | Defense |
@@ -599,7 +942,11 @@ projection.rebuild.completed
 
 ## Hard gates
 
-Milestone 2 does not pass until every one of these holds.
+Milestone 2 does not pass until every one of these holds. One exception is
+noted where it occurs: the migration-graph walk registers at Milestone 0,
+because the empty migration Milestone 0 already requires is a graph, and a
+walk that only starts once there are twelve revisions is a walk that has
+already missed the branch it exists to prevent.
 
 1. **Sequence integrity.** A fuzz test appending concurrently across sessions,
    with injected rollbacks, produces no duplicate `(session_id, sequence)` and no
@@ -624,6 +971,32 @@ Milestone 2 does not pass until every one of these holds.
    transaction is open across an `await` that performs provider, tool, or sandbox
    I/O. Registered as `gate.structure.txn_hygiene`, which `runtime-loop.md` #6
    restates: this document owns it. **M2.**
+8. **One migration head.** A static walk of the revision graph finds exactly
+   one head, no merge revision, and no revision whose `down_revision` is a
+   tuple. The same walk asserts that the adapter's `EXPECTED_REVISION`
+   constant equals that head. Registered as
+   `gate.structure.migration_graph`. **M0.**
+9. **Migrations upgrade from a clean database.** `upgrade head` against an
+   empty database succeeds, and an autogenerate run against the resulting
+   schema produces an empty diff. Section 24 states the criterion; this is
+   what makes it decidable, and the empty diff is what keeps a hand-edited
+   revision honest. Registered as `gate.event.migration_clean`. **M2.**
+10. **Migrations upgrade from the previous revision.** For every revision,
+    `upgrade` from its predecessor succeeds and `downgrade` back to the
+    predecessor succeeds, against a database that already holds the earlier
+    schema. Section 24's second migration criterion. Data revisions are
+    exempt from the downgrade half by declaration, not by omission.
+    Registered as `gate.event.migration_stepwise`. **M2.**
+11. **The pinned revision is refused, not repaired.** Started against a
+    database at the wrong revision, the process exits non-zero naming both
+    revisions, does not migrate, and does not serve a request first.
+    ADR-0024 decision 6 requires the behavior; this asserts it. Registered
+    as `gate.event.revision_pinned`. **M2.**
+12. **The ORM stays in the adapter.** No module outside
+    `adapters/persistence/` imports `sqlalchemy`, and no name defined in
+    `sqlalchemy_models.py` appears in a signature outside that package. This
+    is dependency rule 7 in the form a static check can evaluate. Registered
+    as `gate.structure.orm_confined`. **M2.**
 
 ## Tracked metrics
 
@@ -633,9 +1006,15 @@ checkpoint bytes per run, and rebuild duration per projection.
 
 ## Build sequence
 
-1. **Schema and migrations.** Section 15's tables plus the additions above.
-   Nothing consumes `payload_schema_version`, `priority`, or `lease_epoch` yet;
-   they are cheap now and are retrofits that break replay later.
+1. **Schema and migrations.** Section 15's tables plus the additions above,
+   created by revisions written to the conventions in "Authoring migrations"
+   rather than by `metadata.create_all`. The round-trip gates belong here and
+   not at the end: `migration_clean` and `migration_stepwise` have something
+   to assert as soon as the second revision exists, and a convention adopted
+   at revision two costs nothing where the same convention retrofitted at
+   revision twenty costs a rewrite of everything before it. Nothing consumes
+   `payload_schema_version`, `priority`, or `lease_epoch` yet; they are cheap
+   now and are retrofits that break replay later.
 2. **Append path.** Sequence allocation, envelope insert, conditional state
    change, all in one transaction. Fuzz for sequence integrity before anything
    depends on it.
@@ -692,6 +1071,38 @@ checkpoint bytes per run, and rebuild duration per projection.
     so the primitive is built once.
 16. **Ambiguous non-idempotent tool executions become `UNCERTAIN`** and are
     reported to the model as unknown-outcome rather than as failed.
+17. **Row classes are separate declarative types confined to the persistence
+    adapter.** This is forced rather than chosen: declarative mapping of a
+    domain type violates dependency rule 1 by import, and imperative mapping
+    violates rule 7 in a way no static check can see.
+18. **Translation between rows and domain types is two hand-written
+    functions per table**, never a generic mapper and never Pydantic's
+    `from_attributes`, which is the ORM mode rule 1's note excludes.
+19. **A repository is constructed with a live session, never with a
+    factory**, and repository methods do not commit. The unit of work owns
+    the boundary, which is what makes that boundary a construction site a
+    static check can look inside.
+20. **A repository returns a domain type, a `domain` read model, a scalar, or
+    `None`**, under a concrete return annotation, because the check enforcing
+    rule 7 resolves signatures and cannot reject what a signature does not
+    name.
+21. **The revision graph is linear.** No merge revisions, no `alembic
+    merge`; a branch is resolved by rebasing `down_revision`. Two of the
+    plan's own statements — `upgrade head` and "upgrade from the previous
+    revision" — are not well-defined otherwise.
+22. **Structure and data are separate revisions**, with `downgrade()`
+    written for structural revisions and raising `NotImplementedError` for
+    data revisions.
+23. **Autogenerate drafts and a person edits**, kept honest by an empty-diff
+    round trip rather than by review, because the four things autogenerate
+    misses are the four that matter here.
+24. **The expected schema revision is a constant in the adapter**, not the
+    head computed from the migrations directory at runtime — a computed head
+    always agrees with the code that ships beside it, which makes the
+    assertion vacuous in exactly the case it exists to catch.
+25. **Test schema is created by running the migrations**, never by
+    `metadata.create_all`, or Section 24's two migration criteria become
+    statements nothing evaluates.
 
 ## Open questions
 

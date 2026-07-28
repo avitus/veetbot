@@ -38,8 +38,8 @@ and declares thirteen more, in the same form and in a new twelfth
 area. [skills.md](skills.md) was written last and declares sixteen
 more, in a new thirteenth area, and is the first spec to declare
 gates at Milestone 10. The counts throughout this document are the
-corpus as it now stands: one hundred and thirty-two declared across
-thirteen specs, one hundred and thirty-eight registry entries.
+corpus as it now stands: one hundred and thirty-seven declared across
+thirteen specs, one hundred and forty-three registry entries.
 
 ## What this document is responsible for
 
@@ -220,10 +220,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and thirty-two gates declared across thirteen specs, two
+One hundred and thirty-seven gates declared across thirteen specs, two
 more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and forty-one declarations, one hundred and
-thirty-eight registry entries once the three aliases are subtracted.
+over the corpus: one hundred and forty-six declarations, one hundred and
+forty-three registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -401,14 +401,26 @@ sequenced separately and is not a dependency.
 10  gate.policy.prompt_not_authz    corpus       4
 ```
 
-### Event log and persistence, seven gates
+### Event log and persistence, twelve gates
 
-The section says Milestone 2 for all seven. One qualification, already
-decided in ADR-0024: the transaction-hygiene *check* is a Milestone 0
-deliverable and its *gate* is a Milestone 2 acceptance criterion. The
-registry entry carries Milestone 2, because a gate is the assertion and
-not the tool, and Milestone 0's obligation is that the tool exists and
-passes against a nearly empty repository.
+The section says Milestone 2 for eleven of the twelve, and two of them
+need a word.
+
+The first is the transaction-hygiene gate, already decided in ADR-0024:
+the *check* is a Milestone 0 deliverable and its *gate* is a Milestone 2
+acceptance criterion. The registry entry carries Milestone 2, because a
+gate is the assertion and not the tool, and Milestone 0's obligation is
+that the tool exists and passes against a nearly empty repository.
+
+The second is the revision-graph walk, added with the migration
+conventions ADR-0031 records. It registers at Milestone 0, and unlike
+every other early registration in this document the spec says so
+itself — the gate is tagged **M0.** where it is declared. Milestone 0
+already requires that an empty Alembic migration runs, so there is a
+graph to walk on the day the milestone closes. The rule is the same one
+that produced every other assignment here: a gate lands at the milestone
+that builds the last thing it observes, and what this one observes is
+the graph.
 
 ```text
 #   id                              kind         M
@@ -420,6 +432,11 @@ passes against a nearly empty repository.
 5   gate.event.crash_recovery       case         2
 6   gate.event.checkpoint_dispens.  case         2
 7   gate.structure.txn_hygiene      structural   2
+8   gate.structure.migration_graph  structural   0
+9   gate.event.migration_clean      case         2
+10  gate.event.migration_stepwise   case         2
+11  gate.event.revision_pinned      case         2
+12  gate.structure.orm_confined     structural   2
 ```
 
 The build sequence's nine steps are Milestone 2, except that the step
@@ -681,23 +698,25 @@ alias restatements.
 ```text
 milestone  new gates  cumulative  the earliest of them
 ---------  ---------  ----------  -----------------------------
-0                 12          12  the import boundary, the secret
-                                  scanner, and ten checks over
-                                  documents
-1                 28          40  the vertical slice, both
+0                 13          13  the import boundary, the secret
+                                  scanner, ten checks over documents,
+                                  and the migration graph
+1                 28          41  the vertical slice, both
                                   builtins, deterministic build
-2                 12          52  persistence, fencing, resume
-3                 11          63  five adapters, trajectories
-4                 13          76  policy, approvals, corpora
-5                 11          87  the API surface, the stream,
+2                 16          57  persistence, fencing, resume, the
+                                  ORM boundary, the migration
+                                  round trips
+3                 11          68  five adapters, trajectories
+4                 13          81  policy, approvals, corpora
+5                 11          92  the API surface, the stream,
                                   cancellation keeps effects
-6                 11          98  isolation, egress, artifacts
-7                  6         104  budgeting and compaction
-8                 14         118  the MCP adapter, the pinned
+6                 11         103  isolation, egress, artifacts
+7                  6         109  budgeting and compaction
+8                 14         123  the MCP adapter, the pinned
                                   catalog, the metadata boundary,
                                   package validation
-9                 14         132  formation and retrieval
-10                 6         138  the authoring loop and the
+9                 14         137  formation and retrieval
+10                 6         143  the authoring loop and the
                                   background review
 ```
 
@@ -718,14 +737,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries four — three in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty of one hundred and thirty-eight gates are green before
+2.  **Forty-one of one hundred and forty-three gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
-    checkable against the in-memory slice, and twelve of them against a
-    repository with no agent in it at all. That is the number that
+    checkable against the in-memory slice, and thirteen of them against
+    a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and thirty-eight, which is
+The cumulative column reaches one hundred and forty-three, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise

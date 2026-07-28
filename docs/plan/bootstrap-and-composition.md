@@ -496,11 +496,16 @@ channel. The session *factory* is constructed here; a session is not.
 Dependency rule 13 forbids global singleton database sessions, and the
 distinction the rule turns on is exactly this one — a factory in the
 composition is fine, a live `AsyncSession` in it is the bug the rule names.
-Section 3 states the unit-of-work rule the factory exists to serve: "Each
+Section 2.2 states the unit-of-work rule the factory exists to serve: "Each
 request, worker operation, or parallel tool invocation must receive its own
 unit of work and database session."
 
-This phase also asserts the schema revision. It does not migrate.
+This phase also asserts the schema revision. It does not migrate. What it
+compares against is specified in
+[event-log-and-persistence.md](event-log-and-persistence.md): an
+`EXPECTED_REVISION` constant in the persistence adapter, read against the
+single row of `alembic_version`, rather than a head computed from the
+migrations directory at runtime.
 
 **Phase 4 — freeze.** Everything versioned is loaded, hashed, and made
 immutable, in this order:
@@ -572,7 +577,11 @@ expects and refuses to start otherwise. Migrating on boot means N processes
 racing to migrate the same database during a rolling deploy, and it means a
 process that failed to start has already changed the schema. Section 25
 already treats migration as a step ("Run migrations") separate from starting
-anything.
+anything. The mechanism this leaves open — where the expected revision comes
+from, and why it is a constant rather than a computed head — is specified in
+[event-log-and-persistence.md](event-log-and-persistence.md) under "The
+revision the code expects is a constant", along with the migration-authoring
+conventions the assertion is only as good as.
 
 Provider pinning is per run, not per process: ADR-0007 fixes routing "once at
 run start", which is `RunService`'s concern. And contract-module coverage — "a
