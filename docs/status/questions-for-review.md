@@ -4178,3 +4178,210 @@ this sentence was not renumbered with them. Position 6 is the
 session-open memory snapshot.
 
 **Reversal cost:** none.
+
+## The Milestone 8 MCP authentication gap (no ADR)
+
+### Authentication is specified inside the tool system, not in an ADR
+
+**Decided:** the authentication scheme is written into
+`docs/plan/tool-system.md` and no ADR records it.
+
+**Why:** an ADR earns its place when a decision binds documents that
+would otherwise diverge. This one adds four columns to a table that
+document already owns and three gates to a list it already keeps. It
+touches the sandbox spec only by reading its tier-0 variable list
+rather than copying it, which is the opposite of divergence. The
+Milestone 4 scope vocabulary and the Milestone 7 history predicate
+were settled the same way and for the same reason.
+
+**Reversal cost:** cheap; an ADR can be written over a decision
+already recorded in prose.
+
+### The scheme is configuration, not something the broker infers
+
+**Decided:** `mcp_servers` gains an `auth_scheme` column. The broker
+resolves a reference to bytes and is never asked what those bytes
+are for.
+
+**Why:** a bearer token and an OAuth client secret are both opaque
+strings. A resolver that infers between them is a resolver that
+eventually presents a client secret as a bearer token to a server
+that logs its `Authorization` headers, and the failure is silent on
+our side and permanent on theirs.
+
+**Alternative:** store the scheme in the secret alongside the value,
+which some brokers support. Rejected for three reasons that each
+stand alone: validating a row would then require dereferencing a
+secret, secrets rotate and protocols do not, and the scheme appears
+in operator-facing errors and in `mcp.server.disconnected`, which is
+a place the emitter is forbidden to look for secrets.
+
+**Reversal cost:** none.
+
+### Five schemes, and no mutual TLS
+
+**Decided:** the closed set is `none`, `bearer`, `header`,
+`oauth2_client`, and `env`. A client certificate is not among them.
+
+**Why:** the five cover every deployment shape the corpus already
+describes, and a closed set is what makes write-time validation
+possible at all. Mutual TLS is left out because a client certificate
+is a property of the connection rather than of the request, so it
+belongs in the egress proxy's configuration rather than in a row
+that describes what to put in a header.
+
+**Question for you:** if an operator asks for mutual TLS, the answer
+is to configure it at the proxy, not to add a sixth scheme. Say so
+if you disagree, because the sixth scheme is the cheaper-looking
+option and someone will propose it.
+
+**Reversal cost:** low for a sixth scheme, higher for mTLS, which
+would want a place to put a certificate and a key rather than one
+reference.
+
+### Configuration is validated when written, not when dialled
+
+**Decided:** every rule about schemes, names, transports, and token
+endpoints is checked at the point the row is written.
+
+**Why:** a bad row should be a configuration error a human sees
+immediately, not a connect failure a tenant discovers when a tool
+they were advertised does not work. It also means the checks run
+with no server and no broker, which is why the gate over them needs
+neither.
+
+**Cost:** the validator has to know things the dialler also knows,
+including the egress allowlist and the sandbox's tier-0 variable
+list. The list is read from `sandbox-isolation.md`'s definition
+rather than copied, so the two cannot drift.
+
+**Reversal cost:** none.
+
+### Three gates rather than one
+
+**Decided:** `gate.tool.mcp_auth_config`,
+`gate.tool.mcp_reauth_bounded`, and `gate.tool.mcp_stdio_env_built`.
+
+**Why:** they divide by what each needs in order to run. The first
+needs a validator and nothing else. The second needs a server that
+will return 401 on demand. The third needs a child process whose
+environment can be read back. One combined gate would be unrunnable
+until the last of those three fixtures existed, which would put the
+cheapest check behind the most expensive one.
+
+**Reversal cost:** none.
+
+### A 401 buys one re-authentication and at most one retry
+
+**Decided:** the ladder runs at most once per server per session, and
+the retry it permits is the retry the recovery table already permits.
+
+**Why:** routing through the recovery rules rather than around them
+keeps `mark_effect_sent` the thing that decides retryability. A 401
+arriving after an effect was sent says nothing about whether the
+effect landed, so a non-idempotent call in that state is `UNCERTAIN`
+and is not retried. A ladder that made its own retry decision would
+be a second, quieter answer to a question the spec already answers.
+
+**Note:** if the re-resolved credential is byte-identical to the one
+that failed, the retry is skipped. Presenting the same rejected bytes
+again is a round trip that cannot succeed.
+
+**Reversal cost:** none.
+
+### Expiry is checked at use, and there is no background refresh
+
+**Decided:** the transport compares recorded expiry against the clock
+when it builds a header, with a fixed sixty-second skew. Nothing
+refreshes on a timer.
+
+**Why:** a background refresh is a second clock in a system that
+already has a lease epoch and a worker heartbeat, it keeps tokens
+alive for connections nobody is using, and it does not remove the 401
+path, because a token can be revoked before it expires. Check-at-use
+costs one comparison on a path that is already doing I/O.
+
+**Reversal cost:** none.
+
+### Refresh tokens are not used
+
+**Decided:** the `oauth2_client` scheme re-runs the client-credentials
+grant and stores no refresh token.
+
+**Why:** the grant is not supposed to issue one. A server that does
+is either misconfigured or running a different flow, and holding a
+long-lived credential we did not ask for is a liability with no
+corresponding capability.
+
+**Reversal cost:** none.
+
+### The user-delegated OAuth flows are deferred, and said so
+
+**Decided:** authorization code and dynamic client registration are
+out of scope for 0.1. A server that requires one fails to connect
+with `tool.auth_unsupported`.
+
+**Why:** they need a browser redirect, a callback URL, and a
+per-principal token store. `conversation.ask_user` suspends a run to
+collect text, not to collect a redirect, so there is no existing
+surface to hang this on. Failing to connect with a named reason is
+better than a scheme that half works.
+
+**Question for you:** the unlock is an interactive authorization
+surface on the HTTP API, which is a real piece of product and not
+just a protocol chore. If you want to connect to servers that only
+speak user-delegated OAuth before 0.1 ships, this needs to move up
+and it needs a design of its own.
+
+**Reversal cost:** moderate; the scheme vocabulary has room, but the
+token store and the redirect handling are new.
+
+### A stdio server's child environment is built, not inherited
+
+**Decided:** the child receives the synthesized sandbox tier plus the
+one declared credential variable, and nothing else. The credential
+never reaches `argv`.
+
+**Why:** inheritance is the default behaviour of every
+process-spawning API in the standard library, and what would be
+inherited here is the worker's database URL and every provider key,
+handed to an operator-configured third-party process. That is why it
+is a gate with a planted sentinel rather than a sentence in a
+paragraph.
+
+**Cost:** a server that expected some ambient variable will fail, and
+the fix is to declare it, which the schema does not currently allow
+for anything but the credential. That is deliberate for now.
+
+**Reversal cost:** low; a declared extra-environment field is an
+additive change.
+
+### Four pre-existing defects fixed on the same pass
+
+**Decided:** four sentences that had fallen behind what they describe
+were corrected rather than left for the next reader.
+`tool-system.md`'s availability table said "Three different things
+can make an advertised tool uncallable" over a table that already had
+four rows, and now says "Several things ... and every one of them".
+`evaluation-harness.md` said "seventy-one of the hundred and fifty-six
+declared gates are not case gates", stale from before the Milestone 7
+gate, and now says seventy-three of one hundred and sixty.
+`milestone-map.md`'s opening said "one hundred and fifty declared
+across thirteen specs, one hundred and fifty-six registry entries",
+stale by one from the same pass, and now says one hundred and
+fifty-four and one hundred and sixty. Its third open question said the
+MCP half "still registers no invariant of its own", which stopped
+being true when gates 11 through 13 were added, and now records both
+later passes.
+
+**Why:** three of the four are counts, and a count that has fallen
+behind is the failure the derived census exists to prevent. The prose
+numbers are not generated, so they are worth re-deriving on every
+pass rather than trusting — which is how three of these were found,
+by grepping the corpus for every spelled-out census figure after the
+new ones were written.
+
+**Note:** the harness one also carried a ninety-seven character line
+in a file whose convention is eighty-three.
+
+**Reversal cost:** none.

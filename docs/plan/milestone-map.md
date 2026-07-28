@@ -41,7 +41,7 @@ gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
 gained two more on a later pass, all four at Milestone 3. The counts
 throughout this document are the corpus as it now stands: one hundred
-and fifty declared across thirteen specs, one hundred and fifty-six
+and fifty-four declared across thirteen specs, one hundred and sixty
 registry entries.
 
 ## What this document is responsible for
@@ -274,7 +274,7 @@ the two aliases are visible.
 14  gate.runtime.build_stable       property     7
 ```
 
-### Tool system, thirteen gates
+### Tool system, sixteen gates
 
 The section carried no milestone. The assignment follows the build
 order the same document already tags — steps 1 through 5 are Milestone
@@ -297,9 +297,12 @@ Milestone 8 — by asking which build step each gate observes.
 11  gate.tool.mcp_pipeline_parity   case         8   9
 12  gate.tool.mcp_disconnect        case         8   9
 13  gate.tool.mcp_sdk_confined      structural   8   9
+14  gate.tool.mcp_auth_config       structural   8   9
+15  gate.tool.mcp_reauth_bounded    case         8   9
+16  gate.tool.mcp_stdio_env_built   case         8   9
 ```
 
-Gates 11, 12, and 13 are step 9's and say so themselves, so they need
+Gates 11 through 16 are step 9's and say so themselves, so they need
 no derivation. Three of the rest need their reasoning stated, because
 the milestone is not the one a first reading gives.
 
@@ -334,6 +337,16 @@ inside the outcome vocabulary, and that the SDK stops at the adapter
 boundary. The third is the engineering plan's last Milestone 8
 acceptance criterion promoted from prose to a walk over the import
 graph.
+
+Gates 14, 15, and 16 arrived later still, with the authentication
+scheme the readiness review found missing behind `credential_ref`.
+They divide by what each needs in order to run, which is why there are
+three rather than one: gate 14 needs neither a server nor a broker and
+tests the configuration validator alone, gate 15 needs a server that
+will return 401 on demand, and gate 16 needs a child process it can
+read the environment of. A single gate covering all three would be
+unrunnable until the last of its dependencies existed, and the first
+of them is checkable on the day the column is added.
 
 ### Builtin tools, fifteen gates
 
@@ -754,11 +767,11 @@ milestone  new gates  cumulative  the earliest of them
                                   cancellation keeps effects
 6                 11         116  isolation, egress, artifacts
 7                  7         123  budgeting and compaction
-8                 14         137  the MCP adapter, the pinned
-                                  catalog, the metadata boundary,
-                                  package validation
-9                 14         151  formation and retrieval
-10                 6         157  the authoring loop and the
+8                 17         140  the MCP adapter, authentication,
+                                  the pinned catalog, the metadata
+                                  boundary, package validation
+9                 14         154  formation and retrieval
+10                 6         160  the authoring loop and the
                                   background review
 ```
 
@@ -776,17 +789,17 @@ leaving for someone to notice.
     contributed corpus members to gates 2 and 5 of the tool system and
     nothing of its own, which reads as the right shape for a milestone
     that widens an existing surface until you notice it leaves build
-    step 9 unobserved. It now carries four — three in the tool system
+    step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and fifty-seven gates are green before
+2.  **Forty-one of one hundred and sixty gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and fifty-seven, which is
+The cumulative column reaches one hundred and sixty, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise
@@ -1082,12 +1095,13 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     answered yes, by [skills.md](skills.md), which gave it ten and
     gave Milestone 10 six. The sentence about a skill doing something
     no gate was watching turned out to describe a real hole, as the
-    same sentence about the sandbox had. What remains of the question
-    is the MCP half, which still registers no invariant of its own
-    and instead adds corpus members to two tool-system gates. That
-    may be right — MCP widens a surface the tool pipeline already
-    gates — and it is the part worth a look during the milestone's
-    planning.
+    same sentence about the sandbox had. The MCP half was answered
+    the same way on two later passes: three gates when this census
+    made build step 9 the only unobserved step in the tool system,
+    and three more when the readiness review found nothing behind
+    `credential_ref`. It registers six invariants of its own now,
+    rather than corpus members in two gates belonging to the
+    pipeline it widens.
 4.  **Whether the `optional` field is worth its precedent.** One gate
     uses it. The alternative is a live smoke test that is not a gate
     at all but a manually run script, which is honest about its status

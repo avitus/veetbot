@@ -4,6 +4,71 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Milestone 8's MCP authentication gap is closed
+
+- Gave `credential_ref` a counterpart in
+  [tool-system.md](plan/tool-system.md). The column said where a
+  secret is; nothing said what the reference resolves to, and the
+  broker cannot infer it — a bearer token and an OAuth client secret
+  are both opaque strings, and a resolver that guesses between them
+  eventually presents a client secret as a bearer token to a server
+  that logs its `Authorization` headers.
+- Made the scheme configuration rather than inference. `mcp_servers`
+  gains `auth_scheme`, `auth_name`, `token_endpoint`, and
+  `token_scopes`; the scheme is a closed set of five — `none`,
+  `bearer`, `header`, `oauth2_client`, and `env` — and it lives in
+  the row rather than inside the secret, because validating a row
+  should not require dereferencing one, secrets rotate and protocols
+  do not, and the scheme is named in operator-facing errors and in
+  `mcp.server.disconnected`.
+- Moved the checking to write time. A scheme outside the five, a
+  scheme on the wrong transport, `header` naming `Authorization`,
+  `env` naming a tier-0 variable, or an `oauth2_client` token
+  endpoint the egress allowlist does not permit are configuration
+  errors a human sees before anything is dialled. The tier-0 list is
+  read from [sandbox-isolation.md](plan/sandbox-isolation.md)'s
+  definition rather than copied.
+- Bounded the re-authentication path and routed it through the
+  recovery table already in the spec. One re-authentication per
+  server per session, one retry and only where recovery permits,
+  `UNCERTAIN` rather than a retry for a non-idempotent call whose
+  watermark is set — a 401 arriving after `mark_effect_sent` says
+  nothing about whether the effect landed — then `unavailable` with
+  `tool.server_unauthorized`. Expiry is checked when a header is
+  built rather than on a timer, and no refresh token is stored,
+  because the client-credentials grant is not supposed to issue one.
+- Built the stdio child's environment instead of inheriting it: the
+  synthesized sandbox tier plus the one declared credential
+  variable, with the credential never reaching `argv`. Inheritance
+  is the default behaviour of every process-spawning API in the
+  standard library, and what it would hand an operator-configured
+  third-party process is the worker's database URL and every
+  provider key.
+- Deferred the user-delegated OAuth flows and said so in the
+  vocabulary. A server that needs an authorization-code redirect
+  fails to connect with `tool.auth_unsupported`; the unlock is an
+  interactive authorization surface on the HTTP API, which is past
+  0.1.
+- Added three gates, all Milestone 8, dividing by what each needs in
+  order to run: `gate.tool.mcp_auth_config` over the validator
+  alone, `gate.tool.mcp_reauth_bounded` against a server that
+  returns 401 on demand, and `gate.tool.mcp_stdio_env_built` against
+  a child process whose environment can be read back. The census is
+  now **one hundred and sixty registry entries**, eighty-seven of
+  them cases, and Milestone 8 carries seventeen.
+- Changed Milestone 8's verdict in [readiness.md](plan/readiness.md)
+  from ready with named gaps to **ready**. One named gap remains in
+  the corpus: knowledge documents at Milestone 9.
+- Fixed four sentences that had fallen behind what they describe.
+  `tool-system.md` said "three different things" over a four-row
+  availability table; `evaluation-harness.md` said "seventy-one of
+  the hundred and fifty-six declared gates" and `milestone-map.md`
+  said "one hundred and fifty declared across thirteen specs, one
+  hundred and fifty-six registry entries", both stale from before
+  the Milestone 7 gate was added; and the map's third open question
+  still said the MCP half registers no invariant of its own, which
+  stopped being true two passes ago.
+
 ## 2026-07-28 — Milestone 7's history predicate is closed
 
 - Gave history selection a predicate in

@@ -302,7 +302,7 @@ joined by dots, of which the last is the action. All fourteen have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1023` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1187` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal

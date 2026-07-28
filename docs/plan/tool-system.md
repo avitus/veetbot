@@ -424,13 +424,14 @@ stays in the prefix and is denied at call time. That rule was written for scope
 revocation. It generalizes, and generalizing it is what makes MCP compatible
 with a cached prefix at all.
 
-Three different things can make an advertised tool uncallable, and all three
-resolve at call time rather than by rewriting the prefix:
+Several things can make an advertised tool uncallable, and every one of them
+resolves at call time rather than by rewriting the prefix:
 
 | Cause | Outcome | `reason_code` |
 | --- | --- | --- |
 | Scope revoked, or policy now denies | `denied` | `policy.scope.missing` |
 | MCP server disconnected or unreachable | `unavailable` | `tool.server_unreachable` |
+| MCP server rejected our credential | `unavailable` | `tool.server_unauthorized` |
 | Tool withdrawn from the server's catalog | `unavailable` | `tool.withdrawn` |
 | Target device offline | `unavailable` | `tool.device_offline` |
 
@@ -1000,6 +1001,169 @@ remaining run budget)`, and it is the effective value that lands in
 responding slowly, and a tool cannot extend it by declaring a large
 `timeout_seconds`, because the run deadline is always in the minimum.
 
+### Authentication, and what the reference resolves to
+
+`credential_ref` says where the secret is. Nothing yet says what to do with
+the secret once the broker returns it, and that is not something the broker
+can supply: a bearer token and an OAuth client secret are both opaque
+strings, and a resolver that infers between them is a resolver that
+eventually presents a client secret as a bearer token to a server that logs
+its `Authorization` headers.
+
+So **the scheme is configuration, not inference.** `mcp_servers` gains an
+`auth_scheme` column beside `credential_ref`, from a closed set of five,
+plus `auth_name`, `token_endpoint`, and `token_scopes` for the schemes that
+need them. All four are in the table under *Schema additions* below.
+
+| `auth_scheme` | Transport | The reference resolves to | Applied as |
+| --- | --- | --- | --- |
+| `none` | either | nothing; the reference is NULL | no credential |
+| `bearer` | HTTP | a token | `Authorization: Bearer` |
+| `header` | HTTP | a token | the header `auth_name` names |
+| `oauth2_client` | HTTP | a client id and secret | `Authorization: Bearer`, after an exchange |
+| `env` | stdio | a token | the variable `auth_name` names |
+
+The scheme lives in the row rather than inside the secret, which is the
+tempting alternative because it puts everything about a credential in one
+place. It is wrong three ways. Validating a configuration would then require
+dereferencing a secret, so an operator listing servers, or a validator
+checking that a `header` scheme names a header, would have to ask the broker
+for a value it has no business seeing. A secret's contents get rotated and a
+protocol does not, so a scheme inside the secret lets a rotation silently
+change how the platform talks to a server — a deployment change wearing a
+credential change's clothes. And the scheme appears in operator-facing
+errors and in `mcp.server.disconnected`, so it must not live somewhere the
+emitter is forbidden to look.
+
+**Configuration is validated when it is written, not when it is dialled.**
+Five rules, all mechanical:
+
+1. `none` requires a null `credential_ref`, and every other scheme requires
+   a non-null one.
+2. `header` and `env` require `auth_name`, matching
+   `^[A-Za-z0-9_-]{1,64}$`. A `header` scheme may not name `Authorization`,
+   because a header scheme that writes `Authorization` is a bearer scheme
+   with a different audit trail and two spellings of one request.
+3. An `env` scheme may not name a variable on the tier-0 list
+   [sandbox-isolation.md](sandbox-isolation.md) fixes, and the check reads
+   that list rather than a copy of it.
+4. `oauth2_client` requires `token_endpoint`, and the endpoint is checked
+   against the egress allowlist by the same resolver that checks the
+   server's own `endpoint`. A token endpoint policy will not permit is a
+   configuration error now rather than a connect failure later.
+5. The transport cross-check: `env` on HTTP, and `bearer`, `header`, or
+   `oauth2_client` on stdio, are all rejected. There is no header on a pipe
+   and no child environment on a socket.
+
+**A stdio server's credential enters as environment, and the environment is
+built.** There is no request to attach a header to, so the resolved value is
+placed in the child's environment under `auth_name` — and the moment a child
+process is being handed an environment, what else is in it becomes the
+question. The answer is the sandbox spec's: the environment is constructed
+rather than inherited, so the child receives the synthesized tier plus that
+one declared variable and nothing from the worker's own environment. The
+default behaviour of every process-spawning API in the standard library is
+the other one, which is why this is a gate and not a paragraph.
+
+The credential never reaches `argv`. A command line is the process table,
+and the process table is one of the three places the no-inline-credentials
+rule names. And because the previous subsection makes stdio servers
+operator-configured only, no tenant can choose the variable's name, which
+would otherwise be a way to shadow a name the worker's children read.
+
+**The resolved value belongs to the connection, not to the session.** It is
+held by the transport and by nothing else: not the registry, not a
+`ToolSpec`, not a context plan, not a `tool_invocations` row, not a span
+attribute. It travels as `SecretValue`, and `.reveal()` is called in exactly
+two places — building a header and building a child environment — both
+inside `adapters.mcp`. A connection that is re-dialled re-resolves, which is
+what lets a rotation take effect without a restart and what makes the ladder
+below possible at all.
+
+**A 401 at connect is terminal for the session and is not retried.** An
+`initialize` that comes back unauthorized, or a token exchange that comes
+back `invalid_client`, ends the connection attempt.
+`mcp.server.disconnected` carries `tool.auth_failed`, none of that server's
+tools are registered, and the session proceeds without them. There is no
+second attempt, because a credential rejected at connect is rejected, and
+dialling again with the same value is one more failed authentication against
+a server that may well be counting them.
+
+**A 401 mid-session runs a bounded ladder.** An unauthorized `tools/call`
+means the token expired, was rotated, or was revoked, and from here those
+are not distinguishable. In order:
+
+1. The call is held rather than failed.
+2. One re-authentication is attempted. For `oauth2_client` the cached access
+   token is discarded and the exchange runs again; for every other scheme
+   the reference is re-resolved from the broker, because an operator may
+   have rotated it since connect.
+3. If re-authentication produces a value byte-identical to the one that just
+   failed, the ladder stops and step 5 runs. Retrying a value already known
+   to be rejected buys nothing and spends a round trip.
+4. Otherwise the call is retried exactly once, and only where the recovery
+   table already permits a retry. A `NON_IDEMPOTENT` call whose effect
+   watermark is set is `UNCERTAIN`, not retried, because a 401 arriving
+   after `mark_effect_sent` says nothing about whether the effect landed.
+   The re-authentication path routes through the recovery rules rather than
+   around them, which is why the watermark is set before the first outbound
+   operation rather than after the response.
+5. The next failure is `unavailable` with `tool.server_unauthorized`. The
+   connection closes, and every later call to that server in this session
+   returns the same outcome without dialling.
+
+The ladder runs at most once per server per session. A second 401 after a
+successful re-authentication is a server that is failing, not a credential
+that expired, and treating it as the latter is how a run spends its budget
+in a loop.
+
+**Expiry is checked at use, never on a timer.** A client-credentials
+exchange returns `expires_in`, and the obvious design refreshes on a
+schedule. It is refused. A background refresh is a second clock in a system
+whose determinism arguments all assume one; it keeps a token alive for a
+connection nobody is using; and it does not remove the 401 path anyway,
+because a token can be revoked long before it expires. Instead the transport
+compares the recorded expiry against the clock at the moment it builds a
+header, with a fixed sixty-second skew, and exchanges again inside that
+window. One code path serves expiry and revocation, there is no scheduler
+entry, and an idle connection that gets closed takes its token with it.
+
+**Refresh tokens are not used.** The client-credentials grant is not
+supposed to issue one, and re-running the exchange costs a single request
+against a credential the worker already holds. A refresh token would be a
+second long-lived secret to store, scope, rotate, and eventually leak,
+bought with nothing.
+
+**The user-delegated flows are deferred, and saying so is the honest
+version.** MCP's authorization specification describes an OAuth
+authorization-code flow with dynamic client registration, which is how a
+server asks a *human* for consent. It needs a browser redirect, a callback
+URL, and a per-principal token store, and the platform has a surface for
+none of the three: `conversation.ask_user` suspends a run for text, not for
+a redirect. A server that requires it fails to connect with
+`tool.auth_unsupported` — an operator-facing error rather than a
+half-working state, the same refusal and the same reason as sampling and
+roots. The unlock is an interactive authorization surface on the HTTP API,
+which is a product decision as much as an engineering one and belongs after
+0.1.
+
+**What the tenant and the model see is a reason code.** A
+`WWW-Authenticate` header, an error body, a token endpoint's
+`error_description` — all of it is external text, and the no-external-text
+rule covers it with no amendment. The outcome carries
+`tool.server_unauthorized` and its fixed message, the event carries the code
+and the server id, and an operator who needs more reads
+`tool_failures_total` labelled by `reason_code`. Nothing about an
+authentication failure reaches the model's context beyond the fact that a
+tool is unavailable.
+
+**None of this changes the advertisement.** A server that becomes
+unauthorized mid-session keeps its tools in the pinned set exactly as a
+disconnected one does, and the availability table gains a row rather than an
+exception. Withdrawing tools on an authentication blip would let a third
+party invalidate a tenant's cacheable prefix by revoking a token, which is
+the cost attack the recorded-and-not-applied rule already refuses.
+
 ### Discovery, and the schema that arrives from outside
 
 Discovery runs at session open, before the context plan is built, because the
@@ -1324,7 +1488,12 @@ mcp_servers
   server_id         TEXT NOT NULL     -- the name used in tool names
   transport         TEXT NOT NULL     -- stdio | http
   endpoint          TEXT NOT NULL     -- command or URL
+  auth_scheme       TEXT NOT NULL     -- none | bearer | header |
+                                      -- oauth2_client | env
+  auth_name         TEXT NULL         -- header name, or variable name
   credential_ref    TEXT NULL         -- broker reference, never a secret
+  token_endpoint    TEXT NULL         -- oauth2_client only
+  token_scopes      JSONB NULL        -- oauth2_client only
   side_effect       TEXT NOT NULL     -- operator classification
   risk              TEXT NOT NULL
   idempotency       TEXT NOT NULL
@@ -1411,6 +1580,7 @@ session:
 | --- | --- | --- |
 | `mcp.server.connected` | handshake done | server, transport, tools |
 | `mcp.server.disconnected` | close or failure | server, reason_code |
+| `mcp.server.reauthenticated` | ladder step 2 | server, scheme, outcome |
 | `mcp.catalog.changed` | list differs | server, old and new hash |
 | `mcp.catalog.conflict` | name collision | server, both remote names |
 | `mcp.tool.rejected` | schema invalid | server, remote name, reason |
@@ -1421,6 +1591,11 @@ session:
 exception string, because a disconnection reason from a remote server is
 external text and the same rule applies to it as to everything else that
 crosses that boundary.
+
+`mcp.server.reauthenticated` is the one worth a dashboard. The ladder runs
+at most once per server per session, so a server producing them steadily has
+a token lifetime shorter than its sessions, which is a configuration problem
+on the other side that the platform cannot fix and should not hide.
 
 ### Spans and metrics
 
@@ -1541,6 +1716,18 @@ that no such call is proposed.
 per Milestone 8's fifth acceptance criterion, the run continues, and the model
 gets a structured result it can act on rather than an exception.
 
+**A server rejects our credential mid-run.** The ladder runs once, an
+idempotent call is retried once, and the outcome is `unavailable` with
+`tool.server_unauthorized` rather than an exception. A non-idempotent call
+whose watermark is set becomes `UNCERTAIN` instead, because a 401 arriving
+after the effect was sent is not evidence that the effect failed.
+
+**A stdio server inherits the worker's environment.** That is the default
+behaviour of every process-spawning API in the standard library, and it
+hands an operator-configured child process the database URL and every
+provider key. Caught by building the environment rather than passing it
+through, and asserted against a server that echoes back what it was given.
+
 ## Hard gates
 
 These fail the build.
@@ -1584,6 +1771,24 @@ These fail the build.
 13. No module outside `adapters.mcp` imports an MCP SDK type, asserted by
     the import-graph walk rather than by grep, because the import this
     catches is transitive through a shared helper. **M8.**
+14. Configuration validation rejects every invalid authentication row: a
+    scheme outside the closed five, a scheme on the wrong transport, `none`
+    with a credential reference, `header` or `env` without a name, `header`
+    naming `Authorization`, `env` naming a tier-0 variable, and
+    `oauth2_client` whose token endpoint the egress allowlist does not
+    permit. Asserted over the validator, with no server and no broker.
+    **M8.**
+15. The re-authentication ladder is bounded and routes through recovery.
+    Against a scripted server that returns 401 on demand: exactly one
+    re-authentication per server per session, one retry of an idempotent
+    call, `UNCERTAIN` rather than a retry for a non-idempotent call whose
+    watermark is set, `unavailable` with `tool.server_unauthorized`
+    thereafter, and a run that continues throughout. **M8.**
+16. A stdio server's child process receives a constructed environment: the
+    synthesized tier plus the one declared credential variable and nothing
+    else, asserted against a server that echoes its environment back, with
+    a sentinel planted in the worker's own environment that must not appear
+    in what comes back. **M8.**
 
 ## Build order
 
@@ -1605,19 +1810,23 @@ The dependency order that keeps every step independently testable.
 6. **Parallelism.** The admission check and the batch step boundary.
 7. **Control tools.** `conversation.ask_user`, `delegate.run`, suspension.
 8. **The bridge.** ADR-0015, on top of a pipeline that is already correct.
-9. **MCP.** Transport, discovery, mapping, resources, prompts, the catalog
-   tables. Last because it is the only part that depends on all of it.
+9. **MCP.** Transport, authentication, discovery, mapping, resources,
+   prompts, the catalog tables. Last because it is the only part that
+   depends on all of it.
 
 Steps 1 through 5 are Milestone 1. Step 6 is Milestone 4. Steps 7 and 8 are
 Milestone 6. Step 9 is Milestone 8.
 
-Gates 11, 12, and 13 are step 9's, and they are the reason step 9 can be last
-without being unobserved. Each one asserts a property of the adapter that only
+Gates 11 through 16 are step 9's, and they are the reason step 9 can be last
+without being unobserved. Each asserts a property of the adapter that only
 becomes checkable once the adapter exists: that it added no path around the
-pipeline, that its worst ordinary failure stays inside the outcome vocabulary,
-and that it did not leak its SDK upward into the runtime. A milestone that
-widens an existing surface still owes the corpus the evidence that the surface
-is the same one.
+pipeline, that its worst ordinary failure stays inside the outcome
+vocabulary, that it did not leak its SDK upward into the runtime, that its
+authentication configuration cannot be written into an invalid state, that
+its recovery from a rejected credential is bounded, and that the one child
+process it spawns starts from a built environment rather than an inherited
+one. A milestone that widens an existing surface still owes the corpus the
+evidence that the surface is the same one.
 
 ## Decisions
 
@@ -1671,6 +1880,22 @@ is the same one.
     determinism, and the effect watermark is what bounds the rest.
 20. No `tool_registry_snapshots` table. The context plan's pin plus the
     catalog history already answer the question.
+21. Authentication is a declared scheme rather than an inferred one.
+    `auth_scheme` is a column from a closed set of five, with `auth_name`,
+    `token_endpoint`, and `token_scopes` beside it, and all of it is
+    validated when configuration is written rather than when a server is
+    dialled.
+22. A 401 buys one bounded ladder: terminal at connect, and mid-session one
+    re-authentication and at most one retry, routed through the recovery
+    rules so a non-idempotent call whose watermark is set becomes
+    `UNCERTAIN` rather than a duplicate. Expiry is checked at use, not on a
+    timer, and refresh tokens are not used.
+23. A stdio server's child environment is built rather than inherited, and
+    its credential enters as one declared variable rather than on `argv`.
+24. The user-delegated OAuth flows are declined at connect with
+    `tool.auth_unsupported`, for the reason sampling and roots are declined
+    at negotiation: there is no consent surface, and a half-working one is
+    worse than a refusal.
 
 ## Open questions for review
 
@@ -1698,3 +1923,10 @@ is the same one.
 5. **Device tools are a reserved seam, not a design.** The transport, attach
    handshake, and offline behaviour belong with the cross-device work, and
    nothing here should be read as having settled them.
+6. **Five authentication schemes, and no mutual TLS.** A server that
+   authenticates its client with a certificate is a real deployment, and the
+   reason it is absent is that a client certificate is a property of the
+   connection rather than of the request, which puts it in the egress
+   proxy's configuration rather than in `mcp_servers`. That is probably the
+   right home. It is not obviously the only one, and the question should be
+   reopened the first time an operator asks for it.

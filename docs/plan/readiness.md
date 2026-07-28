@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1698` states that device tools are *"a reserved
+    `tool-system.md:1923` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -81,7 +81,7 @@ rather than smoothed.
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
-| 8 | Skills and MCP integration | Ready with named gaps | 14 | MCP auth scheme |
+| 8 | Skills and MCP integration | Ready | 17 | Nothing |
 | 9 | Long-term memory and knowledge | Ready with named gaps | 14 | Knowledge documents |
 | 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | No acceptance criteria exist |
 
@@ -158,7 +158,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and fifty-seven gates are green before
+**Forty-one of one hundred and sixty gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -538,7 +538,7 @@ Section 28 of the plan is not empty — `engineering-plan.md:3152-3229`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:977` constrains MCP server URLs by *"the
+existed. `tool-system.md:978` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:180` and `:183` assign ownership of
@@ -547,8 +547,8 @@ itself, which is the corpus recording that nothing below the plan owns
 them.
 
 Two bullets are covered. Output truncation and artifactization are
-specified at `tool-system.md:708`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1169`.
+specified at `tool-system.md:709`, and the programmatic orchestration
+bridge Section 8.5 requires is specified from `tool-system.md:1333`.
 
 Two further items deserved naming.
 
@@ -586,7 +586,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:977` depends on by
+remaining. The egress allowlist `tool-system.md:978` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -685,12 +685,12 @@ One gate, at Milestone 7: `gate.context.history_cut`, a property gate
 for the same reason gate 1 is. Both named shortfalls are closed, so
 the verdict changes with them.
 
-## Milestone 8: ready with named gaps
+## Milestone 8: ready
 
-Fourteen registry entries: ten from [skills.md](skills.md), which was
-written after this review and closes the half that was missing, and
-four added later still for the MCP half. The verdict below is the
-review as it stood, followed by what changed.
+Seventeen registry entries: ten from [skills.md](skills.md), which
+was written after this review and closes the half that was missing,
+and seven added later still for the MCP half. The verdict below is
+the review as it stood, followed by what changed.
 
 **MCP is substantively covered.** [tool-system.md](tool-system.md)
 designs nine of eleven bullets: server configuration and lifecycle,
@@ -707,7 +707,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1110-1157` draws the line between
+had to be written. `tool-system.md:1274-1321` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -748,12 +748,74 @@ cases 29 and 30. The mock server the implement bullet asked for is
 that fixture kind: authored YAML, loaded at collection time, no socket
 and no subprocess.
 
-One named gap survives, and it is the smaller one: authentication
-configuration still has a `credential_ref` column, no auth scheme, and
-no refresh or re-auth path. It is a Milestone 8 implementation
+One named gap survived, and it was the smaller one: authentication
+configuration still had a `credential_ref` column, no auth scheme,
+and no refresh or re-auth path. It was a Milestone 8 implementation
 question rather than a design hole in the corpus, because the broker
 that resolves the reference is specified and only the scheme it
-resolves is not.
+resolves was not.
+
+### What closed it
+
+The gap was a column with no counterpart. `credential_ref` says where
+a secret is; nothing said what the reference resolves to, and the
+broker cannot infer it, because a bearer token and an OAuth client
+secret are both opaque strings and a resolver that guesses between
+them eventually presents a client secret as a bearer token to a server
+that logs its `Authorization` headers.
+
+[tool-system.md](tool-system.md) closes it by making the scheme
+configuration rather than inference: a closed set of five — `none`,
+`bearer`, `header`, `oauth2_client`, and `env` — declared in the
+`mcp_servers` row beside the reference, with `auth_name`,
+`token_endpoint`, and `token_scopes` for the schemes that need them.
+The scheme lives in the row rather than inside the secret for three
+reasons that each stand alone: validating configuration would
+otherwise require dereferencing a secret, secrets rotate and protocols
+do not, and the scheme appears in operator-facing errors and in
+`mcp.server.disconnected`, which is a place the emitter is forbidden
+to look for secrets.
+
+Because the scheme is a column it is validated when the row is written
+rather than when the server is dialled, which turns most of this into
+a configuration error a human sees before anything connects: a scheme
+outside the five, `header` naming `Authorization`, `env` naming a
+tier-0 variable, an `oauth2_client` token endpoint the egress
+allowlist does not permit, and the transport cross-check that rejects
+`env` over HTTP and headers over a pipe.
+
+The refresh half is a bounded ladder that routes through the recovery
+table already in the spec rather than around it: one re-authentication
+per server per session, one retry and only where recovery permits,
+`UNCERTAIN` rather than a retry for a non-idempotent call whose
+watermark is set — a 401 arriving after `mark_effect_sent` says
+nothing about whether the effect landed — and `unavailable` with
+`tool.server_unauthorized` thereafter. Expiry is checked when a header
+is built rather than on a timer, because a background refresh is a
+second clock that keeps tokens alive for idle connections and removes
+none of the 401 path anyway.
+
+The `env` scheme dragged in the sharper question, which is what else
+is in a stdio server's child environment. It is constructed — the
+synthesized sandbox tier plus the one declared variable — rather than
+inherited, and it is a gate rather than a paragraph because
+inheritance is the default behaviour of every process-spawning API in
+the standard library, and what would be inherited is the worker's
+database URL and every provider key.
+
+What is deferred is said out loud. The user-delegated flows need a
+browser redirect, a callback URL, and a per-principal token store, and
+`conversation.ask_user` suspends a run for text, not for a redirect. A
+server that requires one fails to connect with `tool.auth_unsupported`,
+which is a refusal a reader can find rather than a connection that
+hangs.
+
+Three gates, all Milestone 8, dividing by what each needs in order to
+run: `gate.tool.mcp_auth_config` over the validator with no server and
+no broker, `gate.tool.mcp_reauth_bounded` against a server that
+returns 401 on demand, and `gate.tool.mcp_stdio_env_built` against a
+child process whose environment can be read back. The named gap is
+closed, so the verdict changes with it.
 
 ## Milestone 9: ready with named gaps
 
@@ -844,8 +906,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1252` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1698` states that device tools are *"a reserved seam,
+`tool-system.md:1416` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1923` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. The
 `Device` model itself still has no home.
@@ -993,7 +1055,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1399` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:809`. The map
+    `model-gateway.md:1735` and `milestone-map.md:822`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1053,7 +1115,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:977` already depends on an egress
+    come first: `tool-system.md:978` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two
