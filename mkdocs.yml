@@ -114,4 +114,5 @@ nav:
       - ADR-0029 Sandbox isolation and artifacts: adr/0029-sandbox-isolation-and-artifacts.md
       - ADR-0030 Skills and the authoring loop: adr/0030-skills-and-the-authoring-loop.md
       - ADR-0031 The ORM surface and migrations: adr/0031-persistence-authoring.md
+      - ADR-0032 Trajectory export, redaction, and consent: adr/0032-trajectory-export-redaction-and-consent.md
   - Changelog: changelog.md

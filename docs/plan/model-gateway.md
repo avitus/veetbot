@@ -661,8 +661,10 @@ class ModelCapabilities(BaseModel):
     native_tool_calling: bool    # false routes via ADR-0012's parser
     parallel_tool_calls: bool
     images: bool
+    audio: bool = False
     files: bool
     reasoning: ReasoningSupport  # none | native | in_band
+    provider_managed_state: bool
     explicit_cache_control: bool
     structured_output: bool
     streaming: bool = True
@@ -693,7 +695,8 @@ The router is a port with one implementation in 0.1, reading the model
 registry described at `engineering-plan.md:1288-1295`. The registry is
 configuration, not code: a YAML file per provider profile, validated at load,
 hashed the way the policy profile is hashed so that a run records which
-registry it resolved against. Making it a port rather than a module is what
+registry it resolved against. That document's schema, its validation, and the
+format of `registry_version` are below. Making it a port rather than a module is what
 lets Milestone 10's availability-aware routing arrive later without touching
 call sites.
 
@@ -728,9 +731,329 @@ done. Section 10 already made this call; this document only explains it so
 that a future reader does not undo it as an obvious improvement.
 
 A resumed run keeps its pin. `ProviderPin` is persisted on the run rather than
-held in memory, because `event-log-and-persistence.md:315` shows
+held in memory, because `event-log-and-persistence.md:564` shows
 `ProviderContinuation` being lost across a worker restart and a lost pin would
 compound that into a provider switch on resume.
+
+## The provider profile document
+
+`engineering-plan.md:1288` calls a provider profile "a plugin the registry
+loads and the user can override without editing core" and
+`engineering-plan.md:1290-1293` says what it declares: an API mode, aliases
+and capabilities and limits and prices, credential pools, and a
+model-catalog import. ADR-0012 decision 2 requires that a new
+OpenAI-compatible provider be addable without writing code. Neither
+statement gives the declaring document a schema, and "addable without code"
+is not a property anyone can act on until the thing being added has a shape.
+This section is that shape.
+
+### Where a profile lives, and the two files it is not
+
+The routing section above says the registry is a YAML file per provider
+profile. `bootstrap-and-composition.md:295-296` places `models/policies.yaml`
+("model_policies and provider profiles") and `models/catalog.yaml`
+("aliases, limits, context windows, prices") inside the package. Read
+together those describe two layouts, and the difference is not cosmetic: one
+of them makes adding a provider a diff against a file every other provider
+also lives in, which is the thing ADR-0012 decision 2 exists to prevent.
+
+The reconciliation keeps every statement and adds one directory.
+
+```text
+src/agent_core/models/
+  policies.yaml             model_policies, and the enabled list
+  catalog.yaml              shared entries a profile may import
+  providers/openai.yaml     one profile, one file
+  providers/anthropic.yaml
+  providers/ollama.yaml
+```
+
+`policies.yaml` keeps `model_policies` unchanged and satisfies its "and
+provider profiles" half with the list of profile names this deployment
+loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
+the four things `bootstrap-and-composition.md:296` names it for and becomes
+the target of Section 10.5's fourth declaration, the model-catalog import,
+rather than a second place models are defined. A profile either declares a
+model inline or imports a catalog entry for it, never both.
+
+The overlay rules are unchanged. `AGENT_CONFIG_DIR` merges file over file by
+top-level key, so an operator adds a provider by dropping one file into the
+overlay's `models/providers/` and adding its name to `policies.yaml`: two
+files touched, neither of them another provider's.
+
+### A profile, worked
+
+```yaml
+schema_version: 1
+profile: anthropic
+adapter: anthropic
+api: messages
+base_url: https://api.anthropic.com
+credential_ref: ANTHROPIC_API_KEY
+enabled: true
+
+capabilities:
+  native_tool_calling: true
+  parallel_tool_calls: true
+  images: true
+  audio: false
+  files: true
+  reasoning: native
+  provider_managed_state: true
+  explicit_cache_control: true
+  structured_output: true
+  streaming: true
+
+limits:
+  max_cache_breakpoints: 4
+  default_output_reserve: 8192
+  max_tool_count: null
+
+models:
+  - id: claude-sonnet-4-5
+    aliases: [sonnet, default]
+    limits:
+      context_window_tokens: 200000
+      max_output_tokens: 64000
+    pricing:
+      input_per_mtok: "3.00"
+      cached_input_per_mtok: "0.30"
+      cache_write_per_mtok: "3.75"
+      output_per_mtok: "15.00"
+      reasoning_per_mtok: null
+      reasoning_priced_separately: false
+      source: published
+      effective_at: "2026-06-01T00:00:00Z"
+```
+
+An OpenAI-compatible endpoint is the same document with different values and
+no new field except the one Section 10.6 already requires:
+
+```yaml
+schema_version: 1
+profile: ollama
+adapter: chat_completions
+api: chat_completions
+base_url: http://127.0.0.1:11434/v1
+credential_ref: null
+enabled: true
+
+in_band_reasoning:
+  open: "<think>"
+  close: "</think>"
+
+capabilities:
+  native_tool_calling: false
+  reasoning: in_band
+  explicit_cache_control: false
+  provider_managed_state: false
+  parallel_tool_calls: false
+  images: false
+  audio: false
+  files: false
+  structured_output: false
+  streaming: true
+
+limits:
+  max_cache_breakpoints: 0
+  default_output_reserve: 2048
+  max_tool_count: 32
+
+models:
+  - id: qwen3-8b
+    aliases: [local-small]
+    catalog: open-local-8b
+```
+
+`in_band_reasoning` is where decision 6's configurable tag pair lives.
+`catalog: open-local-8b` names an entry in `catalog.yaml` and stands in for
+that model's `limits` and `pricing` blocks. `credential_ref: null` is how a
+profile says it needs no credential, and it is not the same as omitting the
+key, which is rejected.
+
+### What the loader rejects
+
+Loading is total: the process either has a registry or exits non-zero naming
+the file, the field, and the rule. There is no partial registry and no
+profile that loads with a warning, for the reason
+`gate.event.revision_pinned` gives about the schema revision. A process that
+starts on configuration it could not fully parse is a process whose
+telemetry describes something other than what it is running.
+
+```text
+field              rule                                     on failure
+-----------------  ---------------------------------------  ----------
+schema_version     equals 1                                 reject
+profile            [a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?       reject
+profile            equals the file stem                     reject
+profile            unique across the merged registry        reject
+adapter            names a registered adapter class         reject
+api                responses|messages|chat_completions      reject
+api                permitted by that adapter                reject
+base_url           absolute https, or http on a loopback    reject
+credential_ref     present; a name or null, never a value   reject
+capabilities       all ten fields present, none extra       reject
+capabilities       within the adapter's ceiling             reject
+limits             three fields present                     reject
+in_band_reasoning  present iff reasoning is in_band         reject
+models             1 to 200 entries                         reject
+models[].id        non-empty, unique within the profile     reject
+models[].aliases   unique across the merged registry        reject
+models[].catalog   resolves to an entry in catalog.yaml     reject
+models[]           declares pricing or catalog, not both    reject
+pricing amounts    decimal strings, never YAML floats       reject
+effective_at       RFC 3339 with an explicit offset         reject
+any level          an unknown key                           reject
+```
+
+Three of those rows are worth defending.
+
+**Prices are strings.** A YAML float for `0.30` is a binary approximation,
+`ModelPricing` types every amount as `Decimal`, and a registry that loses a
+fraction of a cent per million tokens at parse time makes `model_prices`
+unreconcilable against an invoice for a reason nobody will find. Quoting
+them is the whole fix.
+
+**`credential_ref` is a name, never a value.** The field is validated
+against the shape of an environment variable name, and a value matching any
+family of the secret scanner at `bootstrap-and-composition.md:966-1003` is
+rejected at load with the match not printed. This is the one field where a
+mistake gets committed to a repository, and
+`gate.structure.no_committed_secrets` catches it a second time.
+
+**Unknown keys are rejected at every level.** The opposite choice, ignoring
+what you do not recognize, turns a typo in `parallel_tool_calls` into a
+capability silently false, which produces a deployment that quietly stops
+using parallel tool calls and emits nothing that says why.
+
+### A capability a profile claims and an adapter cannot satisfy
+
+Every adapter class carries a `CAPABILITY_CEILING: ModelCapabilities`
+constant describing what its code can do at all. The `chat_completions`
+adapter's ceiling has `native_tool_calling`, `explicit_cache_control`, and
+`provider_managed_state` false, because it parses tool calls out of text,
+sends no cache breakpoints, and has no continuation slot to put a payload
+in.
+
+A profile may narrow the ceiling and may never widen it. A profile setting
+`explicit_cache_control: true` under an adapter whose ceiling is false fails
+the load, naming both. Intersecting silently was rejected because the
+narrowing would be invisible: the operator who wrote `true` believes prompt
+caching is on, the bill says otherwise a month later, and nothing in between
+emits a line about it. A refused start is loud on the day the mistake is
+made, which is the day it is cheap.
+
+Narrowing is allowed because it is how an operator disables something a
+deployment cannot afford or a vendor contract does not include, and it is
+recorded rather than assumed: `ResolvedModel.capabilities` is the narrowed
+set, and the narrowing is inside the profile hash, so a run's
+`registry_version` resolves to the exact capability set it ran under.
+
+### `registry_version`
+
+`ProviderPin.registry_version` and the `model_calls` column of the same name
+are declared as strings above with no format. The format mirrors
+`policy_version` at `policy-and-approvals.md:468` because it answers the
+same question about a different ruleset.
+
+```text
+{profile_name}@{profile_sha256[:12]}+r{registry_sha256[:8]}
+
+anthropic@8c41f0b2e7d9+r5a3c1e04
+```
+
+`profile_sha256` is over the merged profile document, after overlay and
+before interpolation, which is the point `policy_version` is taken at and
+for the same reason. `registry_sha256` is over the sorted list of every
+enabled profile's hash together with the hash of `policies.yaml`. The left
+half says what this attempt resolved to; the right half says what the router
+was choosing among when it resolved.
+
+Both halves are needed. A pin identified only by its profile cannot tell you
+that a second provider was added between two runs, and that is the change
+most likely to explain why two runs a week apart resolved differently.
+
+### `CapabilitySet` and `ReasoningSupport`
+
+Both are referenced above and neither is declared anywhere in the corpus.
+
+```python
+class ReasoningSupport(str, Enum):
+    NONE = "none"
+    NATIVE = "native"
+    IN_BAND = "in_band"
+
+
+class Capability(str, Enum):
+    NATIVE_TOOL_CALLING = "native_tool_calling"
+    PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    IMAGES = "images"
+    AUDIO = "audio"
+    FILES = "files"
+    REASONING = "reasoning"
+    PROVIDER_MANAGED_STATE = "provider_managed_state"
+    EXPLICIT_CACHE_CONTROL = "explicit_cache_control"
+    STRUCTURED_OUTPUT = "structured_output"
+    STREAMING = "streaming"
+
+
+CapabilitySet = frozenset[Capability]
+```
+
+One member per `ModelCapabilities` field, so `ModelRouter.resolve`'s
+`required` argument is satisfied by projecting the resolved capabilities
+into a set and testing containment, with no field-name string anywhere.
+`Capability.REASONING` is satisfied by `NATIVE` and by `IN_BAND` and not by
+`NONE`: a caller that needs the model to think does not care how the
+thinking arrives, and a caller that needs it structured asks for a model
+policy that guarantees it rather than for a capability.
+
+A resolution that cannot satisfy `required` is the failure table's "Model
+policy unresolvable", a permanent error, and never a downgrade to the
+nearest model that fits. A silent downgrade is the same failure as a silent
+capability intersection, one layer up.
+
+### The two `ModelCapabilities` declarations
+
+`engineering-plan.md:599` declares `ModelCapabilities` with eight fields and
+this document declares it with ten. That is a divergence rather than an
+addition, and this is where it gets reconciled instead of being left for an
+implementer to discover.
+
+```text
+engineering-plan.md:599   here                     what changed
+------------------------  -----------------------  ------------
+tool_calling              native_tool_calling      narrowed
+parallel_tool_calls       parallel_tool_calls      unchanged
+structured_output         structured_output        unchanged
+streaming                 streaming                unchanged
+vision                    images                   renamed
+audio                     audio                    unchanged
+provider_managed_state    provider_managed_state   unchanged
+max_context_tokens        ModelLimits              moved
+--                        files                    added
+--                        reasoning                added
+--                        explicit_cache_control   added
+```
+
+`tool_calling` is the one row that changes a meaning. ADR-0012's XML parser
+makes a model that cannot call tools natively still able to call tools, so
+the plan's single boolean answers two different questions.
+`native_tool_calling` answers the one an adapter branches on. The plan's
+question, whether this model can call tools at all, is
+`native_tool_calling or adapter.parses_in_band_tool_calls`, and nothing is
+lost.
+
+`max_context_tokens` moved to `ModelLimits.context_window_tokens` because
+limits and prices can arrive from a catalog import while capabilities are
+bounded by the adapter's ceiling, and a field subject to both rules has no
+correct home. The three additions are things the gateway branches on that
+the plan had no reason to name before adapters existed.
+
+Where the row for a field and `engineering-plan.md:599` conflict the plan
+wins, per this document's preamble, and the conflict is a defect here. The
+renaming is recorded as an open question rather than fixed by editing a plan
+sentence.
 
 ## Usage, cost, and where the numbers live
 
@@ -839,6 +1162,146 @@ There is no model-call idempotency key because neither first provider offers
 one that would let us reclaim the cost. This is recorded as an accepted cost,
 not an oversight.
 
+## Provider metadata, and why the key set is closed
+
+`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1205` as
+`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1207`:
+it "may include response IDs and cache information, but application logic
+must not rely on provider-specific fields." That is a constraint on readers.
+It says nothing about writers, and an adapter is a writer.
+
+The corpus carries twenty-two `dict[str, Any]` field declarations and
+exactly one of them is bounded: `ProviderReasoningItem.provider_payload`,
+which is safe because the four properties above leave it no consumer.
+`provider_metadata` cannot be made safe that way, because it exists to be
+read. It gets the other treatment, which is a closed set of keys, each with
+a declared type, a declared writer, and a declared destination.
+
+### The seven keys
+
+The dictionary's contents come from a frozen model and are serialized into
+it. The plan's declared type does not change — the field stays
+`dict[str, Any]` on the wire, because that is what Section 10.1 says it is —
+and what goes in comes from exactly one place.
+
+```python
+class ProviderMetadata(BaseModel, frozen=True, extra="forbid"):
+    provider_api: str            # responses|messages|chat_completions
+    response_id: str | None      # the provider's id for this response
+    request_id: str | None       # the vendor's request id, support only
+    resolved_model: str | None   # what the provider says it ran
+    previous_response_id: str | None
+    cache_breakpoints_sent: int = 0
+    cache_breakpoints_dropped: int = 0
+```
+
+`ModelTurn.provider_metadata` is `ProviderMetadata(...).model_dump()` with
+null values dropped, and it is built nowhere else. `extra="forbid"` is what
+makes "closed" a property the type system holds rather than a convention,
+and the gate below is what makes it hold across adapters nobody has written
+yet.
+
+| key | source | why it earns a key |
+| --- | --- | --- |
+| `provider_api` | the profile | one adapter fronts three APIs, and a row that does not say which is a row that cannot be compared |
+| `response_id` | the response body | `engineering-plan.md:1250` requires the OpenAI adapter to capture it |
+| `request_id` | a response header | the only identifier a vendor support ticket can be opened against |
+| `resolved_model` | the response body | an alias resolves to a dated model, and reproducibility needs the dated one |
+| `previous_response_id` | the request | which continuation this attempt resumed, which is the first thing to check when a reasoning chain breaks |
+| `cache_breakpoints_sent` | the adapter | how many hints reached the provider |
+| `cache_breakpoints_dropped` | the adapter | decision 10's drop, recorded where the attempt can be found |
+
+`request_id` is the only header-derived value in the set, and it is copied
+by name rather than by sweeping headers into a dictionary. ADR-0002's sixth
+invariant forbids raw provider headers on any event, which is why this key
+is persisted and never emitted: it reaches the `model_calls` row and a span
+attribute, and never an event payload or an SSE frame. A support ticket is
+written from the database.
+
+### What is not in the set
+
+Three families are excluded, and the exclusion is the design rather than an
+oversight.
+
+Anything header-derived beyond `request_id`, including rate-limit headers.
+An adapter that needs `Retry-After` uses it inside its own three attempts
+and does not report it upward, because a caller cannot act on a number that
+was already stale when the attempt it describes finished.
+
+Anything carrying model or user content. A refusal, a safety
+classification, and a truncated completion are `StopReason` values or
+errors, and both of those are typed. A key holding provider prose is a key
+that puts provider prose on an event, which the sixth invariant forbids and
+which the secret-leak gate would catch only in the case where the prose
+happened to contain a credential.
+
+Anything an adapter would add "just in case". Adding a key is a schema
+change with a migration behind it, deliberately, because the alternative is
+a dictionary that grows into a second schema nobody migrates and nobody can
+remove a field from.
+
+### Where it is persisted, and where it is not
+
+`provider_metadata` is never persisted as a blob. `model_calls` gains six
+scalar columns and the table gains no JSONB.
+
+```text
+model_calls                          -- added to the table above
+  provider_api     TEXT NOT NULL     -- responses|messages|chat_c.
+  response_id      TEXT NULL
+  request_id       TEXT NULL         -- support correlation only
+  resolved_model   TEXT NULL
+  cache_breakpoints_sent    SMALLINT NOT NULL DEFAULT 0
+  cache_breakpoints_dropped SMALLINT NOT NULL DEFAULT 0
+  INDEX (tenant_id, response_id)     -- the support lookup
+```
+
+`previous_response_id` gets no column. On every attempt after the first it
+equals the previous attempt's `response_id` within the same run, which the
+table already holds and which `INDEX (run_id, step_number, attempt_number)`
+already orders. A column would be a denormalization maintained by hand.
+
+There is no JSONB column for the same reason the key set is closed. A JSONB
+column is a place to put keys nobody agreed on, its shape changes without a
+migration, and a query against it cannot be planned. Every key here worth
+keeping is worth a column, and a key not worth a column is a key that should
+not have existed.
+
+### `ModelCallRecord`
+
+`UsageRepository.record_attempt` above takes a `ModelCallRecord` and no
+document declares one. It is the `model_calls` row before it is a row.
+
+```python
+class ModelCallRecord(BaseModel):
+    attempt: ModelAttempt        # attempt_id, run_id, step, number
+    session_id: UUID
+    tenant_id: str
+    resolved: ResolvedModel      # provider, model, policy_name
+    registry_version: str        # from the run's ProviderPin
+    prefix_sha256: str | None
+    usage: ModelUsage | None     # None when the attempt produced none
+    cost: Decimal
+    cost_source: CostSource
+    price_id: str | None
+    stop_reason: StopReason | None
+    error_kind: Literal["transient", "permanent", "protocol"] | None
+    metadata: ProviderMetadata
+    finished_at: datetime | None
+```
+
+`registry_version` comes from the run's pin rather than from
+`ResolvedModel`, because the pin is what a resumed run carries across a
+worker restart and the resolution is what would be recomputed.
+
+Flattening `metadata` into columns happens in the persistence adapter and is
+the first of exactly two places in the system that read `ProviderMetadata`
+at all. The second is the span builder in the telemetry section below.
+Nothing in the runtime, the policy engine, the context engine, or any tool
+reads it, which is what `engineering-plan.md:1207`'s "application logic must
+not rely on provider-specific fields" means once it is a rule a test can
+evaluate.
+
 ## Retries, and who owns them
 
 `engineering-plan.md:1253` puts retries in the adapter.
@@ -871,7 +1334,7 @@ deadline permit another attempt. Each caller-level retry is a new attempt with
 a new `attempt_id` and its own `model_calls` row.
 
 `max_attempts` is 3 and lives in application code, matching
-`event-log-and-persistence.md:423`, which already sets 3 for the worker.
+`event-log-and-persistence.md:672`, which already sets 3 for the worker.
 Section 13 states neither number, so this document states both and notes that
 they are the same number for the same reason rather than by coincidence: three
 attempts is where the marginal recovery rate stops justifying the marginal
@@ -1247,6 +1710,15 @@ Milestone 3 does not pass until every one of these holds.
 9.  The Ollama calculator scenario passes with no network cost. **M3.**
 10. A live one-call smoke test against each vendor passes when
     credentials are present and skips cleanly when they are not. **M3.**
+11. Every key any adapter writes into `provider_metadata` is a declared
+    field of `ProviderMetadata`, and `provider_metadata` is read at
+    exactly two call sites: the persistence adapter's flattening function
+    and the span builder. An adapter that writes an undeclared key fails
+    the check. Registered as `gate.model.metadata_closed`. **M3.**
+12. Every provider profile in the repository loads, and every member of a
+    corpus of intentionally invalid profiles is rejected naming the rule
+    it broke. The corpus carries one member per row of the loader's rule
+    table. Registered as `gate.model.profile_valid`. **M3.**
 
 ## Build order
 
@@ -1265,7 +1737,7 @@ Milestone 3 does not pass until every one of these holds.
 12. The `chat_completions` adapter, the `<think>` scrubber and the XML
     tool-call parser.
 13. Events, spans and metrics.
-14. The ten hard gates as CI checks.
+14. The twelve hard gates as CI checks.
 
 Steps 2 and 5 before step 7 is the whole discipline of this module. Writing
 the contract suite against the fake first is what stops it from being
@@ -1318,6 +1790,24 @@ extra steps.
     attempt using usage that includes them.
 20. The contract suite runs against fake, recorded, OpenAI, Anthropic and
     `chat_completions`, and is written against the fake first.
+21. A provider profile is one YAML document per provider under
+    `models/providers/`. `policies.yaml` keeps model policies and the
+    enabled list, and `catalog.yaml` becomes the import target rather
+    than a second place models are declared.
+22. Every adapter carries a capability ceiling. A profile may narrow it
+    and may never widen it; widening fails the load rather than being
+    intersected away.
+23. `registry_version` is
+    `{profile}@{profile_sha256[:12]}+r{registry_sha256[:8]}`, mirroring
+    `policy_version` so that a pin names both what it resolved to and
+    what the router was choosing among.
+24. `provider_metadata` carries a closed set of seven keys produced by a
+    frozen `ProviderMetadata`. Each persisted key is a column on
+    `model_calls`, the table gains no JSONB, and exactly two call sites
+    read the metadata at all.
+25. `Capability`, `CapabilitySet`, `ReasoningSupport`, and
+    `ModelCallRecord` are declared here; each was referenced by this
+    document or by the plan and defined nowhere.
 
 ## Open questions for review
 
@@ -1339,3 +1829,15 @@ These are decisions taken to keep the plan moving. Each is recorded in
    traces exist.
 5. Should reasoning display be per-session as specified here, or per-tenant
    policy? Per-session is more flexible and slightly more work.
+6. Should `ModelCapabilities.tool_calling` be renamed in the plan itself to
+   `native_tool_calling`, and `vision` to `images`? This document reconciles
+   the two declarations and cannot edit the plan's. The reconciliation table
+   makes the divergence readable; it does not make it go away.
+7. Is one file per provider profile right, given that
+   `bootstrap-and-composition.md:295` describes a single `models/policies.yaml`
+   holding both policies and profiles? One file per profile is what ADR-0012's
+   "without editing core" requires of an overlay, and merging the two back is
+   a compatible change in the other direction.
+8. Should `request_id` be dropped from `model_calls` after a retention
+   window? It is the one column whose only consumer is a vendor support
+   ticket, and those have a shelf life measured in weeks.

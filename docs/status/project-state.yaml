@@ -68,9 +68,13 @@ readiness:
     when docs/plan/http-api-and-streaming.md,
     docs/plan/sandbox-isolation.md, and docs/plan/skills.md were
     written; the review's original findings are retained in the review
-    itself. No subject in the plan now lacks a document.
+    itself. No subject in the plan now lacks a document. Milestone 3's
+    three named gaps closed when model-gateway.md and
+    event-log-and-persistence.md gained the provider-metadata key
+    discipline, the provider-profile schema, and the redacted
+    trajectory export; its verdict is now ready.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-28T00:00:00Z
-last_reviewed_commit: fa42620
+last_updated: 2026-07-28T12:00:00Z
+last_reviewed_commit: 43d7e7f

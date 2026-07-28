@@ -37,9 +37,12 @@ reconciliation.
 and declares thirteen more, in the same form and in a new twelfth
 area. [skills.md](skills.md) was written last and declares sixteen
 more, in a new thirteenth area, and is the first spec to declare
-gates at Milestone 10. The counts throughout this document are the
-corpus as it now stands: one hundred and thirty-seven declared across
-thirteen specs, one hundred and forty-three registry entries.
+gates at Milestone 10. [model-gateway.md](model-gateway.md) and
+[event-log-and-persistence.md](event-log-and-persistence.md) each
+gained two more on a later pass, all four at Milestone 3. The counts
+throughout this document are the corpus as it now stands: one hundred
+and forty-one declared across thirteen specs, one hundred and
+forty-seven registry entries.
 
 ## What this document is responsible for
 
@@ -220,10 +223,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and thirty-seven gates declared across thirteen specs, two
+One hundred and forty-one gates declared across thirteen specs, two
 more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and forty-six declarations, one hundred and
-forty-three registry entries once the three aliases are subtracted.
+over the corpus: one hundred and fifty declarations, one hundred and
+forty-seven registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -351,12 +354,13 @@ which ship at Milestone 1.
 9   gate.builtin.message_table      structural   1
 ```
 
-### Model gateway, ten gates
+### Model gateway, twelve gates
 
-The section already says Milestone 3 for all ten, and the build order's
-fourteen steps carry no tags because all fourteen are Milestone 3. Gate
-10 is the one exception worth naming: it skips when credentials are
-absent, which registry rule 3 forbids at or past a gate's milestone.
+The section already says Milestone 3 for all twelve, and the build
+order's fourteen steps carry no tags because all fourteen of them are
+Milestone 3 as well. Gate 10 is the one exception worth naming: it
+skips when credentials are absent, which registry rule 3 forbids at or
+past a gate's milestone.
 
 ```text
 #   id                              kind         M
@@ -371,6 +375,8 @@ absent, which registry rule 3 forbids at or past a gate's milestone.
 8   gate.model.cost_on_failure      case         3
 9   gate.model.ollama_scenario      case         3
 10  gate.model.live_smoke           case         3
+11  gate.model.metadata_closed      structural   3
+12  gate.model.profile_valid        corpus       3
 ```
 
 Gate 10 is registered with `optional: true`, a field the registry does
@@ -401,10 +407,10 @@ sequenced separately and is not a dependency.
 10  gate.policy.prompt_not_authz    corpus       4
 ```
 
-### Event log and persistence, twelve gates
+### Event log and persistence, fourteen gates
 
-The section says Milestone 2 for eleven of the twelve, and two of them
-need a word.
+The section says Milestone 2 for eleven of the fourteen, and three
+things need a word.
 
 The first is the transaction-hygiene gate, already decided in ADR-0024:
 the *check* is a Milestone 0 deliverable and its *gate* is a Milestone 2
@@ -422,6 +428,13 @@ that produced every other assignment here: a gate lands at the milestone
 that builds the last thing it observes, and what this one observes is
 the graph.
 
+The third is the pair of export gates, 13 and 14, which the spec tags
+**M3.** where they are declared. Milestone 2 builds the projection's
+scaffold and the `export_consent` column the stamp lands in; Milestone
+3 builds the document builder, the redaction pipeline, and the consent
+tables, which is what those two gates observe. The rule is the same
+rule again.
+
 ```text
 #   id                              kind         M
 --  ------------------------------  -----------  --
@@ -437,10 +450,14 @@ the graph.
 10  gate.event.migration_stepwise   case         2
 11  gate.event.revision_pinned      case         2
 12  gate.structure.orm_confined     structural   2
+13  gate.event.export_redacted      case         3
+14  gate.event.export_consent       case         3
 ```
 
-The build sequence's nine steps are Milestone 2, except that the step
-naming trajectory export says *"export itself is Milestone 3"*.
+The build sequence's nine steps are Milestone 2, except that step 8
+keeps only the projection's scaffold and the consent stamp there and
+places the document builder, the redaction pipeline, the consent
+tables, and both export gates at Milestone 3.
 
 ### Context engine, five gates
 
@@ -706,17 +723,19 @@ milestone  new gates  cumulative  the earliest of them
 2                 16          57  persistence, fencing, resume, the
                                   ORM boundary, the migration
                                   round trips
-3                 11          68  five adapters, trajectories
-4                 13          81  policy, approvals, corpora
-5                 11          92  the API surface, the stream,
+3                 15          72  five adapters, the profile schema,
+                                  the closed metadata key set, the
+                                  redacted export
+4                 13          85  policy, approvals, corpora
+5                 11          96  the API surface, the stream,
                                   cancellation keeps effects
-6                 11         103  isolation, egress, artifacts
-7                  6         109  budgeting and compaction
-8                 14         123  the MCP adapter, the pinned
+6                 11         107  isolation, egress, artifacts
+7                  6         113  budgeting and compaction
+8                 14         127  the MCP adapter, the pinned
                                   catalog, the metadata boundary,
                                   package validation
-9                 14         137  formation and retrieval
-10                 6         143  the authoring loop and the
+9                 14         141  formation and retrieval
+10                 6         147  the authoring loop and the
                                   background review
 ```
 
@@ -737,14 +756,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries four — three in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and forty-three gates are green before
+2.  **Forty-one of one hundred and forty-seven gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and forty-three, which is
+The cumulative column reaches one hundred and forty-seven, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise

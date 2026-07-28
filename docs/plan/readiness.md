@@ -75,7 +75,7 @@ rather than smoothed.
 | 0 | Repository and engineering foundation | Ready | 13 | Nothing |
 | 1 | In-memory vertical slice | Ready | 28 | Nothing |
 | 2 | PostgreSQL persistence and durable worker | Ready | 16 | Nothing |
-| 3 | Model adapters and normalized streaming | Ready with named gaps | 11 | Provider response metadata |
+| 3 | Model adapters and normalized streaming | Ready | 15 | Nothing |
 | 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 13 | Four deferred tools; scope vocabulary |
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
@@ -104,7 +104,11 @@ are the reason the mock-server gap this table first named is gone.
 Its six at Milestone 10 are a different case: they are the authoring
 loop's gates, registered against a milestone whose own acceptance
 criteria still do not exist, which is why that row's verdict is
-unchanged.
+unchanged. Milestone 3's eleven became fifteen last, and the same way:
+two from [model-gateway.md](model-gateway.md) and two from
+[event-log-and-persistence.md](event-log-and-persistence.md), each
+pair arriving with the design that closed one of this section's named
+gaps rather than being added to make a count look better.
 
 ## Milestone 0: ready
 
@@ -153,7 +157,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and forty-three gates are green before
+**Forty-one of one hundred and forty-seven gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -236,16 +240,16 @@ exist a milestone before anything writes to it, so this is a question
 of whether the migration ships early or the whole item ships late; it
 does not change what gets built.
 
-## Milestone 3: ready with named gaps
+## Milestone 3: ready
 
-Eleven registry entries. [model-gateway.md](model-gateway.md) is one
+Fifteen registry entries. [model-gateway.md](model-gateway.md) is one
 of the more complete specifications in the corpus: both provider
 adapters, the normalized streaming event set with the exact field
 mappings pinned for Anthropic Messages and OpenAI Responses, retry
 classification, the reasoning-state handling ADR-0007 requires, and
 the usage and cost model.
 
-Three items fall short, one of them completely.
+Three items fell short, one of them completely.
 
 1.  **Provider response metadata is designed nowhere.**
     `provider_metadata` appears exactly once in the entire corpus, as
@@ -265,8 +269,40 @@ Three items fall short, one of them completely.
     adapter cannot satisfy.
 3.  **Minimal redacted trajectory export has no design.** See
     [Section 31](#31-trajectory-capture-and-export) below; this is the
-    consumption half of a section whose production half is fully
+    production half of a section whose consumption half is fully
     specified.
+
+### What closed it
+
+All three, in documents that already owned the subject.
+
+Item 1 is closed by [model-gateway.md](model-gateway.md), which makes
+`provider_metadata` a closed set: a declared field list, a persisted
+column on `model_calls`, and exactly two readers. The discipline is
+the point, not the field — an open dictionary is where
+provider-specific data accumulates until something depends on it, and
+a closed one cannot. It registers `gate.model.metadata_closed`.
+
+Item 2 is closed in the same document, which gives the provider
+profile a document schema, a required set, a rule table the loader
+enforces, and a stated answer for a profile that claims a capability
+its adapter does not have. Its gate,
+`gate.model.profile_valid`, is a corpus gate rather than a case,
+because one invalid profile proves only the rule it violates and the
+rule table has a row for each.
+
+Item 3 is closed by
+[event-log-and-persistence.md](event-log-and-persistence.md) and
+[ADR-0032](../adr/0032-trajectory-export-redaction-and-consent.md),
+which choose the format, make the export an artifact rather than a
+table, specify redaction as three stages that fail closed, and design
+the consent record the corpus had asserted four times and never
+defined. It is covered below under Section 31, and it registers
+`gate.event.export_redacted` and `gate.event.export_consent`.
+
+Four gates for three gaps, all at Milestone 3, which is the same
+correlation the verdict table reports: a milestone acquires gates when
+somebody writes down what it must be true of. The verdict is ready.
 
 ## Milestone 4: ready with named gaps
 
@@ -725,14 +761,41 @@ consumption path: the conversion from a captured run to a case, the
 `source: trajectory` marking that keeps promoted cases distinguishable
 from authored ones, the `agent eval promote` command, and a hard gate.
 
-The production path has nothing. The export format the section names
-as an example — ShareGPT or messages — is not chosen. The redaction
+The production path had nothing. The export format the section names
+as an example — ShareGPT or messages — was not chosen. The redaction
 rules that make the acceptance criterion *"no secrets, raw reasoning,
-or restricted PII"* checkable do not exist, and neither does the
+or restricted PII"* checkable did not exist, and neither did the
 consent gate that criterion also requires. Redaction of raw reasoning
 in particular interacts with ADR-0006 and ADR-0007, which forbid
-persisting it in the first place, so the two documents need to be read
-together by whoever writes this.
+persisting it in the first place, so the two documents needed to be
+read together by whoever wrote this.
+
+[event-log-and-persistence.md](event-log-and-persistence.md) and
+ADR-0032 close it, in the document that already owns the log the
+export reads and the `gate.event.*` area, rather than in a fourteenth
+specification. The format is one versioned JSON document in the
+`messages` shape, with ShareGPT left to a consumer as the rename of a
+role vocabulary that it is. The export is written into the artifact
+store under a new `TRAJECTORY_EXPORT` origin, which supplies content
+addressing, an authorized read path, and the `expires_at` sweeper a
+governed export needs and a new table would have had to grow.
+Redaction is structural exclusion, then pattern replacement reusing
+the committed-secret scanner's five rule families and the log
+processor's key-name families, then a verification scan that raises
+and writes nothing rather than redacting a second time. The
+ADR-0006 interaction resolves in the simplest available direction:
+reasoning is never persisted, so the builder has nothing to redact
+and the exclusion is structural. Consent becomes a record — granted
+per principal, evaluated at run start and stamped on the run,
+withdrawn backward across every run and every artifact already
+produced, with the deletion routed through `expires_at` and the
+sweeper so the rarest governance operation runs on the most exercised
+code. `agent run export` is a subcommand rather than a thirteenth
+top-level command, on the precedent
+[evaluation-harness.md](evaluation-harness.md) set with `agent eval`.
+
+That leaves one. Section 29's `Device` model is the only part of
+Sections 29 through 31 that no specification now expands.
 
 ## What the evaluation suite does not reach
 
@@ -804,7 +867,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md` is corrected.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1263` and `milestone-map.md:767`. The map
+    `model-gateway.md:1735` and `milestone-map.md:786`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

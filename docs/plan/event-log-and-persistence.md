@@ -284,6 +284,255 @@ correct — they are different derivations — but it means a rule change is a
 migration with a cost, and superseding the old derivations is part of shipping
 it, not an afterthought.
 
+## The trajectory export
+
+Section 31 adds a projection that turns finished runs into evaluation
+fixtures and training data, and ADR-0016 records the decision. Between them
+they fix four acceptance criteria and one exclusion list. Neither states a
+format, a redaction procedure, or what "consent-gated" means mechanically,
+and [evaluation-harness.md](evaluation-harness.md) has already built the
+consuming half against the assumption that this half is redacted before a
+converter ever sees it (`evaluation-harness.md:1310`). This is the
+producing half, and it is the third projection in the table above.
+
+### The export is an artifact, not a query
+
+The projection maintains, per finished run, only what is cheap to maintain
+incrementally: the contributing sequence range, the `builder_version` that
+would produce the document, and whether the run has reached a terminal
+status. The document itself is materialized once, on demand, into the
+artifact store, and every later reader reads the artifact.
+
+Materializing into the artifact store rather than into a table is the whole
+of the decision, and it is made for four properties the store already has
+and a table would have to grow: content addressing by SHA-256, a key
+derived from platform-generated values rather than composed from caller
+input (`sandbox-isolation.md:1042`), an authorized read path that ADR-0028
+already puts in front of both metadata and bytes, and `expires_at` with a
+sweeper behind it. Every one of those is load-bearing for a governed
+export. A second bytes-holding mechanism inside PostgreSQL would be a worse
+version of a thing that already exists, and it would be the version whose
+deletion path nobody tested.
+
+`ArtifactOrigin` gains `TRAJECTORY_EXPORT` for this
+(`sandbox-isolation.md:999`). The origin matters because it is the one
+whose contents are a function of an entire run rather than of a single act
+inside it, and an operator reviewing what a run produced should not have to
+infer that from a filename.
+
+Its trust label is the floor of the run. `trust` is inherited and never
+assigned by the producer, and an export flattens platform, user, and
+external-untrusted content into one document, so the label the document
+carries is the lowest label any contributing span carried. For any run that
+called a tool that is `EXTERNAL_UNTRUSTED`, which is the correct and
+slightly uncomfortable answer: an export is a file of recorded text, some
+of it written by a system nobody here controls, and anything that reads one
+back into a context window must treat it that way.
+
+### The format
+
+One JSON document, versioned, with the conversation in the shape the
+normalized protocol already uses. ADR-0016 says "ShareGPT / messages" and
+this picks `messages`, because the internal protocol is already
+messages-shaped and ShareGPT is then a rename of the role vocabulary — a
+consumer's transformation, not a producer's obligation.
+
+```text
+{
+  "schema_version": 1,
+  "export_id":      "<uuid7>",
+  "run_id":         "<uuid>",
+  "tenant_id":      "<uuid>",
+  "agent_id":       "research-assistant",
+  "agent_version":  4,
+  "outcome":        "SUCCEEDED" | "FAILED" | "CANCELLED",
+  "failure":        {"kind": "...", "at_step": 7} | null,
+  "recorded_on":    "2026-07-28",
+  "builder_version": "trajectory@3",
+  "redaction": {
+    "ruleset_version": "...",
+    "replacements":    {"provider_key": 1, "dsn_password": 2}
+  },
+  "messages": [ ... ],
+  "tools":    [ {"name": "...", "schema_sha256": "..."} ]
+}
+```
+
+`outcome` is what makes Section 31.3's fourth criterion — failed runs
+captured and labeled distinctly — true by construction rather than by
+convention, and `failure` carries the classification without carrying the
+error text, which is the field most likely to have a path, a host, or a
+query string in it.
+
+`recorded_on` is a date, not a timestamp, and there are no per-message
+timestamps at all. Per-message timing is the highest-entropy correlatable
+field an export could carry, no stated consumer needs it — the harness
+discards timestamps at conversion (`evaluation-harness.md:1287`) and a
+training corpus has no use for them — and a field that is dropped by every
+consumer and re-identifies a user is a field that should not have been
+written. `tools` records the name and schema hash of every tool the run
+touched, which is what lets a converter tell a missing fixture from a tool
+that has since changed shape.
+
+### What is left out, and why each
+
+| Left out | Because |
+| --- | --- |
+| Reasoning, raw or summarized | ADR-0006; never stored, so never exported |
+| Usage, cost, and prices | Not a property of the trajectory; commercially sensitive per tenant |
+| Per-message timestamps | Correlatable, and dropped by every consumer |
+| Internal identifiers | Event ids, sequences, checkpoint ids; a converter seeds its own |
+| Provider metadata | `request_id` and friends are support correlation, not conversation |
+| Checkpoints and queue events | Execution mechanics, not the trajectory |
+| Artifact bytes | The export carries an `ArtifactRef`, never the content |
+
+The reasoning row deserves a sentence because it is the one that looks like
+an omission and is not. ADR-0006 rejected persisting reasoning with
+redaction applied, on the grounds that reasoning paraphrases its input and
+redaction is pattern-based. That reasoning applies to the export with more
+force, not less: an export is the artifact most likely to leave the system,
+and a paraphrase is exactly what a pattern cannot catch.
+
+### Redaction is a pipeline that ends in a refusal
+
+Three stages, in order, and the third is the one that makes the first two
+trustworthy.
+
+1. **Structural exclusion.** Everything in the table above is dropped by
+   the builder, by construction. No pattern is involved and none could
+   help; these fields are excluded because of what they are, not because
+   of what they contain.
+2. **Pattern replacement.** The secret scanner's five rule families
+   (`bootstrap-and-composition.md:982-987`) run over every message body,
+   every tool argument, and every tool result, and a match is replaced with
+   `[redacted:<rule_name>]`. The key-name families the log-redaction
+   processor already uses (`development-toolchain.md:153-155`) run over
+   structured tool arguments and results, where a value's key is better
+   evidence than the value's shape. A tenant may add patterns; it may not
+   remove one.
+3. **Verification.** The scanner runs again, over the finished document.
+   A hit here fails the export.
+
+The third stage is not belt-and-braces, it is the contract. Redaction that
+reports success is a claim, and a claim with no check behind it decays the
+first time a message body acquires a shape stage two does not cover. So the
+export **fails closed**: a verification hit raises `ExportRedactionError`,
+writes no artifact, and reports the rule name and the message index. It
+never reports the match, for the reason the scanner already gives — a
+report that echoes the secret has moved the secret somewhere worse
+(`bootstrap-and-composition.md:992`).
+
+Failing rather than repairing is deliberate. A verification hit means stage
+two has a gap, and silently redacting the same string a second time hides
+the gap while shipping the artifact. The failure is a defect report with a
+run attached.
+
+Two things this pipeline cannot do, stated here rather than discovered
+later. It cannot recognize content that is sensitive because of who it is
+about: a user describing a third party in prose produces no pattern, and no
+version of this will. And it cannot recognize a secret with no shape — a
+password that looks like a word is a word. Policy-restricted PII is
+therefore a per-tenant declared pattern set that rides in stage two, not a
+classifier, and the residual is a limit of the mechanism that belongs in
+whatever a tenant is told before consent is asked for.
+
+### Consent is stamped forward and withdrawn backward
+
+Section 31.3 requires that export honor tenant scope and per-principal
+consent. No mechanism for either exists anywhere in the corpus, so this is
+it.
+
+Two conditions, both required. The tenant must have export enabled, which
+is operator configuration and covers the deployment that wants none of
+this. The principal on the run's session must have granted export consent,
+which is a stored grant with a scope and two timestamps. Neither implies
+the other: a tenant enabling export does not consent on its users' behalf,
+and a principal's grant does nothing in a tenant where export is off.
+
+The grant is evaluated **when the run starts**, and its answer is stamped
+onto the run as `export_consent`. Export reads the stamp. Withdrawal is
+evaluated **at export time and again by the sweeper**, over every run the
+principal ever produced.
+
+That asymmetry is the design, and it reduces to one sentence: a grant is a
+statement about data the principal has not produced yet, and a withdrawal
+is a statement about data they have. So a grant is prospective — it does
+not reach back and authorize conversations the principal had before they
+were asked, and cannot, because nobody consents meaningfully to the
+contents of a conversation they have forgotten. A withdrawal is total. It
+blocks export of every run, stamped or not, and it expires every export
+artifact already produced from that principal's runs by setting
+`expires_at` to now, after which the artifact sweeper deletes them on its
+next pass.
+
+Reusing `expires_at` rather than writing a deletion path is the point.
+Withdrawal is rare, deletion-on-withdrawal is the operation most likely to
+be written once and never exercised, and routing it through the sweeper
+that already runs every day means the withdrawal path is tested by every
+ordinary expiry.
+
+A subagent run inherits its parent's stamp at creation, and **an export
+never descends into child runs.** Each run is exported separately or not at
+all. The alternative — a parent export that inlines its children — makes
+the redaction surface recursive, makes the consent question ambiguous when
+a child ran under a different principal, and produces a document whose size
+is unbounded in a system that otherwise bounds everything.
+
+What consent does not solve: an export of a principal's run contains
+whatever other people said inside it, by way of tool results and quoted
+content. The pipeline redacts what has a shape and the export is
+tenant-scoped, and beyond that this is a governance boundary rather than an
+engineering one, named here so that nobody reads "consent-gated" as
+"complete".
+
+### Retention, and why promotion is the durable step
+
+An export expires like any other artifact — thirty days by default, per the
+artifact retention this corpus already sets (`sandbox-isolation.md:1106`).
+It is not special-cased to live longer, and the reason is that the two
+things Section 31.2 wants exports for do not actually want a long-lived
+export.
+
+An eval fixture wants a case, and `agent eval promote` already produces
+one: a converted case is marked `source: trajectory`, carries the export
+id, and does not enter the blocking suite until a person has read it and
+written its assertions. That reviewed case lives in source control under
+review, which is where a durable artifact belongs. A training corpus wants
+a corpus, assembled deliberately, with its own governance and its own
+retention, and it is a consumer of exports rather than a pile of them.
+
+So promotion is the durable step and the export is the perishable one.
+That is the property that keeps the governance question small: at any
+moment the set of undeleted exports is roughly the last thirty days of
+deliberate export commands, not the entire history of the platform.
+
+### The commands and the endpoint
+
+```text
+agent run export <run-id>          write the redacted export
+agent run export <run-id> --json   the ArtifactRef on stdout
+```
+
+`export` becomes the fourth reserved word after `agent run`
+(`bootstrap-and-composition.md:855`), which is cheaper than a thirteenth
+top-level command and follows the precedent `agent eval`'s four
+subcommands already set. It reuses the existing exit codes without
+addition: a refused consent check exits 1, an unknown run exits 2, an
+`ExportRedactionError` exits 1 with the rule name on stderr.
+
+`POST /v1/runs/{run_id}/export` is the same application service, returns
+the `ArtifactRef`, and is idempotent per run — a second call against a run
+whose export exists and has not expired returns the existing reference
+rather than rebuilding, because rebuilding under a changed
+`builder_version` would silently hand a caller a different document under
+the same run id.
+
+`agent eval promote <run-id>` requires an export to exist and fails naming
+this command when none does. That is the mechanical form of "the converter
+consumes the redacted artifact and has no access to the raw log": the
+converter cannot trigger production, so there is exactly one path through
+which conversation content becomes a file, and exactly one place to audit.
+
 ## Checkpoints
 
 Section 6.9 already identifies the problem: a checkpoint is written after every
@@ -470,6 +719,7 @@ runs
   + attempts        SMALLINT     NOT NULL DEFAULT 0
   + scheduled_for   TIMESTAMPTZ  NULL
   + lease_epoch     INTEGER      NOT NULL DEFAULT 0
+  + export_consent  BOOLEAN      NOT NULL DEFAULT FALSE  -- at run start
   + INDEX (status, priority, created_at) WHERE status = 'QUEUED'
   + UNIQUE INDEX (session_id) WHERE status NOT IN
       ('COMPLETED','FAILED','CANCELLED')    -- 27.5 single active run
@@ -495,7 +745,33 @@ derived_event_keys
   derivation_key  TEXT PRIMARY KEY         -- source ids + rule + version
   event_id        BIGINT NOT NULL
   created_at      TIMESTAMPTZ NOT NULL
+
+export_consent                             -- Section 31.3, per principal
+  tenant_id       UUID NOT NULL
+  principal_id    UUID NOT NULL
+  granted_at      TIMESTAMPTZ NOT NULL
+  withdrawn_at    TIMESTAMPTZ NULL
+  PRIMARY KEY (tenant_id, principal_id)
+
+trajectory_exports                         -- one row per exported run
+  export_id       UUID PRIMARY KEY
+  tenant_id       UUID NOT NULL
+  principal_id    UUID NOT NULL            -- denormalized from session
+  run_id          UUID NOT NULL
+  artifact_id     UUID NOT NULL
+  builder_version TEXT NOT NULL
+  ruleset_version TEXT NOT NULL
+  created_at      TIMESTAMPTZ NOT NULL
+  UNIQUE (run_id)                          -- the endpoint's idempotency
+  INDEX (tenant_id, principal_id)          -- the withdrawal sweep
 ```
+
+`trajectory_exports` carries `principal_id` even though it is reachable
+through `run_id` and `session_id`, because consent withdrawal is a sweep
+over one principal's exports and a two-join sweep on the rarest write path
+is how a governance operation acquires a query plan nobody has looked at.
+The `UNIQUE (run_id)` constraint is what makes the export endpoint
+idempotent per run at the schema rather than at the service.
 
 `idempotency_keys` stores `request_hash` so that a repeated `Idempotency-Key`
 carrying a *different* body is a `ConflictError` rather than a silent return of
@@ -939,14 +1215,19 @@ a test of the only adapter that can satisfy it.
 | Head-of-line blocking | A long async run occupies the workers a user is waiting on | Priority classes with capacity reserved per class |
 | Non-idempotent double write | A tool left `RUNNING` by a crash is retried | Idempotency class decides; ambiguous cases become `UNCERTAIN` and stop |
 | Watermark/state divergence | Projection state committed separately from its cursor | Both written in one transaction |
+| Export leaks a secret | A message body carries a shape the replacement stage does not cover | A verification scan over the finished document; a hit fails the export and writes nothing |
+| Consent granted retroactively | A grant read at export time covers runs recorded before anyone asked | Consent is stamped on the run at start; export reads the stamp, never the table |
+| Withdrawal leaves exports behind | Deletion-on-withdrawal is a bespoke path exercised once a year | Withdrawal sets `expires_at` to now and the daily artifact sweeper does the deleting |
 
 ## Hard gates
 
-Milestone 2 does not pass until every one of these holds. One exception is
-noted where it occurs: the migration-graph walk registers at Milestone 0,
-because the empty migration Milestone 0 already requires is a graph, and a
-walk that only starts once there are twelve revisions is a walk that has
-already missed the branch it exists to prevent.
+Milestone 2 does not pass until every one of these holds, with three
+exceptions, each noted where it occurs. The migration-graph walk registers
+at Milestone 0, because the empty migration Milestone 0 already requires is
+a graph, and a walk that only starts once there are twelve revisions is a
+walk that has already missed the branch it exists to prevent. The two
+export gates register at Milestone 3, because Milestone 2 builds the
+projection's scaffold and Milestone 3 builds the export itself.
 
 1. **Sequence integrity.** A fuzz test appending concurrently across sessions,
    with injected rollbacks, produces no duplicate `(session_id, sequence)` and no
@@ -997,6 +1278,21 @@ already missed the branch it exists to prevent.
     `sqlalchemy_models.py` appears in a signature outside that package. This
     is dependency rule 7 in the form a static check can evaluate. Registered
     as `gate.structure.orm_confined`. **M2.**
+13. **The export is redacted, and refuses when it is not.** A run seeded
+    with one instance of each of the scanner's five rule families, plus a
+    tenant-declared pattern, exports with every one replaced by its
+    placeholder and a clean verification scan over the finished document.
+    A second case disables the replacement stage and asserts that the
+    export raises `ExportRedactionError`, writes no artifact, and names
+    the rule that fired without printing what it matched. Registered as
+    `gate.event.export_redacted`. **M3.**
+14. **Consent is stamped forward and withdrawn backward.** Four states —
+    tenant disabled, principal never granted, granted then withdrawn, both
+    present — produce three refusals and one export. The withdrawal case
+    additionally asserts that an export produced before the withdrawal has
+    `expires_at` in the past and is gone after one sweeper pass, and that
+    a grant made after a run does not make that run exportable. Registered
+    as `gate.event.export_consent`. **M3.**
 
 ## Tracked metrics
 
@@ -1028,8 +1324,12 @@ checkpoint bytes per run, and rebuild duration per projection.
    it makes cross-run continuity real and is the first consumer to exercise
    watermarks.
 7. **Recovery.** Tool-invocation-driven resume, idempotency classes, `UNCERTAIN`.
-8. **Trajectory-export projection scaffold.** Structure and watermark only; the
-   export itself is Milestone 3.
+8. **Trajectory-export projection scaffold.** Structure, watermark, and the
+   `export_consent` stamp on `runs`, which costs nothing at Milestone 2 and
+   is a replay-breaking retrofit afterwards, because a run that started
+   before the column existed has no honest value to backfill. The document
+   builder, the redaction pipeline, the consent tables, and both export
+   gates are Milestone 3.
 9. **Rebuild.** Rebuild-from-zero for every projection, wired into CI as a gate
    rather than as a script.
 
@@ -1103,10 +1403,34 @@ checkpoint bytes per run, and rebuild duration per projection.
 25. **Test schema is created by running the migrations**, never by
     `metadata.create_all`, or Section 24's two migration criteria become
     statements nothing evaluates.
+26. **A trajectory export is an artifact, not a table**, so it inherits
+    content addressing, a derived key, an authorized read path, and
+    `expires_at` with a sweeper behind it, rather than growing a second
+    and less tested version of each inside PostgreSQL.
+27. **The export carries no per-message timestamps** and a date rather
+    than a timestamp at the top, because timing is the most correlatable
+    thing an export could carry and no stated consumer keeps it.
+28. **Redaction fails closed.** A verification scan runs over the finished
+    document, and a hit raises rather than redacting a second time,
+    because a second pass hides the gap in the first and ships the
+    artifact anyway.
+29. **Consent is stamped forward and withdrawn backward.** The grant is
+    evaluated at run start and stamped on the run; a withdrawal blocks
+    every run, stamped or not, and expires every artifact already
+    produced.
+30. **Withdrawal deletes through `expires_at` and the existing sweeper**,
+    never through a bespoke deletion path, so the rarest governance
+    operation runs on the most exercised code in the system.
+31. **An export never descends into child runs.** Each run exports
+    separately, which keeps the redaction surface flat, keeps the consent
+    question single-principal, and keeps the document bounded.
+32. **Promotion is the durable step and the export is perishable**, so the
+    undeleted set is a thirty-day window rather than a history of every
+    conversation the platform has held.
 
 ## Open questions
 
-None blocking Milestone 2. Two recorded for Andy's review, with the interim
+None blocking Milestone 2. Four recorded for Andy's review, with the interim
 decision noted in
 [questions for review](../status/questions-for-review.md):
 
@@ -1117,3 +1441,15 @@ decision noted in
 - Whether the trajectory-export projection belongs in Milestone 2 or Milestone 3.
   Section 21's Implement list says Milestone 2; Section 21.1's sequencing table
   says Milestone 3. The interim split is scaffold in 2, export in 3.
+- Whether export consent is one grant or two, split between evaluation
+  fixtures and training data, which Section 31.2 lists as different uses
+  with plausibly different answers. The interim position is one grant,
+  because Section 31.3 says consent in the singular and a scope vocabulary
+  invented here would collide with the principal scopes Milestone 4 owns.
+- Whether an export should be rebuildable under a new `builder_version`
+  while the previous artifact still exists. The interim position is no: a
+  second call returns the existing reference, because a changed builder
+  would otherwise hand a caller a materially different document under the
+  same run id and nothing in the document says which builder made it —
+  except `builder_version`, which is exactly the field a caller who has
+  already stored the first one will not re-read.

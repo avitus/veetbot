@@ -40,3 +40,4 @@ implementation without one.
 - [ADR-0029 — Isolated execution, the egress boundary, and the artifact store](0029-sandbox-isolation-and-artifacts.md)
 - [ADR-0030 — The skill package, the pinned catalog, and the authoring loop](0030-skills-and-the-authoring-loop.md)
 - [ADR-0031 — The ORM surface and the migration conventions](0031-persistence-authoring.md)
+- [ADR-0032 — Trajectory export, redaction, and consent](0032-trajectory-export-redaction-and-consent.md)

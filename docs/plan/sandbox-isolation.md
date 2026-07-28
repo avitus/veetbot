@@ -575,7 +575,7 @@ class ArtifactWriter(Protocol):
         stream: AsyncIterator[bytes],
         filename: str,
         media_type: str,
-        trust: TrustLabel,
+        trust: TrustLevel,
     ) -> ArtifactRef:
         ...
 ```
@@ -991,7 +991,7 @@ class ArtifactMetadata:
     media_type: str
     size_bytes: int
     sha256: str
-    trust: TrustLabel
+    trust: TrustLevel
     created_at: datetime
     expires_at: datetime | None
 
@@ -1001,6 +1001,7 @@ class ArtifactOrigin(StrEnum):
     TOOL_OUTPUT = "TOOL_OUTPUT"
     MODEL_OUTPUT = "MODEL_OUTPUT"
     UPLOAD = "UPLOAD"
+    TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
 
 
 @dataclass(frozen=True)
@@ -1018,11 +1019,15 @@ random identifier and three facts about bytes. `ArtifactMetadata` is
 what the store holds and what `GET /v1/artifacts/{id}` reads after
 authorization, which ADR-0028 already specifies.
 
-`origin` exists because the four sources have different review
+`origin` exists because the five sources have different review
 properties and an operator asking "what did this run produce" wants
 them separated. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
-`artifact.export`; `UPLOAD` is a client-supplied file.
+`artifact.export`; `UPLOAD` is a client-supplied file;
+`TRAJECTORY_EXPORT` is the redacted, consent-gated run export
+[event-log-and-persistence.md](event-log-and-persistence.md) owns,
+and it is the one origin whose contents are a function of the whole
+run rather than of a single act inside it.
 
 `trust` is inherited, never assigned by the producer. An artifact
 written from a sandbox is `EXTERNAL_UNTRUSTED` because Section 28.5

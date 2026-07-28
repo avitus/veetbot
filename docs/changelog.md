@@ -4,6 +4,72 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Milestone 3's three gaps are closed
+
+- Closed the readiness review's three Milestone 3 gaps, each in a
+  document that already owned the subject rather than in a fourteenth
+  specification. Recorded as
+  [ADR-0032](adr/0032-trajectory-export-redaction-and-consent.md).
+- Made `provider_metadata` a closed set in
+  [model-gateway.md](plan/model-gateway.md): a declared field list, a
+  persisted column on `model_calls`, and exactly two readers — the
+  persistence adapter's flattening function and the span builder. An
+  adapter writing an undeclared key fails
+  `gate.model.metadata_closed`.
+- Gave the declarative provider profile a document schema in the same
+  specification: fields, required set, a rule table the loader
+  enforces, and a stated answer for a profile claiming a capability
+  its adapter does not have. `gate.model.profile_valid` is a corpus
+  gate, because one invalid profile proves only the rule it broke and
+  the rule table has a row for each.
+- Specified the trajectory export in
+  [event-log-and-persistence.md](plan/event-log-and-persistence.md),
+  which had the log, the projections, the schema, and the
+  `gate.event.*` area already. One versioned JSON document in the
+  `messages` shape, written to the artifact store under a new
+  `TRAJECTORY_EXPORT` origin, with the seven excluded field families
+  tabulated and a reason for each.
+- Made redaction three stages that fail closed: structural exclusion,
+  pattern replacement reusing the committed-secret scanner's five
+  rule families and the log processor's key-name families, then a
+  verification scan that raises, writes no artifact, and names the
+  rule without printing the match. It does not redact a second time,
+  because a second pass hides the gap in the first and ships the
+  artifact anyway.
+- Designed the consent record the corpus had asserted four times and
+  never defined. A grant is evaluated at run start and stamped on the
+  run; a withdrawal reaches every run and expires every artifact
+  already produced, through `expires_at` and the sweeper that already
+  runs. Two gates, `gate.event.export_redacted` and
+  `gate.event.export_consent`, both Milestone 3.
+- Made `export` a fourth reserved word after `agent run` rather than
+  a thirteenth top-level command, on the precedent
+  [evaluation-harness.md](plan/evaluation-harness.md) set with four
+  `agent eval` subcommands. The CLI still has twelve commands, and
+  [bootstrap-and-composition.md](plan/bootstrap-and-composition.md)'s
+  heading now names the rule instead of the count.
+- Fixed two defects found in passing.
+  [sandbox-isolation.md](plan/sandbox-isolation.md) used an
+  undeclared `TrustLabel` at two sites where the declared type is
+  `TrustLevel`, and `ArtifactOrigin` had no member for an export;
+  `TRAJECTORY_EXPORT` is the fifth origin and the only one whose
+  contents are a function of a whole run.
+- Re-derived the census rather than editing it. Four new gates, all
+  Milestone 3: one hundred and forty-one declared across thirteen
+  specs, one hundred and fifty declarations, one hundred and
+  forty-seven registry entries. Kinds move to seventy-nine case,
+  seventeen property, eight corpus, forty-three structural. Milestone
+  3's row moves from eleven to fifteen and every cumulative below it
+  by four. Nine live arithmetic locations updated across
+  [milestone-map.md](plan/milestone-map.md),
+  [evaluation-harness.md](plan/evaluation-harness.md),
+  [readiness.md](plan/readiness.md), and
+  [engineering-plan.md](plan/engineering-plan.md).
+- Moved Milestone 3's verdict from *"ready with named gaps"* to
+  *"ready"*, and corrected an inversion the review carried: the
+  export is the production half of Section 31 and the harness's
+  conversion is the consumption half, not the other way round.
+
 ## 2026-07-28 — Every cited line is now a checked citation
 
 - Converted thirty-five line references that the citation checker

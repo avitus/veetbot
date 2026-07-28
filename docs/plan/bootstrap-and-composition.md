@@ -852,17 +852,27 @@ math.calculate`, and so on — and those six lines are stderr. The final
 assistant message is stdout. `agent run "..." > answer.txt` then does the
 obvious thing.
 
-### Three reserved words
+### Reserved words after `agent run`
 
 `agent run "Calculate 12 times 9"` and `agent run get <run-id>` are the same
 command with different first arguments, which is a genuine ambiguity in the
-spelling the plan chose. It is resolved by reserving three words: `get`,
+spelling the plan chose. It is resolved by reserving words: `get`,
 `events`, and `cancel` are subcommands of `run`, and any other first argument
 is a prompt.
 
 The residual collision — a prompt that is exactly the word `get` — is
 accepted rather than designed away, because the alternative is renaming a
 command the plan fixed. `agent run -- get` passes the literal string.
+
+The set is open to a subject spec that needs one, on the same terms
+[evaluation-harness.md](evaluation-harness.md) already uses when it adds
+four subcommands under `agent eval` without changing the twelve: a
+subcommand under an existing command is not a new command.
+[event-log-and-persistence.md](event-log-and-persistence.md) adds `export`
+on that basis, making the reserved set four words. A spec adding one pays
+exactly two costs — a line here and one more prompt that needs `--` — and
+both are cheaper than a thirteenth top-level noun, because the twelve is a
+number Section 17 states and this document's own heading repeats.
 
 ### Options
 
@@ -1110,10 +1120,11 @@ the plan's text stands with an annotation rather than a replacement.
 15. **CLI results go to stdout and progress goes to stderr**, so the
     Milestone 1 demonstration's six flow lines and its final answer are
     separable without a flag.
-16. **`get`, `events`, and `cancel` are reserved words after `agent run`.**
-    The residual collision with a prompt that is exactly one of them is
-    accepted, with `--` as the escape, rather than renaming a command the
-    plan fixed.
+16. **`get`, `events`, `cancel`, and `export` are reserved words after
+    `agent run`.** The residual collision with a prompt that is exactly one
+    of them is accepted, with `--` as the escape, rather than renaming a
+    command the plan fixed. The set is open to a subject spec that needs a
+    subcommand, which is not the same thing as a new command.
 17. **The secret scanner never prints what it matched**, requires prose on
     every allowlist entry, and scans `.env.example` rather than exempting
     it.

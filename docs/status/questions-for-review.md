@@ -3606,3 +3606,110 @@ neutral to yes.
 
 **Reversal cost:** low now, higher after Milestone 0 ships a Makefile
 without it.
+
+## The Milestone 3 gaps (ADR-0032)
+
+The readiness review named three gaps at Milestone 3. Closing all
+three was one pass, and it made four judgment calls that are cheaper
+to reverse now than after Milestone 3 ships.
+
+### The trajectory export goes in the persistence spec, not a fourteenth one
+
+**Decided:** the export's format, redaction pipeline, consent model,
+retention, CLI, and endpoint are all specified inside
+`docs/plan/event-log-and-persistence.md`, in a new section between
+Projections and Checkpoints.
+
+**Why:** the export is a projection over the event log, and that
+document already owns the log, the projections, the schema, and the
+`gate.event.*` area. A fourteenth specification would have owned one
+feature and borrowed all four.
+
+**Cost:** the document is now the longest in the corpus.
+
+**Alternative:** a `trajectory-export.md`. Rejected for a second
+reason as well — "thirteen specs" is a number nine other documents
+state, and a fourteenth would have rippled through all of them for a
+feature that fits in an existing one.
+
+**Reversal cost:** moderate. Splitting later is a move plus the
+ripple that was avoided.
+
+### `agent run export` is a subcommand, not a thirteenth command
+
+**Decided:** `export` joins `get`, `events`, and `cancel` as a
+reserved word after `agent run`. The CLI still has twelve commands.
+
+**Why:** the precedent already existed and was already load-bearing.
+`docs/plan/evaluation-harness.md` added four subcommands under
+`agent eval` without changing the twelve, so a subcommand under an
+existing command is not a new command. Section 17 states twelve and
+`bootstrap-and-composition.md`'s own heading repeated it, which made
+the alternative a corpus-wide arithmetic change for one feature.
+
+**Note:** the composition spec's heading moved from "Three reserved
+words" to "Reserved words after `agent run`", so the next spec that
+needs one changes a list rather than a number.
+
+**Reversal cost:** cheap.
+
+### Consent is stamped forward and withdrawn backward
+
+**Decided:** a grant is evaluated at run start and stamped on the
+run; a withdrawal is evaluated at export time and by the sweeper, and
+it reaches every run and every artifact already produced.
+
+**Why:** the two directions are not symmetric and treating them as
+symmetric gets one of them wrong. A grant is a statement about data
+the principal has not produced yet, so evaluating it at export time
+would retroactively authorize every conversation they had before
+anyone asked. A withdrawal is a statement about data they have, so
+leaving existing artifacts in place would make it a preference
+rather than a withdrawal.
+
+**Cost:** a boolean column on `runs` at Milestone 2 for a Milestone 3
+feature, and a daily sweep that will almost always find nothing.
+
+**Note:** the column has to precede the first exportable run, because
+a run that started before it existed has no honest value to backfill.
+Deletion routes through `expires_at` and the artifact sweeper that
+already runs, so the rarest governance operation in the system runs
+on the most exercised code in it.
+
+**Question for you:** one grant covering all export, or separate
+grants for evaluation use and for support use. One is specified; two
+is defensible and costs a column.
+
+**Reversal cost:** low before Milestone 3, high after a tenant has
+granted anything.
+
+### Redaction fails closed rather than redacting twice
+
+**Decided:** the verification scan over the finished document raises
+`ExportRedactionError`, writes no artifact, and names the rule
+without printing the match.
+
+**Why:** the alternative is to redact whatever the scan found and
+ship the document. That converts a detectable defect in the
+replacement stage into an undetectable one, and ships the artifact
+either way.
+
+**Cost:** an export can fail for a reason the caller cannot fix. That
+is the correct trade and it needs to be said out loud in whatever the
+operator reads.
+
+**Reversal cost:** cheap.
+
+### Two defects fixed in passing
+
+**Decided:** `sandbox-isolation.md` used an undeclared `TrustLabel`
+at two sites where the declared type is `TrustLevel`, and
+`ArtifactOrigin` had no member for an export. Both are corrected, and
+`TRAJECTORY_EXPORT` is the fifth origin.
+
+**Why:** the second is not bookkeeping. `origin` is the field that
+says what an artifact is a function of, and an export is the only
+origin whose contents are a function of a whole run rather than of a
+single act inside it.
+
+**Reversal cost:** none.
