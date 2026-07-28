@@ -358,7 +358,7 @@ is not an authorization input.
 | `POST /v1/runs/{id}/input` | `run.write` |
 | `GET /v1/approvals` | `approval.read` |
 | `GET /v1/approvals/{id}` | `approval.read` |
-| `GET /v1/approvals/{id}/resolve` | `approval.resolve` |
+| `POST /v1/approvals/{id}/resolve` | `approval.resolve` |
 | `GET /v1/artifacts/{id}` | `artifact.read` |
 | `GET /v1/artifacts/{id}/content` | `artifact.read` |
 | `GET /health/live` | none |
@@ -377,6 +377,15 @@ the policy engine checks against a string this document does not contain
 is a scope that gets misspelled. [skills.md](skills.md) owns what it
 governs. There is no `skill.read`: nothing reads skills over the API in
 0.1, and an uncheckable scope is worse than a missing one.
+
+`skill.write` is not the only such scope, and the rest arrive a milestone
+earlier than this document does.
+[policy-and-approvals.md](policy-and-approvals.md) enumerates the whole
+closed vocabulary — these nine plus the five that
+`ToolSpec.required_scopes` carries — states the grammar that lets an MCP
+server's operator-configured scopes exist outside a closed list, and
+specifies the subset test the pipeline runs. Nothing there changes what a
+route requires; the table above is the API's half of one namespace.
 
 ### Tenancy is a repository argument, never a filter applied afterwards
 

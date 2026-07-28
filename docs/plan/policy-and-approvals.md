@@ -255,6 +255,167 @@ business-hours approval window, an expiry computation — receives it as data.
 The moment the evaluator can call `now()` it stops being replayable, and the
 determinism gate below stops being testable.
 
+## The scope vocabulary, and the check that precedes policy
+
+`required_scopes` is a field on `ToolSpec` and on `ProposedAction`, and
+Section 8.3 checks it at step 3, ahead of the engine. Three things were
+never written down: which strings are legal, how the check compares them,
+and where a worker gets the principal's scope set. Each is an answer an
+implementer would otherwise have to invent, and two of the three have a
+wrong version that looks right.
+
+### One vocabulary, not two
+
+[http-api-and-streaming.md](http-api-and-streaming.md) enumerates the
+scopes its routes require and states the property that matters: the
+vocabulary is closed, because a scope the policy engine checks against a
+string no document contains is a scope that gets misspelled. It made
+`skill.write` the demonstration — enumerated there, in no row of its route
+table, checked here.
+
+The rest of the tool-checked scopes belong in the same list for the same
+reason. That document is Milestone 5 and this check is Milestone 4, so the
+union is written here:
+
+```text
+session.read      session.write
+run.read          run.write        run.cancel
+approval.read     approval.resolve
+artifact.read     artifact.write
+workspace.read    workspace.write
+sandbox.execute
+skill.write
+demo.write
+```
+
+Fourteen strings. Nine are enumerated by the API document; the five new
+ones are the `required_scopes` the builtin roster declares in
+[builtin-tools.md](builtin-tools.md). `artifact.read` and `artifact.write`
+are the pair that shows this is one namespace rather than two that happen
+to collide: the first gates a read route, the second gates
+`artifact.export`, and they are two actions on one resource.
+
+### The grammar, and the contributor a closed list cannot hold
+
+A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
+joined by dots, of which the last is the action. All fourteen have
+exactly two.
+
+A closed list needs no grammar, so the grammar exists for the one
+contributor the list cannot enumerate. `tool-system.md:1023` takes an MCP
+tool's `required_scopes` from server configuration — the operator declares
+them, never the server — and an operator-declared string is outside a
+closed set by construction. The rule is therefore that an entry is legal
+when it is one of the fourteen, or when its first segment is `mcp` and its
+second is the server id. `mcp.files.write` is legal on a tool from the
+`files` server. `run.cancel` on that tool is not.
+
+The escalation this prevents is quiet, which is why it is worth naming.
+`required_scopes` reads as a restriction, so a misdeclaration looks
+harmless — the apparent worst case is a tool nobody can call. It is not.
+An operator who declares that a remote filesystem-write tool requires
+`session.write` has handed every principal that can open a session the
+ability to write files on that server, because that principal already
+holds the scope. Borrowing a platform scope for a capability the platform
+never granted is how a scope system stops meaning anything, and it is one
+configuration typo away. Registration validation rejects it.
+
+### The comparison is a subset test over exact strings
+
+`required_scopes` is a set and the rule is all of them:
+
+```python
+missing = action.required_scopes - principal.scopes
+```
+
+Empty passes. Non-empty raises `AuthorizationError`, which the pipeline
+converts into `denied` with `reason_code = policy.scope.missing`.
+
+There is no hierarchy, no wildcard, and no prefix rule. `run.write` does
+not admit `run.read`, and `mcp.files.write` does not admit
+`mcp.files.read` — a shared prefix is a naming convention and not an
+evaluation input. This is the API document's exact-match rule applied to a
+set rather than to one route scope, and the argument is unchanged: a
+hierarchy needs an evaluation order, an evaluation order is a thing that
+can be subtly wrong, and the direction it is wrong in grants access nobody
+intended.
+
+An empty `required_scopes` is a tool with no scope check. That is what the
+two Milestone 1 builtins carry, and
+[builtin-tools.md](builtin-tools.md) gives the reason: a scope that gates
+arithmetic is a scope that gets granted to everyone, which teaches the
+scope system to be ignored.
+
+### The scope denial names the scope, and no other denial names anything
+
+The section below argues at length that a denial must not tell the model
+what fired. The scope denial is the exception, and
+[skills.md](skills.md) already takes it — the denial names the scope.
+
+The distinction is that a policy rule is an evasion gradient and a scope
+is not. A model that learns a rule denied a write at four hundred
+kilobytes tries three hundred and ninety-nine. A model that learns
+`workspace.write` was missing learns nothing it can act on, because it
+cannot grant itself a scope; that sentence is for the human reading the
+transcript. The missing scopes are named. The set the principal does hold
+never is, because that is a map of the surface still worth probing.
+
+### Where a worker gets the scope set
+
+The check runs on a worker and a worker has no credential.
+[http-api-and-streaming.md](http-api-and-streaming.md) turns a credential
+into a `Principal` inside a request; [runtime-loop.md](runtime-loop.md)
+declares `PrincipalResolver.for_run`, which produces one from a `Run`, and
+nothing said from what.
+
+**The scope set is captured at submission and stamped on the run**, and
+`for_run` reads the stamp. It does not read a principal table.
+Re-deriving the set on the worker would be wrong rather than merely
+slower: the runtime already fixes that a permission change takes effect on
+the next run and not mid-run, and that guarantee holds only if the run
+carries the set it was submitted under. A re-derivation makes it depend on
+how long the run sat in the queue, which is the kind of guarantee that
+passes every test and fails under load.
+
+This is a Milestone 2 column serving a Milestone 4 check. ADR-0032
+established that direction for the consent stamp and the reason transfers:
+a run that started before the column existed has no honest value to
+backfill, so the column has to precede the first run whose decisions
+anyone might later have to explain.
+
+Approval resumption is the one path that deliberately ignores the stamp.
+The revalidation table below voids an approval when the principal's scopes
+are narrowed, and the runtime names resumption as its one exception to
+resolving a principal once. Both say the same thing: a human's consent is
+authority the human held at the moment they gave it, so resumption
+compares against the current principal.
+
+The advertisement filter uses the same predicate at the other end. Section
+11.1's second filter is principal authorization, and it is this subset
+test run once at session open. That is why a tool can be advertised and
+then denied at call time: the filter ran against the session, the check
+runs per action against the run's stamp, and
+[tool-system.md](tool-system.md) fixes that the pinned set is never
+rewritten in between.
+
+### Roles are declared in 0.1 and resolved in the version after it
+
+`Principal.roles` exists in Section 6.2, and the API document says roles
+are bundles that authentication resolves into a scope set. In 0.1 there is
+one token and one configured principal, so there is no bundle to resolve:
+the configured principal's scopes are configured directly, `roles` is
+populated for audit and for log lines, and nothing reads it as an
+authorization input. Naming the mechanism without building it is the
+posture the corpus already takes for multi-tenancy — the field is shaped
+now so that it does not have to be added later, and the resolution step
+arrives with the second principal.
+
+`AUTH_MODE=dev` binds the full scope set, and this section is what "full"
+means: all fourteen, and no `mcp.` scope. Those exist only once a server
+is configured, and a development principal that silently held every scope
+an operator could declare would make the misdeclaration above the one
+class of mistake development cannot surface.
+
 ## The decision, and what may change it
 
 ### Restrictiveness is an ordering
@@ -699,6 +860,9 @@ Additions to Section 15. Nothing existing is removed; one column widens from
 above.
 
 ```text
+runs                                      -- Section 15, extended
+  + principal_scopes JSONB NOT NULL       -- stamped at submission
+
 approvals                                 -- Section 15, extended
   + tenant_id       TEXT NOT NULL         -- M4 cross-tenant rejection
   + principal_id    TEXT NOT NULL         -- who the run belongs to
@@ -731,6 +895,14 @@ policy_profiles                           -- audit only; rules are files
   loaded_at        TIMESTAMPTZ NOT NULL
   loaded_by        TEXT NOT NULL          -- process or deployment id
 ```
+
+`runs.principal_scopes` is the stamp the scope section specifies. It is
+`JSONB` and not `TEXT[]` because `tool_definitions.required_scopes` is already
+`JSONB`, and one schema carrying two representations of the same concept is a
+conversion function somebody eventually writes twice. Like `export_consent` it
+is a Milestone 2 column with a Milestone 4 reader, and its default is the empty
+array only for the migration; submission always writes the set explicitly, so a
+run with no stamp is a bug rather than an unprivileged run.
 
 The classification columns on `tool_invocations` are denormalized on purpose.
 `ToolSpec` is versioned and its classification can change between releases; an
@@ -885,6 +1057,18 @@ one blocks the milestone, not a warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
+11. **Scope grammar.** Every entry in the fourteen-string vocabulary and
+    every `required_scopes` entry on a registered `ToolSpec` matches the
+    grammar, and registration rejects an MCP tool declaring a scope that is
+    neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**
+12. **Scope matching is a subset test over exact strings.** A principal
+    holding one of a tool's two required scopes is denied with
+    `policy.scope.missing`, the denial names the missing scope and not the
+    held one, holding both succeeds, and holding `run.write` does not
+    satisfy a requirement for `run.read`. **M4.**
+13. **The scope set is the run's.** Narrowing a principal's scopes after
+    submission changes no decision in the run already submitted, and the
+    next run that principal submits is denied. **M4.**
 
 ## Tracked metrics
 
@@ -977,6 +1161,19 @@ not a Milestone 4 dependency.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
+31. The scope vocabulary is one closed set of fourteen dotted strings,
+    shared by the API's route checks and by this pipeline's tool check.
+32. An MCP tool may require only scopes whose first segment is `mcp` and
+    whose second is the server id, so an operator configuring a server
+    cannot borrow a platform scope for a remote capability.
+33. Scope matching is a subset test over exact strings — no hierarchy, no
+    wildcard, no prefix rule — and the denial names the missing scopes and
+    never the held ones.
+34. The principal's scope set is stamped on the run at submission;
+    `PrincipalResolver.for_run` reads the stamp and never a table.
+35. `Principal.roles` is populated and never read as an authorization
+    input in 0.1, because one configured principal has no bundle to
+    resolve.
 
 ## Open questions
 
@@ -990,3 +1187,10 @@ changes the default for everyone. The two differ in who can turn it on.
 in Section 9.1 and consumed nowhere. The plumbing is specified here because
 removing a declared enum value would weaken the plan, but shipping an untested
 path is its own risk, which the zero-rules decision is meant to bound.
+
+**Where does the configured principal's scope set live?** 0.1 has one
+principal, so its scopes are a configured value, and this document does not
+say which of the three configuration layers holds it. A settings field keeps
+the count of configuration files at six; a file makes the second principal a
+data change rather than a deploy. The question becomes answerable when there
+is a second principal to hold.

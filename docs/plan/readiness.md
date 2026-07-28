@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1690` states that device tools are *"a reserved
+    `tool-system.md:1698` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -77,7 +77,7 @@ rather than smoothed.
 | 1 | In-memory vertical slice | Ready | 28 | Nothing |
 | 2 | PostgreSQL persistence and durable worker | Ready | 16 | Nothing |
 | 3 | Model adapters and normalized streaming | Ready | 15 | Nothing |
-| 4 | Policy, approvals, and tool lifecycle | Ready with named gaps | 19 | Scope vocabulary |
+| 4 | Policy, approvals, and tool lifecycle | Ready | 22 | Nothing |
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
@@ -158,7 +158,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and fifty-three gates are green before
+**Forty-one of one hundred and fifty-six gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -305,9 +305,9 @@ Four gates for three gaps, all at Milestone 3, which is the same
 correlation the verdict table reports: a milestone acquires gates when
 somebody writes down what it must be true of. The verdict is ready.
 
-## Milestone 4: ready with named gaps
+## Milestone 4: ready
 
-Nineteen registry entries.
+Twenty-two registry entries.
 [policy-and-approvals.md](policy-and-approvals.md) covers the
 deterministic decision function, the hardline set, profile compilation
 and freezing, `policy_version`, the approval record and its lifecycle,
@@ -316,8 +316,8 @@ expiry, resume revalidation, and the injection corpus.
 end to end. The thirteenth entry arrived later, with
 [sandbox-isolation.md](sandbox-isolation.md): a property test over
 `WorkspaceHandle.resolve`, which acquires its first callers at this
-milestone. The last six arrived later still, from the pass that closed
-the first of the two gaps below.
+milestone. The last nine arrived later still, from the two passes that
+closed the two gaps below.
 
 Two things were outstanding.
 
@@ -341,18 +341,18 @@ that no document then contained. A rejection rule is exactly the kind
 of thing that is written three different ways by three implementers,
 two of which are subtly wrong.
 
-**Principal scopes are half-designed.** The `Principal` model lives
-only at `engineering-plan.md:459`, the policy spec identifies where
-scopes are checked, and nothing states the scope vocabulary, its
-grammar, or the comparison algorithm — whether a scope is an opaque
+**Principal scopes were half-designed.** The `Principal` model lived
+only at `engineering-plan.md:459`, the policy spec identified where
+scopes are checked, and nothing stated the scope vocabulary, its
+grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:450` names `ApprovalService` as one of
-the services `build` returns, and no document gives it a method
+`bootstrap-and-composition.md:450` named `ApprovalService` as one of
+the services `build` returns, and no document gave it a method
 signature.
 
 ### What closed it
 
-The first of the two. The second is untouched.
+Both, on two passes.
 
 The traversal half closed first and separately.
 [sandbox-isolation.md](sandbox-isolation.md) specifies
@@ -387,8 +387,49 @@ first.
 Six gates, all at Milestone 4: `gate.builtin.handle_only`,
 `gate.builtin.text_only`, `gate.builtin.write_idempotent`,
 `gate.builtin.listing_stable`, `gate.builtin.provenance`, and
-`gate.builtin.demo_records`. The scope vocabulary is unchanged, so
-the verdict is.
+`gate.builtin.demo_records`.
+
+The scope gap closed on the pass after that one, and half of it had
+already closed on its own.
+[http-api-and-streaming.md](http-api-and-streaming.md) gave
+`ApprovalService` the three-method Protocol the composition spec had
+been naming without one, and enumerated the nine scopes the API
+checks. What was left was the tool half — the five more that appear
+as `ToolSpec.required_scopes` on the builtin roster — and the three
+questions no document had answered: what a scope is, how two of them
+are compared, and where a worker gets the set.
+
+[policy-and-approvals.md](policy-and-approvals.md) answers all three
+in one section. The vocabulary is one closed set of fourteen strings
+rather than an API namespace and a tool namespace, because
+`artifact.read` and `artifact.write` are two actions on one resource
+and not two vocabularies that happen to collide. A scope is an opaque
+string compared by exact match, the check is a set difference and
+all-of, and there is no hierarchy, no wildcard, and no prefix rule —
+so `run.write` does not satisfy `run.read`, and a tool that means
+both declares both.
+
+The closed list has one deliberate seam. An MCP tool's
+`required_scopes` are operator-declared, so a list closed against
+them is a list the operator routes around. The rule is that a
+declared scope is legal if it is one of the fourteen or its first
+segment is `mcp` and its second is the server id. That lets an
+operator classify a remote tool's risk without letting one borrow
+`session.write`, which is the escalation worth blocking: a
+requirement that reads as a restriction and grants.
+
+The worker's copy is a stamp. `runs.principal_scopes` is written at
+submission and `PrincipalResolver.for_run` reads it rather than a
+principal table, because a worker holds no credential, and
+re-deriving would make the runtime loop's *"takes effect on the next
+run"* depend on queue latency rather than on submission order. It is
+a Milestone 2 column with a Milestone 4 reader, which is the shape
+[ADR-0032](../adr/0032-trajectory-export-redaction-and-consent.md)
+already chose for the consent stamp and for the same reason.
+
+Three gates, all at Milestone 4: `gate.policy.scope_grammar`,
+`gate.policy.scope_match`, and `gate.policy.scope_stamped`. Both
+named gaps are closed, so the verdict changes with them.
 
 ## Milestone 5: ready
 
@@ -410,9 +451,9 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:823-824` and the resolve at
-`policy-and-approvals.md:833`, and one reference in
-`runtime-loop.md:1165` to `POST /runs/{id}/input` that routed to an
+at `policy-and-approvals.md:995-996` and the resolve at
+`policy-and-approvals.md:1005`, and one reference in
+`runtime-loop.md:1172` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -507,7 +548,7 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:708`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1161`.
+bridge Section 8.5 requires is specified from `tool-system.md:1169`.
 
 Two further items deserved naming.
 
@@ -623,7 +664,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1102-1149` draws the line between
+had to be written. `tool-system.md:1110-1157` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -760,8 +801,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1244` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1690` states that device tools are *"a reserved seam,
+`tool-system.md:1252` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1698` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. The
 `Device` model itself still has no home.
@@ -909,7 +950,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1399` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:797`. The map
+    `model-gateway.md:1735` and `milestone-map.md:804`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

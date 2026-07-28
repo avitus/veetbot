@@ -4,6 +4,65 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Milestone 4's second gap is closed
+
+- Designed the principal scope vocabulary in
+  [policy-and-approvals.md](plan/policy-and-approvals.md), which the
+  readiness review named as the second of Milestone 4's two gaps. It
+  is one closed set of fourteen strings: the nine
+  [http-api-and-streaming.md](plan/http-api-and-streaming.md) already
+  enumerates and five more that appear as `ToolSpec.required_scopes`
+  on the builtin roster. One namespace and not two, because
+  `artifact.read` and `artifact.write` are two actions on one
+  resource, and because `skill.write` was already an API scope
+  checked by the policy engine rather than by a route.
+- Answered what a scope is. An opaque string compared by exact match,
+  the check a set difference and all-of, with no hierarchy, no
+  wildcard, and no prefix rule — so `run.write` does not satisfy
+  `run.read`, and a tool that means both declares both. A failure is
+  `AuthorizationError` and the denial reason `policy.scope.missing`.
+- Reserved `mcp` as a first segment. MCP `required_scopes` are
+  operator-declared, so a list closed against them is a list the
+  operator routes around; a declared scope is legal only if it is one
+  of the fourteen or its first segment is `mcp` and its second is the
+  server id. What that blocks by construction is an operator
+  declaring that a remote filesystem-write tool requires
+  `session.write` — a line that reads as a restriction and grants.
+- Made the scope denial the one denial that names something. It names
+  the scopes the action required and the principal lacks, never the
+  ones the principal holds, because a model cannot climb toward a
+  scope it cannot grant itself and the sentence is for the human
+  reading the transcript. The held set stays withheld, being a map of
+  the surface still worth probing.
+- Stamped the scope set on the run. A new `runs.principal_scopes`
+  `JSONB` column is written at submission and
+  `PrincipalResolver.for_run` reads it rather than a principal table,
+  because a worker holds no credential and re-deriving would make the
+  runtime loop's *"takes effect on the next run"* depend on queue
+  latency rather than on submission order.
+  [ADR-0032](adr/0032-trajectory-export-redaction-and-consent.md)
+  chose the same shape for the consent stamp.
+- Recorded that `Principal.roles` is populated for audit and read by
+  nothing in 0.1, and that `AUTH_MODE=dev` binds all fourteen
+  first-class scopes and no `mcp.` scope, so a developer is never
+  blocked by authorization on what the platform ships and always
+  blocked by it on what a server they just connected declares.
+- Fixed a route-table defect: `GET /v1/approvals/{id}/resolve` is
+  `POST`. The same document's request body, the policy specification,
+  and `ApprovalService.resolve` all describe a state change.
+- Registered three gates, all at Milestone 4:
+  `gate.policy.scope_grammar`, `gate.policy.scope_match`, and
+  `gate.policy.scope_stamped`. The census is one hundred and
+  fifty-six registry entries from one hundred and fifty-nine
+  declarations; Milestone 4 goes from nineteen to twenty-two, the
+  cumulative column reaches one hundred and fifty-six, and the
+  non-case count reaches seventy-one.
+- Closed Milestone 4 in [readiness.md](plan/readiness.md). Both named
+  gaps are gone and its verdict changes from *"ready with named
+  gaps"* to ready. The `ApprovalService` half of this gap had already
+  closed on its own: the API specification gave it a three-method
+  Protocol after the review was written.
+
 ## 2026-07-28 — Milestone 4's first gap is closed
 
 - Designed the four remaining builtin tools in

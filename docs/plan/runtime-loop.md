@@ -393,6 +393,13 @@ principal whose permissions changed takes effect on the next run. The one
 exception is approval resumption, where the policy engine revalidates
 against the current principal by design.
 
+`for_run` reads the scope set from the run rather than from a principal
+table. [policy-and-approvals.md](policy-and-approvals.md) stamps it on
+`runs` at submission for exactly this reason: a worker holds no credential,
+and re-deriving the set here would make "takes effect on the next run"
+depend on how long the run sat in the queue. The stamp is what makes the
+sentence above true rather than usually true.
+
 ```python
 class BudgetLedger(Protocol):
     def check(self, run: Run, scope: BudgetScope) -> None: ...

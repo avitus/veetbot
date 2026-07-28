@@ -3835,3 +3835,180 @@ corrected statement lives, and the surrounding prose re-tensed to
 match.
 
 **Reversal cost:** none.
+
+## The Milestone 4 scope vocabulary (no ADR)
+
+### One scope vocabulary, not an API one and a tool one
+
+**Decided:** there is one closed set of fourteen strings. Nine were
+already enumerated by the API specification and five more appear as
+`ToolSpec.required_scopes` on the builtin roster. They share a
+namespace rather than occupying two that happen to use the same
+spelling.
+
+**Why:** `artifact.read` and `artifact.write` are two actions on one
+resource. If the API owned one vocabulary and the tool system
+another, those two would be the same string in both, and the first
+time they meant different things the bug would be unfindable.
+`skill.write` settles it on its own: the API document already
+describes it as checked by the policy engine rather than by a route,
+which is a tool-system check written into an API scope.
+
+**Alternative:** two prefixed namespaces, `api.` and `tool.`. It
+makes the boundary visible at the cost of doubling every scope that
+crosses it, and every interesting one crosses it.
+
+**Reversal cost:** expensive after the first profile ships, because
+the strings are in operator configuration.
+
+### An MCP tool may require only its own server's scopes
+
+**Decided:** a declared scope is legal if it is one of the fourteen
+or if its first segment is `mcp` and its second is the server id.
+`mcp` is reserved and cannot be a resource name.
+
+**Why:** MCP `required_scopes` are operator-declared, so a list
+closed against them is a list the operator routes around. The
+escalation worth blocking by construction is an operator declaring
+that a remote filesystem-write tool requires `session.write` — a
+line that reads as a restriction and is a grant, because every
+principal who can write to a session now reaches a tool nobody
+audited.
+
+**Cost:** an operator who genuinely wants an MCP tool gated on a
+first-class scope cannot say so. They gate it in the policy profile
+instead, which is where risk classification belongs anyway.
+
+**Reversal cost:** cheap; the rule is one registration-time check.
+
+### Scopes are opaque strings compared by exact match
+
+**Decided:** the check is a set difference, all-of. No hierarchy, no
+wildcard, no prefix rule. `run.write` does not satisfy `run.read`,
+and a tool that means both declares both.
+
+**Why:** the alternatives each buy convenience with a question an
+implementer has to answer the same way twice. A hierarchy needs a
+rule for whether `run` implies `run.cancel`; a wildcard needs a rule
+for whether `run.*` reaches a scope added next year. Both rules are
+the kind that get written slightly differently in the authorization
+check and in the admin UI that displays what a principal has.
+
+**Cost:** verbose principal configurations. Fourteen strings is a
+small enough set that the verbosity is bounded.
+
+**Reversal cost:** cheap in one direction only. Adding a hierarchy
+later widens every existing principal silently, so it would need a
+migration that enumerates what each one currently reaches.
+
+### The scope denial names the missing scope
+
+**Decided:** `policy.scope.missing` names the scopes the action
+required and the principal lacks. It never names the scopes the
+principal holds. This is the one denial in the document that names
+anything.
+
+**Why:** the document's rule is that a denial states the outcome and
+not the reason, because a reason is a gradient a model can climb.
+A scope is not a gradient. A model cannot grant itself a scope, and
+the sentence is being written for the human who reads the transcript
+and has to work out whether the principal is misconfigured or the
+tool is over-declared. The held set is withheld on the other half of
+the same reasoning: it is a map of the surface still worth probing.
+
+**Reversal cost:** none.
+
+### The scope set is stamped on the run, not re-derived
+
+**Decided:** a new `runs.principal_scopes JSONB NOT NULL` column is
+written at submission. `PrincipalResolver.for_run` reads the stamp
+and never a principal table.
+
+**Why:** a worker holds no credential, so it has nothing to resolve
+a principal from. Re-deriving at execution would also make the
+runtime loop's *"takes effect on the next run"* depend on queue
+latency rather than on submission order, which is the difference
+between a guarantee and a usual outcome. ADR-0032 chose the same
+shape for the consent stamp, and for the same reason: a grant is a
+statement about work not yet submitted.
+
+**Note:** approval resumption deliberately ignores the stamp for the
+revalidation step. A run that resumes after its principal's scopes
+were narrowed revalidates against the stamp for consistency of the
+decision it already made, and the next run is denied. Voiding
+mid-run would make a narrowing operation abort work in flight, which
+is a different and louder decision than the one an operator thinks
+they are making.
+
+**Reversal cost:** expensive; it is a column with a writer at
+Milestone 2 and a reader at Milestone 4.
+
+### `JSONB` rather than `TEXT[]` for the stamp
+
+**Decided:** `JSONB`, matching `tool_definitions.required_scopes`.
+
+**Why:** the same data already has a representation in this schema.
+One concept with two representations is a conversion function that
+somebody writes twice and gets subtly different both times.
+
+**Cost:** no array containment operators, which is fine because
+nothing queries a run by its scopes.
+
+**Reversal cost:** cheap; one migration.
+
+### `Principal.roles` is declared and not resolved in 0.1
+
+**Decided:** the field is populated and written to the audit record.
+Nothing reads it as an authorization input. Role-to-scope expansion
+is a later version.
+
+**Why:** the field exists on the model already and deleting it would
+be a churn with no benefit. Reading it in 0.1 would mean a second
+authorization path that resolves to the same scope set by a
+different route, and two paths to one answer is where the two
+answers diverge.
+
+**Reversal cost:** none; adding the expansion later changes what
+fills `scopes`, not what checks them.
+
+### Development mode binds the fourteen and no `mcp.` scope
+
+**Decided:** `AUTH_MODE=dev` gives its single principal all fourteen
+first-class scopes and no scope in the `mcp.` space.
+
+**Why:** a developer should not be blocked by authorization on
+anything the platform itself ships, and should be blocked by it on
+anything a server they just connected declares. That asymmetry is
+the whole point of the reserved prefix, and dev mode is where it is
+cheapest to notice.
+
+**Reversal cost:** none.
+
+### The approvals resolve route was documented as `GET`
+
+**Decided:** the route table's
+`GET /v1/approvals/{id}/resolve` row is corrected to `POST`. It is a
+transcription defect, not a design position — the same document's
+request body, the policy specification, and `ApprovalService.resolve`
+all describe a state change.
+
+**Why:** a resolve over `GET` is a state change a crawler can
+perform.
+
+**Reversal cost:** none.
+
+### Where the configured principal's scope set lives
+
+**Decided:** provisionally a `Settings` field, which keeps the
+configuration-file count at six.
+
+**Why:** the alternative is a seventh configuration file, and the
+composition specification's own heading counts six.
+
+**Question for you:** a file would make adding a second principal a
+data change rather than a deploy, which is the shape this wants as
+soon as there is more than one. The `Settings` field is right for
+0.1 and probably wrong for 0.2, and I would rather you knew that
+than discovered it.
+
+**Reversal cost:** cheap while there is one principal.

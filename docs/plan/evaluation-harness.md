@@ -191,7 +191,7 @@ restates a gate another spec owns.
 | Tool system | 6 | 1 | 1 | 4 | 12 |
 | Builtin tools | 7 | 4 | 0 | 4 | 15 |
 | Model gateway | 8 | 0 | 1 | 3 | 12 |
-| Policy and approvals | 5 | 3 | 1 | 1 | 10 |
+| Policy and approvals | 7 | 3 | 1 | 2 | 13 |
 | Event log and persistence | 9 | 2 | 0 | 3 | 14 |
 | Context engine | 2 | 2 | 1 | 0 | 5 |
 | Memory formation | 3 | 0 | 2 | 0 | 5 |
@@ -202,12 +202,12 @@ restates a gate another spec owns.
 | Skills | 12 | 1 | 1 | 2 | 16 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **83** | **18** | **8** | **44** | **153** |
+| **Total** | **85** | **18** | **8** | **45** | **156** |
 
-The counts are the useful output, not the individual assignments: **seventy
-of the hundred and fifty-three declared gates are not case gates**, and a
-harness that only runs cases would report a green build with those seventy
-of the plan's stated invariants unchecked. Two of the four kinds — property and
+The counts are the useful output, not the individual assignments:
+**seventy-one of the hundred and fifty-six declared gates are not case
+gates**, and a harness that only runs cases would report a green build with
+those seventy-one of the plan's stated invariants unchecked. Two of the four kinds — property and
 structural — need no runtime at all and can be built in Milestone 0, before
 there is an agent to evaluate.
 

@@ -41,8 +41,8 @@ gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
 gained two more on a later pass, all four at Milestone 3. The counts
 throughout this document are the corpus as it now stands: one hundred
-and forty-seven declared across thirteen specs, one hundred and
-fifty-three registry entries.
+and fifty declared across thirteen specs, one hundred and fifty-six
+registry entries.
 
 ## What this document is responsible for
 
@@ -223,10 +223,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and forty-seven gates declared across thirteen specs, two
-more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and fifty-six declarations, one hundred and
-fifty-three registry entries once the three aliases are subtracted.
+One hundred and fifty gates declared across thirteen specs, two more
+declared in the engineering plan, and seven this document declares over
+the corpus: one hundred and fifty-nine declarations, one hundred and
+fifty-six registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -396,11 +396,14 @@ the precondition recorded. Without the field the choice is a forbidden
 skip or a gate that fails on every machine without vendor keys, and
 both are worse than naming the exception once.
 
-### Policy and approvals, ten gates
+### Policy and approvals, thirteen gates
 
-All ten are Milestone 4, which the section states and the build
+All thirteen are Milestone 4, which the section states and the build
 sequence confirms — steps 1 through 11 are Milestone 4 and step 12 is
-sequenced separately and is not a dependency.
+sequenced separately and is not a dependency. The last three arrived
+with the scope vocabulary, which that section owns because the check
+runs at this milestone and the API document that enumerated the first
+nine strings is Milestone 5.
 
 ```text
 #   id                              kind         M
@@ -415,6 +418,9 @@ sequenced separately and is not a dependency.
 8   gate.policy.no_leakage          case         4
 9   gate.policy.idempotent_resolve  case         4
 10  gate.policy.prompt_not_authz    corpus       4
+11  gate.policy.scope_grammar       structural   4
+12  gate.policy.scope_match         case         4
+13  gate.policy.scope_stamped       case         4
 ```
 
 ### Event log and persistence, fourteen gates
@@ -736,17 +742,18 @@ milestone  new gates  cumulative  the earliest of them
 3                 15          72  five adapters, the profile schema,
                                   the closed metadata key set, the
                                   redacted export
-4                 19          91  policy, approvals, corpora, the
-                                  four remaining builtins
-5                 11         102  the API surface, the stream,
+4                 22          94  policy, approvals, corpora, the
+                                  four remaining builtins, the
+                                  scope vocabulary
+5                 11         105  the API surface, the stream,
                                   cancellation keeps effects
-6                 11         113  isolation, egress, artifacts
-7                  6         119  budgeting and compaction
-8                 14         133  the MCP adapter, the pinned
+6                 11         116  isolation, egress, artifacts
+7                  6         122  budgeting and compaction
+8                 14         136  the MCP adapter, the pinned
                                   catalog, the metadata boundary,
                                   package validation
-9                 14         147  formation and retrieval
-10                 6         153  the authoring loop and the
+9                 14         150  formation and retrieval
+10                 6         156  the authoring loop and the
                                   background review
 ```
 
@@ -767,14 +774,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries four — three in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and fifty-three gates are green before
+2.  **Forty-one of one hundred and fifty-six gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and fifty-three, which is
+The cumulative column reaches one hundred and fifty-six, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise

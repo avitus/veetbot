@@ -862,7 +862,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-`tool-system.md:1143` says *"`skill.load` and `skill_manage` are
+`tool-system.md:1151` says *"`skill.load` and `skill_manage` are
 control tools"* and then classifies `skill_manage` as
 `idempotency: NON_IDEMPOTENT`. Its own registration rule at
 `tool-system.md:240` requires every control tool to be `READ_ONLY` or
@@ -950,7 +950,7 @@ It retries by reading the new current revision and deciding again.
 
 ### The scope is `skill.write`
 
-`tool-system.md:1145` requires the `skills:write` scope. That string
+`tool-system.md:1153` requires the `skills:write` scope. That string
 is wrong in two ways against
 [http-api-and-streaming.md](http-api-and-streaming.md), which
 enumerates the scope vocabulary as dotted `resource.action` strings
@@ -1152,7 +1152,7 @@ something.
 1  skill_manage called a control tool a capability tool
 2  skill_manage NON_IDEMPOTENT        CONDITIONALLY_IDEMPOTENT
 3  the scope spelled skills:write     skill.write, enumerated
-4  "skills have no design at all"     tool-system.md:1102-1149
+4  "skills have no design at all"     tool-system.md:1110-1157
 5  Milestone 8 had zero gates         ten, a new `skill` area
 6  Milestone 10 had zero gates        six, in the same area
 7  no harness case names a skill      case 27, Milestone 8
@@ -1171,7 +1171,7 @@ above, under the heading that calls `skill_manage`
 Row 4 is a correction to a verdict rather than to a design.
 `readiness.md` says skills have no specification at all and that no
 document outside the plan and ADR-0013 mentions `SKILL.md`. The
-second half is true. The first is not: `tool-system.md:1102-1149` is
+second half is true. The first is not: `tool-system.md:1110-1157` is
 forty-eight lines of real design that settles four questions, and
 this document had to be written to fit inside it rather than on top
 of it. The verdict is corrected where it is stated.
@@ -1183,7 +1183,7 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:245` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:592` cited `engineering-plan.md:2690` for the
+`readiness.md:675` cited `engineering-plan.md:2690` for the
 version-pinning acceptance criterion, which is at
 `engineering-plan.md:2696`; the line it named is an MCP
 trust-labelling bullet. The ADR and the questions file are

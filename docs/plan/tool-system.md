@@ -1037,6 +1037,14 @@ declares nothing is the most restrictive combination the type system permits:
 harmless reads is one configuration line away from being cheap; a server
 nobody classified is expensive, which is the correct direction.
 
+`required_scopes` is the one operator-declared field that reaches a closed
+vocabulary, and [policy-and-approvals.md](policy-and-approvals.md) constrains
+it: an MCP tool may require only scopes whose first segment is `mcp` and whose
+second is the server id. The operator classifies risk, but the operator may not
+declare that a remote tool requires `session.write`, because every principal
+that can open a session already holds it and the requirement would then grant
+rather than restrict.
+
 `allow_parallel` is forced false for v0.1 because parallelism requires
 read-only classification and read-only classification of a remote tool is a
 statement about someone else's system.
