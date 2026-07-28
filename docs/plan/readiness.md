@@ -318,22 +318,22 @@ Eleven registry entries. There was one when this review was written —
 the fewest of any milestone that adds work — and that number was the
 finding.
 
-Section 16 of the engineering plan, at lines 1791 through 1943,
-designs the API more thoroughly than a summary of this milestone's
-coverage would suggest. It specifies nine endpoints with methods,
-paths, and where relevant headers; request and response JSON for
-session creation, message submission, and approval resolution; the SSE
-frame format with `id`, `event`, and `data` lines; the reconnect rule
-that replays persisted events after `Last-Event-ID` and then continues
-streaming; the five cooperative cancellation observation points; the
-error envelope; and the readiness constraint that a probe must not
-call a provider.
+Section 16 of the engineering plan, at
+`engineering-plan.md:1793-1946`, designs the API more thoroughly than
+a summary of this milestone's coverage would suggest. It specifies
+nine endpoints with methods, paths, and where relevant headers;
+request and response JSON for session creation, message submission,
+and approval resolution; the SSE frame format with `id`, `event`, and
+`data` lines; the reconnect rule that replays persisted events after
+`Last-Event-ID` and then continues streaming; the five cooperative
+cancellation observation points; the error envelope; and the
+readiness constraint that a probe must not call a provider.
 
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
-routes designed outside the plan were three in
-`policy-and-approvals.md` — the two approvals reads at lines 819 and
-820 and the resolve at line 829 — and one reference in
+routes designed outside the plan were three: the two approvals reads
+at `policy-and-approvals.md:823-824` and the resolve at
+`policy-and-approvals.md:833`, and one reference in
 `runtime-loop.md:1165` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -415,10 +415,10 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — it runs from line 3136 to line
-3212, states a six-item threat model that assumes model-generated code
-is hostile, and is recorded as ADR-0008. But it was not expanded,
-and two specifications pointed at the expansion as though it already
+Section 28 of the plan is not empty — `engineering-plan.md:3152-3229`
+states a six-item threat model that assumes model-generated code is
+hostile, and is recorded as ADR-0008. But it was not expanded, and
+two specifications pointed at the expansion as though it already
 existed. `tool-system.md:977` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
@@ -657,11 +657,12 @@ verdict is unchanged by them.
 ## The three plan sections no specification expands
 
 Sections 29 through 31 are the only major sections of the engineering
-plan with no outward cross-reference paragraph. A scan of lines 3136
-through 3364 for links to other documents returned nothing when this
-review was written, where every other major section acquired one
-during the specification work. Two of the three are genuinely
-unexpanded; the third is half-expanded from the consuming side.
+plan with no outward cross-reference paragraph. A scan of
+`engineering-plan.md:3231-3384` for links to other documents returned
+nothing when this review was written, where every other major section
+acquired one during the specification work. Two of the three are
+genuinely unexpanded; the third is half-expanded from the consuming
+side.
 
 Section 28 was the fourth, and it is expanded now, by
 [sandbox-isolation.md](sandbox-isolation.md), which gives it the
@@ -703,11 +704,13 @@ provenance, gating, restricted review, injection resistance, and
 sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
 criterion, and 30.6's constraints are each carried forward rather
 than reinterpreted. Two citation errors are corrected in the process.
-One is this review's: the version-pinning criterion is at line 2692,
-not 2686, and 2686 is an MCP trust-labelling bullet. Both numbers are
-two higher than the pair originally recorded, because a heading was
-later inserted above them; a line-number citation into the plan is
-correct only until the plan is next edited. One the corpus
+One is this review's: the version-pinning criterion is at
+`engineering-plan.md:2696`, and the line this review first named was
+an MCP configuration bullet a few lines above it. A line-number
+citation into the plan is correct only until the plan is next edited,
+which is why every citation in this corpus is now recorded in
+`docs/status/citation-ledger.yaml` and checked by
+`scripts/check_citations.py` rather than remembered. One the corpus
 carried: `policy-and-approvals.md` attributes the policy-and-approval
 gating requirement to Section 30.4, which Section 30.3 states.
 What remains open is a threshold for 30.5's eval delta, which is a
@@ -801,7 +804,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md` is corrected.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1259` and `milestone-map.md:767`. The map
+    `model-gateway.md:1263` and `milestone-map.md:767`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

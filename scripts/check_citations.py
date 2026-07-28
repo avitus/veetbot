@@ -12,7 +12,10 @@ citation was last verified.
 
   check  (default)  Recompute each cited line and compare it to the ledger.
                     A mismatch, a missing entry, a blank target, or a target
-                    past end-of-file is an error.
+                    past end-of-file is an error. A line number written as
+                    prose - "line 1408", "lines 659 to 661" - is also an
+                    error, because the ledger cannot see that form and it
+                    therefore drifts silently forever.
   --update          Re-resolve drifted citations by content: search the target
                     file for the recorded excerpt, and if it appears exactly
                     once, rewrite the line number in the citing file and
@@ -39,10 +42,25 @@ LEDGER = ROOT / "docs" / "status" / "citation-ledger.yaml"
 # record and is left as written.
 LIVE_GLOBS = ("docs/plan/*.md",)
 
-# Documents a citation may point into.
-TARGET_GLOBS = ("docs/plan/*.md", "docs/*.md", "docs/status/*.md")
+# Documents a citation may point into. Order matters: the first glob to
+# supply a basename wins, which keeps `index.md` pointing at docs/index.md.
+TARGET_GLOBS = (
+    "docs/plan/*.md",
+    "docs/*.md",
+    "docs/status/*.md",
+    "docs/adr/*.md",
+)
 
 CITE = re.compile(r"`?([a-z0-9][a-z0-9-]*\.md):(\d+)(?:-(\d+))?`?")
+
+# The two ways of naming a line that CITE cannot see. Both were in the corpus
+# and both were stale: the checker repairs `file.md:NNN` on every run, so the
+# forms it does not match are the only ones that can rot. A reference may span
+# one line break - "while line\n2202" - so these match across a single newline
+# but never across a blank line.
+_GAP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
+BARE = re.compile(rf"\b[Ll]ines?{_GAP}\d{{2,}}")
+LOOSE = re.compile(rf"\b[a-z0-9][a-z0-9-]*\.md{_GAP}\d{{2,}}")
 
 EXCERPT_CHARS = 60
 
@@ -142,6 +160,30 @@ def find_excerpt(path: Path, excerpt: str) -> list[int]:
         if " ".join(line.split())[:EXCERPT_CHARS] == excerpt:
             hits.append(n)
     return hits
+
+
+def check_bare_references() -> None:
+    """Reject line numbers written as prose rather than as citations.
+
+    ``file.md:LINE`` is checked on every run and repaired by ``--update``.
+    A line number written any other way is invisible to that machinery, so it
+    is never checked, never repaired, and wrong from the first edit after it
+    was written. Nothing here can be auto-repaired - the reference has to be
+    re-resolved by content, which is a human decision - so this is an error
+    and not a note.
+    """
+    for src in live_files():
+        text = src.read_text(encoding="utf-8")
+        rel = src.relative_to(ROOT)
+        for rx in (BARE, LOOSE):
+            for m in rx.finditer(text):
+                line = text.count("\n", 0, m.start()) + 1
+                shown = " ".join(m.group(0).split())
+                errors.append(
+                    f"{rel}:{line} names a line as \"{shown}\", which the "
+                    f"ledger cannot check. Write it as `file.md:LINE` "
+                    f"(or `file.md:LO-HI`) and re-resolve it by content."
+                )
 
 
 def run_check(update: bool) -> None:
@@ -249,6 +291,7 @@ def run_check(update: bool) -> None:
 def main() -> None:
     update = "--update" in sys.argv
     run_check(update)
+    check_bare_references()
     for n in notes:
         print("note:", n)
     if errors:

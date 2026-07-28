@@ -565,9 +565,9 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md` lines 659 to 661). The gateway translates those hints
-into provider syntax and nothing more. It does not add breakpoints, it does
-not move them, and it does not decide that a request would cache better a
+(`context-engine.md:680-682`). The gateway translates those hints into
+provider syntax and nothing more. It does not add breakpoints, it does not
+move them, and it does not decide that a request would cache better a
 different way.
 
 The translation differs sharply between the two first providers:
@@ -603,15 +603,15 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md` lines 637 to 639 and
-the gateway supplies its numerator and denominator, not its interpretation.
+The cached-prefix ratio is defined in `context-engine.md:658-660` and the
+gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
 `model.response.completed` event. The context engine's metric reads those.
 Below roughly 90 per cent on a session that should be stable, the invariant is
 leaking, and the diagnosis is a prefix diff, which is why `prefix_sha256` is
-recorded on `model.request.started` (`context-engine.md` lines 127 to 135).
-Two consecutive requests in one session with different prefix hashes and no
+recorded on `model.request.started` (`context-engine.md:133-141`). Two
+consecutive requests in one session with different prefix hashes and no
 intervening epoch bump is the signature of the bug.
 
 Section 6.8 never defined those two event payloads. They are defined below in
@@ -622,7 +622,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md` line 212
+native tool calling, how much output to reserve. `context-engine.md:220`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -690,17 +690,19 @@ class ModelPricing(BaseModel):
 ```
 
 The router is a port with one implementation in 0.1, reading the model
-registry described at plan lines 1268 to 1275. The registry is configuration,
-not code: a YAML file per provider profile, validated at load, hashed the way
-the policy profile is hashed so that a run records which registry it resolved
-against. Making it a port rather than a module is what lets Milestone 10's
-availability-aware routing arrive later without touching call sites.
+registry described at `engineering-plan.md:1288-1295`. The registry is
+configuration, not code: a YAML file per provider profile, validated at load,
+hashed the way the policy profile is hashed so that a run records which
+registry it resolved against. Making it a port rather than a module is what
+lets Milestone 10's availability-aware routing arrive later without touching
+call sites.
 
 ### Pinning, and the contradiction with availability routing
 
-Section 10 line 1266 requires a run to be pinned to one provider. Milestone 10
-line 2722 wants routing to move work between providers on availability. These
-are in tension and the resolution is temporal, not architectural.
+Section 10 (`engineering-plan.md:1305`) requires a run to be pinned to one
+provider. Milestone 10 (`engineering-plan.md:2810`) wants routing to move work
+between providers on availability. These are in tension and the resolution is
+temporal, not architectural.
 
 Selection happens once, at run start. From then until the run reaches a
 terminal state, `ProviderPin` is absolute: every attempt in the run goes to
@@ -726,17 +728,17 @@ done. Section 10 already made this call; this document only explains it so
 that a future reader does not undo it as an obvious improvement.
 
 A resumed run keeps its pin. `ProviderPin` is persisted on the run rather than
-held in memory, because `event-log-and-persistence.md` lines 295 to 320 show
+held in memory, because `event-log-and-persistence.md:315` shows
 `ProviderContinuation` being lost across a worker restart and a lost pin would
 compound that into a provider switch on resume.
 
 ## Usage, cost, and where the numbers live
 
 Section 6.5 fixes the precedence order for cost figures and Section 15 has no
-table to put them in. `runs.usage JSONB` at plan line 1650 is the only
-persistence the plan gives usage, and a JSONB blob on the run cannot answer
-the questions the budget enforcement in Section 6.5 needs to ask: what did
-this step cost, which attempt burned the tokens, and what were we charged
+table to put them in. `runs.usage JSONB` at `engineering-plan.md:1680` is the
+only persistence the plan gives usage, and a JSONB blob on the run cannot
+answer the questions the budget enforcement in Section 6.5 needs to ask: what
+did this step cost, which attempt burned the tokens, and what were we charged
 before the retry that produced no output.
 
 Two tables close that.
@@ -794,8 +796,8 @@ denormalized rather than computed on read for the same reason.
 `runs.usage` stays exactly as Section 15 defines it. It becomes a rollup of
 `model_calls` for that run rather than the source of truth, and it is
 maintained in the same transaction that writes the attempt row so that the two
-never disagree. The usage repository port named at plan line 798 and never
-typed is:
+never disagree. The usage repository port named at `engineering-plan.md:810`
+and never typed is:
 
 ```python
 class UsageRepository(Protocol):
@@ -839,9 +841,10 @@ not an oversight.
 
 ## Retries, and who owns them
 
-Plan line 1233 puts retries in the adapter. Plan line 1556 says "Keep retry
-decisions in application code, not in provider adapters alone." The word
-"alone" is doing the work, and the split it implies is the right one.
+`engineering-plan.md:1253` puts retries in the adapter.
+`engineering-plan.md:1580` says "Keep retry decisions in application code, not
+in provider adapters alone." The word "alone" is doing the work, and the split
+it implies is the right one.
 
 The dividing line is whether the caller has observed any output.
 
@@ -868,11 +871,11 @@ deadline permit another attempt. Each caller-level retry is a new attempt with
 a new `attempt_id` and its own `model_calls` row.
 
 `max_attempts` is 3 and lives in application code, matching
-`event-log-and-persistence.md` lines 407 to 425, which already sets 3 for the
-worker. Section 13 states neither number, so this document states both and
-notes that they are the same number for the same reason rather than by
-coincidence: three attempts is where the marginal recovery rate stops
-justifying the marginal cost.
+`event-log-and-persistence.md:423`, which already sets 3 for the worker.
+Section 13 states neither number, so this document states both and notes that
+they are the same number for the same reason rather than by coincidence: three
+attempts is where the marginal recovery rate stops justifying the marginal
+cost.
 
 Every internal adapter retry is recorded on the attempt as
 `internal_retry_count` so that a provider having a bad day is visible in
@@ -881,9 +884,9 @@ telemetry rather than hidden behind eventual success.
 ### Timeouts
 
 No document defines a model-call timeout. `ToolSpec.timeout_seconds` exists at
-plan line 821 and has no counterpart here, which means today a hung provider
-connection stalls a run until the worker's own deadline fires, if it has one.
-Two timeouts close that:
+`engineering-plan.md:837` and has no counterpart here, which means today a
+hung provider connection stalls a run until the worker's own deadline fires,
+if it has one. Two timeouts close that:
 
 ```python
 class ModelRequest(BaseModel):
@@ -937,13 +940,12 @@ class ProviderReasoningItem(BaseModel):
 
 ### The PLATFORM default is a privilege inversion, and it is bounded here
 
-Plan line 584 defaults `ProviderReasoningItem.trust_level` to
+`engineering-plan.md:592` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md` lines 661 to 690 map trust tiers to policy
-restrictiveness, so on its face this hands model-generated content the same
-standing as platform configuration. That is backwards: reasoning is model
-output, and `AssistantMessage` correctly defaults to
-`TrustLevel.EXTERNAL_UNTRUSTED`.
+`policy-and-approvals.md:663-692` maps trust tiers to policy restrictiveness,
+so on its face this hands model-generated content the same standing as
+platform configuration. That is backwards: reasoning is model output, and
+`AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.
 
 Changing the plan's default is not this document's call. What this document
 can do is make the label unable to cause harm, by fixing four properties of
@@ -975,11 +977,11 @@ Neither half is both readable and privileged.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md` lines 247 to 251 require
-that a call and its result never be separated by compaction. Both assume a
-pairing invariant that no document states. The gateway states and enforces it,
-because it is the last thing to touch the message list before it becomes a
-provider request:
+be answerable by a tool result; `context-engine.md:258-262` requires that a
+call and its result never be separated by compaction. Both assume a pairing
+invariant that no document states. The gateway states and enforces it, because
+it is the last thing to touch the message list before it becomes a provider
+request:
 
 1. Every `ToolCallItem` in the history is followed, before the next
    `AssistantMessage`, by a `ToolResultItem` with a matching `call_id`. A
@@ -1041,8 +1043,8 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (plan lines 2046 to 2055) omit the cached
-and reasoning token classes. The gateway's spans add
+Section 19's telemetry attributes (`engineering-plan.md:2076-2085`) omit the
+cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
 `veetbot.model.attempt_number` and `veetbot.model.internal_retries`. The span
@@ -1067,10 +1069,11 @@ engine interprets it per session, which is the level at which the
 prefix-stability invariant is actually stated.
 
 LISTEN/NOTIFY carries token deltas, reasoning deltas and provisional usage
-(ADR-0010 lines 24 to 25). The gateway publishes normalized events to that
-transport unchanged apart from one filter: `ReasoningDeltaEvent` is published
-only when the subscribing session has reasoning display enabled, because
-reasoning text is the largest volume and the least often wanted.
+(ADR-0010 at `0010-live-event-transport.md:24-25`). The gateway publishes
+normalized events to that transport unchanged apart from one filter:
+`ReasoningDeltaEvent` is published only when the subscribing session has
+reasoning display enabled, because reasoning text is the largest volume and
+the least often wanted.
 
 ## Ports, adapters, and what may import what
 
@@ -1139,14 +1142,15 @@ the failure that grep misses.
 
 ### The four adapters of Milestone 3
 
-Section 2.3's provider list at plan line 163 is controlling where the later
-list disagrees: OpenAI, Anthropic, and an OpenAI-compatible `chat_completions`
-endpoint, plus the fake. Milestone 3 line 2430 requires "the same contract
-suite against OpenAI, Anthropic, and a chat_completions endpoint", while line
-2202 names only OpenAI fixtures. The suite runs against all three plus the
-fake and the recorded adapter; the fixture asymmetry at line 2202 is an
-incomplete enumeration, not a narrower requirement, and this document resolves
-it in favour of the acceptance criterion.
+Section 2.3's provider list at `engineering-plan.md:157-161` is controlling
+where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
+`chat_completions` endpoint, plus the fake. Milestone 3
+(`engineering-plan.md:2500`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2244`
+names only OpenAI fixtures. The suite runs against all three plus the fake and
+the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
+a narrower requirement, and this document resolves it in favour of the
+acceptance criterion.
 
 The `chat_completions` adapter is where the awkward cases live. It carries the
 in-band `<think>` scrubber, ADR-0012's XML `<tool_call>` parser for models
@@ -1156,8 +1160,8 @@ test path Milestone 3 asks for.
 
 ### The fake and the recorded adapters
 
-Plan lines 1196 to 1204 use `FakeModelScript`, `ToolCallTurn` and `FinalTurn`
-at a call site and never define them.
+`engineering-plan.md:1216-1224` uses `FakeModelScript`, `ToolCallTurn` and
+`FinalTurn` at a call site and never defines them.
 
 ```python
 class ScriptedTurn(BaseModel):

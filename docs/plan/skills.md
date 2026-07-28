@@ -1152,14 +1152,14 @@ something.
 1  skill_manage called a control tool a capability tool
 2  skill_manage NON_IDEMPOTENT        CONDITIONALLY_IDEMPOTENT
 3  the scope spelled skills:write     skill.write, enumerated
-4  "skills have no design at all"     tool-system.md 1102-1149
+4  "skills have no design at all"     tool-system.md:1102-1149
 5  Milestone 8 had zero gates         ten, a new `skill` area
 6  Milestone 10 had zero gates        six, in the same area
 7  no harness case names a skill      case 27, Milestone 8
 8  the prefix ceiling was 13,500      15,000, a fifth class
 9  authoring "is not a tool call"     it is; the kind stays
 10 Section 30.4 cited for gating      Section 30.3 states it
-11 readiness.md cites line 2686       the criterion is at 2692
+11 readiness.md cites the wrong line  corrected below, and checked
 12 the gate token grammar says digit  a number; M10 has two
 ```
 
@@ -1178,9 +1178,10 @@ of it. The verdict is corrected where it is stated.
 
 Rows 10 and 11 are citation errors and are worth listing because they
 propagate. Four documents — `policy-and-approvals.md:137`,
-`docs/adr/0005-two-stage-policy-and-approval-model.md` at lines 10
-and 141, and `docs/status/questions-for-review.md:245` — attribute
-the policy-and-approval gating requirement to Section 30.4. The plan
+`0005-deterministic-policy-engine.md:10` and
+`0005-deterministic-policy-engine.md:141`, and
+`docs/status/questions-for-review.md:245` — attribute the
+policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
 `readiness.md:556` cited `engineering-plan.md:2690` for the
 version-pinning acceptance criterion, which is at

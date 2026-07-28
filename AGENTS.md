@@ -97,6 +97,11 @@ a document that others cite into, run `make citations-fix` and review the
 diff; a citation whose text is gone or now ambiguous is reported rather
 than guessed, and needs a human.
 
+Write every line reference as `file.md:LINE` or `file.md:LO-HI`. A line
+named in prose - "line 1408", "lines 659 to 661", "tool-system.md 1102" -
+is invisible to the ledger, so it is never checked and never repaired.
+`make docs-check` rejects that form in a specification.
+
 As implementation tooling is added in later milestones, this section and
 `make check` must also require formatting, linting, type checking, and tests.
 Do not claim a command works unless it exists in this repository.

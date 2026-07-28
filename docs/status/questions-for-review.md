@@ -3522,3 +3522,87 @@ That is a real limitation of the checker and it is worth knowing
 before someone hits it again.
 
 **Reversal cost:** cheap.
+
+## Bare line references (no ADR)
+
+### Line numbers written in prose are converted, and the form is rejected
+
+**Decided:** thirty-five references that named a line without naming
+it in the checked form — *"line 1408"*, *"lines 659 to 661"*,
+*"`tool-system.md` 1102-1149"* — are converted to `file.md:LINE`
+citations across [model-gateway.md](../plan/model-gateway.md),
+[readiness.md](../plan/readiness.md),
+[runtime-loop.md](../plan/runtime-loop.md), and
+[skills.md](../plan/skills.md). Every target was re-resolved by
+content against the current file rather than trusted.
+`scripts/check_citations.py` gains a `check_bare_references()` pass
+that fails `make docs-check` on either form in a live specification.
+
+**Why:** the checker only ever saw `file.md:NNN`, which means the
+forms it could not see were the only ones that could rot — the ones
+it could see are repaired on every run. They had rotted. Two were off
+by more than eighty lines. The ones still correct were correct by
+luck, since nothing had ever evaluated them.
+
+**Cost:** twenty-eight patches across four specifications and
+forty-three lines in the checker. The ledger grows from thirty-three
+citations to sixty-five.
+
+**Alternative:** delete the numbers and cite by heading instead.
+Rejected on the same argument as the earlier sweep: several targets
+are rows in tables and lines inside code blocks, and there is no
+heading to name.
+
+**Note:** two references were rephrased rather than repointed. A
+second occurrence of *"line 2202"* in the paragraph that had already
+cited it became *"that fixture asymmetry"*, and the self-referential
+paragraph in `readiness.md` that named its own wrong line now names
+the ledger instead. Repointing a number that a sentence is arguing
+about would have kept the sentence and lost the argument.
+
+**Reversal cost:** cheap for the checker, moderate for the prose.
+
+### ADR files become citable targets, and one ADR filename was wrong
+
+**Decided:** `docs/adr/*.md` is added to the checker's target globs,
+last in the list so that a citation naming `index.md` still resolves
+to `docs/index.md`. Three ADR-targeted citations exist as a result,
+all of them new. One of them corrects a filename: `skills.md` cited
+`docs/adr/0005-two-stage-policy-and-approval-model.md`, which is not
+a file in this repository. The ADR it means is
+`0005-deterministic-policy-engine.md`, whose lines 10 and 141 both
+still carry the attribution that sentence relies on.
+
+**Why:** an ADR is a record, but a citation *into* one is a live
+statement and rots the same way. The wrong filename had survived
+because nothing resolved it — a checker that knows three directories
+cannot report a name in a fourth.
+
+**Note:** the same wrong filename appears in an earlier entry in this
+file and is left alone. It is a record of what was believed on
+2026-07-25, and the corpus separates records from live statements.
+
+**Reversal cost:** cheap.
+
+### The standing toolchain-spec question is now worth more
+
+**Decided:** `docs/plan/development-toolchain.md` is still left
+unedited, on the reasoning recorded above under the harness section.
+
+**Why:** none of that reasoning changed. The specification reconciles
+a Makefile target count against Sections 21, 24, and 25, and a
+docs-only check is not a Milestone 0 deliverable.
+
+**Note:** what would be lost at Milestone 0 grew. It is no longer one
+script that repoints moved citations; it is also the only thing
+stopping thirty-five prose references from coming back one sentence
+at a time. `AGENTS.md` now carries two paragraphs about it and is
+still the only thing that will remember.
+
+**Question for you:** the earlier question stands — should
+`development-toolchain.md` name the check, at the cost of moving its
+target count from six to seven? My recommendation has moved from
+neutral to yes.
+
+**Reversal cost:** low now, higher after Milestone 0 ships a Makefile
+without it.

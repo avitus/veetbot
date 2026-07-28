@@ -4,6 +4,39 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Every cited line is now a checked citation
+
+- Converted thirty-five line references that the citation checker
+  could not see into the form it can. *"line 1408"*, *"lines 659 to
+  661"*, and *"`tool-system.md` 1102-1149"* become
+  `engineering-plan.md:1424`, `context-engine.md:680-682`, and
+  `tool-system.md:1102-1149`. Twenty-eight patches across
+  [model-gateway.md](plan/model-gateway.md),
+  [readiness.md](plan/readiness.md),
+  [runtime-loop.md](plan/runtime-loop.md), and
+  [skills.md](plan/skills.md).
+- Re-resolved every one of them by content against the current file
+  rather than by arithmetic. Most had drifted; two by more than
+  eighty lines. The forms the checker could not see were the only
+  ones that could rot, because the form it can see is repaired on
+  every run.
+- Extended `scripts/check_citations.py` with a `check_bare_references`
+  pass that fails `make docs-check` on a line named in prose or on a
+  `file.md NNN` form with a space where the colon belongs. Both match
+  across a single line break and neither matches across a blank line,
+  because a reference may wrap and a paragraph boundary is not one.
+- Added `docs/adr/*.md` to the checker's target globs, last, so that
+  `index.md` still resolves to `docs/index.md`. Three ADR-targeted
+  citations exist as a result.
+- Corrected an ADR filename that no file has ever had.
+  [skills.md](plan/skills.md) cited
+  `docs/adr/0005-two-stage-policy-and-approval-model.md`; the ADR it
+  means is `0005-deterministic-policy-engine.md`, and its lines 10
+  and 141 both still say what the sentence needs them to say.
+- Grew the ledger from thirty-three citations to sixty-five, and
+  added the rule to `AGENTS.md`: write `file.md:LINE`, never a line
+  named in prose.
+
 ## 2026-07-27 — The ORM surface and the migration conventions
 
 - Closed both partial bullets the readiness review named against
