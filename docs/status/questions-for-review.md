@@ -4012,3 +4012,169 @@ soon as there is more than one. The `Settings` field is right for
 than discovered it.
 
 **Reversal cost:** cheap while there is one principal.
+
+## The Milestone 7 history predicate (no ADR)
+
+### Selection is specified inside the context engine, not in an ADR
+
+**Decided:** the history predicate is written into
+`docs/plan/context-engine.md` and no ADR records it.
+
+**Why:** an ADR earns its place when a decision binds documents that
+would otherwise diverge. This one binds a single spec's own build
+sequence and adds one column that the event-log spec already had a
+place for. The Milestone 4 scope vocabulary was settled the same way
+and for the same reason.
+
+**Reversal cost:** cheap; an ADR can be written over a decision
+already recorded in prose.
+
+### Selection is two functions, not one
+
+**Decided:** seeding a run and assembling a request are separate
+selections with separate inputs, and the readiness finding is treated
+as covering both.
+
+**Why:** the finding says "stable across two runs with the same
+input", and there are two places that phrase can fail. Assembly reads
+the checkpoint, which is closed and ordered. Seeding reads a
+projection, which is neither. Writing one predicate over both would
+have hidden the harder half.
+
+**Reversal cost:** none.
+
+### The retained set is a contiguous suffix, not a ranking
+
+**Decided:** history is a tail of the ordered item list, chosen by a
+single cut index. No relevance ranking over past turns.
+
+**Why:** a ranked subset produces a transcript with holes, and a
+model reading a hole reads a conversation in which the missing thing
+never happened. It would also be a second retrieval system beside
+in-turn recall, which already exists to pull back the older thing
+that matters — and with two of them, a turn that should have been
+present and was not is ambiguous between a selection defect and a
+ranking miss.
+
+**Alternative:** rank by relevance and keep the highest-scoring
+turns. It sounds better than it is: every objection above is a
+consequence of it, and none of them surfaces in a demo.
+
+**Reversal cost:** high once anything depends on the ordering.
+
+### Seeding reads the log at a pinned sequence
+
+**Decided:** `seed_checkpoint` reads session history strictly below
+`runs.seed_event_sequence`, the sequence of the
+`user.message.created` event the run answers, rather than reading the
+projection as it stands.
+
+**Why:** `seed_checkpoint` has two call sites — run creation and the
+rebuild forced when a run's checkpoints are gone — and they can be
+hours and a deploy apart. A live read makes the second seed a
+different conversation from the first, which is the failure the
+Milestone 2 dispensability gate exists to detect and would instead
+have been causing.
+
+**Cost:** one nullable column on `runs`, written in a transaction
+that already allocates the value.
+
+**Reversal cost:** none while it is additive; expensive after runs
+exist without it, which is why it is a Milestone 2 column.
+
+### Child runs select no session history
+
+**Decided:** `runs.seed_event_sequence` is null for the child runs of
+Section 27.6, and a null sequence selects nothing.
+
+**Why:** Section 27.6 already says a child returns a concise result
+and never writes to the parent's conversation. Seeding it from the
+parent's history would make the relationship asymmetric in the
+direction that costs the most: unbounded context, a wider redaction
+surface, and a subagent that can be steered by conversation it was
+not given on purpose.
+
+**Question for you:** this is closer to a product decision than an
+engineering one. A subagent that cannot see the conversation that
+spawned it needs the parent to restate anything it depends on, and a
+parent that forgets to will produce a child that confidently answers
+the wrong question. The alternative is to pass a bounded excerpt the
+parent names explicitly, which is more work and more honest. I chose
+the strict version for 0.1 because it is the one that can be relaxed
+later without breaking anything.
+
+**Reversal cost:** cheap; the column already carries the value that
+would be needed.
+
+### One gate, not two
+
+**Decided:** `gate.context.history_cut` at Milestone 7 covers the
+assembly half. The seeding half gets no gate of its own.
+
+**Why:** the Milestone 2 dispensability gate already asserts that a
+run whose checkpoints were deleted resumes to the same terminal
+state, which is untestable unless reseeding is deterministic. A
+second gate over the same property would pass or fail with the first.
+
+**Reversal cost:** none.
+
+### `select_history` returns an index
+
+**Decided:** the signature returns the cut index, not the retained
+list.
+
+**Why:** an index can only describe a suffix. Returning a list would
+make contiguity an assertion somebody has to remember to write, and
+the gate would be checking a property the type could have carried.
+
+**Reversal cost:** none.
+
+### A split tool pair moves the cut later, never earlier
+
+**Decided:** when the cut falls between a tool call and its result,
+the pair is excluded as a unit.
+
+**Why:** admitting the call instead would add tokens to a set already
+at its limit, which turns one boundary adjustment into a loop. The
+pair is an atomic budget unit in both directions, and the cheaper
+direction is out.
+
+**Reversal cost:** none.
+
+### The cut never falls earlier than the compaction boundary
+
+**Decided:** items below `replaced_through_sequence` are never
+re-admitted to the body.
+
+**Why:** they are already represented by the summary at position 7.
+Admitting them again states the same turns twice in two voices, and
+the paraphrase and the original will not agree about emphasis.
+
+**Reversal cost:** none.
+
+### The token estimator becomes a pure function
+
+**Decided:** `TokenEstimator.estimate` stays approximate and gains a
+requirement that it be a pure function of its arguments.
+
+**Why:** approximation moves the cut to a slightly wrong place, which
+is a tuning question. Non-determinism moves the cut to a different
+place on two identical calls, which is the failure the predicate
+exists to prevent. Nothing in the earlier wording ruled out a
+sampled or clock-sensitive implementation.
+
+**Note:** a cache is still permitted. It may change how long
+`estimate` takes and never what it returns.
+
+**Reversal cost:** none.
+
+### The compaction summary's stated position was wrong
+
+**Decided:** `context-engine.md` said the summary "sits at position 6
+in the assembly order" and now says position 7.
+
+**Why:** rows 5 and 9 were inserted by the skills specification and
+this sentence was not renumbered with them. Position 6 is the
+session-open memory snapshot.
+
+**Reversal cost:** none.

@@ -4,6 +4,60 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Milestone 7's history predicate is closed
+
+- Gave history selection a predicate in
+  [context-engine.md](plan/context-engine.md), which the readiness
+  review named as Milestone 7's surviving shortfall and said to close
+  first. The yield order and the 8,000-token floor were already
+  specified; what decided that a given turn was in or out was not.
+- Split it into the two selections it actually is. Seeding a run
+  reads the session-history projection; assembling a request reads
+  the run's checkpoint. The checkpoint is closed and ordered, so
+  assembly was always the easier half — the projection is a live read
+  model that advances on a timer, and reading it for "the session's
+  history" returns whatever has been applied at the moment of the
+  call.
+- Pinned the seed to a log prefix. `seed_checkpoint` reads history
+  strictly below `runs.seed_event_sequence`, the session sequence of
+  the `user.message.created` event the run answers, written in the
+  transaction that already allocates it. `seed_checkpoint` has two
+  call sites — run creation and the rebuild forced when a run's
+  checkpoints are deleted — and hours can separate them. A live read
+  would have made the second seed disagree with the first, which is
+  the failure the Milestone 2 dispensability gate exists to detect.
+- Made the retained set a contiguous suffix: one cut index, a
+  backward scan against `budget.history_tokens`, floored at
+  `replaced_through_sequence`, moved later past any tool pair it
+  would split, taken after the never-yield items are subtracted.
+  `select_history` returns the index rather than the list, so
+  contiguity is carried by the return type.
+- Ruled out a relevance ranking over past turns, and said why. It
+  produces a transcript with holes that a model reads as a
+  conversation in which the missing thing never happened, and it is a
+  second retrieval system beside in-turn recall — after which a
+  turn that should have been present and was not is ambiguous between
+  a selection defect and a ranking miss. History is recency; recall
+  is relevance.
+- Required `TokenEstimator.estimate` to be a pure function of its
+  arguments. Approximate was always allowed and still is; an
+  estimator that answers differently on two identical calls moves the
+  cut, which is the whole failure. A cache may change how long it
+  takes and never what it returns.
+- Registered one gate, `gate.context.history_cut` at Milestone 7,
+  property-tested over generated item lists. The seeding half gets no
+  gate, because the dispensability gate already asserts the property
+  and only ever could once the cut was fixed. The census moves to one
+  hundred and fifty-seven registry entries from one hundred and
+  fifty-one declarations across the thirteen specs, with Milestone 7
+  at seven and non-case gates at seventy-two.
+- Corrected a numbering defect the skills specification left behind:
+  the compaction section said the summary "sits at position 6 in the
+  assembly order" when rows 5 and 9 had pushed it to 7. Position 6 is
+  the session-open memory snapshot.
+- Changed Milestone 7's readiness verdict to ready. Two milestones
+  carry named gaps: 8 and 9.
+
 ## 2026-07-28 — Milestone 4's second gap is closed
 
 - Designed the principal scope vocabulary in

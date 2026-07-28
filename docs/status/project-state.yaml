@@ -78,10 +78,14 @@ readiness:
     WorkspaceHandle a provenance record, then policy-and-approvals.md
     defined the fourteen-string principal scope vocabulary, its
     grammar, the exact-match subset test, and the scope set stamped on
-    the run. Its verdict is now ready. Three milestones carry named
-    gaps: 7, 8, and 9.
+    the run. Its verdict is now ready. Milestone 7's surviving gap
+    closed when context-engine.md gave history selection a predicate:
+    seeding reads the log below a sequence pinned on the run, and
+    assembly retains a contiguous suffix chosen by a deterministic
+    cut. Its verdict is now ready. Two milestones carry named gaps: 8
+    and 9.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
 last_updated: 2026-07-28T12:00:00Z
-last_reviewed_commit: b880626
+last_reviewed_commit: 81d2b5c

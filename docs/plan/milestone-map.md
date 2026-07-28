@@ -475,7 +475,7 @@ keeps only the projection's scaffold and the consent stamp there and
 places the document builder, the redaction pipeline, the consent
 tables, and both export gates at Milestone 3.
 
-### Context engine, five gates
+### Context engine, six gates
 
 The section says Milestone 7 for all five. One moves earlier, because
 ADR-0024 already scheduled it: the Milestone 1 context builder is
@@ -491,6 +491,7 @@ Region B only. That is gate 1, exactly.
 3   gate.context.budget_conform     case         7
 4   gate.context.tool_pair_integ    property     7
 5   gate.context.trust_preserved    corpus       7
+6   gate.context.history_cut        property     7
 ```
 
 Gate 2 stays at Milestone 7 because its subject is a scripted
@@ -498,7 +499,11 @@ fifty-turn session with a forced compaction, a revoked tool, and a
 memory correction — none of which exist before Milestone 7. Gate 1
 stays true from Milestone 1 onward and is the reason the builder is
 written deterministically from the first commit rather than
-retrofitted.
+retrofitted. Gate 6 was added later, when the readiness review found
+that history had a yield order and no rule saying which items were in
+the request before yielding began; it is a property gate for the same
+reason gate 1 is, because the claim is about every input rather than
+about a chosen one.
 
 The build sequence's seven steps are Milestone 7 except step 1, which
 is Milestone 1 by the same decision.
@@ -748,12 +753,12 @@ milestone  new gates  cumulative  the earliest of them
 5                 11         105  the API surface, the stream,
                                   cancellation keeps effects
 6                 11         116  isolation, egress, artifacts
-7                  6         122  budgeting and compaction
-8                 14         136  the MCP adapter, the pinned
+7                  7         123  budgeting and compaction
+8                 14         137  the MCP adapter, the pinned
                                   catalog, the metadata boundary,
                                   package validation
-9                 14         150  formation and retrieval
-10                 6         156  the authoring loop and the
+9                 14         151  formation and retrieval
+10                 6         157  the authoring loop and the
                                   background review
 ```
 
@@ -774,14 +779,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries four — three in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and fifty-six gates are green before
+2.  **Forty-one of one hundred and fifty-seven gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and fifty-six, which is
+The cumulative column reaches one hundred and fifty-seven, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise

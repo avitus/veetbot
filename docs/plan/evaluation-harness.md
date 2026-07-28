@@ -193,7 +193,7 @@ restates a gate another spec owns.
 | Model gateway | 8 | 0 | 1 | 3 | 12 |
 | Policy and approvals | 7 | 3 | 1 | 2 | 13 |
 | Event log and persistence | 9 | 2 | 0 | 3 | 14 |
-| Context engine | 2 | 2 | 1 | 0 | 5 |
+| Context engine | 2 | 3 | 1 | 0 | 6 |
 | Memory formation | 3 | 0 | 2 | 0 | 5 |
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 3 | 0 | 0 | 8 | 11 |
@@ -202,7 +202,7 @@ restates a gate another spec owns.
 | Skills | 12 | 1 | 1 | 2 | 16 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **85** | **18** | **8** | **45** | **156** |
+| **Total** | **85** | **19** | **8** | **45** | **157** |
 
 The counts are the useful output, not the individual assignments:
 **seventy-one of the hundred and fifty-six declared gates are not case

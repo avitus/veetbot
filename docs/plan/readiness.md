@@ -80,7 +80,7 @@ rather than smoothed.
 | 4 | Policy, approvals, and tool lifecycle | Ready | 22 | Nothing |
 | 5 | HTTP API and SSE | Ready | 11 | Nothing |
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
-| 7 | Context budgeting and working state | Ready with named gaps | 6 | No evaluation cases |
+| 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready with named gaps | 14 | MCP auth scheme |
 | 9 | Long-term memory and knowledge | Ready with named gaps | 14 | Knowledge documents |
 | 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | No acceptance criteria exist |
@@ -158,7 +158,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and fifty-six gates are green before
+**Forty-one of one hundred and fifty-seven gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -612,9 +612,9 @@ the composition root learns to refuse the development mechanism, and
 one is Milestone 4, where `WorkspaceHandle` acquires its first
 callers. The verdict is ready.
 
-## Milestone 7: ready with named gaps
+## Milestone 7: ready
 
-Six registry entries and the best per-bullet coverage of any milestone
+Seven registry entries and the best per-bullet coverage of any milestone
 in the second half. [context-engine.md](context-engine.md) covers
 seven of eight implement bullets fully: the token budgeter, the
 compaction boundary, the structured working set, the deterministic
@@ -623,10 +623,10 @@ assembled context, and the recall trace as a second consumer.
 
 Two shortfalls.
 
-1.  **History selection has an order but no predicate.** The yield
-    order and the floor are specified. What decides that a given turn
-    is in or out is not, which is the part that determines whether the
-    result is stable across two runs with the same input.
+1.  **History selection had an order but no predicate.** The yield
+    order and the floor were specified. What decided that a given turn
+    was in or out was not, which is the part that determines whether
+    the result is stable across two runs with the same input.
 2.  **Long-session evaluation has a gate and no case.** The
     twenty-five-case table carries milestones 1, 2, 4, 5, and 6 and
     nothing else. There is no Milestone 7 row, so three of this
@@ -634,13 +634,56 @@ Two shortfalls.
     harness specifies how to add cases and the gate exists; what does
     not exist is the case.
 
-**What changed.** Shortfall 2 is closed.
+**What changed.** Shortfall 2 was closed first.
 [evaluation-harness.md](evaluation-harness.md) case 28 gives this
 milestone its first row: the fifty-turn session with one distinct
 `prefix_sha256`, which is `gate.context.prefix_stability` given
-something to run. Shortfall 1 stands and is the one to close first,
-because a selection order with no predicate is the kind of gap that
-looks specified until two runs disagree.
+something to run.
+
+### What closed it
+
+Shortfall 1 was closed on a later pass, and it turned out to be two
+questions wearing one name. Which items are in the request is decided
+twice — once when a run seeds from the session and once on every
+assembly — and the two decisions read different inputs, so a single
+predicate could not have covered both.
+
+[context-engine.md](context-engine.md) answers the seeding half with a
+cut rather than a rule about content. The session-history projection
+is a live read model that advances on a timer, so reading it for "the
+session's history" returns whatever has been applied at the moment of
+the call. That matters more than it looks: `seed_checkpoint` has two
+call sites, the second being the rebuild the Milestone 2
+dispensability gate forces, and the two can be hours apart. The seed
+now reads the log below `runs.seed_event_sequence`, the session
+sequence of the `user.message.created` event the run answers, written
+in the transaction that already allocates it. Projections were already
+required to be deterministic over a log prefix; pinning which prefix
+is what converts that into a statement about seeding, and it needs no
+gate of its own, because the dispensability gate is the test and it
+only tested anything once the cut was fixed.
+
+The assembly half is answered by making the retained set a contiguous
+suffix — one cut index, computed by a backward scan against
+`history_tokens`, floored at the compaction boundary, moved later past
+any tool pair it would split, and taken after the never-yield items
+have been subtracted. `select_history` returns the index rather than
+the list, so contiguity is carried by the return type instead of by a
+test someone has to remember to write, and `TokenEstimator.estimate`
+picks up a purity requirement it was missing: approximate was always
+allowed, but an estimator that answers differently on two identical
+calls moves the cut, which is the whole failure.
+
+The argument against the obvious alternative is the part worth
+keeping. A relevance ranking over past turns would be a second
+retrieval system beside the one the corpus already has, and it would
+make a missing turn ambiguous between a selection defect and a ranking
+miss. History is recency and in-turn recall is relevance; the two stay
+separate so that either can be tested.
+
+One gate, at Milestone 7: `gate.context.history_cut`, a property gate
+for the same reason gate 1 is. Both named shortfalls are closed, so
+the verdict changes with them.
 
 ## Milestone 8: ready with named gaps
 
@@ -950,7 +993,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1399` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:804`. The map
+    `model-gateway.md:1735` and `milestone-map.md:809`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
