@@ -5209,3 +5209,65 @@ the fifteen tables, and the two the engineering plan declares outside
 any such section make one hundred and seventy-two.
 
 **Reversal cost:** none. This is a record of a measurement.
+
+### The case table promised gates it does not carry
+
+**Decided:** the heading now names what the table holds, and the
+gate-to-case direction is stated in prose rather than filled in with a
+column I would have had to invent.
+
+**Why:** *"The twenty-five cases, with milestones and gates"* headed a
+table whose columns are number, case, milestone, kind, and what only
+this case proves. There is no gate column and there is no sign there
+ever was one. The heading now reads *"with milestones and kinds"*,
+`Kind` being the column's own label rather than a word I chose.
+
+**Note:** the arithmetic behind the heading is the larger finding.
+Ninety-five of the hundred and seventy-two registered gates declare
+kind `case`, which this document defines as a gate that runs as an
+eval case, and the document enumerates thirty-one cases. Nothing in
+the corpus reconciles the two numbers. Six cases are tied to a named
+gate anywhere in prose — 19 and 26 to the two sandbox gates, 20 to the
+policy specification's tenth by position rather than by identifier, 28
+to the context engine's prefix gate, and 29 and 30 to the MCP set they
+arrived with — and the other twenty-five are tied to nothing. So the
+enumeration is the floor Section 20.3 asks for and not the size of the
+finished suite, which the section now says.
+
+**Question for you:** whether the binding belongs in the registry's
+`check` field, which can carry it with no schema change, or in a gate
+column on the table, which puts it where a reader looks for it and
+duplicates a fact the registry owns. Recorded as the harness's seventh
+open question rather than decided, because a column would mean
+asserting which of the ninety-five case gates each row satisfies and
+the corpus states that for six.
+
+**Reversal cost:** the heading is free to change again. The binding is
+cheap to decide before the registry is written and awkward after.
+
+### Eleven cases are writable in Milestone 1, not ten
+
+**Decided:** corrected the four live statements that said ten, and
+tied each to the range so the count is checkable.
+
+**Why:** the case table places cases 1 through 11 at Milestone 1, and
+[development-toolchain.md](../plan/development-toolchain.md), the
+engineering plan, and the harness's own build order all say "cases 1
+through 11". Three live statements said "ten of the twenty-five" and
+one said a Milestone 1 checkout without the `milestone` field "fails
+twenty of the twenty-five", where the figure is fourteen. The harness
+contradicted itself: its build order and its Decision 15 disagreed
+about the same set, four lines apart in the same document.
+
+**Note:** each corrected statement now names the range as well as the
+count, so the number is checkable against the table rather than
+merely asserted. That is why the error survived: "ten" was a number
+with nothing to check it against.
+
+**Question for you:** `docs/adr/0022-evaluation-harness.md` carries
+the same stale figure in its eighteenth decision. It is left alone
+under the rule that a decision record is a record at a point in time,
+which I think is right, but an erratum note is the alternative and it
+is your call rather than mine.
+
+**Reversal cost:** none. The corrected numbers follow from the table.

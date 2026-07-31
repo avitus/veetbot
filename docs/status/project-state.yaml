@@ -166,8 +166,24 @@ readiness:
     build sequence table, which passes on all nine specifications
     whose sequences carry milestones. The census is unchanged at
     one hundred and seventy two registry entries.
+    A third pass audited the evaluation case registry, which had never
+    been read against itself. The case table places eleven cases at
+    Milestone 1, cases 1 through 11, and five live statements say so,
+    but three others said ten and one said a Milestone 1 checkout
+    fails twenty of the twenty five when the figure is fourteen. All
+    four are corrected and each now names the range, so the count is
+    checkable against the table. The section heading promised gates
+    the table does not carry and now names the kind column it holds.
+    Ninety five of the one hundred and seventy two registered gates
+    declare kind case against thirty one enumerated cases, and six
+    cases are tied to a named gate anywhere, so the enumeration is a
+    floor and the binding is recorded as an open question. The two
+    remaining map gates that can be run today were run and pass:
+    every identifier matches the grammar and uses one of the fourteen
+    areas, and the written census is what the registry derives, per
+    milestone and cumulative.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-01T02:15:00Z
-last_reviewed_commit: e20169b
+last_updated: 2026-08-01T04:40:00Z
+last_reviewed_commit: b40bf54

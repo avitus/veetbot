@@ -4,6 +4,37 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The evaluation case registry, audited
+
+- Read the case table against every statement that counts it. Eleven
+  cases are writable in Milestone 1, cases 1 through 11, which
+  [development-toolchain.md](plan/development-toolchain.md), the
+  engineering plan, and the harness's own build order all say. Three
+  live statements said ten, and one said a Milestone 1 checkout
+  fails twenty of the twenty-five when the figure is fourteen. All
+  four are corrected, and each now names the range as well as the
+  count so the number is checkable against the table rather than
+  merely asserted.
+- Corrected the heading *"The twenty-five cases, with milestones and
+  gates"*, which headed a table with no gate column. It now names
+  the `Kind` column the table actually carries.
+- Recorded what that heading was pointing at. Ninety-five of the
+  hundred and seventy-two registered gates declare kind `case`,
+  against thirty-one enumerated cases, and six cases are tied to a
+  named gate anywhere in the corpus. The enumeration is a floor
+  rather than the finished suite, which
+  [evaluation-harness.md](plan/evaluation-harness.md) now says, and
+  where the binding belongs is its seventh open question.
+- Ran the last two of the milestone map's own hard gates that can be
+  run today. Every identifier matches the grammar and its area is
+  one of the fourteen, with no area unused and no slug repeated
+  within one. The written census is exactly what the registry
+  derives, per milestone and cumulative. Only the set comparison
+  against `evals/gates/*.yaml` remains, and it cannot run until that
+  directory exists.
+- Left [ADR-0022](adr/0022-evaluation-harness.md) alone. It carries
+  the same stale figure and is a record at a point in time.
+
 ## 2026-07-31 — The map's own hard gates, audited by hand
 
 - Ran hard gates 1, 3, and 4 of

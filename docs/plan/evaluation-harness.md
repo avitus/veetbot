@@ -414,7 +414,7 @@ Six additions to Section 20.1, each traceable to something a spec now requires.
 
 `milestone` is the earliest milestone at which the case can pass, and the runner
 refuses to run a case above the milestone the repository declares. Without it,
-a Milestone 1 checkout fails twenty of the twenty-five initial cases and the
+a Milestone 1 checkout fails fourteen of the twenty-five initial cases and the
 suite is ignored from the first week.
 
 `principal` and `policy_profile` name the identity and ruleset the run executes
@@ -946,7 +946,7 @@ declarative front end, it runs in the integration job, and it is collected by
 the same runner. Making cases a separate pipeline stage is how a suite ends up
 with two ways to start a run.
 
-## The twenty-five cases, with milestones and gates
+## The twenty-five cases, with milestones and kinds
 
 Section 20.3 requires at least these twenty-five. What it does not say is when
 each becomes writable, which is the single fact an implementer needs most: case
@@ -957,6 +957,14 @@ table below is its source.
 The right-hand column names what the case proves that no other case proves,
 because twenty-five cases with overlapping purposes is how a suite gets slow
 without getting stronger.
+
+The table carries no gate column, and the binding runs the other way: a case
+gate names its case in the registry's `check` field, so a gate finds its case
+rather than a case finding its gates. The direction is worth stating because
+the two counts do not match. Ninety-five of the hundred and seventy-two
+registered gates declare kind `case`, against the thirty-one cases this
+document enumerates, so the enumeration is the floor Section 20.3 asks for
+and not the size of the finished suite.
 
 | # | Case | M | Kind | What only this case proves |
 | --- | --- | --- | --- | --- |
@@ -1004,10 +1012,10 @@ readable illustration.
 Cases 12 through 15 and 24 through 25 are marked Milestone 4 rather than
 Milestone 1 because they need the policy engine and the approval service.
 Cases 16 through 18 are Milestone 2, because before durable persistence there is
-nothing to restart into. Ten of the twenty-five are writable in Milestone 1,
-which is what makes "build evaluations before advanced features" a real
-instruction rather than an aspiration — the suite starts on the first vertical
-slice and grows with the milestones.
+nothing to restart into. Eleven of the twenty-five, cases 1 through 11, are
+writable in Milestone 1, which is what makes "build evaluations before
+advanced features" a real instruction rather than an aspiration — the suite
+starts on the first vertical slice and grows with the milestones.
 
 ### Case 26, and why the twenty-five are still twenty-five
 
@@ -1669,8 +1677,8 @@ invariants stop being prose.
     layout and two specs that already rely on it. Eval cases are not a category;
     they are integration tests with a declarative front end.
 15. Every case declares its earliest milestone, and the runner refuses cases
-    above the repository's declared milestone. Ten of the twenty-five initial
-    cases are writable in Milestone 1.
+    above the repository's declared milestone. Eleven of the twenty-five
+    initial cases, cases 1 through 11, are writable in Milestone 1.
 16. Case 18 splits into 18a and 18b, before and after the watermark, because
     the tool system made the distinction decidable and only 18b has a safety
     consequence.
@@ -1754,3 +1762,14 @@ invariants stop being prose.
    track, which removes the whole deprecation problem. It also removes the
    cross-provider independence rule's easiest satisfaction. Worth deciding
    before the first published score, not before Milestone 3.
+
+7. **Whether a case gate should name its case in the registry, or whether the
+   case table should gain a gate column.** Ninety-five gates declare kind
+   `case` and thirty-one cases are enumerated, so most case gates have no
+   named case yet and nothing reconciles the two. The registry's `check`
+   field can carry the reference with no schema change, which is the cheaper
+   direction and the one the paragraph above assumes. A column in the table
+   would put the mapping where a reader looks for it, at the cost of
+   duplicating a fact the registry owns and of a second place to forget to
+   update. Either answer beats the current silence, and the choice is worth
+   making before the registry is written rather than after.
