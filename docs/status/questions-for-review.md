@@ -4983,3 +4983,131 @@ see a citation that points at the wrong line, and it cannot see a
 quotation in the citing document that no longer matches the cited
 text. Both were found by reading. If the check is ever extended,
 that is the gap to close.
+
+### Thirteen registry rows carried an identifier the grammar forbids
+
+**Decided:** the four affected tables in `milestone-map.md` widen
+their identifier column, and every row in the registry is written
+in full.
+
+**Why:** the document sets the grammar itself. An identifier is
+`gate.<area>.<slug>`, where the slug is lowercase,
+underscore-separated, and unique within its area. A slug holds no
+dots, so `gate.runtime.one_terminal_wr..` is not an identifier, and
+two of this document's own hard gates fail on one. Gate 5 asserts
+that every identifier matches the grammar, and a truncated one does
+not. Gate 2 asserts that the registry and `evals/gates/*.yaml` hold
+the same identifiers, compared as sets and not as counts, and a
+truncated form cannot be a set member of anything. The corpus was
+carrying thirteen such rows across four tables, which no
+implementation of either gate could have accepted.
+
+**Note:** this answers a question already on the record. The entry
+headed *"`gate.tool.mcp_disconnect` is named for the column, not
+for clarity"* asked whether to widen the column or keep the
+ceiling, and named two truncations. The audit found twelve gates
+across thirteen rows, the extra row being an alias restated in a
+second table. The ceiling is gone. The naming decision that entry
+recorded stands on its own reasoning, since there is one disconnect
+gate and the short name is not ambiguous, but the constraint that
+produced it no longer exists and no future name needs shortening to
+fit a column.
+
+**Note:** `make docs-check` passed green with all thirteen in
+place, before the audit and after the fix. Nothing in the toolchain
+reads a gate identifier.
+
+**Reversal cost:** low.
+
+### Three runtime gate identifiers had never been spelled in full
+
+**Decided:** runtime loop gates 1, 11, and 12 are registered as
+`gate.runtime.one_terminal_writer`,
+`gate.runtime.waiting_holds_nothing`, and
+`gate.runtime.cancel_keeps_effects`.
+
+**Why:** nine of the twelve truncated gates were spelled in full
+somewhere else in the corpus and were restored from there, the
+eight sandbox ones from `sandbox-isolation.md` and
+`gate.event.checkpoint_dispensable` from both
+`event-log-and-persistence.md` and `runtime-loop.md`. The other
+three existed nowhere in full. Their declarations in
+`runtime-loop.md` read *"One terminal writer"*, *"A waiting run
+holds nothing"*, and *"Cancellation never abandons an effect"*, and
+each completion above is the reading consistent with both the
+surviving prefix and the declaration. The third has independent
+corroboration: the census in `milestone-map.md` already describes
+Milestone 5 as *"the API surface, the stream, cancellation keeps
+effects"*.
+
+**Question for you:** confirm the three spellings. They are the
+only identifiers in the registry that this pass named rather than
+recorded, and every other one in the corpus can be traced to a
+document that already stated it.
+
+**Reversal cost:** low now — four table rows and this entry — and
+higher once `evals/gates/runtime.yaml` exists and tests reference
+the identifiers.
+
+### The harness's worked examples named gates that do not exist
+
+**Decided:** the second `evals/gates` example and the `agent eval
+gates` output example in `evaluation-harness.md` are corrected to
+use registry identifiers, and the two milestone counts in the
+second are corrected against the census.
+
+**Why:** they used `gate.policy.prompt_is_not_authorization` and
+`gate.tool.watermark_contract`. The registry holds
+`gate.policy.prompt_not_authz` and `gate.tool.watermark_first`.
+Gate 2 of `milestone-map.md` compares the registry against
+`evals/gates/*.yaml` as sets, so a worked example of that very file
+naming an identifier the registry does not hold is a worked example
+that fails the gate it illustrates. The document's first example
+uses a real entry with its real kind and milestone, so this is a
+deviation from the document's own convention rather than a licence
+to invent.
+
+**Note:** `gate.tool.watermark_first` is a case gate at Milestone
+1, and the example is a Milestone 4 listing, so it could not be
+renamed in place. It is replaced by `gate.builtin.listing_stable`,
+a property gate at Milestone 4, which keeps the example's point
+that a milestone listing mixes areas.
+
+**Note:** the counts read 28 gates for Milestone 4 and 12 for
+Milestone 5. The census says 22 and 11, and 28 is Milestone 1's
+count. The pass and pending figures move with them so the example
+still adds up, and the sentence below it that read *"the twelve
+gates arriving next"* now reads eleven.
+
+**Reversal cost:** low.
+
+### Nothing in the toolchain reads a gate identifier
+
+**Decided:** the audit stays a record and is not turned into a
+check in `scripts/`.
+
+**Why:** the checks that would have caught all of this are already
+specified. They are gates 2, 5, and 6 of `milestone-map.md`, all
+Milestone 0, with a named home in `tests/gates/` and a registry in
+`evals/gates/*.yaml` that does not exist yet. Writing a partial one
+into `scripts/check_docs.py` now would begin Milestone 0, pre-empt
+where the check lives and what it reads, and create a second
+authority on a question the corpus has already answered once.
+
+**Note:** what the audit did, for whoever writes those gates. It
+parsed every registry row out of the fenced tables and asserted
+four things. Every identifier matches the grammar and its area is
+one of the fourteen. No identifier repeats. Every well-formed
+identifier appearing anywhere in `docs/plan/*.md` is a registry
+entry. And the per-kind and per-spec counts in the harness's own
+table, together with the per-milestone counts in the census, are
+what the registry actually holds. All four pass now. The third is
+the one that found the harness examples, and it is the one no gate
+currently states.
+
+**Note:** a malformed identifier written in prose is not an
+identifier. `milestone-map.md` now quotes one deliberately, to show
+what the grammar excludes, and says so where it quotes it, so gate
+5 is not implemented as a scan of free text.
+
+**Reversal cost:** none. This defers work rather than doing it.

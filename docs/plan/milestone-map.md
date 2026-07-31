@@ -199,6 +199,27 @@ its gates across `memory`, `context`, and `tool`, and it was rejected
 for the reason `skill` rejected the same split: `visibility` and
 `no_belief_write` are two halves of one governance story.
 
+Every identifier in the tables below is written in full. Thirteen rows
+across four of them used to carry a truncated one, which this grammar
+does not admit — a slug is underscore-separated and holds no dots, so
+`gate.runtime.one_terminal_wr..` is not an identifier, and
+`gate.harness.id_grammar` and `gate.harness.map_bijection` would both
+fail on it, the first because it does not match and the second because
+it cannot be compared as a set member against anything. Nine of the
+twelve gates involved were spelled in full elsewhere in the corpus and
+are restored from there. The other three had never been spelled
+anywhere, and are completed here from their own declarations: runtime
+loop gates 1, 11, and 12 are *"One terminal writer"*, *"A waiting run
+holds nothing"*, and *"Cancellation never abandons an effect"*, giving
+`gate.runtime.one_terminal_writer`,
+`gate.runtime.waiting_holds_nothing`, and
+`gate.runtime.cancel_keeps_effects` — the last of which the census
+below already reads as *"cancellation keeps effects"*. The
+malformed form above is quoted, not registered: the grammar gate
+reads the registry tables and `evals/gates/*.yaml`, both of which
+hold only real identifiers, and not the prose that explains what a
+truncated one looked like.
+
 ## Ownership: the three gates declared twice
 
 Three statements appear as gates in two specs each. Each gets one
@@ -206,12 +227,12 @@ registry entry, one owner, and an explicit alias so that a reader who
 finds it in the non-owning spec knows it is not a second gate.
 
 ```text
-gate id                          owner            also stated in
--------------------------------  ---------------  -----------------
-gate.structure.import_boundary   engineering      tool-system #6
-                                 plan, M0
-gate.structure.txn_hygiene       event-log #7     runtime-loop #6
-gate.event.checkpoint_dispens..  event-log #6     runtime-loop #9
+gate id                            owner            also stated in
+---------------------------------  ---------------  -----------------
+gate.structure.import_boundary     engineering      tool-system #6
+                                   plan, M0
+gate.structure.txn_hygiene         event-log #7     runtime-loop #6
+gate.event.checkpoint_dispensable  event-log #6     runtime-loop #9
 ```
 
 The generic import-boundary walk is one of the two registry entries
@@ -270,22 +291,22 @@ Already tagged per gate. Reproduced here so the map is complete and so
 the two aliases are visible.
 
 ```text
-#   id                              kind         M
---  ------------------------------  -----------  --
-1   gate.runtime.one_terminal_wr..  structural   1
-2   gate.runtime.no_ambient_time    structural   1
-3   gate.runtime.no_ambient_id      structural   1
-4   gate.runtime.step_identity      case         1
-5   gate.runtime.budget_stops       case         1
-6   (alias of gate.structure.txn_hygiene)        2
-7   gate.runtime.lease_once         case         2
-8   gate.runtime.fenced_no_write    case         2
-9   (alias of gate.event.checkpoint_dispensable) 2
-10  gate.runtime.resume_idempotent  case         2
-11  gate.runtime.waiting_holds_no.  case         4
-12  gate.runtime.cancel_keeps_eff.  case         5
-13  gate.runtime.build_fits         property     7
-14  gate.runtime.build_stable       property     7
+#   id                                  kind         M
+--  ----------------------------------  -----------  --
+1   gate.runtime.one_terminal_writer    structural   1
+2   gate.runtime.no_ambient_time        structural   1
+3   gate.runtime.no_ambient_id          structural   1
+4   gate.runtime.step_identity          case         1
+5   gate.runtime.budget_stops           case         1
+6   (alias of gate.structure.txn_hygiene)            2
+7   gate.runtime.lease_once             case         2
+8   gate.runtime.fenced_no_write        case         2
+9   (alias of gate.event.checkpoint_dispensable)     2
+10  gate.runtime.resume_idempotent      case         2
+11  gate.runtime.waiting_holds_nothing  case         4
+12  gate.runtime.cancel_keeps_effects   case         5
+13  gate.runtime.build_fits             property     7
+14  gate.runtime.build_stable           property     7
 ```
 
 ### Tool system, sixteen gates
@@ -479,22 +500,22 @@ tables, which is what those two gates observe. The rule is the same
 rule again.
 
 ```text
-#   id                              kind         M
---  ------------------------------  -----------  --
-1   gate.event.sequence_integrity   property     2
-2   gate.event.projection_determ    case         2
-3   gate.event.upcaster_totality    property     2
-4   gate.event.exactly_once         case         2
-5   gate.event.crash_recovery       case         2
-6   gate.event.checkpoint_dispens.  case         2
-7   gate.structure.txn_hygiene      structural   2
-8   gate.structure.migration_graph  structural   0
-9   gate.event.migration_clean      case         2
-10  gate.event.migration_stepwise   case         2
-11  gate.event.revision_pinned      case         2
-12  gate.structure.orm_confined     structural   2
-13  gate.event.export_redacted      case         3
-14  gate.event.export_consent       case         3
+#   id                                 kind         M
+--  ---------------------------------  -----------  --
+1   gate.event.sequence_integrity      property     2
+2   gate.event.projection_determ       case         2
+3   gate.event.upcaster_totality       property     2
+4   gate.event.exactly_once            case         2
+5   gate.event.crash_recovery          case         2
+6   gate.event.checkpoint_dispensable  case         2
+7   gate.structure.txn_hygiene         structural   2
+8   gate.structure.migration_graph     structural   0
+9   gate.event.migration_clean         case         2
+10  gate.event.migration_stepwise      case         2
+11  gate.event.revision_pinned         case         2
+12  gate.structure.orm_confined        structural   2
+13  gate.event.export_redacted         case         3
+14  gate.event.export_consent          case         3
 ```
 
 The build sequence's nine steps are Milestone 2, except that step 8
@@ -661,21 +682,21 @@ those two observe code written before the sandbox exists. The spec
 tags each one.
 
 ```text
-#   id                              kind         M
---  ------------------------------  -----------  --
-1   gate.sandbox.production_refu..  structural   1
-2   gate.sandbox.no_runtime_in_w..  structural   6
-3   gate.sandbox.spec_has_no_hos..  structural   6
-4   gate.sandbox.no_credential_r..  case         6
-5   gate.sandbox.network_denied     case         6
-6   gate.sandbox.egress_allowlis..  case         6
-7   gate.sandbox.limits_enforced    case         6
-8   gate.sandbox.escape_denied      case         6
-9   gate.sandbox.workspace_isola..  case         6
-10  gate.sandbox.no_orphans         case         6
-11  gate.sandbox.artifact_checksum  case         6
-12  gate.sandbox.artifact_key_op..  structural   6
-13  gate.sandbox.workspace_conta..  property     4
+#   id                                   kind         M
+--  -----------------------------------  -----------  --
+1   gate.sandbox.production_refuses_dev  structural   1
+2   gate.sandbox.no_runtime_in_worker    structural   6
+3   gate.sandbox.spec_has_no_host_path   structural   6
+4   gate.sandbox.no_credential_reaches   case         6
+5   gate.sandbox.network_denied          case         6
+6   gate.sandbox.egress_allowlisted      case         6
+7   gate.sandbox.limits_enforced         case         6
+8   gate.sandbox.escape_denied           case         6
+9   gate.sandbox.workspace_isolated      case         6
+10  gate.sandbox.no_orphans              case         6
+11  gate.sandbox.artifact_checksum       case         6
+12  gate.sandbox.artifact_key_opaque     structural   6
+13  gate.sandbox.workspace_containment   property     4
 ```
 
 Gate 1 is Milestone 1 because the composition root refuses the

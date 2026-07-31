@@ -4,6 +4,35 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Gate identifiers reconciled against the registry
+
+- Widened the identifier column in four tables of
+  [milestone-map.md](plan/milestone-map.md) and wrote all thirteen
+  truncated rows in full. The grammar that document sets admits no
+  dot inside a slug, so `gate.runtime.one_terminal_wr..` is not an
+  identifier at all, and two of the document's own hard gates fail
+  on one: the grammar gate because it does not match, and the set
+  comparison against `evals/gates/*.yaml` because a truncated form
+  cannot be a set member of anything.
+- Restored nine of the twelve affected gates from spellings already
+  attested elsewhere in the corpus — eight from
+  [sandbox-isolation.md](plan/sandbox-isolation.md) and one from
+  both the event log and the runtime loop. The other three had
+  never been spelled anywhere and are completed from their own
+  declaration titles, which is the one new naming decision in this
+  pass and is recorded as a question.
+- Answered a question already on the record, which asked whether to
+  widen the column or keep the thirty-character ceiling that had
+  begun shaping identifiers. It named two truncations; the audit
+  found twelve gates across thirteen rows.
+- Corrected two worked examples in
+  [evaluation-harness.md](plan/evaluation-harness.md) that named
+  gates the registry does not hold, and two milestone counts in one
+  of them that disagreed with the census.
+- Re-derived the census from the corrected tables and confirmed it
+  unchanged: one hundred and seventy-two registry entries, the same
+  four kind totals, and the same per-milestone counts.
+
 ## 2026-07-31 — A pass that tried to falsify the corpus
 
 - Ran a closing pass whose only job was to falsify the claim that

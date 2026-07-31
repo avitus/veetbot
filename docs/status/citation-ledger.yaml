@@ -145,7 +145,7 @@ citations:
     excerpt: "`list`, `edit`, `delete`, `reject`, `outstanding_rejections`"
   - cite: "docs/plan/readiness.md#docs/plan/memory-retrieval-and-ranking.md:87"
     excerpt: "**3. Child-run recall.** Subagents and consolidation runs (S"
-  - cite: "docs/plan/readiness.md#docs/plan/milestone-map.md:873"
+  - cite: "docs/plan/readiness.md#docs/plan/milestone-map.md:894"
     excerpt: "model-gateway 14 all M3"
   - cite: "docs/plan/readiness.md#docs/plan/model-gateway.md:1735"
     excerpt: "10. `model_calls`, `model_prices`, `UsageRepository`, cost c"

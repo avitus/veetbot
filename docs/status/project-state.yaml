@@ -131,9 +131,24 @@ readiness:
     Milestone 9 acceptance criterion about inspecting and deleting
     memories has nothing behind it to test. Choosing that surface is
     Milestone 9 design and this pass makes no Milestone 9 decisions.
-    The gate census is unchanged.
+    A structural audit then compared every gate declaration against
+    its registry row. The milestone tokens agreed on all one hundred
+    and seventy three rows, but thirteen rows across four tables
+    carried a truncated identifier, which the grammar this corpus
+    sets does not admit and which two of its own hard gates cannot
+    be implemented against. All thirteen are now written in full.
+    Nine of the twelve gates were restored from spellings attested
+    elsewhere in the corpus, and three were completed from their
+    declaration titles, which is the one naming decision this pass
+    made and is recorded as a question. The same audit found two
+    worked examples in the evaluation harness naming gates the
+    registry does not hold, and two milestone counts in one of them
+    that disagreed with the census; both are corrected. The gate
+    census is unchanged: one hundred and seventy two registry
+    entries, the same four kind totals, the same per milestone
+    counts.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T22:10:00Z
-last_reviewed_commit: 2e19ca1
+last_updated: 2026-07-31T23:40:00Z
+last_reviewed_commit: 4504fdb

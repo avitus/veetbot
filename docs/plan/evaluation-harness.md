@@ -231,7 +231,7 @@ that implement them.
 ```
 
 ```yaml
-- id: gate.policy.prompt_is_not_authorization
+- id: gate.policy.prompt_not_authz
   milestone: 4
   kind: corpus
   spec: docs/plan/policy-and-approvals.md#hard-gates
@@ -1367,17 +1367,17 @@ agent eval promote <run-id>     trajectory to case
 registry exists. Its output answers the question a milestone review asks:
 
 ```text
-Milestone 4 (current)          28 gates  24 pass  0 fail   4 pending
-  gate.policy.totality                    pass   property 1000 trials
-  gate.policy.single_gate                 pass   structural
-  gate.policy.prompt_is_not_authorization pass   corpus   47 members
-  gate.tool.watermark_contract            pass   property
-  gate.context.prefix_stability        pending   M7
+Milestone 4 (current)          22 gates  18 pass  0 fail   4 pending
+  gate.policy.totality                 pass   property 1000 trials
+  gate.policy.single_gate              pass   structural
+  gate.policy.prompt_not_authz         pass   corpus   47 members
+  gate.builtin.listing_stable          pass   property
+  gate.context.prefix_stability     pending   M7
   ...
-Milestone 5                    12 gates   0 pass  0 fail  12 pending
+Milestone 5                    11 gates   0 pass  0 fail  11 pending
 ```
 
-Pending is printed, never hidden. A milestone review that cannot see the twelve
+Pending is printed, never hidden. A milestone review that cannot see the eleven
 gates arriving next is a review of a partial picture.
 
 ### What fails the build, and what fails a run
