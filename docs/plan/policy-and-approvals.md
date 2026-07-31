@@ -414,7 +414,7 @@ now so that it does not have to be added later, and the resolution step
 arrives with the second principal.
 
 `AUTH_MODE=dev` binds the full scope set, and this section is what "full"
-means: all fourteen, and no `mcp.` scope. Those exist only once a server
+means: all fifteen, and no `mcp.` scope. Those exist only once a server
 is configured, and a development principal that silently held every scope
 an operator could declare would make the misdeclaration above the one
 class of mistake development cannot surface.
@@ -1060,7 +1060,7 @@ one blocks the milestone, not a warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
-11. **Scope grammar.** Every entry in the fourteen-string vocabulary and
+11. **Scope grammar.** Every entry in the fifteen-string vocabulary and
     every `required_scopes` entry on a registered `ToolSpec` matches the
     grammar, and registration rejects an MCP tool declaring a scope that is
     neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**
@@ -1164,7 +1164,7 @@ not a Milestone 4 dependency.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
-31. The scope vocabulary is one closed set of fourteen dotted strings,
+31. The scope vocabulary is one closed set of fifteen dotted strings,
     shared by the API's route checks and by this pipeline's tool check.
 32. An MCP tool may require only scopes whose first segment is `mcp` and
     whose second is the server id, so an operator configuring a server

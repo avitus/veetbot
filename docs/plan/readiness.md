@@ -99,17 +99,22 @@ Milestone 6's eleven arrived the same way, from
 [sandbox-isolation.md](sandbox-isolation.md), and took one of the two
 zeros in the table that belonged to a milestone doing real work.
 [skills.md](skills.md) took the other, giving Milestone 8 ten; the
-four that bring it to fourteen came later, from the pass that noticed
-build step 9 of the tool system had nothing observing it, and they
-are the reason the mock-server gap this table first named is gone.
+seven that bring it to seventeen came later in two passes — four from
+the one that noticed build step 9 of the tool system had nothing
+observing it, and they are the reason the mock-server gap this table
+first named is gone, then three more with the authentication design
+that closed the other half of the same milestone.
 Its six at Milestone 10 are a different case: they are the authoring
 loop's gates, registered against a milestone whose own acceptance
 criteria still do not exist, which is why that row's verdict is
-unchanged. Milestone 3's eleven became fifteen last, and the same way:
-two from [model-gateway.md](model-gateway.md) and two from
+unchanged. Milestone 3's eleven became fifteen the same way: two from
+[model-gateway.md](model-gateway.md) and two from
 [event-log-and-persistence.md](event-log-and-persistence.md), each
 pair arriving with the design that closed one of this section's named
-gaps rather than being added to make a count look better.
+gaps rather than being added to make a count look better. Milestone
+9's fourteen became twenty-six on the same principle and by the
+largest margin, when the knowledge half of that milestone acquired a
+design to be true of.
 
 ## Milestone 0: ready
 
@@ -400,7 +405,7 @@ questions no document had answered: what a scope is, how two of them
 are compared, and where a worker gets the set.
 
 [policy-and-approvals.md](policy-and-approvals.md) answers all three
-in one section. The vocabulary is one closed set of fourteen strings
+in one section. The vocabulary is one closed set of fifteen strings
 rather than an API namespace and a tool namespace, because
 `artifact.read` and `artifact.write` are two actions on one resource
 and not two vocabularies that happen to collide. A scope is an opaque
@@ -412,7 +417,7 @@ both declares both.
 The closed list has one deliberate seam. An MCP tool's
 `required_scopes` are operator-declared, so a list closed against
 them is a list the operator routes around. The rule is that a
-declared scope is legal if it is one of the fourteen or its first
+declared scope is legal if it is one of the fifteen or its first
 segment is `mcp` and its second is the server id. That lets an
 operator classify a remote tool's risk without letting one borrow
 `session.write`, which is the escalation worth blocking: a

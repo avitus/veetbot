@@ -174,10 +174,10 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-Thirteen specs and one engineering-plan section declare gates, and they
-declare them in prose. Sorting them by kind is what tells an implementer
-which harness facility each one needs, and it is the first concrete
-deliverable of this document.
+Fourteen specs, the milestone map, and one engineering-plan section declare
+gates, and they declare them in prose. Sorting them by kind is what tells an
+implementer which harness facility each one needs, and it is the first
+concrete deliverable of this document.
 
 The itemization is [milestone-map.md](milestone-map.md), which names every gate
 and assigns it a milestone; the table below is a count over that itemization and
