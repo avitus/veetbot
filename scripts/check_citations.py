@@ -241,8 +241,18 @@ def find_span(path: Path, recorded: dict[str, str], width: int) -> list[int]:
     for n, line in enumerate(lines, 1):
         if " ".join(line.split())[:EXCERPT_CHARS] != recorded["excerpt"]:
             continue
-        if digest_of(lines, n, n + width - 1) == recorded["digest"]:
-            hits.append(n)
+        found = digest_of(lines, n, n + width - 1)
+        if not found:
+            # The span runs off the end of the file from here; not a candidate.
+            continue
+        # An entry written before digests existed has none to compare against.
+        # Requiring equality would reject every candidate and make such an
+        # entry permanently unrelocatable, so in-bounds plus the excerpt match
+        # is the test for it, and the digest is computed and stored on the way
+        # out. An entry that has a digest must still match it exactly.
+        if recorded["digest"] and found != recorded["digest"]:
+            continue
+        hits.append(n)
     return hits
 
 
@@ -370,7 +380,13 @@ def run_check(update: bool) -> None:
             (c["source_line"], c["_span"], new_raw)
         )
         notes.append(f"repaired {where} -> line {span}")
-        fresh[f"{c['source']}#{c['target']}:{span}"] = recorded
+        # Record the digest at the location it moved to. Carrying `recorded`
+        # through unchanged would leave a pre-digest entry with an empty digest
+        # after every relocation, so it would never acquire one.
+        fresh[f"{c['source']}#{c['target']}:{span}"] = {
+            "excerpt": recorded["excerpt"],
+            "digest": digest_of(lines, new_line, new_line + width - 1),
+        }
 
     for source, items in repairs.items():
         p = ROOT / source

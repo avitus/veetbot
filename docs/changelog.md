@@ -17,6 +17,14 @@ title: Changelog
   starting there is in bounds and digests identically. That stops `--update`
   from repointing a range onto text whose trailing lines differ, and more than
   one survivor is still reported rather than guessed.
+- **Fixed the legacy path the digest change had broken.** `find_span` required
+  digest equality, but an entry written before digests have an empty one while
+  the file yields a real one, so no candidate survived and a pre-digest entry
+  became permanently unrelocatable. Such an entry now relocates on an
+  in-bounds excerpt match, and the digest is computed and stored at the
+  location it moved to, so it acquires one instead of carrying an empty digest
+  through every future relocation. An entry that has a digest must still match
+  it exactly.
 - **Rule 6's runtime half is no longer claimed as covered by the contract
   suite.** That suite asserts stream behaviour and cancellation, and two
   adapters can agree on both while passing a provider object through a
