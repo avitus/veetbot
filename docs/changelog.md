@@ -4,6 +4,28 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The ledger now fingerprints the whole span
+
+- **A cited range was only ever checked on its first line.** `excerpt` is one
+  line because a human reads it in a diff, and it was also doing duty as the
+  integrity check, so `file.md:10-20` went on matching while lines 11 through
+  20 were rewritten underneath it. Each ledger entry now carries a `digest`
+  over every line of the cited span. A change anywhere inside a range is drift
+  and is reported as drift.
+- **Relocation now has to prove the whole span moved.** A first-line match only
+  proposes a candidate; the candidate survives when a span of the same width
+  starting there is in bounds and digests identically. That stops `--update`
+  from repointing a range onto text whose trailing lines differ, and more than
+  one survivor is still reported rather than guessed.
+- **Rule 6's runtime half is no longer claimed as covered by the contract
+  suite.** That suite asserts stream behaviour and cancellation, and two
+  adapters can agree on both while passing a provider object through a
+  parameter annotated `ModelRequest`, `ResolvedModel`, or `ModelAttempt`;
+  behavioural agreement is not type hygiene. ADR-0001 now requires
+  adapter-boundary validation or conversion, with a negative contract case per
+  SDK adapter.
+- No product implementation was performed.
+
 ## 2026-07-31 — Twenty-one more findings, and a trust rule that did not hold
 
 CodeRabbit's re-review of the two preceding commits, all twenty-one posted as

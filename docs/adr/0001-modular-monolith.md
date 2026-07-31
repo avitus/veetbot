@@ -122,10 +122,18 @@ was watching.
    external SDKs — needs no check, being the absence of a restriction.
 9. **Two residues are recorded as not mechanically checkable, with
    compensating controls.** Rule 6's runtime half — an SDK object passed at
-   run time through a parameter annotated as a domain type — is caught by
-   the contract suite rather than statically, since a fake and a real
-   adapter passing the same contract cannot be exchanging provider-specific
-   objects. Rule 11's second half — *"must not depend on model judgment"* —
+   run time through a parameter annotated as a domain type — is *not*
+   carried by the contract suite as that suite is written. It asserts stream
+   behaviour and cancellation, and two adapters can agree on both while
+   handing a provider object across a parameter annotated `ModelRequest`,
+   `ResolvedModel`, or `ModelAttempt`: behavioural agreement is not type
+   hygiene, and inferring the second from the first is how this residue was
+   mistaken for covered. The control is therefore explicit. Every adapter
+   validates or converts at its own boundary, so a value reaching a
+   domain-annotated parameter is a domain object by construction, and each
+   SDK adapter's contract module carries a negative case that passes a
+   provider-specific object at that boundary and asserts it is refused or
+   converted rather than forwarded. Rule 11's second half — *"must not depend on model judgment"* —
    is semantic and no static check reaches it; ADR-0005's determinism and
    totality gates carry it instead, since a policy engine that consulted a
    model could not produce identical decisions across repeated evaluations

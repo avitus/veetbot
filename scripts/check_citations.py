@@ -29,6 +29,7 @@ time and are deliberately not repaired.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -79,6 +80,36 @@ def excerpt_of(lines: list[str], lo: int, hi: int) -> str:
         if n - 1 < len(lines) and lines[n - 1].strip():
             return " ".join(lines[n - 1].split())[:EXCERPT_CHARS]
     return ""
+
+
+def span_lines(lines: list[str], lo: int, hi: int) -> list[str]:
+    """Every line of a cited span, whitespace-normalized. Empty if out of bounds."""
+    if lo < 1 or hi < lo or hi > len(lines):
+        return []
+    return [" ".join(lines[n - 1].split()) for n in range(lo, hi + 1)]
+
+
+def digest_of(lines: list[str], lo: int, hi: int) -> str:
+    """A fingerprint of the **whole** cited span, not just its first line.
+
+    The excerpt is one line because a human has to read it in a diff. That
+    makes it useless as the integrity check for a range: `file.md:10-20` would
+    go on matching while lines 11 through 20 were rewritten underneath it. The
+    digest covers every line in the span, so a change anywhere inside a cited
+    range is drift and is reported as drift.
+    """
+    body = span_lines(lines, lo, hi)
+    if not body:
+        return ""
+    return hashlib.sha256("\n".join(body).encode("utf-8")).hexdigest()[:16]
+
+
+def fingerprint(lines: list[str], c: dict) -> dict[str, str]:
+    """The pair recorded in the ledger: a readable excerpt and a span digest."""
+    return {
+        "excerpt": excerpt_of(lines, c["target_line"], c["target_end"]),
+        "digest": digest_of(lines, c["target_line"], c["target_end"]),
+    }
 
 
 def malformed_span(c: dict) -> str | None:
@@ -156,11 +187,14 @@ def key(c: dict) -> str:
     return f"{c['source']}#{c['target']}:{span_of(c)}"
 
 
-def load_ledger() -> dict[str, str]:
+def load_ledger() -> dict[str, dict[str, str]]:
     if not LEDGER.is_file():
         return {}
     data = yaml.safe_load(LEDGER.read_text(encoding="utf-8")) or {}
-    return {e["cite"]: e["excerpt"] for e in data.get("citations", [])}
+    return {
+        e["cite"]: {"excerpt": e["excerpt"], "digest": e.get("digest", "")}
+        for e in data.get("citations", [])
+    }
 
 
 def as_yaml_scalar(text: str) -> str:
@@ -176,7 +210,9 @@ def write_ledger(entries: list[dict]) -> None:
         "#",
         "# One entry per line-number citation in a live document. `excerpt` is the",
         "# text the cited line held when the citation was last verified; it is what",
-        "# lets --update find the line again after an edit moves it.",
+        "# lets --update find the line again after an edit moves it. `digest`",
+        "# fingerprints every line of the cited span, so a change inside a range is",
+        "# drift even when the range's first line is untouched.",
         "",
         "citations:",
     ]
@@ -187,13 +223,25 @@ def write_ledger(entries: list[dict]) -> None:
     for e in entries:
         body.append(f"  - cite: {as_yaml_scalar(e['cite'])}")
         body.append(f"    excerpt: {as_yaml_scalar(e['excerpt'])}")
+        body.append(f"    digest: {as_yaml_scalar(e['digest'])}")
     LEDGER.write_text("\n".join(body) + "\n", encoding="utf-8")
 
 
-def find_excerpt(path: Path, excerpt: str) -> list[int]:
+def find_span(path: Path, recorded: dict[str, str], width: int) -> list[int]:
+    """Start lines where the recorded span reappears **whole**.
+
+    A first-line match only proposes a candidate. The candidate survives when a
+    span of the same width starting there is in bounds and digests identically,
+    which is what stops `--update` from relocating a range onto text whose
+    trailing lines differ. More than one survivor is ambiguity, and ambiguity is
+    a human's decision rather than this script's.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
     hits = []
-    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if " ".join(line.split())[:EXCERPT_CHARS] == excerpt:
+    for n, line in enumerate(lines, 1):
+        if " ".join(line.split())[:EXCERPT_CHARS] != recorded["excerpt"]:
+            continue
+        if digest_of(lines, n, n + width - 1) == recorded["digest"]:
             hits.append(n)
     return hits
 
@@ -257,10 +305,10 @@ def run_check(update: bool) -> None:
                 fresh[k] = ledger[k]
             continue
 
-        current = excerpt_of(lines, c["target_line"], c["target_end"])
+        current = fingerprint(lines, c)
         recorded = ledger.get(k)
 
-        if not current and recorded is None:
+        if not current["excerpt"] and recorded is None:
             # Nothing to compare against and nothing at the target. This is
             # what an unrecorded citation into whitespace looks like.
             errors.append(
@@ -283,12 +331,17 @@ def run_check(update: bool) -> None:
                 )
             continue
 
-        if recorded == current:
+        # A ledger written before digests existed has none to compare; adopt
+        # the digest on the next --update rather than reporting false drift.
+        if recorded["excerpt"] == current["excerpt"] and (
+            not recorded["digest"] or recorded["digest"] == current["digest"]
+        ):
             fresh[k] = current
             continue
 
-        # Drift. Find where the cited text went.
-        hits = find_excerpt(c["_path"], recorded)
+        # Drift. Find where the cited span went, whole.
+        width = c["target_end"] - c["target_line"] + 1
+        hits = find_span(c["_path"], recorded, width)
         where = f"{c['source']}:{c['source_line']} -> {c['target']}:{c['target_line']}"
         if len(hits) != 1:
             errors.append(
@@ -330,7 +383,10 @@ def run_check(update: bool) -> None:
 
     if update:
         write_ledger(
-            [{"cite": k, "excerpt": v} for k, v in sorted(fresh.items())]
+            [
+                {"cite": k, "excerpt": v["excerpt"], "digest": v["digest"]}
+                for k, v in sorted(fresh.items())
+            ]
         )
         notes.append(f"ledger rewritten with {len(fresh)} citations")
     else:
