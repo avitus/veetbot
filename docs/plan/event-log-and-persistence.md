@@ -102,17 +102,38 @@ COMMIT;
 
 Section 27.5 offers two mechanisms for sequence allocation, `SELECT ... FOR
 UPDATE` on the session row or an atomic increment of `next_event_sequence`. This
-document pins the atomic increment. Both take the same row lock; the increment
-holds it for one statement rather than for the caller's whole transaction, and
-it makes the lock's existence obvious in the code that must not grow an I/O call
-inside it. `UNIQUE(session_id, sequence)` remains the backstop, and a violation
-of it is a defect to be fixed rather than a conflict to be retried.
+document pins the atomic increment. Both take the same row lock, and both hold
+it until the transaction ends: PostgreSQL releases a row lock at `COMMIT` or
+`ROLLBACK`, never at the end of the statement that acquired it. The increment is
+pinned for a different reason — it is a single atomic read-modify-write with no
+application round-trip inside the lock, which is what makes the "no I/O" rule
+above checkable by reading the transaction rather than by reasoning about it.
+`UNIQUE(session_id, sequence)` remains the backstop, and a violation of it is a
+defect to be fixed rather than a conflict to be retried.
+
+That the lock is held to the end of the transaction is load-bearing rather than
+incidental: it is what serializes appends within a session, and "Gaps are
+normal; missing writes are not" below rests on it.
 
 The state change that an event describes belongs in the same transaction as the
 event. An event that says `run.completed` while the `runs` row still says
-`RUNNING` is a lie the log tells forever. Because the state change is a
-conditional `UPDATE` guarded by expected status and lease ownership, a
-transaction that loses that race commits nothing at all.
+`RUNNING` is a lie the log tells forever.
+
+The guard by itself does not prevent that lie, and it is worth being exact about
+why. The state change is a conditional `UPDATE` guarded by expected status and
+lease ownership, so a writer that has lost the race matches zero rows — but a
+zero-row `UPDATE` is not an error and aborts nothing. The sequence allocation
+and the `INSERT` would still commit, and the log would carry precisely the
+statement this section forbids. **The writer therefore inspects the affected-row
+count of the guarded `UPDATE` before `COMMIT`, and rolls the transaction back
+when that count is zero**, surrendering the sequence to the gap rule below. This
+is the same "zero rows updated means stop, not retry" discipline that
+`lease_epoch` fencing imposes everywhere else.
+
+An append that carries no state change has no guarded `UPDATE` to inspect and is
+not subject to the check. The diagnostic `run.fenced` is the case in point: a
+fenced worker performs no transition, no lease release, and no checkpoint write,
+and appends exactly one event, which must commit (`runtime-loop.md:821-830`).
 
 ### Gaps are normal; missing writes are not
 
@@ -124,7 +145,9 @@ that blocks until `N+1` materializes will hang forever on the first rolled-back
 append.
 
 The dangerous case is the mirror image, and it is subtle enough to be worth
-stating as a scenario rather than a rule.
+stating as a scenario rather than a rule. It presumes that two appends to one
+session can commit out of allocation order; the defences below are the reason
+they cannot, and the first of them is easy to credit to the wrong mechanism.
 
 Two transactions are appending to the same session. Transaction A takes sequence
 5. Transaction B takes sequence 6. B commits at 10:00:00.100. A commits at
@@ -138,24 +161,43 @@ rebuild-equals-incremental check passes too.
 
 There are two defences and the system already has the stronger one:
 
-1. **One appender per session.** Section 27.5's default of at most one
-   non-terminal run per session means there is exactly one writer allocating
-   sequences for a session, so sequences commit in allocation order and the
-   interleaving above cannot arise. This is the primary defence, and it is the
-   reason the default is load-bearing rather than merely convenient. It is
-   enforced by a partial unique index, not by convention.
-2. **Snapshot-aware watermarking, if that default is ever relaxed.** A
+1. **Serialized allocation.** Every event writer allocates its sequence with the
+   `UPDATE sessions` shown above, inside the same transaction that inserts the
+   event. That statement takes the session row lock and holds it until the
+   transaction ends, so a second writer blocks on it until the first commits or
+   rolls back. Sequences therefore commit in allocation order and the
+   interleaving above cannot arise. This is the primary defence, and the
+   discipline it rests on is the one ADR-0003 already records: allocation
+   happens *inside* the appending transaction, never ahead of it.
+2. **Snapshot-aware watermarking, if that discipline is ever broken.** A
    projection may only advance its watermark past sequences whose transactions
    are visible to every future snapshot — in PostgreSQL, those with `xmin` below
    `pg_snapshot_xmin(pg_current_snapshot())`. Concretely, the projection reads
    events after its watermark *and* below that horizon, and leaves the rest for
    the next poll.
 
-The rule for implementers: if you ever permit two concurrent appenders in one
-session, you have taken on defence 2, and the projection reader must change in
-the same commit. A test asserts defence 1 today. If parallel branches are wanted
-later, Section 27.5 already directs them to separate sessions or child runs,
-which keeps a single appender per sequence space.
+Two mistaken readings of defence 1 are worth closing off, because both are easy
+to arrive at. The first is that the partial unique index provides it: `UNIQUE
+INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
+non-terminal run per session, which is a statement about runs and not about
+appenders. The second is that a session therefore has only one appender. It does
+not — the submit handler appends the user message from its own transaction,
+alongside the run insert (`http-api-and-streaming.md:537`), while a worker may
+be appending to the same session. That is safe, and it is safe because both
+writers allocate the same way, not because either the index or the one-active-run
+default forbids the concurrency.
+
+The rule for implementers: the hazard returns the moment a writer takes a
+sequence outside the transaction that inserts its event — by reserving a number,
+performing I/O, and inserting afterwards, say. Such a writer does not hold the
+session row lock across its own append, commit order stops matching allocation
+order, and defence 2 becomes mandatory, changing every projection's cursor logic
+in the same commit. Hard gate 1 asserts defence 1, and asserts it within a single
+session and not only across sessions, because one session is where the two
+appenders meet. Section 27.5's one-active-run
+default remains in force for contention and for the run model, and if parallel
+branches are wanted later it already directs them to separate sessions or child
+runs.
 
 ### Notification is a hint, never a delivery
 
@@ -1206,7 +1248,8 @@ a test of the only adapter that can satisfy it.
 
 | Failure | How it happens | Defense |
 | --- | --- | --- |
-| Silent missing write | A projection advances its watermark past a sequence whose transaction has not committed yet | One appender per session, enforced by partial unique index; snapshot-aware watermarking if that is ever relaxed |
+| Silent missing write | A projection advances its watermark past a sequence whose transaction has not committed yet | Every writer allocates its sequence inside the transaction that appends the event, so the session row lock serializes commits into allocation order; snapshot-aware watermarking if that discipline is ever broken |
+| Event committed without its state change | The guarded `UPDATE runs` matches zero rows and the surrounding transaction commits anyway, leaving an event that describes a transition that did not happen | The writer checks the affected-row count before `COMMIT` and rolls back on zero; an append carrying no state change, such as `run.fenced`, is the explicit exception |
 | Projection stall on a gap | A reader waits for the next contiguous sequence after a rolled-back append | Readers ask for events after a watermark, never for a specific sequence |
 | Split-brain worker | A stalled worker's lease expires; the sweeper hands the run to a second worker | `lease_epoch` fencing on every write; zero rows updated means stop, not retry |
 | Duplicate turn | A client retries a submit that already succeeded | `idempotency_keys` with `request_hash`; repeat returns the original run, mismatch is a `ConflictError` |
@@ -1232,9 +1275,13 @@ walk that has already missed the branch it exists to prevent. The two
 export gates register at Milestone 3, because Milestone 2 builds the
 projection's scaffold and Milestone 3 builds the export itself.
 
-1. **Sequence integrity.** A fuzz test appending concurrently across sessions,
-   with injected rollbacks, produces no duplicate `(session_id, sequence)` and no
-   event that any projection failed to observe. **M2.**
+1. **Sequence integrity.** A fuzz test appending concurrently, with injected
+   rollbacks, produces no duplicate `(session_id, sequence)` and no event that
+   any projection failed to observe. It appends concurrently *within* one
+   session as well as across sessions — a submit-handler append racing a
+   worker's — because a single session's sequence space is where the
+   out-of-order-commit hazard lives, and appending only across sessions would
+   exercise the serialization that matters nowhere. **M2.**
 2. **Projection determinism.** For every projection, rebuild-from-zero over a
    recorded log equals the incrementally built state, field for field, on the
    same `builder_version`. **M2.**
@@ -1346,9 +1393,12 @@ checkpoint bytes per run, and rebuild duration per projection.
    backstop whose violation is a defect rather than a retryable conflict.
 3. **Sequence gaps are legal and readers tolerate them.** Consumers read after a
    watermark and never wait for a specific next sequence.
-4. **One appender per session is load-bearing for projection correctness**, not
-   only for contention. Relaxing Section 27.5's default requires switching
-   projections to snapshot-aware watermarking in the same change.
+4. **Allocating the sequence inside the appending transaction is load-bearing
+   for projection correctness**, not only for contention. The session row lock
+   is held to `COMMIT`, which serializes appends into allocation order even
+   though a session has more than one appender. Allocating outside that
+   transaction requires switching projections to snapshot-aware watermarking in
+   the same change.
 5. **`LISTEN`/`NOTIFY` is a latency optimization and never a delivery
    guarantee.** Every consumer is a poller first.
 6. **Stored event payloads are immutable**; schema evolution is expressed only

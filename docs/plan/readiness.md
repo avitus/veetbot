@@ -971,7 +971,7 @@ separate trace and the artifact references, stated at
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
-`event-log-and-persistence.md:727` declares a unique index on
+`event-log-and-persistence.md:769` declares a unique index on
 `session_id` where status is not one of `COMPLETED`, `FAILED`, or
 `CANCELLED`, to enforce Section 27.5's one active run per session. A
 parent suspended on a child waits in `WAITING_FOR_APPROVAL` carrying

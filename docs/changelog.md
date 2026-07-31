@@ -4,6 +4,49 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The append path's three wrong sentences
+
+- Required the append transaction to roll back when its guarded `UPDATE runs`
+  affects zero rows, in
+  [event-log-and-persistence.md](plan/event-log-and-persistence.md). The
+  document had claimed that a writer losing the status-and-lease race "commits
+  nothing at all", which is not what the SQL does: a zero-row `UPDATE` is not an
+  error and aborts nothing, so the sequence allocation and the event `INSERT`
+  would have committed without the state change — producing the
+  `run.completed`-while-`RUNNING` record the same paragraph forbids. An append
+  carrying no state change, the diagnostic `run.fenced`, is named as the
+  explicit exception.
+- Corrected the lock explanation behind the pinned allocation mechanism.
+  PostgreSQL holds a row lock until the transaction ends, not until the end of
+  the statement that took it, so the claim that the atomic increment "holds it
+  for one statement rather than for the caller's whole transaction" was false
+  and the stated reason for pinning it did not hold. The pin stands on the
+  correct reason: it is one atomic read-modify-write with no application
+  round-trip inside the lock.
+- Re-founded the silent-missing-write defence on the mechanism that actually
+  provides it. The document had credited the partial unique index, but `UNIQUE
+  INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to
+  one non-terminal run per session and says nothing about who appends events —
+  and a session already has two appenders, since the submit handler appends the
+  user message from its own transaction
+  ([http-api-and-streaming.md](plan/http-api-and-streaming.md)) while a worker
+  appends run events. The guarantee comes from every writer allocating its
+  sequence inside the transaction that inserts the event, which the corrected
+  lock lifetime makes serializing. The two errors were connected: the false lock
+  claim is what had made the multi-appender case look unsafe.
+- Widened hard gate 1 to append concurrently *within* one session and not only
+  across sessions. Separate sessions share no sequence space, so the gate as
+  written exercised none of the serialization it was there to protect, and the
+  document's claim that a test asserted the defence was not yet true.
+- Propagated the correction to ADR-0003, the failure table, and the document's
+  closing summary, and added a failure-table row for an event committed without
+  its state change. Revised the corresponding entry in
+  [questions-for-review.md](status/questions-for-review.md) and recorded the new
+  rollback requirement beside it.
+- Found by CodeRabbit on pull request #1; the third finding was re-derived
+  rather than applied as written.
+- No product implementation was performed.
+
 ## 2026-07-31 — Pandoc's renamed highlighting flag
 
 - Selected the single-HTML build's syntax-highlighting flag by Pandoc

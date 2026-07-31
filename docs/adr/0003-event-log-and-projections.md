@@ -49,12 +49,18 @@ in the reader's definition of progress, not in the writer.
    burns its number. Consumers read *events after a watermark*, never *the event
    at sequence n + 1*, so a gap costs nothing and a reader can never stall
    waiting for a number that will never exist.
-4. **One appender per session is load-bearing for projection correctness**, not
-   merely for contention. Section 27.5's "one active run per session" default is
-   what makes a monotonic sequence watermark safe. Relaxing that default requires
-   switching every projection to snapshot-aware watermarking
-   (`pg_snapshot_xmin(pg_current_snapshot())`) **in the same change**, and this
-   ADR is the record of that coupling.
+4. **Allocating the sequence inside the appending transaction is load-bearing
+   for projection correctness**, not merely for contention. The `UPDATE
+   sessions` that allocates takes the session row lock and holds it until the
+   transaction ends, so concurrent appenders — and a session has them, since the
+   submit handler appends the user message while a worker appends run events —
+   commit in allocation order, which is what makes a monotonic sequence
+   watermark safe. Section 27.5's "one active run per session" default is not
+   the mechanism, and neither is the partial unique index that enforces it:
+   that index constrains runs, not appenders. Permitting a writer to allocate
+   ahead of its append requires switching every projection to snapshot-aware
+   watermarking (`pg_snapshot_xmin(pg_current_snapshot())`) **in the same
+   change**, and this ADR is the record of that coupling.
 5. **`LISTEN`/`NOTIFY` is a latency optimization and never a delivery
    guarantee.** It is transactional, so no outbox table is needed; it is
    at-most-once, so every consumer is a poller first and treats a notification

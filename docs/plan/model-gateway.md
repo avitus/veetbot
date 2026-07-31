@@ -738,7 +738,7 @@ done. Section 10 already made this call; this document only explains it so
 that a future reader does not undo it as an obvious improvement.
 
 A resumed run keeps its pin. `ProviderPin` is persisted on the run rather than
-held in memory, because `event-log-and-persistence.md:567` shows
+held in memory, because `event-log-and-persistence.md:609` shows
 `ProviderContinuation` being lost across a worker restart and a lost pin would
 compound that into a provider switch on resume.
 
@@ -1341,7 +1341,7 @@ deadline permit another attempt. Each caller-level retry is a new attempt with
 a new `attempt_id` and its own `model_calls` row.
 
 `max_attempts` is 3 and lives in application code, matching
-`event-log-and-persistence.md:675`, which already sets 3 for the worker.
+`event-log-and-persistence.md:717`, which already sets 3 for the worker.
 Section 13 states neither number, so this document states both and notes that
 they are the same number for the same reason rather than by coincidence: three
 attempts is where the marginal recovery rate stops justifying the marginal
