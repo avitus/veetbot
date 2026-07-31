@@ -123,10 +123,18 @@ come from.
 11. **Trust labels have a defined and fail-closed origin.** `origin_trust` is
     the minimum trust label over the context items present in the request that
     produced the call — it answers "was untrusted content in the room".
-    `argument_trust` defaults to `EXTERNAL_UNTRUSTED` and is only ever
-    *raised*, on a verbatim sixteen-character match against `USER`-labelled
-    context. Raising can only fail by costing an unnecessary approval;
-    lowering could fail by passing an injection as trusted.
+    `argument_trust` defaults to `EXTERNAL_UNTRUSTED` and is **not** inferred
+    by matching argument text against `USER`-labelled context. A verbatim
+    sixteen-character match was the original rule and it is unsound:
+    equality demonstrates that two values are equal, not that this one came
+    from that source, and an `EXTERNAL_UNTRUSTED` document can simply quote a
+    string it can see in the same request. The failure is not a wasted
+    approval — raising the label *removes* an approval that would otherwise
+    have been required, so a successful copy buys an injected action a
+    trusted path. Provenance is therefore carried, not reconstructed: an
+    argument's label is set where the call is constructed, and where any
+    untrusted item contributed to a field the lower label stands. An
+    argument whose provenance is unknown stays `EXTERNAL_UNTRUSTED`.
 12. **Large output is excerpted head-and-tail and artifactized, never
     summarized.** A summarizer over untrusted tool output producing
     trusted-looking prose is the exact laundering ADR-0020 forbids. Excerpts

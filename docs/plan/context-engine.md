@@ -340,6 +340,14 @@ def select_history(
 ) -> int: ...                            # cut index; items[cut:] are retained
 ```
 
+**`summary_floor` is an event sequence; the return is an item index.** The two
+are different units and the function never compares them to each other. Each
+`ConversationItem` carries the sequence of the event it was built from, and the
+floor is applied by comparing *that* to `replaced_through_sequence`: an item at
+or below the floor has been replaced by the summary and is not a candidate. The
+index the function returns is then a position in `items`, derived after the
+floor has been applied, never a sequence number in disguise.
+
 **It returns an index, not a list.** An index can only describe a suffix, so the
 contiguity rule is carried by the return type instead of by a test somebody has
 to remember to write.
@@ -839,9 +847,12 @@ built incrementally afterwards.
   would duplicate in-turn recall and leave a missing turn ambiguous between a
   selection defect and a ranking miss; a live projection read would let two seeds
   of one run disagree.
-- **Yield order is in-turn recall, then tool-result truncation, then compaction** —
-  cheapest and most recoverable first; compaction last because it alone costs a
-  model call and loses information irreversibly within the run.
+- **Yield order is knowledge passages, then in-turn recall, then tool-result
+  truncation, then compaction** — cheapest and most recoverable first. Knowledge
+  passages lead because the corpus is still there and one `knowledge.search`
+  re-reaches it; compaction is last because it alone costs a model call and
+  loses information irreversibly within the run. This is the same order stated
+  where the ladder is specified, and the two must not drift apart.
 - **Tool call/result pairs are atomic budget units.** Dropping half a pair is a
   malformed request, not a smaller one.
 - **`build()` is a pure function; compaction is a write.** Pressure is resolved by

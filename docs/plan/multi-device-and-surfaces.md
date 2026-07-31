@@ -252,11 +252,25 @@ gate 13 states the property directly: **the scope set is the run's.**
 So per-device narrowing is the intersection of the principal's scopes
 with the device's granted scopes, computed once at submission and
 stamped like any other scope set. The policy engine is never told
-that a device exists. Revocation then behaves correctly without being
-designed: a run already in flight finishes under the scopes it was
-submitted with, and the next submission from that device gets the
-narrowed set, which is exactly the semantics revocation already has
-for a principal.
+that a device exists.
+
+Revocation does **not** then fall out for free, and the temptation to say
+it does is the trap here. Section 29.7 requires that revoking a device
+*"immediately removes its scopes and presence server-side"*, and a stamped
+scope set is by construction not immediate: a run already in flight would
+go on acting under scopes an operator has just withdrawn, for as long as
+that run lasts. Extending the principal-scope stamp rule to device
+revocation would weaken a stated security requirement, which is not a
+change this document is entitled to make.
+
+One thing is therefore added. **Every action taken over a device channel
+revalidates the device's presence and granted scopes before it proceeds**,
+so a revoked device fails on its next action rather than at its next
+submission. The stamped set stays the ceiling — revalidation can only
+narrow it, never widen it — so the policy engine still never learns that a
+device exists, and the run's recorded scope set is still the one it was
+submitted with. What changes is that a run cannot keep *using* a device
+whose grant is gone.
 
 One constraint travels with this and is easy to miss. The scope
 vocabulary is a closed list of fifteen strings with exactly one

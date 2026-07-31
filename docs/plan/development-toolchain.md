@@ -178,7 +178,7 @@ format      uv run ruff format . && uv run ruff check --fix .
 lint        uv run ruff format --check . && uv run ruff check .
 typecheck   uv run mypy src tests
 test        uv run pytest -m "not live"
-check       lint typecheck test-fast
+check       lint typecheck test-fast docs
 db-up       docker compose up -d postgres && wait-for-healthy
 migrate     uv run alembic upgrade head
 ```
@@ -432,9 +432,12 @@ The Milestone 0 form of that block is a pytest fixture, not
 infrastructure:
 
 ```text
-scope       session, autouse, for the static and contract markers
+scope       function, autouse; a marker is a property of a test, and a
+            session-scoped fixture runs once before any test's markers
+            are in scope, so it cannot decide per test
+applies to  the static and contract markers; the live marker lifts it
 mechanism   socket.socket patched to raise on connect
-exempt      AF_UNIX, and 127.0.0.1 for the integration marker
+exempt      AF_UNIX, and 127.0.0.1 for the integration marker only
 failure     the test that attempted the connection fails, naming
             the host it tried to reach
 ```

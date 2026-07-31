@@ -59,8 +59,8 @@ CITE = re.compile(r"`?([a-z0-9][a-z0-9-]*\.md):(\d+)(?:-(\d+))?`?")
 # one line break - "while line\n2202" - so these match across a single newline
 # but never across a blank line.
 _GAP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
-BARE = re.compile(rf"\b[Ll]ines?{_GAP}\d+")
-LOOSE = re.compile(rf"\b[a-z0-9][a-z0-9-]*\.md{_GAP}\d+")
+BARE = re.compile(rf"\blines?{_GAP}\d+", re.IGNORECASE)
+LOOSE = re.compile(rf"\b[a-z0-9][a-z0-9_-]*\.md{_GAP}\d+", re.IGNORECASE)
 
 EXCERPT_CHARS = 60
 
@@ -69,11 +69,33 @@ notes: list[str] = []
 
 
 def excerpt_of(lines: list[str], lo: int, hi: int) -> str:
-    """The comparable text of a cited span: first non-blank line, normalized."""
-    for n in range(lo, hi + 1):
+    """The comparable text of a cited span: first non-blank line, normalized.
+
+    ``lo`` below 1 would index backwards from the end of the file - ``:0`` would
+    silently fingerprint the last line - so a caller must reject a malformed
+    span before calling this. `malformed_span` is that check.
+    """
+    for n in range(max(lo, 1), hi + 1):
         if n - 1 < len(lines) and lines[n - 1].strip():
             return " ".join(lines[n - 1].split())[:EXCERPT_CHARS]
     return ""
+
+
+def malformed_span(c: dict) -> str | None:
+    """Why a citation's span is not a span, or None if it is one.
+
+    A line number is 1-based and a range runs forwards. Neither holds by
+    construction: both come out of the document text. Left unchecked, `:0`
+    fingerprints the last line of the file through Python's negative indexing,
+    and a reversed range like `:10-2` yields an empty excerpt that `--update`
+    would then adopt as the recorded truth.
+    """
+    lo, hi = c["target_line"], c["target_end"]
+    if lo < 1:
+        return f"line {lo} is not a line number; lines are numbered from 1"
+    if hi < lo:
+        return f"range {lo}-{hi} runs backwards"
+    return None
 
 
 def target_index() -> dict[str, Path]:
@@ -212,6 +234,16 @@ def run_check(update: bool) -> None:
     for c in cites:
         lines = c["_path"].read_text(encoding="utf-8").splitlines()
         k = key(c)
+
+        bad = malformed_span(c)
+        if bad:
+            errors.append(
+                f"{c['source']}:{c['source_line']} cites {c['target']}:"
+                f"{span_of(c)}, but {bad}"
+            )
+            if k in ledger:
+                fresh[k] = ledger[k]
+            continue
 
         # `target_end` is `target_line` for a single-line citation, so this
         # covers both forms and catches a range whose end runs off the file

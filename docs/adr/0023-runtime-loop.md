@@ -42,10 +42,12 @@ and an implementer meets all twenty in the first week.
 
 Three of them are not disagreements about detail. They are places where
 the loop as written cannot do what another document requires of it. It
-cannot resolve its own agent: line 1408 reads
+cannot resolve its own agent: `engineering-plan.md:1408`, as the plan stood
+when this ADR was written, reads
 `agents.get_version(run.agent_id, run.agent_version)` and neither field
 exists on `Run`, because Section 6.3 puts both on `Session`. It cannot
-suspend: line 1437 handles a paused disposition with a bare `return`,
+suspend: the same document's line 1437, again as it then stood, handles a
+paused disposition with a bare `return`,
 while Section 27.2 requires that entering either `WAITING_*` state release
 the lease, checkpoint, and emit an event — so a run that pauses for
 approval holds its lease until the lease expires, at which point the queue
@@ -122,7 +124,18 @@ called from it.
     exactly one event.** Aborting is safe because nothing the stream
     produced could have been committed under a stale epoch; the single
     `run.fenced` append is legal because the event log is sequence-guarded
-    rather than epoch-guarded.
+    rather than epoch-guarded. Guarding the append with a compare-and-set on
+    the epoch would be the wrong instinct: it would make the record
+    unwritable in precisely the case it exists to document, since the
+    worker's epoch is stale by definition when it writes. The append must
+    instead never be read as a state change. `run.fenced` transitions
+    nothing, releases nothing, and ends nothing; it carries the superseded
+    `lease_epoch` and records that a *worker* stopped, not that a *run*
+    did. A stale worker's append can therefore land at a sequence above the
+    new owner's events, and a consumer deriving run lifecycle from the log
+    must treat it as diagnostic — never as terminal — because the new owner
+    is still executing and its events follow at higher sequences still. Run
+    lifecycle is the `runs` row and its epoch-guarded transitions.
 13. **Every write the loop makes outside the event append is guarded by
     `WHERE lease_epoch = :lease_epoch`.** Fencing is not a convention
     about well-behaved workers; it is a predicate on every UPDATE, and a

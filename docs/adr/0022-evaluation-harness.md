@@ -132,7 +132,15 @@ test-only bypass has a bypass.
     CLI uses. It does not set a status.
 14. **Eval runs are ordinary runs in the ordinary event log,** in a tenant
     nobody queries. The suite truncates that tenant's tables between cases;
-    it does not turn the log off.
+    it does not turn the log off. Truncation waits for the case to be
+    quiet, which is not the same as waiting for its run to reach a terminal
+    state: ADR-0023 enqueues post-run hooks *after* the terminal commit, so
+    a hook belonging to case N can still be runnable when case N ends. The
+    suite drains outstanding run and hook work for the case before it
+    truncates. Otherwise a late hook writes into case N+1's tables or
+    recreates projection state that truncation has just removed, and the
+    resulting failure lands on whichever case runs next rather than on the
+    one that caused it.
 15. **Production configuration cannot load an evaluation identity.** The
     production loader does not read `evals/`, a startup check asserts that
     no loaded profile name begins with `eval.` outside development, and a

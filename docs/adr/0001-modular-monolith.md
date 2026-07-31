@@ -98,8 +98,12 @@ was watching.
    Rule 6 (provider SDK objects must never cross adapter boundaries) and
    rule 7 (SQLAlchemy ORM objects must never be returned from
    repositories) are signature checks: the port Protocols' parameter and
-   return annotations are resolved, and any type whose defining module lies
-   outside `agent_core.domain` fails. Rule 13 (no global singleton database
+   return annotations are resolved, and each must be either a type defined in
+   `agent_core.domain` or a value type from the standard library or `typing` —
+   `str`, `int`, `UUID`, `datetime`, `Mapping`, `Sequence` and their kind. What
+   fails is a type defined in an adapter module: a provider SDK class, an ORM
+   model, a driver's connection or row type. The rule exists to keep adapter
+   vocabulary out of port signatures, not to forbid `str`. Rule 13 (no global singleton database
    sessions) is a module-scope check for engine or session objects assigned
    at import time. Rule 14 (explicit construction in `bootstrap.py`, no
    dependency-injection framework) is a dependency-manifest check against a
