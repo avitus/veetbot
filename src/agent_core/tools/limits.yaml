@@ -1,0 +1,7 @@
+version: 1
+default_timeout_seconds: 30
+default_maximum_output_bytes: 65536
+maximum_parallel_calls: 8
+repeated_call_breaker:
+  exact_limit: 3
+  normalized_limit: 5

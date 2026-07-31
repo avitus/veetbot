@@ -80,6 +80,10 @@ nav:
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
+  - Implementation:
+      - Architecture: architecture.md
+      - Events: events.md
+  - Security: security.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md

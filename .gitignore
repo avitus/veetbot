@@ -9,6 +9,10 @@ __pycache__/
 venv/
 *.egg-info/
 .mkdocs_tmp/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.hypothesis/
 
 # uv
 # (uv.lock is intentionally allowed to be committed once generated.)

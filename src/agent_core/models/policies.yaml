@@ -1,0 +1,11 @@
+provider_profiles:
+  fake:
+    adapter: fake
+    model: deterministic
+  openai:
+    adapter: openai_responses
+    model: ${OPENAI_MODEL}
+    credential_env: OPENAI_API_KEY
+model_policies:
+  default:
+    providers: [fake]

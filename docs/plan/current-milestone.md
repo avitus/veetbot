@@ -6,7 +6,16 @@ title: Current Milestone
 
 - **Current milestone:** Milestone 0 — Repository and engineering foundation
 - **Authorized next milestone:** Milestone 1 — In-memory vertical slice
-- **Project status:** implementation has not started (`pre_implementation`).
+- **Project status:** Milestone 0 implementation is in progress
+  (`milestone_0_in_progress`).
+
+The repository foundation and all locally runnable Milestone 0 gates are in
+place, including the Docker Compose startup, migration round trip, and the four
+CI target partitions. Completion remains open while the eight shipped YAML
+files still contain provisional subsets rather than all 106 version-controlled
+defaults required by the configuration design, and until the committed workflow
+has hosted execution evidence. See the machine-readable
+[project state](../status/project-state.yaml) for the recorded checks.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a

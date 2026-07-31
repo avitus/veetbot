@@ -1,0 +1,10 @@
+version: 1
+worker:
+  lease_seconds: 30
+  heartbeat_seconds: 10
+  sweep_seconds: 15
+  claim_batch_size: 8
+run_defaults:
+  max_steps: 32
+  max_model_calls: 16
+  max_tool_calls: 32

@@ -1,0 +1,11 @@
+version: 1
+prefix_ceiling_tokens: 15000
+classes:
+  system_instructions: {cap: 6000, region: prefix}
+  policy_summary: {cap: 1500, region: prefix}
+  tool_schemas: {cap: 6000, region: prefix}
+  session_history: {cap: 12000, region: body}
+  current_turn: {cap: 8000, region: body}
+  working_state: {cap: 4000, region: body}
+  retrieved_context: {cap: 6000, region: body}
+max_compactions_per_step: 2

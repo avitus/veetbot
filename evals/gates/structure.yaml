@@ -1,0 +1,31 @@
+# Canonical gate registry entries for the structure area.
+- id: gate.structure.import_boundary
+  milestone: 0
+  kind: structural
+  spec: docs/plan/engineering-plan.md#milestone-0-repository-and-engineering-foundation
+  statement: "No application code exists outside the documented module boundaries."
+  check: tests/gates/test_import_boundaries.py::test_import_boundaries
+- id: gate.structure.no_committed_secrets
+  milestone: 0
+  kind: structural
+  spec: docs/plan/engineering-plan.md#milestone-0-repository-and-engineering-foundation
+  statement: "No committed secrets; the five scanner families find no unallowlisted match."
+  check: tests/gates/test_secret_scanner.py::test_no_committed_secrets
+- id: gate.structure.txn_hygiene
+  milestone: 2
+  kind: structural
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Transaction hygiene.** A static check plus a runtime assertion: no transaction is open across an `await` that performs provider, tool, or sandbox I/O. Registered as `gate.structure.txn_hygiene`, which `runtime-loop.md` #6 restates: this document owns it."
+  check: tests/gates/test_transaction_hygiene.py::test_transaction_hygiene
+- id: gate.structure.migration_graph
+  milestone: 0
+  kind: structural
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**One migration head.** A static walk of the revision graph finds exactly one head, no merge revision, and no revision whose `down_revision` is a tuple. The same walk asserts that the adapter's `EXPECTED_REVISION` constant equals that head. Registered as `gate.structure.migration_graph`."
+  check: tests/gates/test_migration_graph.py::test_migration_graph
+- id: gate.structure.orm_confined
+  milestone: 2
+  kind: structural
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**The ORM stays in the adapter.** No module outside `adapters/persistence/` imports `sqlalchemy`, and no name defined in `sqlalchemy_models.py` appears in a signature outside that package. This is dependency rule 7 in the form a static check can evaluate. Registered as `gate.structure.orm_confined`."
+  check: tests/gates/pending.py::pending_gate

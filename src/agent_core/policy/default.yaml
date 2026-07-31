@@ -1,0 +1,7 @@
+name: default
+version: 1
+default_effect: deny
+approval_expiry_seconds:
+  low: 900
+  medium: 3600
+  high: 86400

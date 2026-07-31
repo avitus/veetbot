@@ -1,0 +1,7 @@
+version: 1
+profiles:
+  default:
+    enabled: false
+    snapshot_token_cap: 3000
+    retrieval_token_cap: 4000
+    reciprocal_rank_fusion_k: 60

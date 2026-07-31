@@ -1,0 +1,37 @@
+# Canonical gate registry entries for the context area.
+- id: gate.context.determinism
+  milestone: 1
+  kind: property
+  spec: docs/plan/context-engine.md#hard-gates
+  statement: "**Determinism.** `build()` invoked twice on the same checkpoint produces byte-identical output. Property-tested across generated checkpoints."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.context.prefix_stability
+  milestone: 7
+  kind: case
+  spec: docs/plan/context-engine.md#hard-gates
+  statement: "**Prefix stability.** The scripted fifty-turn session — clock crossing midnight, a tool revoked, memory written and corrected, a forced compaction — yields exactly one distinct `prefix_sha256`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.context.budget_conform
+  milestone: 7
+  kind: case
+  spec: docs/plan/context-engine.md#hard-gates
+  statement: "**Budget conformance.** No assembled request exceeds the model's window; the output reserve is intact on every request; a synthetic overflow yields in the specified order and no more than necessary."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.context.tool_pair_integ
+  milestone: 7
+  kind: property
+  spec: docs/plan/context-engine.md#hard-gates
+  statement: "**Tool-pair integrity.** No assembled request, under any yield path, contains an unpaired tool call or tool result."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.context.trust_preserved
+  milestone: 7
+  kind: corpus
+  spec: docs/plan/context-engine.md#hard-gates
+  statement: "**Trust preservation.** A canary string placed in `EXTERNAL_UNTRUSTED` tool output never appears outside an envelope, and never appears in a compaction summary. Envelope-closing attempts in tool output do not escape the envelope."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.context.history_cut
+  milestone: 7
+  kind: property
+  spec: docs/plan/context-engine.md#hard-gates
+  statement: "**History-cut determinism.** The retained set is always a contiguous suffix, always fits `history_tokens`, never falls earlier than the summary floor, never contains an orphaned tool call or result, and is identical across two calls on the same input. Property-tested over generated item lists."
+  check: tests/gates/pending.py::pending_gate

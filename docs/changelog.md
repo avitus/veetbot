@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Milestone 0 implementation started
+
+- Established the Python 3.12 `uv`/Hatch repository, `agent` CLI entry point,
+  typed settings, structured logging, configuration assets, and documented
+  security baseline.
+- Added the single-service PostgreSQL Compose stack, an empty Alembic revision,
+  the pinned expected revision, and the four CI partitions.
+- Materialized the 172-entry gate registry and made all 13 Milestone 0 gates
+  executable, including import boundaries, secret scanning, transaction
+  hygiene, migration-graph validation, and the six registry invariants.
+- Passed `make install`, `make check`, Docker Compose startup, and an
+  empty-database migration against the Compose PostgreSQL 16 service. The live
+  check exposed and corrected a Compose-version portability bug in the
+  Makefile's health poll. Milestone 0 remains in progress because hosted CI has
+  not yet supplied its own execution evidence.
+
 ## 2026-07-31 — The values, audited
 
 - Corrected `StopReason.STOP` in [runtime-loop.md](plan/runtime-loop.md)

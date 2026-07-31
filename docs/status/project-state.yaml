@@ -2,8 +2,8 @@ schema_version: 1
 
 project:
   name: modular-general-purpose-ai-agent
-  phase: pre_implementation
-  status: ready_for_milestone_0
+  phase: implementation
+  status: milestone_0_in_progress
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 0
   authorized_milestones:
@@ -13,7 +13,7 @@ project:
 milestones:
   "0":
     title: Repository and engineering foundation
-    status: not_started
+    status: in_progress
   "1":
     title: In-memory vertical slice
     status: not_started
@@ -44,6 +44,51 @@ milestones:
   "10":
     title: Scheduling, model routing, and subagents
     status: not_started
+
+verification:
+  milestone_0:
+    recorded_at: 2026-07-31T23:27:14Z
+    status: in_progress
+    evidence:
+      - check: make install
+        outcome: passed
+        detail: uv synchronized the locked Python 3.12 environment.
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff, strict mypy, 38 static tests, the empty contract partition,
+          the strict documentation build, 120 citation checks, and all 13
+          active Milestone 0 gates passed.
+      - check: make test against Compose PostgreSQL 16
+        outcome: passed
+        detail: >-
+          All 39 non-live tests passed, including a clean Alembic downgrade
+          and upgrade round trip against PostgreSQL 16.
+      - check: make db-up
+        outcome: passed
+        detail: >-
+          Docker Compose started postgres:16-alpine and its configured
+          healthcheck reached healthy.
+      - check: make migrate test-integration against Compose PostgreSQL 16
+        outcome: passed
+        detail: >-
+          The Compose database upgraded from empty to revision a3f19c2b7d04,
+          matching EXPECTED_REVISION, and the integration partition passed.
+          This host already runs another PostgreSQL on loopback port 5432, so
+          verification addressed Docker's published port through the host
+          network address.
+      - check: four CI target partitions
+        outcome: passed_locally
+        detail: >-
+          The static, contract, integration, and currently empty live targets
+          from .github/workflows/ci.yml all exited successfully. Workflow
+          structure tests assert their triggers, commands, PostgreSQL service,
+          Python version, and credential gate.
+    remaining:
+      - >-
+        Replace the provisional shipped YAML values with the complete set of
+        106 version-controlled defaults specified across the design corpus.
+      - Observe the workflow on hosted CI after the worktree changes are committed.
 
 documentation:
   canonical_format: markdown
@@ -333,5 +378,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T21:55:00Z
-last_reviewed_commit: a819b7b
+last_updated: 2026-07-31T22:59:41Z
+last_reviewed_commit: 149b6c1

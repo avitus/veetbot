@@ -1,0 +1,8 @@
+version: 1
+rules:
+  - id: deny_secret_exfiltration
+    effect: deny
+    description: Never expose platform or provider credentials.
+  - id: deny_destructive_host_access
+    effect: deny
+    description: Never grant generated code access to the host.

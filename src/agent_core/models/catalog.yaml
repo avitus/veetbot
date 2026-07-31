@@ -1,0 +1,10 @@
+models:
+  deterministic:
+    provider: fake
+    context_window: 32768
+    max_output_tokens: 4096
+    prices_per_million_tokens:
+      input: 0
+      cached_input: 0
+      output: 0
+      reasoning: 0
