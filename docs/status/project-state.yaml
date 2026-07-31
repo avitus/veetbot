@@ -255,8 +255,34 @@ readiness:
     memory, knowledge and device stores should get DDL, since they
     are the only storage declared as Pydantic models and prose, and
     whether any document should own a table census.
+    An eighth pass audited the port census. The corpus declares
+    forty seven Protocol blocks naming forty three distinct types.
+    Four blocks re declare a type an earlier document declared and
+    four of the types are application services of the API document,
+    which leaves thirty nine ports. runtime-loop.md said four ports
+    were declared under a heading that declares five; four is the
+    number of code fences, since Clock and IdFactory share one, and
+    the same document declares CancellationToken later, so it
+    declares six in all. The larger defect is that the ports table
+    in bootstrap-and-composition.md left eight declared Protocols
+    unassigned: SkillRepository, SkillPackageStore, Extractor,
+    Chunker, KnowledgeStore, WorkspaceHandle, ArtifactWriter and
+    CredentialResolver. That table exists so the first implementer
+    does not invent a layout the second disagrees with, and the
+    harness gates on a walk of agent_core/ports/ that demands one
+    contract module per Protocol, so where the eight live decides
+    which contract suites exist. All eight are assigned. Six went
+    into existing modules under the document's own rule and two new
+    modules were added, ports/knowledge.py and
+    ports/credentials.py, which are the reversible part and are
+    flagged as such. The table now names thirty nine ports across
+    fourteen modules. Three rows still name no type and are left as
+    questions: ports/telemetry.py, which no document declares a
+    Protocol for, the formation half of the memory row, which is
+    prose while the retrieval spec beside it declares five, and the
+    MCP row.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T23:20:00Z
-last_reviewed_commit: 2b6a14f
+last_updated: 2026-07-31T23:55:00Z
+last_reviewed_commit: 2be4ec5

@@ -346,7 +346,13 @@ gives.
 
 ### Ports declared here
 
-Four ports the runtime needs are named in the corpus and declared nowhere.
+Five ports the runtime needs are named in the corpus and declared nowhere.
+They arrive in four fences below, because `Clock` and `IdFactory` are one
+purpose rather than two capabilities and are declared together — the module
+they share is named in
+[bootstrap-and-composition.md](bootstrap-and-composition.md). A sixth,
+`CancellationToken`, is declared further down under cancellation, beside
+the rule about effects that is the reason it is a port and not a boolean.
 
 ```python
 class Clock(Protocol):

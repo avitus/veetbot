@@ -5723,3 +5723,99 @@ way `bootstrap-and-composition.md` owns the CLI census and
 `builtin-tools.md` now owns the tool census?
 
 **Reversal cost:** low.
+
+### The runtime port count came from the fences, not the ports
+
+**Decided:** corrected [runtime-loop.md](../plan/runtime-loop.md) to
+five, and named the sixth.
+
+**Why:** the section headed *"Ports declared here"* opened *"Four
+ports the runtime needs are named in the corpus and declared
+nowhere"* and then declared five before the next heading: `Clock`,
+`IdFactory`, `AgentRepository`, `PrincipalResolver`, and
+`BudgetLedger`. Four is the number of code fences, not the number of
+ports, because `Clock` and `IdFactory` share one. The same document
+declares `CancellationToken` further down under cancellation, so it
+declares six ports in total and five under that heading.
+
+**Note:** the neighbouring count is right and was left alone. Line
+29's *"Section 7 declares eight port Protocols with full
+signatures"* checks against Section 7 exactly, and so does
+`multi-device-and-surfaces.md` putting the device registry *"beside
+the seven repositories already there"*.
+
+**Question for you:** none.
+
+**Reversal cost:** none.
+
+### Eight ports had no module and a gate walks the directory
+
+**Decided:** assigned all eight in
+[bootstrap-and-composition.md](../plan/bootstrap-and-composition.md),
+which meant adding `ports/knowledge.py` and `ports/credentials.py`.
+
+**Why:** that document's *"Where the ports live"* table exists
+because *"without an assignment rule, the first implementer invents
+one, and the second invents a different one"*, and it left eight
+declared Protocols out of the table entirely: `SkillRepository`,
+`SkillPackageStore`, `Extractor`, `Chunker`, `KnowledgeStore`,
+`WorkspaceHandle`, `ArtifactWriter`, and `CredentialResolver`. That
+is not a cosmetic gap.
+[evaluation-harness.md](../plan/evaluation-harness.md) declares a
+structural gate that walks `agent_core/ports/`, collects the
+Protocols it finds, and fails the build for any without a contract
+module, so where these eight live decides which contract suites
+exist.
+
+**Note:** six of the eight are the document's own rule applied
+without judgement. `SkillRepository` goes with the repositories for
+the reason `multi-device-and-surfaces.md` puts `DeviceRegistry`
+there; `SkillPackageStore` and `ArtifactWriter` take bytes and hand
+them back under a key, which is what `artifacts.py` is named for;
+`WorkspaceHandle` is what `ExecutionEnvironment` returns. The table
+now names thirty-nine ports across fourteen modules, and every
+`Protocol` in the corpus that is not one of the four application
+services of the API document has a home.
+
+**Question for you:** the two new module names are the part that is
+a choice rather than a derivation. `ports/knowledge.py` and
+`ports/credentials.py` are what I used. The alternative for the
+second was folding `CredentialResolver` into `policies.py`, which I
+rejected because policy decides whether a tool may run and the
+resolver hands it the secret afterwards, and into `execution.py`,
+which I rejected because the sandbox spec's one structural claim
+about it is that a sandboxed tool gets a resolver that raises.
+
+**Reversal cost:** cheap now, moderate later. Renaming a module in
+prose is a search and replace; renaming it after the contract suites
+are written moves files and import lines in the gate that reads
+them.
+
+### Three rows in the ports table still name no type
+
+**Decided:** left as prose rows, and recorded here.
+
+**Why:** `ports/telemetry.py` is in the Section 5 tree and no
+document in the corpus declares a telemetry Protocol.
+`memory-formation-and-consolidation.md` declares `MemoryStore` and
+`MemoryConsolidator` as prose bullets with method lists rather than
+`Protocol` blocks, while
+[memory-retrieval-and-ranking.md](../plan/memory-retrieval-and-ranking.md)
+beside it declares five with full signatures. And no MCP port is
+declared anywhere, though `adapters.mcp`'s import row says it
+depends on `ports` and `domain`, which may mean it implements `Tool`
+and `ToolRegistry` and needs no port of its own. Writing the three
+would be inventing interfaces, which this assignment does not do.
+
+**Note:** the same harness gate is what makes this load-bearing
+rather than tidy. A port that exists as a sentence has neither a
+Protocol for the walk to find nor a contract module to demand, so
+the gate passes by not looking, which is the failure mode a
+structural gate is supposed to remove. The memory half is also the
+same asymmetry the schema audit found: the two newest specifications
+in the corpus are the two that describe their interfaces in prose.
+
+**Question for you:** should the three be declared before Milestone
+0 opens, or is the walk meant to find only what exists?
+
+**Reversal cost:** low.

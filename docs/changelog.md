@@ -4,6 +4,41 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The ports, audited
+
+- Corrected [runtime-loop.md](plan/runtime-loop.md), which said
+  *"Four ports the runtime needs are named in the corpus and
+  declared nowhere"* and then declared five. Four is the number of
+  code fences; `Clock` and `IdFactory` share one. The same document
+  declares `CancellationToken` under cancellation, so it declares
+  six ports in all.
+- Assigned the eight declared Protocols that
+  [bootstrap-and-composition.md](plan/bootstrap-and-composition.md)
+  left out of its ports table: `SkillRepository`,
+  `SkillPackageStore`, `Extractor`, `Chunker`, `KnowledgeStore`,
+  `WorkspaceHandle`, `ArtifactWriter`, and `CredentialResolver`.
+  That table exists so the first implementer does not invent a
+  layout the second disagrees with, and the harness gates on a walk
+  of `agent_core/ports/` that demands a contract module per
+  Protocol, so the omission was load-bearing.
+- Added `ports/knowledge.py` and `ports/credentials.py`, with the
+  reasoning for both, and added them to the layout additions. The
+  other six went into existing modules under the document's own
+  rule.
+- Pinned the census the table is now checkable against:
+  forty-seven `Protocol` blocks naming forty-three distinct types,
+  four blocks re-declaring an earlier type and four types being the
+  application services of the API document, which leaves
+  thirty-nine ports across fourteen modules.
+- Named the five retrieval ports and `ToolRegistry` in the table,
+  which had described them in prose while naming every other port
+  individually.
+- Left three rows naming no type and recorded them as a question:
+  `ports/telemetry.py` with no telemetry Protocol anywhere, the
+  formation half of the memory row, which is prose bullets while
+  the retrieval spec beside it declares five Protocols, and the MCP
+  row.
+
 ## 2026-07-31 — The schema, audited
 
 - Corrected both column counts in

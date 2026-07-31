@@ -127,10 +127,16 @@ three and the most likely to have been an oversight rather than a decision.
 
 ### Where the ports live
 
-`ports/` has nine modules and the corpus now declares far more than nine
-Protocols. Without an assignment rule, the first implementer invents one, and
-the second invents a different one. The rule is: **a port lives in the module
-named for the capability it abstracts, not for the component that calls it.**
+`ports/` has nine modules and the corpus declares thirty-nine ports. The
+arithmetic is forty-seven `Protocol` blocks naming forty-three distinct
+types: four of the blocks re-declare a type an earlier document already
+declared, and four of the types are the application services of
+[http-api-and-streaming.md](http-api-and-streaming.md), which belong under
+`application/` rather than here. Without an assignment rule, the first
+implementer invents one, and the second invents a different one. The rule
+is: **a port lives in the module named for the capability it abstracts, not
+for the component that calls it.** The table below assigns all thirty-nine
+and names fourteen modules where the tree has nine.
 
 ```text
 ports/models.py
@@ -145,6 +151,7 @@ ports/repositories.py
   AgentRepository        runtime-loop.md
   BudgetLedger           runtime-loop.md
   PrincipalResolver      runtime-loop.md
+  SkillRepository        skills.md
 
 ports/events.py
   EventRepository        engineering-plan.md
@@ -163,24 +170,41 @@ ports/context.py         -- ADDED
   Compactor              context-engine.md
 
 ports/memory.py          -- ADDED
-  the formation and retrieval ports of the two memory specs
+  MemoryRetriever        memory-retrieval-and-ranking.md
+  QueryFormer            memory-retrieval-and-ranking.md
+  Ranker                 memory-retrieval-and-ranking.md
+  EpisodeSearch          memory-retrieval-and-ranking.md
+  TraceStore             memory-retrieval-and-ranking.md
+  the formation ports of memory-formation-and-consolidation.md
+
+ports/knowledge.py       -- ADDED
+  Extractor              knowledge-documents.md
+  Chunker                knowledge-documents.md
+  KnowledgeStore         knowledge-documents.md
 
 ports/determinism.py     -- ADDED
   Clock                  runtime-loop.md
   IdFactory              runtime-loop.md
 
+ports/credentials.py     -- ADDED
+  CredentialResolver     sandbox-isolation.md
+
 ports/tools.py
   Tool                   engineering-plan.md, tool-system.md
-  the registry and MCP ports of tool-system.md
+  ToolRegistry           tool-system.md
+  the MCP ports of tool-system.md
 
 ports/policies.py
   PolicyEngine           engineering-plan.md
 
 ports/artifacts.py
   ArtifactStore          engineering-plan.md
+  ArtifactWriter         sandbox-isolation.md
+  SkillPackageStore      skills.md
 
 ports/execution.py
   ExecutionEnvironment   engineering-plan.md
+  WorkspaceHandle        sandbox-isolation.md
 
 ports/telemetry.py
   the telemetry port
@@ -195,6 +219,40 @@ may read ambient time or generate a random identifier.** That is a module-scope
 static check of the same family as dependency rule 13, and it has somewhere to
 point only because the two ports share a module.
 
+`ports/knowledge.py` and `ports/credentials.py` are the other two groupings
+that are not obvious, and both are new modules rather than rows in an
+existing one because nothing already in `ports/` is named for what they
+abstract. Knowledge is memory's sibling and would land in `repositories.py`
+under a misreading of the rule as "anything that stores goes with the
+stores" — `KnowledgeStore` does store, but extraction and chunking are the
+capability and the store is downstream of them. `CredentialResolver` is not
+policy, because policy decides whether a tool may run and the resolver
+hands it the secret afterwards, and it is deliberately not `execution.py`:
+the one structural thing [sandbox-isolation.md](sandbox-isolation.md) says
+about it is that a tool whose target is the sandbox is handed a resolver
+that raises for every reference, and a module boundary is the cheapest
+place for that asymmetry to live.
+
+The rest is the rule applied without argument. `SkillRepository` joins the
+repositories for the reason
+[multi-device-and-surfaces.md](multi-device-and-surfaces.md) puts the
+device registry there. `SkillPackageStore` and `ArtifactWriter` both take
+bytes and hand them back under a key, which is what `artifacts.py` is named
+for; `ArtifactWriter` says as much itself, calling itself deliberately
+narrower than `ArtifactStore`. `WorkspaceHandle` is what
+`ExecutionEnvironment` returns.
+
+Three rows still name no type: `ports/telemetry.py`, which is in the
+Section 5 tree while no document declares a telemetry Protocol; the
+formation half of the memory row, which is prose in
+[memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
+rather than a `Protocol` block; and the MCP row, whose adapter imports
+`ports` and `domain` and may well implement `Tool` and `ToolRegistry`
+rather than add a third. This is worth naming here and not only there,
+because [evaluation-harness.md](evaluation-harness.md) gates on a walk of
+`agent_core/ports/` that demands one contract module per Protocol, and a
+port that exists as a sentence has neither a Protocol nor a contract.
+
 ### The layout additions in full
 
 ```text
@@ -205,6 +263,8 @@ src/agent_core/
   ports/context.py           context engine ports
   ports/memory.py            memory formation and retrieval ports
   ports/determinism.py       Clock, IdFactory
+  ports/knowledge.py         extraction, chunking, the store
+  ports/credentials.py       CredentialResolver
   adapters/models/anthropic_messages.py
   adapters/models/openai_chat.py
   adapters/models/local_openai.py
