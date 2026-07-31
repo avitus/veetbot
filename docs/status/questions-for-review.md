@@ -5595,3 +5595,131 @@ under an existing command is not a new command all agree across
 **Question for you:** none.
 
 **Reversal cost:** none.
+
+### The run body stated two column counts and both were wrong
+
+**Decided:** corrected both in
+[http-api-and-streaming.md](../plan/http-api-and-streaming.md), and
+stated the split the body actually makes.
+
+**Why:** the paragraph introducing `GET /v1/runs/{run_id}` said *"The
+`runs` table has fourteen columns and this returns nine of them"*.
+Section 15 declares fifteen columns, four other documents add eleven
+more, and the JSON body immediately below has thirteen top-level
+keys. Neither number was derivable from anything in the corpus. The
+overview of the same document says *"the run record's twenty-three
+columns"*, so the document also disagreed with itself; twenty-three
+is exactly Section 13's error-class count, which this document
+states correctly seventy-six lines later.
+
+**Note:** the arithmetic that does close is thirteen returned and
+thirteen withheld, and the split is the seam between Section 15 and
+everything after it. Every Section 15 column is in the body except
+`lease_owner` and `lease_expires_at`, and every column another
+document adds is withheld — though `deadline_at` still reaches the
+client inside `limits`, where it was a domain field before
+`runtime-loop.md` gave it a column. The sessions section of the same
+document is the control case: it states no count, is right, and
+explains its one interesting omission.
+
+**Question for you:** none.
+
+**Reversal cost:** none.
+
+### The idempotency resolution was summarized as two tables
+
+**Decided:** corrected [readiness.md](../plan/readiness.md) to say a
+table and a column.
+
+**Why:** it said the API document resolved `Idempotency-Key` against
+the tool idempotency port as *"two scopes, two tables, two
+milestones, one unfortunate name"*. The API document resolves it as
+one table and one column: `idempotency_keys` for the HTTP header and
+`tool_invocations.idempotency_key` for the tool call. Its own words
+are *"They share a name, a column name, and nothing else"*, and its
+resolution row says *"two mechanisms, two scopes"* — not two tables.
+
+**Note:** the rest of the sentence is right. Two scopes and two
+milestones are both correct, and so is the verdict that the name is
+unfortunate.
+
+**Question for you:** none.
+
+**Reversal cost:** none.
+
+### Two documents add the same column with one cross-reference
+
+**Decided:** added the missing cross-reference to
+[tool-system.md](../plan/tool-system.md).
+
+**Why:** `policy-and-approvals.md` and `tool-system.md` both add
+`origin_trust` and `idempotency_class` to `tool_invocations`, both
+`NOT NULL`, and both with a rationale paragraph. `origin_trust` had
+a sentence naming the other document; `idempotency_class`, whose
+rationale sits in the paragraph immediately below, did not. A reader
+of either document alone would not know the column was declared
+twice, and a migration author reading both would not know whether
+that was intentional.
+
+**Note:** the two declarations agree, so this is a documentation
+defect rather than a design conflict. The columns are denormalized
+onto the authorization record on purpose, which both documents say
+in their own words.
+
+**Question for you:** none.
+
+**Reversal cost:** none.
+
+### Milestone 9 and 10 persistence has no schema
+
+**Decided:** left as is, and recorded.
+
+**Why:** the corpus declares twenty-two tables as DDL across seven
+documents, and every document that adds storage before Milestone 9
+declares it in a fenced schema block.
+`memory-formation-and-consolidation.md` and
+[knowledge-documents.md](../plan/knowledge-documents.md) declare
+their persistence as Pydantic models instead, and
+`multi-device-and-surfaces.md` says the `Device` *"gets a table
+rather than a column"* without giving the table any columns. So the
+last two milestones are the only ones whose storage an implementer
+cannot write a migration from.
+
+**Note:** this may well be deliberate. The retrieval design those
+documents store for is the newest work in the corpus, and Section
+29.8 defers the device schema explicitly. Inventing the columns
+would be exactly the kind of material addition this assignment is
+not allowed to make, which is why it is asked rather than decided.
+
+**Question for you:** should the memory, knowledge, and device
+tables get DDL before coding starts, or is a Pydantic model enough
+to build Milestone 9 from?
+
+**Reversal cost:** low. Adding a schema block to three documents
+touches nothing else, and none of the four gates that reference
+those documents reads a column name.
+
+### The schema is twenty-two tables and nothing says so
+
+**Decided:** left uncounted, and recorded.
+
+**Why:** the tables are declared across seven documents and no
+document enumerates them. The only statement of the size is
+[event-log-and-persistence.md](../plan/event-log-and-persistence.md)
+calling it *"roughly twenty tables, two functions each"*, which is
+defensible for twenty-two and is hedged on purpose. Adding a census
+would mean choosing an owner for it, and the natural owner is
+Section 15, which this assignment does not edit.
+
+**Note:** four of the twenty-two are effectively write-only in the
+corpus. `eval_scenario_runs` and `eval_criterion_scores` are
+mentioned twice each in all of `docs/`, and `mcp_tool_catalog` three
+times, which is the declaration and little else. That is a
+different problem from the count and is not fixed by fixing the
+count.
+
+**Question for you:** should one document own a table census, the
+way `bootstrap-and-composition.md` owns the CLI census and
+`builtin-tools.md` now owns the tool census?
+
+**Reversal cost:** low.

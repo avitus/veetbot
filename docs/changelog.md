@@ -4,6 +4,41 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The schema, audited
+
+- Corrected both column counts in
+  [http-api-and-streaming.md](plan/http-api-and-streaming.md). The
+  paragraph introducing `GET /v1/runs/{run_id}` said the `runs`
+  table has fourteen columns and that the endpoint returns nine of
+  them. Section 15 declares fifteen, four other documents add
+  eleven more, and the JSON body immediately below has thirteen
+  top-level keys. The overview of the same document called it
+  twenty-three columns, which is Section 13's error-class count.
+- Stated the split rather than a count. Thirteen columns go out and
+  thirteen are withheld, and the line falls almost exactly between
+  Section 15 and the documents that extend it: every Section 15
+  column is in the body but `lease_owner` and `lease_expires_at`,
+  and every later addition is withheld, though `deadline_at`
+  reaches the client inside `limits`. Resolution row 12 and
+  decision 22 record it.
+- Corrected [readiness.md](plan/readiness.md), which summarized the
+  `Idempotency-Key` resolution as *"two scopes, two tables, two
+  milestones"*. The API document resolves it as one table and one
+  column — `idempotency_keys` against
+  `tool_invocations.idempotency_key` — and its own resolution row
+  says two mechanisms and two scopes.
+- Added the missing cross-reference to
+  [tool-system.md](plan/tool-system.md). It and
+  [policy-and-approvals.md](plan/policy-and-approvals.md) both add
+  `origin_trust` and `idempotency_class` to `tool_invocations`,
+  both `NOT NULL`. Only `origin_trust` said so.
+- Recorded two open questions rather than closing them: whether the
+  memory, knowledge, and device stores should get DDL, since they
+  are the only storage in the corpus declared as Pydantic models
+  and prose, and whether any document should own a census of the
+  twenty-two tables the way `bootstrap-and-composition.md` owns the
+  CLI census.
+
 ## 2026-07-31 — The route table, audited
 
 - Added the missing scope-table row to

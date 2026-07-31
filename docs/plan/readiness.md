@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1965` states that device tools are *"a reserved
+    `tool-system.md:1969` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -1033,7 +1033,7 @@ and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
 `tool-system.md:1449` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1965` states that device tools are *"a reserved seam,
+`tool-system.md:1969` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1235,7 +1235,7 @@ under the conflict it settles.
     header at Milestone 5 and as a tool-call port at Milestone 1.
     Whether these are one mechanism or two is undecided, and belongs
     to the API specification. Resolved there as two: two scopes, two
-    tables, two milestones, one unfortunate name.
+    milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
     `engineering-plan.md:3227` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the

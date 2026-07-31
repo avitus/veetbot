@@ -1508,6 +1508,10 @@ build, and looking up the class of a call that a previous version classified
 differently is how a non-idempotent call gets retried as idempotent. The row
 records what was believed when the call was authorized, which is what the
 authorization was based on.
+[policy-and-approvals.md](policy-and-approvals.md) declares this column on
+this table as well, `NOT NULL` in both places, for the reason given above
+for `origin_trust`: a classification the authorization record cannot state
+is a classification the recovery path has to guess.
 
 `parallel_group` exists so that a batch is reconstructible from the table
 alone. Without it, "which calls did the model issue together" is only

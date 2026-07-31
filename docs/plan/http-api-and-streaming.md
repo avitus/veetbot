@@ -25,7 +25,7 @@ rule, the error envelope, and the authentication posture. It is a real
 design. What it does not do is say what comes back. An implementer holding
 Section 16 knows that `GET /v1/runs/{run_id}` exists and cannot write it,
 because nothing in the corpus states which of the run record's
-twenty-three columns are public, what a status of `WAITING_FOR_APPROVAL`
+twenty-six columns are public, what a status of `WAITING_FOR_APPROVAL`
 tells a client to do next, or whether the failure that ended a run is
 visible at all.
 
@@ -656,10 +656,21 @@ server does not care.
 GET /v1/runs/{run_id}
 ```
 
-The `runs` table has fourteen columns and this returns nine of them,
-reshaped. `lease_owner`, `lease_expires_at`, and `attempts` are queue
-internals and stay internal — a client that can see the lease will build
-something on top of it, and the lease is the worker's business.
+Section 15 gives `runs` fifteen columns and four other documents add
+eleven more, so the table is twenty-six columns by the time the corpus
+is built. This returns thirteen of them, reshaped, and withholds
+thirteen, and the split is almost exactly the seam between the two.
+Every Section 15 column is in the body except `lease_owner` and
+`lease_expires_at`; every column added afterwards is withheld. Of the
+thirteen withheld, one value still reaches the client: `deadline_at`
+arrives inside `limits`, where it was a domain field before
+[runtime-loop.md](runtime-loop.md) gave it a column.
+
+`lease_owner`, `lease_expires_at`, `lease_epoch`, and `attempts` are
+queue internals and stay internal — a client that can see the lease
+will build something on top of it, and the lease is the worker's
+business. `tenant_id` and `principal_scopes` belong to the
+authorization record and are not a client's to read back.
 
 ```json
 {
@@ -1433,7 +1444,8 @@ an implementer does not move the DDL forward or the endpoint back.
 8  no route reads a session         GET /v1/sessions/{id} added
 9  five vs six observation points   already reconciled by the loop spec
 10 approval routes at M4 or M5      M5; the service and CLI are M4
-11 added route has no scope row      session.read; the surface is 14
+11 added route has no scope row     session.read; the surface is 14
+12 two run column counts, neither   fifteen in §15, twenty-six live
 ```
 
 Row 3 is the one worth expanding, because the readiness review stated
@@ -1601,6 +1613,11 @@ build failure.
 21. **The surface this document leaves is fourteen routes.**
     Thirteen inherited and one added. A document that closes the API
     at a number closes it at fourteen.
+22. **`runs` is twenty-six columns and this returns thirteen.**
+    Section 15 declares fifteen and four other documents add eleven.
+    A body that withholds half a table should say which half, so that
+    the next document to add a column knows it is adding a private
+    one unless it says otherwise.
 
 ## Open questions for review
 

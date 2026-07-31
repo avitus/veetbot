@@ -232,8 +232,31 @@ readiness:
     fourteenth when the CLI is twelve commands and the document that
     owns that census calls the next one a thirteenth. The CLI census
     is otherwise sound.
+    A seventh pass audited the database schema. The corpus declares
+    twenty two tables across seven documents and no document
+    enumerates them; the only statement of the size is
+    event-log-and-persistence.md calling it roughly twenty tables,
+    which is hedged and defensible. The sharp defect is in the API
+    document, which said the runs table has fourteen columns and
+    that GET /v1/runs/{run_id} returns nine of them. Section 15
+    declares fifteen columns, four other documents add eleven more,
+    and the JSON body immediately below the sentence has thirteen
+    top level keys. The overview of the same document called it
+    twenty three columns, which is Section 13's error class count.
+    Both are corrected and the split is now stated rather than
+    counted: thirteen out and thirteen withheld, with every Section
+    15 column in the body but the two lease columns and every later
+    addition withheld. readiness.md summarized the idempotency
+    resolution as two tables when the API document resolves it as
+    one table and one column. tool-system.md and
+    policy-and-approvals.md both add origin_trust and
+    idempotency_class to tool_invocations and only the first was
+    cross referenced. Two questions are left open: whether the
+    memory, knowledge and device stores should get DDL, since they
+    are the only storage declared as Pydantic models and prose, and
+    whether any document should own a table census.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T21:40:00Z
-last_reviewed_commit: 9b76dc5
+last_updated: 2026-07-31T23:20:00Z
+last_reviewed_commit: 2b6a14f

@@ -171,7 +171,7 @@ citations:
     excerpt: "## Device-scoped tools"
   - cite: "docs/plan/readiness.md#docs/plan/tool-system.md:1463"
     excerpt: "What is deliberately not decided here: the device transport,"
-  - cite: "docs/plan/readiness.md#docs/plan/tool-system.md:1965"
+  - cite: "docs/plan/readiness.md#docs/plan/tool-system.md:1969"
     excerpt: "5. **Device tools are a reserved seam, not a design.** The t"
   - cite: "docs/plan/readiness.md#docs/plan/tool-system.md:719"
     excerpt: "- Output is read through a bounded reader that stops at"
