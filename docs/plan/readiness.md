@@ -83,7 +83,7 @@ rather than smoothed.
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready | 17 | Nothing |
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
-| 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | No acceptance criteria exist |
+| 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | Its own entry gates, by design |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -922,10 +922,49 @@ one with neither.
 All seven scheduling requirements are undesigned. Of six routing
 considerations, data residency and evaluation performance have no
 design; the other four are at least touched by the model gateway's
-routing section. Of nine subagent requirements, five have none — the
-explicit objective, restricted context, child deadline, separate
-trace, and artifact references rather than a full transcript — and two
-more are partial.
+routing section. Of nine subagent requirements, five had none when
+this section was written — the explicit objective, restricted
+context, child deadline, separate trace, and artifact references
+rather than a full transcript — and two more were partial.
+
+That subagent count is now stale, and it is the only verdict in this
+review that later documents overtook. Re-measured against the corpus
+as it stands, five of the nine are supplied. `parent_run_id` is a
+Section 15 column at `engineering-plan.md:1674`, and the sibling join
+at `runtime-loop.md:1134` reads it. Restricted context is
+`context-engine.md:278`, where `runs.seed_event_sequence` is nullable
+for child runs because they *"seed from a parent's concise
+instruction rather than from session history"*, together with the
+child-run recall class at `memory-retrieval-and-ranking.md:87`, which
+gets fifteen beliefs against an interactive run's forty. The
+restricted tool set is `tool-system.md:949`: *"the registry resolves
+the child's set through `specs_for_session` with the child's
+principal, not the parent's"*. The child deadline is
+`runtime-loop.md:1141`: *"the parent's `deadline_at` is copied onto
+every child at creation"*. The concise return is the sibling join
+plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
+`tool-system.md:945`. Two are partial: the explicit objective has a
+carrier but no schema, since `delegate.run` is a control tool at
+`tool-system.md:916` and no input type for it exists anywhere, and
+the child budget is additive by `engineering-plan.md:553` while no
+rule derives a child's own `limits`. Two still have none — the
+separate trace and the artifact references, stated at
+`engineering-plan.md:3136` and `engineering-plan.md:2830` and picked
+up by no specification.
+
+Re-measuring surfaced a conflict the stale count was hiding.
+`event-log-and-persistence.md:724` declares a unique index on
+`session_id` where status is not one of `COMPLETED`, `FAILED`, or
+`CANCELLED`, to enforce Section 27.5's one active run per session. A
+parent suspended on a child waits in `WAITING_FOR_APPROVAL` carrying
+a typed suspension kind, which `runtime-loop.md:290` chose over an
+eighth state, and that is not one of the three — so a child run in
+the parent's own session cannot be inserted. Section 27.6 offers both
+placements, *"the parent's session or a dedicated child session per
+policy"*, and only the second survives the index, with no policy
+written to choose between them. It is recorded here rather than
+resolved: resolving it is Milestone 10 work, and this review
+authorizes none.
 
 The honest verdict is that this is a direction rather than a
 milestone, and the plan says as much. It is listed here for
@@ -934,6 +973,17 @@ completeness and because its gate column is no longer zero:
 loop. Those gates come from a section of the plan rather than from
 this milestone's own criteria, which it still does not have, so the
 verdict is unchanged by them.
+
+Open question 4 below closes the remaining half of this, which was
+whether the missing criteria are an omission or a choice. They are a
+choice. Each of the four parts carries an entry condition and a
+must-have list already, and two of those conditions gate on evidence
+rather than on a date: a scheduler comes *"only after durable
+on-demand runs are reliable"*, and subagents come *"only when
+evaluation evidence shows that a single agent fails"*. Acceptance
+criteria are a promise about a delivery, and a promise cannot be made
+about work that must not start until evidence arrives. What Milestone
+10 is missing is the heading, not the content the heading would hold.
 
 ## The three plan sections no specification expanded
 
@@ -1246,7 +1296,15 @@ under the conflict it settles.
     contents *"separate optional extensions"*. Leaving it as a
     direction is defensible; leaving it in a numbered milestone
     sequence while every other entry has criteria is what makes it
-    look like an omission rather than a choice.
+    look like an omission rather than a choice. Answered by measuring
+    what sits behind it: correctly an open direction. Two of its four
+    parts gate on evidence rather than on a date, and criteria for
+    work that must not start until evidence arrives would be a
+    promise this plan cannot keep, where every other milestone's
+    criteria are promises it can. The re-measure that produced the
+    answer also corrected this review: five of the nine subagent
+    requirements are designed now, by documents that landed after the
+    verdict above was written.
 5.  **Is knowledge retrieval a Milestone 9 deliverable or its own
     milestone?** Answered by designing it: a Milestone 9 deliverable,
     sequenced after the memory half. Splitting it out would have made

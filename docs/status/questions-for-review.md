@@ -4766,3 +4766,92 @@ them now would be inventing that use case.
 preference is identity first — the table, pairing, and revocation —
 with routing and notifications after. Identity is the part every
 other piece needs, and it is the part that is a migration.
+
+## Milestone 10 and readiness open question 4
+
+### Answered by measuring, not by adding a heading
+
+**Decided:** Milestone 10 is correctly an open direction. It gets no
+`#### Acceptance criteria` heading and no implement list.
+
+**Why:** the question was whether the missing criteria are an
+omission or a choice, and the way to tell is to look at what the
+milestone's own conditions are. Two of its four parts gate on
+evidence rather than on a date — *"Implement a scheduler only after
+durable on-demand runs are reliable"* and *"Add subagents only when
+evaluation evidence shows that a single agent fails"*. Acceptance
+criteria are a promise about a delivery. A promise cannot be made
+about work whose own entry condition says it must not start until
+evidence arrives, and inventing one would be worse than the missing
+heading, because every other milestone's criteria are promises this
+plan can keep.
+
+**Question for you:** if you would rather Milestone 10 read
+uniformly with the others, the honest form is a heading that states
+the entry gates as the criteria — "subagents are not built until
+evaluation evidence shows a single agent fails for one of five named
+reasons" is a criterion, just not a delivery one. I did not write it
+because it restates the gate rather than adding anything.
+
+### The review's own subagent count was stale
+
+**Decided:** corrected in place, with the finding kept and re-tensed
+rather than deleted.
+
+**Why:** the readiness verdict said five of the nine subagent
+requirements had no design, naming restricted context and the child
+deadline among them. Both are designed now. `context-engine.md:278`
+makes `runs.seed_event_sequence` nullable for child runs, which
+*"seed from a parent's concise instruction rather than from session
+history"*, and `memory-retrieval-and-ranking.md:87` gives child runs
+their own recall class at fifteen beliefs against an interactive
+run's forty. `runtime-loop.md:1141` says *"the parent's
+`deadline_at` is copied onto every child at creation"*. All three
+documents were written after that verdict. Five of the nine are
+supplied, two are partial, and two still have none.
+
+**Question for you:** none. This is a correction of fact, and the
+house rule is that a review's findings are kept as the record with
+the closing appended, which is what I did.
+
+### A child run cannot be inserted into its parent's session
+
+**Decided:** recorded as a conflict in the readiness review, not
+resolved.
+
+**Why:** `event-log-and-persistence.md:724` enforces Section 27.5's
+one active run per session with a unique index on `session_id` where
+status is not `COMPLETED`, `FAILED`, or `CANCELLED`. A parent
+suspended on a child waits in `WAITING_FOR_APPROVAL` carrying a
+typed suspension kind — `runtime-loop.md:290` chose that over an
+eighth status — and that is not one of the three. So the parent row
+still occupies the session, and a child row in the same session
+violates the index. Section 27.6 offers *"the parent's session or a
+dedicated child session per policy"*; only the second is
+implementable as the schema stands, and no policy is written to
+choose between them.
+
+**Question for you:** resolving it is Milestone 10 work and this
+documentation pass authorizes none, so it stays recorded. When it
+comes up, my weak preference is to delete the branch rather than
+write the policy: a dedicated child session always, because the
+alternative needs the index predicate widened to exempt child runs,
+and that predicate is the thing keeping one active run per session
+true.
+
+### `delegate.run` has a carrier and no schema
+
+**Decided:** noted as partial, not designed here.
+
+**Why:** `tool-system.md:916` registers `delegate.run` as a control
+tool that spawns a child run and suspends the parent, and
+`context-engine.md:278` says the child seeds from a parent's concise
+instruction. Nothing types that instruction. The plan's *"explicit
+objective"* requirement therefore has a delivery path and no input
+schema anywhere in the corpus.
+
+**Question for you:** whether the objective should be a plain string
+or a structured brief with a success condition. I have no view worth
+recording, because the answer depends on what the first real
+delegation is for, and Milestone 10's own gate says that should be
+driven by evaluation evidence.

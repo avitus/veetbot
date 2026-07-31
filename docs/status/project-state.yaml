@@ -63,9 +63,12 @@ readiness:
   summary: >-
     Milestones 0 through 9 are implementable from the corpus alone.
     Milestone 10 has a design for its skill-authoring half and no
-    acceptance criteria of its own; it remains a direction rather than
-    a milestone. Milestones 5, 6, and 8 moved into the covered set
-    when docs/plan/http-api-and-streaming.md,
+    acceptance criteria of its own; it remains a direction rather
+    than a milestone, which readiness.md now records as a choice and
+    not an omission, because two of its four parts gate on
+    evaluation evidence rather than on a date. Milestones 5, 6, and
+    8 moved into the covered set when
+    docs/plan/http-api-and-streaming.md,
     docs/plan/sandbox-isolation.md, and docs/plan/skills.md were
     written; the review's original findings are retained in the review
     itself. No subject in the plan now lacks a document. Milestone 3's
@@ -100,9 +103,18 @@ readiness:
     work lands additively, finding eight places that already hold
     the shape and five that do not, and places the four Section
     29.6 items under the existing port rule. It declares no gates,
-    so the gate census is unchanged.
+    so the gate census is unchanged. The last unanswered readiness
+    question, whether Milestone 10 needs acceptance criteria, is
+    answered by re-measuring all twenty two of its requirements: it
+    is correctly an open direction. The re-measure corrected the
+    review's own subagent count, which named five requirements as
+    undesigned when five of the nine are supplied now, and it
+    surfaced one conflict, that the single active run per session
+    index leaves only the dedicated child session branch of Section
+    27.6 implementable. That conflict is recorded, not resolved,
+    because resolving it is Milestone 10 work.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T16:45:00Z
-last_reviewed_commit: 1164e0d
+last_updated: 2026-07-31T18:20:00Z
+last_reviewed_commit: 69cc998

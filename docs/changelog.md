@@ -4,6 +4,52 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Milestone 10, answered by re-measuring it
+
+- Answered the last open question in
+  [readiness.md](plan/readiness.md), which asked whether Milestone 10
+  needs acceptance criteria or is correctly an open direction. It is
+  correctly an open direction. Two of its four parts gate on
+  evidence rather than on a date — a scheduler comes *"only after
+  durable on-demand runs are reliable"* and subagents come *"only
+  when evaluation evidence shows that a single agent fails"* — and
+  acceptance criteria are a promise about a delivery, which cannot
+  be made about work that must not start until evidence arrives.
+  What the milestone is missing is the heading, not the content the
+  heading would hold.
+- Re-measured all twenty-two Milestone 10 requirements against the
+  corpus before answering, because the answer turns on what is
+  actually behind the milestone rather than on how it is formatted.
+  The scheduling and routing verdicts held. The subagent verdict did
+  not.
+- Corrected this review's own subagent count, the only verdict in it
+  that later documents overtook. It named five of nine requirements
+  as having no design; five of the nine are supplied now. Restricted
+  context is `context-engine.md:278` plus the child-run recall class
+  at `memory-retrieval-and-ranking.md:87`, the restricted tool set is
+  `tool-system.md:949`, and the child deadline is
+  `runtime-loop.md:1141`, all written after the verdict was. Two are
+  partial and two still have none: the separate trace and the
+  artifact references, which no specification picks up.
+- Recorded one conflict the stale count was hiding.
+  [event-log-and-persistence.md](plan/event-log-and-persistence.md)
+  enforces one active run per session with a unique partial index,
+  and a parent suspended on a child is not in a terminal status, so
+  a child run in the parent's own session cannot be inserted.
+  Section 27.6 offers the parent's session or a dedicated child
+  session per policy, and only the second survives the index. It is
+  recorded rather than resolved, because resolving it is Milestone
+  10 work and this review authorizes none.
+- Left the verdict and the gate census alone. Milestone 10 is still
+  not a milestone, its six gates still come from
+  [skills.md](plan/skills.md) rather than from criteria of its own,
+  and no document was added, so the census stays at one hundred and
+  seventy-two registry entries.
+- Updated the verdict table's last column for Milestone 10 from *"No
+  acceptance criteria exist"* to *"Its own entry gates, by design"*,
+  and carried the answer into
+  [project-state.yaml](status/project-state.yaml).
+
 ## 2026-07-31 — Section 29's Device model, closed as an audit
 
 - Wrote
