@@ -147,8 +147,27 @@ readiness:
     census is unchanged: one hundred and seventy two registry
     entries, the same four kind totals, the same per milestone
     counts.
+    A second structural audit then ran three of the milestone map's
+    own hard gates by hand, the ones over the registry that the
+    identifier pass did not cover. Every numbered item in every
+    hard gates section carries exactly one milestone token, one
+    hundred and seventy three items across fifteen sections. The
+    alias arithmetic holds per specification and not only in
+    aggregate: each specification's gate count less its declared
+    aliases equals the entries citing it, on all fifteen. The
+    anchor check does not hold as written. It requires every
+    registry entry to name a hard gates anchor, and the two entries
+    the engineering plan owns have no such section, because that
+    document is organized by milestone and declares them in
+    Milestone 0's acceptance criteria. They now name the Milestone
+    0 heading instead, which the built site confirms, and the gate
+    is read as its own title states, that a spec field resolves.
+    The milestone order gate is recorded as asserting against the
+    build sequence table, which passes on all nine specifications
+    whose sequences carry milestones. The census is unchanged at
+    one hundred and seventy two registry entries.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T23:40:00Z
-last_reviewed_commit: 4504fdb
+last_updated: 2026-08-01T02:15:00Z
+last_reviewed_commit: e20169b

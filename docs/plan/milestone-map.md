@@ -285,6 +285,22 @@ and the arithmetic above absorbs it. ADR-0027 and ADR-0028 are not
 amended — their totals are records of what was true when each was
 decided, and this document is where the current one is stated.
 
+Both are registry entries and both carry a `spec` field, and they are
+the only two whose field does not end in `#hard-gates`. The
+engineering plan has no such section, because it is organized by
+milestone rather than by subject: it declares these two in Milestone
+0's acceptance criteria and the prose beneath them, and there is
+nowhere else in that file they could live. Their `spec` names
+`engineering-plan.md` and the anchor of the heading that declares
+them, *"Milestone 0: Repository and engineering foundation"*, which
+is the only heading in that file either one could resolve to. Hard
+gate 4 below is titled *"Every `spec` field resolves"*, and that is
+what it checks: the anchor an entry names exists in the built site,
+which is how [evaluation-harness.md](evaluation-harness.md) states it
+too. The `#hard-gates` form in that gate's body is the shape the
+other one hundred and seventy entries take, not a further condition
+on these two.
+
 ### Runtime loop, fourteen gates
 
 Already tagged per gate. Reproduced here so the map is complete and so
@@ -1084,6 +1100,11 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     the builder's determinism test to Milestone 1.** Resolved by
     moving gate 1 and build step 1 to Milestone 1 and leaving the
     other four where they are.
+10. **Hard gate 4 requires a `#hard-gates` anchor and the two entries
+    the engineering plan owns have no such section to name.**
+    Resolved by that gate's own title: what is checked is that the
+    anchor an entry names resolves in the built site, and those two
+    name the Milestone 0 heading that declares them.
 
 ## Decisions
 
@@ -1146,6 +1167,17 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     The seven gates it does declare are checks over the scheduling
     record itself, which is the one thing no other document is in a
     position to check.
+13. **Hard gate 7 is asserted against the build-sequence table and
+    not against a step recorded per gate.** Only the tool system
+    records which step each of its gates observes, and two of its
+    rows sit at Milestone 2 against a Milestone 1 step under
+    decision 3 above, because the earlier form of each would be
+    vacuous: nothing recovers before there is persistence to recover
+    from, and a single-process dictionary cannot lose a race. A
+    check reading that column per gate would fail on both and be
+    relaxed within a milestone. The table is the input, and the
+    question it answers is whether a spec's gates outrun the steps
+    that build them.
 
 ## Open questions for review
 
@@ -1178,6 +1210,15 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     uses it. The alternative is a live smoke test that is not a gate
     at all but a manually run script, which is honest about its status
     and loses the registry's record of it.
+5.  **Whether the engineering plan should grow a `## Hard gates`
+    section.** It owns two registry entries and is the only
+    declaring document without one, which is why their `spec` field
+    is the single exception to the anchor rule. Giving it the
+    section would make the rule uniform, and would also move two
+    requirements out of the acceptance criteria that state them and
+    into a heading a milestone-ordered document has no natural place
+    for. The exception is recorded instead. Reversal cost: low, one
+    section and two `spec` fields.
 5.  **Whether the census belongs in a document at all** once it is
     generated. Keeping it here makes the shape of the plan visible to
     a reader; generating it makes it correct. The compromise taken —

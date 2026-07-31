@@ -5111,3 +5111,101 @@ what the grammar excludes, and says so where it quotes it, so gate
 5 is not implemented as a scan of free text.
 
 **Reversal cost:** none. This defers work rather than doing it.
+
+### The engineering plan owns two gates and has no hard-gates section
+
+**Decided:** the `spec` field of `gate.structure.import_boundary` and
+`gate.structure.no_committed_secrets` names the anchor of the
+engineering plan's *"Milestone 0: Repository and engineering
+foundation"* heading, and hard gate 4 is read as its own title says —
+the anchor an entry names resolves — rather than as a literal test
+for the string `#hard-gates`.
+
+**Why:** hard gate 4 of `milestone-map.md` says each entry's
+`docs/plan/<file>.md#hard-gates` anchor exists in the built site.
+Fifteen documents carry that anchor and the built site confirms all
+fifteen. `engineering-plan.md` is not one of them, and it owns two of
+the hundred and seventy-two entries — the harness's own per-spec kind
+table records them as a row reading *"Engineering plan"* with two
+structural gates. Under the literal reading the gate fails on those
+two the day it is written, and the failure has no fix inside the
+registry.
+
+**Note:** the anchor-agnostic reading is not an invention. Hard gate
+4's title is *"Every `spec` field resolves"*, and
+`evaluation-harness.md` states the rule as *"a gate whose `spec`
+anchor does not resolve fails the docs check"*. Only the illustrative
+form in the gate's body names `#hard-gates`, and rule 5 of the
+milestone map introduced that form to correct two example entries
+that pointed at `#evaluation`, which is a narrower claim than a
+universal one.
+
+**Question for you:** the alternative is to give `engineering-plan.md`
+a `## Hard gates` section holding those two, which makes the anchor
+rule uniform at the cost of moving two requirements out of the
+Milestone 0 acceptance criteria that state them. I recorded the
+exception instead, because relocating a stated requirement is a
+larger change than naming an exception to an anchor convention.
+
+**Reversal cost:** low. One section and two `spec` fields.
+
+### Hard gate 7 has two readings and the strict one fails
+
+**Decided:** hard gate 7 is asserted against the build-sequence table
+in `milestone-map.md`, which is what its own sentence says, and not
+against the per-gate `step` column.
+
+**Why:** only one registry table of fifteen carries a `step` column,
+the tool system's. Read per gate, the check fails on exactly two
+rows: `gate.tool.crash_recovery` is Milestone 2 against step 4, and
+`gate.tool.dedup_concurrent` is Milestone 2 against step 3, and both
+of those steps are Milestone 1. Both placements are deliberate and
+argued at length in the same document, under *"Tool-system build
+steps 3 and 4 without a database"* and under decision 3, which says
+a gate whose earlier form would be vacuous is registered at the later
+milestone. Nothing recovers before there is persistence to recover
+from, and a single-process dictionary cannot lose a race. A check
+that failed on both would be relaxed in its first week.
+
+**Note:** the reading the sentence gives does pass. I ran it over the
+six specs of the build-sequence table and the three that tag their
+own sequences: no spec has a gate at a milestone later than the last
+step that builds it. `gate.structure.migration_graph` sits at
+Milestone 0 against a Milestone 2 sequence, which is earlier and
+therefore allowed, and the engineering plan says why.
+
+**Question for you:** if the intent was the strict per-gate reading,
+the two tool-system rows need something in the registry that records
+the exception rather than leaving it in prose — an `observes_step`
+field carrying a stated reason, on the `optional` field's precedent.
+That is a registry schema change and I did not make one.
+
+**Reversal cost:** low now, higher once the check is written against
+one reading.
+
+### Three of the map's own hard gates were run by hand and pass
+
+**Decided:** recorded rather than implemented, on the same grounds as
+the identifier audit before it. These are Milestone 0 gates with a
+named home in `tests/gates/`.
+
+**Why:** what was run, so that whoever writes them starts from a
+known state. Gate 1, every top-level numbered item in a `## Hard
+gates` section carries exactly one trailing milestone token: fifteen
+sections, one hundred and seventy-three items, one hundred and
+seventy-three tokens, one per item, none with two and none with
+none. Gate 3, a spec's gate count minus its declared alias count
+equals the number of entries citing it: all fifteen agree, and the
+three aliases are declared in the declaring spec with the owner named
+and the owning gate's number given, in the same sentence form each
+time. Gate 4, the anchors: fifteen documents carry `#hard-gates` and
+the built site confirms every one, with the exception recorded above.
+
+**Note:** the alias arithmetic is the one that moves the headline
+number if it is wrong, and it holds per spec rather than only in
+aggregate. One hundred and seventy-three items in hard-gates
+sections, minus three aliases, is one hundred and seventy rows across
+the fifteen tables, and the two the engineering plan declares outside
+any such section make one hundred and seventy-two.
+
+**Reversal cost:** none. This is a record of a measurement.

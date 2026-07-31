@@ -4,6 +4,39 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The map's own hard gates, audited by hand
+
+- Ran hard gates 1, 3, and 4 of
+  [milestone-map.md](plan/milestone-map.md) by hand against the
+  corpus, the three checks over the registry that the identifier
+  audit did not cover. Gate 1 holds item by item: fifteen hard-gate
+  sections, one hundred and seventy-three numbered items, exactly
+  one milestone token each. Gate 3 holds per spec and not only in
+  aggregate: every spec's gate count minus its declared aliases
+  equals the entries citing it, and all three aliases name their
+  owner and its gate number.
+- Found that gate 4 cannot pass as written. It requires each
+  registry entry's `#hard-gates` anchor to exist in the built site,
+  and the two entries the engineering plan owns have no such
+  section to name — the plan is organized by milestone and declares
+  them in Milestone 0's acceptance criteria. Resolved by the gate's
+  own title, *"Every `spec` field resolves"*, which is also how
+  [evaluation-harness.md](plan/evaluation-harness.md) states the
+  rule: the two name the Milestone 0 heading that declares them,
+  and that anchor is confirmed present in the built site.
+- Recorded the reading of gate 7. Its sentence asserts against the
+  build-sequence table, which passes for all nine specs whose
+  sequences carry milestones. The stricter per-gate reading is
+  possible for only one table of fifteen and fails there on two
+  rows the same document places deliberately and defends at length,
+  so the sentence's reading is the one stated rather than left to
+  whoever implements it.
+- Added one conflict, one decision, and one open question to
+  [milestone-map.md](plan/milestone-map.md), and three entries to
+  [questions-for-review.md](status/questions-for-review.md). No gate
+  statement is changed and the census is untouched: still one
+  hundred and seventy-two registry entries.
+
 ## 2026-07-31 — Gate identifiers reconciled against the registry
 
 - Widened the identifier column in four tables of
