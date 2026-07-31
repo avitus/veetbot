@@ -90,8 +90,9 @@ waiting on a chat turn from queueing behind a four-hour research run.
   throughput on a saturated system is slightly lower than strict priority would
   give, in exchange for a p99 interactive claim latency that does not depend on
   what else is queued.
-- `runs` gains five columns (`priority`, `attempts`, `scheduled_for`,
-  `lease_epoch`, plus the partial unique index) and a partial index on
+- `runs` gains four columns (`priority`, `attempts`, `scheduled_for`,
+  `lease_epoch`), the partial unique index enforcing one non-terminal run per
+  session, and a partial index on
   `(status, priority, created_at)`. All are written in the first migration; a
   fencing token retrofitted after a queue exists cannot be applied to in-flight
   runs.

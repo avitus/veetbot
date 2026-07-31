@@ -923,7 +923,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1038-1075` is
+family of the secret scanner at `bootstrap-and-composition.md:1047-1084` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1085,7 +1085,11 @@ model_calls                          -- one row per attempt
   model            TEXT NOT NULL
   model_policy     TEXT NOT NULL     -- what was asked for
   registry_version TEXT NOT NULL     -- what it resolved against
-  prefix_sha256    TEXT NULL         -- from the ContextPlan
+  prefix_sha256    TEXT NOT NULL     -- from the ContextPlan; never absent,
+                                     -- because the stability gate asserts
+                                     -- exactly one distinct value per session
+                                     -- and a NULL cannot participate
+                                     -- (`context-engine.md:133-141`)
   input_tokens          INTEGER NOT NULL
   cached_input_tokens   INTEGER NOT NULL
   cache_write_tokens    INTEGER NOT NULL

@@ -2,7 +2,7 @@
 name = "modular-general-purpose-ai-agent"
 version = "0.0.0"
 description = "Modular general-purpose AI agent platform. Documentation tooling only until Milestone 0 begins."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 # Documentation tooling only. Application dependencies are added at Milestone 0
 # per docs/plan/engineering-plan.md; do not add application modules here yet.
 dependencies = [

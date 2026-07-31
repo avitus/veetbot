@@ -23,7 +23,7 @@ Canonical files:
 
 ### Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - [Pandoc](https://pandoc.org) as a system dependency (used to build the single
   standalone HTML document). Install it from your package manager, e.g.
   `apt-get install pandoc` or `brew install pandoc`.

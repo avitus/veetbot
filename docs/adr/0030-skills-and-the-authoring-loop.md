@@ -21,10 +21,10 @@ document defining what a skill is, where one is stored, how one is
 referenced, or what enters context when one is used.
 
 The review's summary of that gap, "skills have no specification at
-all", is not accurate and the inaccuracy matters. `tool-system.md`
-lines 1102 to 1149 draw the line between a skill and a tool, fix the
-metadata block at four fields, put `required_tools` checking at load
-rather than at authoring, assign trust by author, and classify
+all", is not accurate and the inaccuracy matters.
+`tool-system.md:1102-1149` draws the line between a skill and a tool, fixes the
+metadata block at four fields, puts `required_tools` checking at load
+rather than at authoring, assigns trust by author, and classifies
 `skill_manage`. That is a real design and this document does not
 replace it. What is missing is everything underneath: no types, no
 storage, no reference grammar, no context accounting, no gates.

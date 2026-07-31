@@ -112,7 +112,7 @@ opposite, not because the reasoning changed.
 
 ## Ingestion
 
-One tool, `knowledge.ingest`, taking an `ArtifactRef` and a visibility. Not a route:
+One tool, `knowledge.ingest`, taking an `ArtifactRef`, a title, and a visibility. Not a route:
 the API's route table is fourteen routes, closed for 0.1, and that document already
 states that an artifact is not uploaded through the API in 0.1. Not a thirteenth CLI
 noun either. Subject specifications declare their own tools — `memory.search`,

@@ -92,13 +92,13 @@ def pandoc_version(pandoc: str) -> tuple[int, ...]:
 def highlight_flag(pandoc: str) -> str:
     """Select the syntax-highlighting flag this Pandoc accepts.
 
-    Pandoc 3.10 renamed ``--highlight-style`` to ``--syntax-highlighting`` and
-    warns on the old spelling; older Pandoc does not know the new one. Both take
-    the same style name. Choose by version so the build stays quiet on current
-    Pandoc and keeps working on the distro-packaged Pandoc that CI installs with
-    apt, which is older than 3.10.
+    Pandoc 3.8 added ``--syntax-highlighting`` and deprecated
+    ``--highlight-style`` in the same release; Pandoc older than 3.8 does not
+    know the new spelling. Both take the same style name. Choose by version so
+    the build stays quiet on current Pandoc and keeps working on the
+    distro-packaged Pandoc that CI installs with apt, which predates 3.8.
     """
-    if pandoc_version(pandoc) >= (3, 10):
+    if pandoc_version(pandoc) >= (3, 8):
         return "--syntax-highlighting=pygments"
     return "--highlight-style=pygments"
 
