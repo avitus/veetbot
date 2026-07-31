@@ -76,7 +76,7 @@ readiness:
     named gaps closed on successive passes: builtin-tools.md designed
     the four remaining builtins and sandbox-isolation.md gave
     WorkspaceHandle a provenance record, then policy-and-approvals.md
-    defined the fourteen-string principal scope vocabulary, its
+    defined the principal scope vocabulary, its
     grammar, the exact-match subset test, and the scope set stamped on
     the run. Its verdict is now ready. Milestone 7's surviving gap
     closed when context-engine.md gave history selection a predicate:
@@ -86,10 +86,15 @@ readiness:
     when tool-system.md gave MCP authentication a declared scheme, a
     closed set of five, write-time validation, a bounded
     re-authentication ladder, and a constructed stdio child
-    environment. Its verdict is now ready. One milestone carries a
-    named gap: 9.
+    environment. Its verdict is now ready. Milestone 9's surviving
+    gap closed when knowledge-documents.md and ADR-0033 gave the
+    other half of its title a design: the document model, ingestion
+    as a tool, deterministic chunking, the index, visibility as the
+    isolation predicate, passage retrieval with its own budget class,
+    and twelve gates in a new fourteenth registry area. Its verdict
+    is now ready. No milestone now carries a named gap.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-28T18:00:00Z
-last_reviewed_commit: ae8782d
+last_updated: 2026-07-28T22:00:00Z
+last_reviewed_commit: e46f791

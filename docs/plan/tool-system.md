@@ -343,6 +343,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `system` `math` `workspace` `sandbox` `artifact` | builtin | build time |
 | `demo` `delegate` | builtin | build time |
 | `conversation` `context` `skill` `memory` | builtin, control | build time |
+| `knowledge` | builtin, corpus | build time |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 

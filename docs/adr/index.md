@@ -41,3 +41,4 @@ implementation without one.
 - [ADR-0030 — The skill package, the pinned catalog, and the authoring loop](0030-skills-and-the-authoring-loop.md)
 - [ADR-0031 — The ORM surface and the migration conventions](0031-persistence-authoring.md)
 - [ADR-0032 — Trajectory export, redaction, and consent](0032-trajectory-export-redaction-and-consent.md)
+- [ADR-0033 — The knowledge document, its corpus, and passage retrieval](0033-knowledge-documents.md)

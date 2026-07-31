@@ -804,7 +804,7 @@ milestone.
 
 ### Tool filtering
 
-Section 11.2 names four filters — agent configuration, principal
+Section 11.1 names four filters — agent configuration, principal
 authorization, policy profile, runtime environment — and all four exist as
 stages from the first commit. Two of them do nothing at Milestone 1: there are
 no policy profiles until Milestone 4 and one runtime environment until

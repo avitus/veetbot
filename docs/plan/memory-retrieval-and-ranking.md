@@ -15,7 +15,11 @@ as [ADR-0019](../adr/0019-memory-retrieval-and-ranking.md).
 
 Scope: **retrieval and ranking** of beliefs and episodes. Formation is specified
 separately; the entity-graph layer is a later spec and appears here only as a
-recall arm that is not yet built.
+recall arm that is not yet built. Documents a principal admits so that passages can
+be quoted back verbatim are not beliefs and are not retrieved by this pipeline;
+[knowledge-documents.md](knowledge-documents.md) owns that store, its own retrieval
+path, and its own budget class, and reuses the fusion and ranking shape defined
+here.
 
 ## Why retrieval is its own problem
 

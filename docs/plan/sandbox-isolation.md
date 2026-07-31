@@ -1058,6 +1058,7 @@ class ArtifactOrigin(StrEnum):
     MODEL_OUTPUT = "MODEL_OUTPUT"
     UPLOAD = "UPLOAD"
     TRAJECTORY_EXPORT = "TRAJECTORY_EXPORT"
+    KNOWLEDGE_SOURCE = "KNOWLEDGE_SOURCE"
 
 
 @dataclass(frozen=True)
@@ -1075,7 +1076,7 @@ random identifier and three facts about bytes. `ArtifactMetadata` is
 what the store holds and what `GET /v1/artifacts/{id}` reads after
 authorization, which ADR-0028 already specifies.
 
-`origin` exists because the five sources have different review
+`origin` exists because the six sources have different review
 properties and an operator asking "what did this run produce" wants
 them separated. `TOOL_OUTPUT` is the truncation path
 [tool-system.md](tool-system.md) owns; `SANDBOX_EXPORT` is
@@ -1083,7 +1084,11 @@ them separated. `TOOL_OUTPUT` is the truncation path
 `TRAJECTORY_EXPORT` is the redacted, consent-gated run export
 [event-log-and-persistence.md](event-log-and-persistence.md) owns,
 and it is the one origin whose contents are a function of the whole
-run rather than of a single act inside it.
+run rather than of a single act inside it. `KNOWLEDGE_SOURCE` is the
+admitted source document
+[knowledge-documents.md](knowledge-documents.md) owns, and it is the
+one origin whose lifetime is not the run's: it is stored with no
+`expires_at` and acquires one only when the document is deleted.
 
 `trust` is inherited, never assigned by the producer. An artifact
 written from a sandbox is `EXTERNAL_UNTRUSTED` because Section 28.5

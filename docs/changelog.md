@@ -4,6 +4,69 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-28 — Milestone 9's knowledge-document gap is closed
+
+- Wrote [knowledge-documents.md](plan/knowledge-documents.md) and
+  ADR-0033, the fourteenth detailed-design specification. Milestone
+  9 is titled *"Long-term memory and knowledge retrieval"* and only
+  the memory half had a design; nothing said what a knowledge
+  document is, how one is ingested, chunked, indexed, or scoped, or
+  how retrieval over it differs from retrieval over memory.
+- Separated the two stores by what they answer. A belief answers
+  *what is true* and the unit of retrieval is the claim; a document
+  answers *what does the source say* and the unit of retrieval is
+  the passage, quoted verbatim and cited. Both memory specifications
+  open with a scope line that says beliefs and episodes, which is
+  why this is a fourteenth document rather than a section in either.
+- Put the bytes in the artifact store under a sixth origin,
+  `KNOWLEDGE_SOURCE`, and kept them after extraction. It is the one
+  origin whose lifetime is not the run's: stored with no
+  `expires_at`, it acquires one at deletion so
+  [sandbox-isolation.md](plan/sandbox-isolation.md)'s existing
+  sweeper collects it, which is ADR-0032's consent-withdrawal move
+  reused.
+- Made ingestion a builtin, `knowledge.ingest`, rather than a
+  fourteenth route or a thirteenth CLI noun. Both of those lists are
+  deliberately closed, and a tool reaches the policy engine, the
+  approval path, and the event log with no new machinery. Admission
+  requires `USER` origin trust, so an agent cannot admit what it
+  fetched.
+- Split the two scans. A detected credential refuses the whole
+  ingest and nothing is written, because a secret in a permanent
+  corpus is quoted back verbatim by design. Instruction-like text is
+  recorded on the chunk and ingested anyway, because it is
+  survivable by labelling and a blocking scan would refuse most real
+  technical documentation.
+- Chunked structure-first with no overlap — target 600 tokens,
+  ceiling 1,000, floor 100 — and gave chunks heading paths instead.
+  The chunk id is the citation, so overlapping chunks would make a
+  citation ambiguous, and the chunker is deterministic under a
+  `chunker_version` because a citation that stops resolving after a
+  library upgrade is a broken citation.
+- Inverted the isolation predicate. `visibility` in `{principal,
+  project, tenant}` replaces `principal_id`, which is the exact
+  opposite of the carry-by-default rule the memory layer took for
+  beliefs: a document is shared unless it is scoped, a belief
+  travels unless it is pinned.
+- Gave knowledge its own Region B budget class in
+  [context-engine.md](plan/context-engine.md) — three passages or
+  3,000 tokens, first in a now four-step yield order. Passages drop
+  whole and are never truncated, because a passage shortened to fit
+  is a misquotation attributed to a real document.
+- Added `knowledge.write` to
+  [policy-and-approvals.md](plan/policy-and-approvals.md)'s closed
+  scope vocabulary, taking it from fourteen strings to fifteen, and
+  a `knowledge` domain to
+  [tool-system.md](plan/tool-system.md)'s partition table.
+- Declared twelve gates in a new fourteenth area, `knowledge`, all
+  at Milestone 9: eight cases, three property gates over chunk
+  stability, verbatim extraction, and citation resolution, and one
+  corpus gate with a floor on passage recall and a ceiling on noise.
+  The corpus goes from one hundred and sixty registry entries to one
+  hundred and seventy-two, and Milestone 9 from fourteen to
+  twenty-six. [readiness.md](plan/readiness.md) now carries no
+  milestone with a named gap.
+
 ## 2026-07-28 — Milestone 8's MCP authentication gap is closed
 
 - Gave `credential_ref` a counterpart in

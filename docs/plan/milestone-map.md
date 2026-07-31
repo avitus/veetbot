@@ -35,14 +35,16 @@ gates appear in the table and the census below and needed no
 reconciliation.
 [sandbox-isolation.md](sandbox-isolation.md) was written later still
 and declares thirteen more, in the same form and in a new twelfth
-area. [skills.md](skills.md) was written last and declares sixteen
+area. [skills.md](skills.md) followed and declares sixteen
 more, in a new thirteenth area, and is the first spec to declare
 gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
-gained two more on a later pass, all four at Milestone 3. The counts
-throughout this document are the corpus as it now stands: one hundred
-and fifty-four declared across thirteen specs, one hundred and sixty
-registry entries.
+gained two more on a later pass, all four at Milestone 3.
+[knowledge-documents.md](knowledge-documents.md) was written last
+and declares twelve more, in a new fourteenth area, all of them at
+Milestone 9. The counts throughout this document are the corpus as
+it now stands: one hundred and sixty-six declared across fourteen
+specs, one hundred and seventy-two registry entries.
 
 ## What this document is responsible for
 
@@ -159,7 +161,8 @@ and given a grammar.
 gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
-      event, context, memory, harness, api, sandbox, skill
+      event, context, memory, harness, api, sandbox, skill,
+      knowledge
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -185,6 +188,16 @@ reason. The alternative considered was splitting its gates across
 owns all sixteen and because two halves of one governance story —
 what reaches the prefix, and who may write a skill — would otherwise
 land in different areas.
+
+`knowledge` is the fourteenth, on the same precedent again. It is not
+folded into `memory` even though both stores are Milestone 9 and share
+a harness, because the two memory specs are one subject read and
+written while a knowledge document is a different store with a
+different trust label, a different isolation predicate, and a
+different unit of retrieval. The alternative considered was splitting
+its gates across `memory`, `context`, and `tool`, and it was rejected
+for the reason `skill` rejected the same split: `visibility` and
+`no_belief_write` are two halves of one governance story.
 
 ## Ownership: the three gates declared twice
 
@@ -223,10 +236,11 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and fifty gates declared across thirteen specs, two more
-declared in the engineering plan, and seven this document declares over
-the corpus: one hundred and fifty-nine declarations, one hundred and
-fifty-six registry entries once the three aliases are subtracted.
+One hundred and sixty-six gates declared across fourteen specs, two
+more declared in the engineering plan, and seven this document declares
+over the corpus: one hundred and seventy-five declarations, one hundred
+and seventy-two registry entries once the three aliases are
+subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -715,6 +729,39 @@ corpus's seventeenth property test. Gate 11 is a corpus gate because
 single case would prove only the one it wrote. The remaining twelve
 need a running session and are cases.
 
+### Knowledge documents, twelve gates
+
+Twelve gates, all new, in a new fourteenth area, and all of them
+Milestone 9 — the milestone whose second half had none. Milestone 9
+goes from fourteen registry entries to twenty-six, which makes it the
+largest single milestone in the census after Milestone 1.
+
+```text
+#   id                              kind         M
+--  ------------------------------  -----------  --
+1   gate.knowledge.ingest_trust     case         9
+2   gate.knowledge.no_secrets       case         9
+3   gate.knowledge.chunk_stable     property     9
+4   gate.knowledge.visibility       case         9
+5   gate.knowledge.verbatim         property     9
+6   gate.knowledge.cite_resolves    property     9
+7   gate.knowledge.budget_yield     case         9
+8   gate.knowledge.supersession     case         9
+9   gate.knowledge.delete_cascades  case         9
+10  gate.knowledge.trace_complete   case         9
+11  gate.knowledge.no_belief_write  case         9
+12  gate.knowledge.corpus_recall    corpus       9
+```
+
+Gate 3 is the corpus's eighteenth property test, gate 5 its nineteenth,
+and gate 6 its twentieth — determinism, verbatim rendering, and
+citation resolution are each a statement over every chunk rather than
+over one, and a single case would prove only the chunk it wrote. Gate
+12 is a corpus gate because passage recall is a distribution over a
+labelled question set. The remaining eight need a running session and
+are cases. None is structural: every one of them is a statement about
+what a run retrieves rather than about the shape of the repository.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -770,8 +817,9 @@ milestone  new gates  cumulative  the earliest of them
 8                 17         140  the MCP adapter, authentication,
                                   the pinned catalog, the metadata
                                   boundary, package validation
-9                 14         154  formation and retrieval
-10                 6         160  the authoring loop and the
+9                 26         166  formation, retrieval, ingestion,
+                                  and the corpus
+10                 6         172  the authoring loop and the
                                   background review
 ```
 
@@ -792,14 +840,14 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and sixty gates are green before
+2.  **Forty-one of one hundred and seventy-two gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and sixty, which is
+The cumulative column reaches one hundred and seventy-two, which is
 every registry entry, at Milestone 10. Milestone 11 adds none: routing
 and subagents are covered by gates registered against the runtime loop
 and the policy engine, and the question this document used to raise
@@ -807,9 +855,9 @@ about Milestone 8 now applies only to it.
 
 ## Build-sequence milestones
 
-Five specs left their build sequences untagged. Four are single-
+Six specs left their build sequences untagged. Five are single-
 milestone documents where the tag is the section's own milestone; the
-fifth is context-engine, whose step 1 moves to Milestone 1 with its
+sixth is context-engine, whose step 1 moves to Milestone 1 with its
 gate.
 
 ```text
@@ -819,6 +867,7 @@ context-engine                 7  step 1 M1, steps 2-7 M7
 event-log-and-persistence      9  all M2, export step M3
 memory-formation               6  all M9
 memory-retrieval               7  all M9
+knowledge-documents            7  all M9
 model-gateway                 14  all M3
 ```
 
@@ -965,7 +1014,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the thirteen. **M0.**
+    of the fourteen. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**

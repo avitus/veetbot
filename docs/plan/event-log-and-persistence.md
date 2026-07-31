@@ -292,7 +292,7 @@ they fix four acceptance criteria and one exclusion list. Neither states a
 format, a redaction procedure, or what "consent-gated" means mechanically,
 and [evaluation-harness.md](evaluation-harness.md) has already built the
 consuming half against the assumption that this half is redacted before a
-converter ever sees it (`evaluation-harness.md:1310`). This is the
+converter ever sees it (`evaluation-harness.md:1311`). This is the
 producing half, and it is the third projection in the table above.
 
 ### The export is an artifact, not a query
@@ -307,7 +307,7 @@ Materializing into the artifact store rather than into a table is the whole
 of the decision, and it is made for four properties the store already has
 and a table would have to grow: content addressing by SHA-256, a key
 derived from platform-generated values rather than composed from caller
-input (`sandbox-isolation.md:1098`), an authorized read path that ADR-0028
+input (`sandbox-isolation.md:1103`), an authorized read path that ADR-0028
 already puts in front of both metadata and bytes, and `expires_at` with a
 sweeper behind it. Every one of those is load-bearing for a governed
 export. A second bytes-holding mechanism inside PostgreSQL would be a worse
@@ -367,7 +367,7 @@ query string in it.
 `recorded_on` is a date, not a timestamp, and there are no per-message
 timestamps at all. Per-message timing is the highest-entropy correlatable
 field an export could carry, no stated consumer needs it — the harness
-discards timestamps at conversion (`evaluation-harness.md:1287`) and a
+discards timestamps at conversion (`evaluation-harness.md:1288`) and a
 training corpus has no use for them — and a field that is dropped by every
 consumer and re-identifies a user is a field that should not have been
 written. `tools` records the name and schema hash of every tool the run
@@ -488,7 +488,7 @@ engineering one, named here so that nobody reads "consent-gated" as
 ### Retention, and why promotion is the durable step
 
 An export expires like any other artifact — thirty days by default, per the
-artifact retention this corpus already sets (`sandbox-isolation.md:1162`).
+artifact retention this corpus already sets (`sandbox-isolation.md:1167`).
 It is not special-cased to live longer, and the reason is that the two
 things Section 31.2 wants exports for do not actually want a long-lived
 export.

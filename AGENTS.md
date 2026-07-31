@@ -49,6 +49,7 @@ Read, in this order, before starting an assignment:
 | HTTP routes, error codes, scopes, the event stream | `http-api-and-streaming.md` |
 | Isolated execution, egress, the artifact store | `sandbox-isolation.md` |
 | Skill packages, the catalog, the authoring loop | `skills.md` |
+| Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 

@@ -286,27 +286,30 @@ workspace.read    workspace.write
 sandbox.execute
 skill.write
 demo.write
+knowledge.write
 ```
 
-Fourteen strings. Nine are enumerated by the API document; the five new
-ones are the `required_scopes` the builtin roster declares in
-[builtin-tools.md](builtin-tools.md). `artifact.read` and `artifact.write`
-are the pair that shows this is one namespace rather than two that happen
-to collide: the first gates a read route, the second gates
-`artifact.export`, and they are two actions on one resource.
+Fifteen strings. Nine are enumerated by the API document; the five after
+them are the `required_scopes` the builtin roster declares in
+[builtin-tools.md](builtin-tools.md), and `knowledge.write` is the one
+[knowledge-documents.md](knowledge-documents.md) adds for ingestion.
+`artifact.read` and `artifact.write` are the pair that shows this is one
+namespace rather than two that happen to collide: the first gates a read
+route, the second gates `artifact.export`, and they are two actions on
+one resource.
 
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
-joined by dots, of which the last is the action. All fourteen have
+joined by dots, of which the last is the action. All fifteen have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1187` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1188` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the fourteen, or when its first segment is `mcp` and its
+when it is one of the fifteen, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 

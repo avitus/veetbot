@@ -4385,3 +4385,200 @@ new ones were written.
 in a file whose convention is eighty-three.
 
 **Reversal cost:** none.
+
+## The Milestone 9 knowledge-document gap (ADR-0033)
+
+### A fourteenth specification rather than a section in either memory document
+
+**Decided:** knowledge documents get their own specification,
+`docs/plan/knowledge-documents.md`, and their own ADR.
+
+**Why:** a belief and a document answer different questions. A belief
+answers *what is true* and the unit of retrieval is the claim; a
+document answers *what does the source say* and the unit of retrieval
+is the passage, quoted verbatim and cited. Both memory specifications
+open with a scope line that says beliefs and episodes, so hosting
+knowledge inside either one means contradicting the sentence the
+document starts with.
+
+**Alternative:** a long section in
+`memory-retrieval-and-ranking.md`. Rejected on the same test that
+rejected a fourteenth spec once before, for trajectory export — does
+the new subject own what it needs, or borrow it. Trajectory export
+borrowed almost everything. Knowledge owns ten things: the document
+model, ingestion, chunking, the index, the scope model, retrieval
+over chunks, rendering and citation, retention, the tool surface, and
+its gates. It borrows four: the artifact store, the event log, the
+budget, and the trace.
+
+**Cost:** three live sentences stated "thirteen specs" and had to be
+corrected, and the census had to be re-derived. That was the whole
+ripple, and it was measured before the decision rather than after.
+
+**Reversal cost:** low while nothing is built. The document could be
+folded into the memory spec by concatenation.
+
+### `knowledge` is a fourteenth gate area
+
+**Decided:** twelve gates in a new area, `gate.knowledge.*`.
+
+**Why:** the same precedent `skill` set at the thirteenth area. An
+area names a subject, one specification owns the subject, and the
+gates are statements about that subject rather than about the
+repository.
+
+**Alternative:** folding them into `memory`. `memory` already holds
+two specifications sharing an area, so the precedent exists — but it
+holds two specifications about *one subject*, which is the reason it
+was allowed to. Knowledge is a second subject.
+
+**Note:** the identifiers are shorter than they read naturally
+because the milestone map's id column is thirty characters and
+`gate.knowledge.` consumes fifteen of them. `no_secrets`, not
+`no_secrets_ingested`.
+
+### Ingestion is a tool, not a route and not a CLI noun
+
+**Decided:** one builtin, `knowledge.ingest`, admitted through the
+tool pipeline.
+
+**Why:** two closed lists said no to the alternatives.
+`http-api-and-streaming.md` closes the API at thirteen routes and
+states that an artifact is not uploaded through this API in 0.1, so a
+knowledge upload route would reopen a list that was deliberately
+shut. The CLI is closed at twelve nouns. A tool needs neither list
+reopened, and it puts admission through the policy engine, the
+approval path, and the event log without any new machinery.
+
+**Cost:** ingestion is only reachable from inside a run. An operator
+bulk-loading a corpus has to drive it through the agent, which is
+slower than a route would be.
+
+**Question for you:** if bulk loading matters before 0.1, the answer
+is a management surface rather than a fourteenth route — say so and
+it moves up.
+
+### The secret scan blocks an ingest; the injection scan does not
+
+**Decided:** a detected credential refuses the whole ingest and
+nothing is written. Instruction-like text is recorded on the chunk as
+`instruction_like` and ingested anyway.
+
+**Why:** the two failures are not symmetric. A credential in a
+permanent, retrievable corpus is unrecoverable — it is quoted back
+verbatim into a context window by design, which is the one place a
+secret must never be. Instruction-like text is survivable by
+labelling: the passage arrives inside a `<knowledge>` block at
+`TrustLevel.KNOWLEDGE`, the policy engine already refuses to treat
+untrusted context as instruction, and a blocking injection scan would
+refuse most real technical documentation, because a deployment guide
+is mostly imperative sentences.
+
+**Reversal cost:** low. The flag is on the chunk, so a later policy
+could filter on it.
+
+### No chunk overlap, and heading paths instead
+
+**Decided:** chunks are structure-first with a target of six hundred
+tokens, a ceiling of a thousand, a floor of a hundred, and no
+overlap.
+
+**Why:** the citation *is* the chunk id. Overlapping chunks mean the
+same sentence has two ids, which makes a citation ambiguous and makes
+deduplication a ranking problem rather than a fact. Overlap exists to
+restore context a hard cut removed; a heading path restores it
+cheaper and exactly, and a document that needs the neighbouring chunk
+can be asked for it.
+
+**Cost:** a claim split across a chunk boundary is retrievable only
+as two passages. The floor of a hundred tokens and the structure-first
+split make that rarer than a fixed-window splitter would.
+
+**Note:** the chunker is deterministic under a `chunker_version`
+because a citation that stops resolving after a library upgrade is a
+broken citation, and there is a property gate on exactly that.
+
+### Visibility replaces the principal id as the isolation predicate
+
+**Decided:** a document carries `visibility` in `{principal, project,
+tenant}`, and retrieval filters on it rather than on `principal_id`.
+
+**Why:** this is the exact inverse of the rule the memory layer took,
+and the inversion is the point. A belief travels unless it is pinned,
+because you asked the agent to learn across projects. A document is
+shared unless it is scoped, because a document is a thing an
+organization has rather than a thing an agent inferred, and the
+common case for admitting one is that more than one person should be
+able to quote it.
+
+**Cost:** the default is the widest of the three, so a mis-set
+visibility over-shares rather than under-shares. The gate on it is a
+case gate rather than a property gate for that reason — it is worth
+an explicit scenario.
+
+### Knowledge passages get their own budget class and yield first
+
+**Decided:** a Region B class of three passages or three thousand
+tokens, first in the yield order, ahead of in-turn recall.
+
+**Why:** a passage is roughly three times the weight of a belief and
+cannot be trimmed by sentence without becoming a misquotation, so it
+cannot share recall's elastic allowance. It yields first because the
+corpus is still there — an explicit `knowledge.search` re-reaches it
+in one tool call, which is not true of a frozen snapshot.
+
+**Alternative:** taking a share of the two-thousand-token recall
+class. Rejected because the two classes then compete on a single
+threshold, and a long document would silently evict beliefs.
+
+### Passages drop whole, never truncated
+
+**Decided:** when the class overflows, the lowest-ranked passage is
+removed entirely.
+
+**Why:** the model is going to quote and cite what it is given. A
+passage shortened to fit is a misquotation attributed to a real
+document, which is worse than the passage being absent. There is a
+property gate asserting the rendered text matches the stored chunk
+exactly.
+
+### No supersession collapse, no per-subject cap, no conflict surfacing
+
+**Decided:** none of the three memory-retrieval mechanisms carry
+over. A per-document cap of two passages replaces them.
+
+**Why:** all three exist because beliefs make claims that can
+contradict each other, and the retrieval layer is where the
+contradiction has to be resolved before the model sees it. Passages
+do not make claims — they report what a source says, and two sources
+disagreeing is information rather than a defect. The per-document cap
+exists for a different reason: to stop one long document from filling
+the whole class.
+
+### One new scope, `knowledge.write`
+
+**Decided:** the closed vocabulary goes from fourteen strings to
+fifteen.
+
+**Why:** ingestion is the one privileged act here, and the vocabulary
+is closed precisely so a new privileged act has to be enumerated
+rather than invented at the call site. Reading is governed by
+visibility rather than by a scope, because a scope that everyone
+holds is not a control.
+
+### The management surface is deferred; the deletion semantics are not
+
+**Decided:** no list, browse, or re-ingest surface in 0.1. Deletion
+semantics are fully specified anyway.
+
+**Why:** the surface is a product decision that wants a UI, and
+nothing in Milestone 9 needs it. Deletion is different — a corpus
+with no defined deletion path is a retention problem the moment the
+first document is admitted, and the mechanism costs nothing because
+it reuses ADR-0032's consent-withdrawal move: a source artifact is
+stored with no `expires_at`, and deleting the document sets one so
+the existing sweeper collects it. There are gates on the cascade and
+on citations resolving rather than dangling.
+
+**Question for you:** if you want a management surface before 0.1,
+it is a small API document rather than an addition to this one.

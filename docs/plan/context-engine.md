@@ -213,9 +213,10 @@ ceiling.
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
 | B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
 | B | Working state | 1,000 | No | Never |
-| B | In-turn recall | 2,000 | No | First |
-| B | Tool results | 25% of body | Partly | Second |
-| B | History | remainder, floor 8,000 | Yes | Third |
+| B | Knowledge passages | 3 passages / 3,000 tokens | No | First |
+| B | In-turn recall | 2,000 | No | Second |
+| B | Tool results | 25% of body | Partly | Third |
+| B | History | remainder, floor 8,000 | Yes | Fourth |
 | B | Current user message | uncapped | — | Never |
 | — | Output reserve | 8,192 or the model's default | No | Never — subtracted first |
 
@@ -227,6 +228,14 @@ skill metadata enters ordinary context), not a bigger allowance. The skill catal
 carries an item cap for the same reason and is capped at twenty;
 [skills.md](skills.md) argues that number and the 6,000-token body class beside
 it, which never yields because a third `skill.load` fails instead.
+
+Knowledge passages are a separate class from in-turn recall rather than a share of
+it, and [knowledge-documents.md](knowledge-documents.md) argues both the split and
+the number. A passage is a verbatim quotation the model may cite, so it is three
+times the weight of a belief and cannot be trimmed by sentence; the class is capped
+at three passages because a document that answers a question usually answers it in
+one or two, and it yields before recall because a corpus is re-queryable by an
+explicit `knowledge.search` while the beliefs in a snapshot are not.
 
 The prefix classes sum to a hard ceiling of 15,000 tokens. If a plan exceeds it,
 **the session fails to open with a structured error naming the offending class**.
@@ -348,15 +357,19 @@ the same input, which is the failure this whole subsection exists to prevent.
 When the assembled body will not fit, the builder yields in a fixed order, taking
 the cheapest and most recoverable loss first:
 
-1. **In-turn recall trims to its floor.** It is the marginal addition, it was
+1. **Knowledge passages drop, lowest-ranked first.** They are dropped whole and
+   never truncated, because a passage shortened to fit is a misquotation of a
+   document the model is about to cite. They go first because the corpus is still
+   there: an explicit `knowledge.search` re-reaches it in one tool call.
+2. **In-turn recall trims to its floor.** It is the marginal addition, it was
    selected against a relevance floor that can simply be raised, and it is the most
    recoverable thing in the request — the agent can call `memory.search` explicitly
    if it turns out to need it.
-2. **Tool results truncate to pointers, oldest first.** The full result is already
+3. **Tool results truncate to pointers, oldest first.** The full result is already
    in the event log and, above the inline threshold, in the artifact store. What
    remains is a typed pointer with the byte count and reference, so the model can
    see that content exists and ask for it rather than concluding it never existed.
-3. **History compacts.** Deliberately last: it is the only step that costs a model
+4. **History compacts.** Deliberately last: it is the only step that costs a model
    call on the critical path, and the only one that loses information the run
    cannot cheaply re-fetch.
 
@@ -637,6 +650,7 @@ class ContextBudget(BaseModel):
     # additions
     working_state_tokens: int
     tool_result_tokens: int
+    knowledge_tokens: int           # knowledge spec: Region B, passages
     safety_margin_ratio: float = 0.05
 ```
 

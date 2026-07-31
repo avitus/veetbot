@@ -200,14 +200,15 @@ restates a gate another spec owns.
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
 | Sandbox and artifacts | 8 | 1 | 0 | 4 | 13 |
 | Skills | 12 | 1 | 1 | 2 | 16 |
+| Knowledge documents | 8 | 3 | 1 | 0 | 12 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **87** | **19** | **8** | **46** | **160** |
+| **Total** | **95** | **22** | **9** | **46** | **172** |
 
 The counts are the useful output, not the individual assignments:
-**seventy-three of the hundred and sixty declared gates are not case
+**seventy-seven of the hundred and seventy-two declared gates are not case
 gates**, and a harness that only runs cases would report a green build with
-those seventy-three of the plan's stated invariants unchecked. Two of the
+those seventy-seven of the plan's stated invariants unchecked. Two of the
 four kinds — property and structural — need no runtime at all and can be
 built in Milestone 0, before there is an agent to evaluate.
 
@@ -1265,8 +1266,8 @@ The track and the suite exchange material, and the exchange needs to be a
 command rather than a habit.
 
 **Track failure to deterministic case.** When a capability failure is diagnosed
-as a reproducible defect, `agent eval promote <scenario-run-id>` writes a case
-file from that run's trajectory using the conversion described below, and the
+as a reproducible defect, `agent eval promote <run-id>` writes a case file
+from that scenario run's agent run using the conversion described below, and the
 author fills in the assertions. The point of the command is that it carries the
 provenance: the case records the scenario and run it came from, so the reason it
 exists is answerable in two years.
@@ -1348,8 +1349,8 @@ thing it gates, and both are worth stopping for. If a property gate flakes, its
 generator found a real failure at a rare seed, which is the generator working.
 ## Running it
 
-Section 18's CLI already lists `agent eval run`. Four subcommands complete it,
-and the constraint from Section 18 applies unchanged: the CLI calls the same
+Section 17's CLI already lists `agent eval run`. Four subcommands complete it,
+and the constraint from Section 17 applies unchanged: the CLI calls the same
 application services, and there is no second runtime loop inside the harness.
 
 ```text

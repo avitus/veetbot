@@ -76,6 +76,7 @@ nav:
       - HTTP API & Streaming: plan/http-api-and-streaming.md
       - Sandbox Isolation & Artifacts: plan/sandbox-isolation.md
       - Skills: plan/skills.md
+      - Knowledge Documents: plan/knowledge-documents.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
   - Project State:
@@ -115,4 +116,5 @@ nav:
       - ADR-0030 Skills and the authoring loop: adr/0030-skills-and-the-authoring-loop.md
       - ADR-0031 The ORM surface and migrations: adr/0031-persistence-authoring.md
       - ADR-0032 Trajectory export, redaction, and consent: adr/0032-trajectory-export-redaction-and-consent.md
+      - ADR-0033 Knowledge documents and passage retrieval: adr/0033-knowledge-documents.md
   - Changelog: changelog.md

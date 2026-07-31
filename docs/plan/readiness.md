@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1923` states that device tools are *"a reserved
+    `tool-system.md:1924` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -82,7 +82,7 @@ rather than smoothed.
 | 6 | Isolated execution and artifacts | Ready | 11 | Nothing |
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready | 17 | Nothing |
-| 9 | Long-term memory and knowledge | Ready with named gaps | 14 | Knowledge documents |
+| 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
 | 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | No acceptance criteria exist |
 
 The gate column is the count of registry entries whose `milestone`
@@ -158,7 +158,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and sixty gates are green before
+**Forty-one of one hundred and seventy-two gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -451,8 +451,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:995-996` and the resolve at
-`policy-and-approvals.md:1005`, and one reference in
+at `policy-and-approvals.md:998-999` and the resolve at
+`policy-and-approvals.md:1008`, and one reference in
 `runtime-loop.md:1172` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -538,7 +538,7 @@ Section 28 of the plan is not empty — `engineering-plan.md:3152-3229`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:978` constrains MCP server URLs by *"the
+existed. `tool-system.md:979` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:180` and `:183` assign ownership of
@@ -547,8 +547,8 @@ itself, which is the corpus recording that nothing below the plan owns
 them.
 
 Two bullets are covered. Output truncation and artifactization are
-specified at `tool-system.md:709`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1333`.
+specified at `tool-system.md:710`, and the programmatic orchestration
+bridge Section 8.5 requires is specified from `tool-system.md:1334`.
 
 Two further items deserved naming.
 
@@ -586,7 +586,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:978` depends on by
+remaining. The egress allowlist `tool-system.md:979` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -707,7 +707,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1274-1321` draws the line between
+had to be written. `tool-system.md:1275-1322` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -817,10 +817,10 @@ returns 401 on demand, and `gate.tool.mcp_stdio_env_built` against a
 child process whose environment can be read back. The named gap is
 closed, so the verdict changes with it.
 
-## Milestone 9: ready with named gaps
+## Milestone 9: ready
 
-Fourteen registry entries, the second-largest count, and the two
-memory specifications are among the most complete documents here.
+Twenty-six registry entries, the second-largest count, and the three
+specifications behind them are among the most complete documents here.
 [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
 covers the autonomous formation loop, the tiers, the provisional tier
 and its promotion rules, contradiction handling, and cross-project
@@ -828,16 +828,10 @@ belief carry-forward.
 [memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md)
 covers retrieval, ranking, the snapshot budget, and the recall trace
 with its two consumers.
+[knowledge-documents.md](knowledge-documents.md) covers the other half
+of the milestone's name.
 
-One item is absent and several are partial.
-
-**Knowledge documents have no design.** The milestone's own heading is
-*"Long-term memory and knowledge retrieval"*, the separate-stores
-subsection distinguishes memory from knowledge, and no document states
-what a knowledge document is, how one is ingested, chunked, indexed,
-or scoped, or how retrieval over it differs from retrieval over
-memory. The memory specs are explicit that they cover memory; nothing
-covers the other half of the milestone's name.
+Several items are partial.
 
 The partials are: session history and artifacts as retrieval sources
 (named as sources, not designed as such); expiration (a policy with no
@@ -847,6 +841,64 @@ the external memory provider port (named, no contract); and the
 persona and identity surface over `AgentSpec.instructions` (no
 statement of how a formed belief reaches the instruction text, or
 whether it may).
+
+One item was absent, and it was the larger one. **Knowledge documents
+had no design.** The milestone's own heading is *"Long-term memory and
+knowledge retrieval"*, the separate-stores subsection distinguished
+memory from knowledge, and no document stated what a knowledge
+document is, how one is ingested, chunked, indexed, or scoped, or how
+retrieval over it differs from retrieval over memory. The memory specs
+were explicit that they cover memory; nothing covered the other half
+of the milestone's name.
+
+### What closed it
+
+The gap was a name with no referent. Milestone 9 promised knowledge
+retrieval, Section 18.4 said knowledge is not memory, and the
+corollary — that a store which is not memory needs a document model,
+an ingestion path, an index, a scope predicate, and a retrieval path
+of its own — was never drawn. What made this the larger of the two
+gaps is that a reader could not tell whether knowledge was a missing
+document or a missing decision.
+
+[knowledge-documents.md](knowledge-documents.md) and ADR-0033 draw the
+corollary. A knowledge document is a thing a principal admitted so
+that later runs can quote passages from it verbatim and cite them,
+which is a different answer to a different question than a belief: a
+belief answers *what is true*, and the unit of retrieval is the claim;
+a document answers *what does the source say*, and the unit of
+retrieval is the passage. That distinction is what forced a fourteenth
+specification rather than a section in either memory document, both of
+whose scope lines say beliefs and episodes. The trajectory-export
+precedent, which rejected a fourteenth spec once already, applies a
+test rather than a quota — does the new document own what it needs, or
+borrow it — and knowledge owns ten things and borrows four, where
+trajectory export borrowed almost everything.
+
+The design decisions that carry the most weight elsewhere in the
+corpus are four. Ingestion is a tool, `knowledge.ingest`, rather than
+a route or a CLI noun, because the API is closed at thirteen routes
+and an artifact is not uploaded through it in 0.1; it requires `USER`
+origin trust, so an agent cannot admit what it fetched. The secret
+scan blocks an ingest and the injection scan does not — a credential
+in a permanent corpus is unrecoverable, while instruction-like text is
+survivable by labelling, which is what `instruction_like` on the chunk
+and `TrustLevel.KNOWLEDGE` on the rendered block are for. Chunking is
+deterministic under a `chunker_version` and carries no overlap,
+because the chunk id *is* the citation and heading paths give back the
+context overlap was buying. And `visibility ∈ {principal, project,
+tenant}` replaces `principal_id` as the isolation predicate, which is
+the exact inverse of the carry-by-default rule the memory layer took
+for beliefs — a document is shared unless it is scoped, a belief
+travels unless it is pinned.
+
+Twelve gates in a new fourteenth area, `knowledge`, all at Milestone 9:
+eight cases, three property gates over chunk stability, verbatim
+extraction, and citation resolution, and one corpus gate with a floor
+on passage recall and a ceiling on noise. They take Milestone 9 from
+fourteen registry entries to twenty-six, and the corpus from one
+hundred and sixty to one hundred and seventy-two. The named gap is
+closed, so the verdict changes with it.
 
 ## Milestone 10: not a milestone yet
 
@@ -906,8 +958,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1416` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1923` states that device tools are *"a reserved seam,
+`tool-system.md:1417` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1924` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. The
 `Device` model itself still has no home.
@@ -1055,7 +1107,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1399` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:822`. The map
+    `model-gateway.md:1735` and `milestone-map.md:871`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1115,7 +1167,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:978` already depends on an egress
+    come first: `tool-system.md:979` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two
@@ -1143,7 +1195,14 @@ under the conflict it settles.
     sequence while every other entry has criteria is what makes it
     look like an omission rather than a choice.
 5.  **Is knowledge retrieval a Milestone 9 deliverable or its own
-    milestone?** It is half of Milestone 9's title and has no design,
-    while the memory half has two complete specifications and fourteen
-    gates. Splitting it out would make Milestone 9 shippable against
-    what is actually designed.
+    milestone?** Answered by designing it: a Milestone 9 deliverable,
+    sequenced after the memory half. Splitting it out would have made
+    Milestone 9 shippable against what was actually designed, and that
+    was the argument for it. The argument against won on a
+    dependency: knowledge retrieval reuses the fusion, the ranking
+    shape, the budget mechanics, and the trace record that
+    [memory-retrieval-and-ranking.md](memory-retrieval-and-ranking.md)
+    establishes, so a separate milestone would have been a milestone
+    that cannot start until the previous one finishes — which is what
+    a build step inside a milestone already is. Twelve gates now sit
+    where the split would have been.

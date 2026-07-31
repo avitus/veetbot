@@ -565,7 +565,7 @@ not.
 The context engine decides where the cache boundaries are. It has the only
 complete view of what is stable and what is volatile, it computes
 `prefix_sha256`, and it populates `CacheHints` on the `ContextPlan`
-(`context-engine.md:794-796`). The gateway translates those hints into
+(`context-engine.md:808-810`). The gateway translates those hints into
 provider syntax and nothing more. It does not add breakpoints, it does not
 move them, and it does not decide that a request would cache better a
 different way.
@@ -603,7 +603,7 @@ because the context engine knows the session shape; the gateway does not.
 
 ### Measuring it
 
-The cached-prefix ratio is defined in `context-engine.md:772-774` and the
+The cached-prefix ratio is defined in `context-engine.md:786-788` and the
 gateway supplies its numerator and denominator, not its interpretation.
 Every completed attempt records `input_tokens`, `cached_input_tokens` and
 `cache_write_input_tokens` on the `model_calls` row and on the
@@ -622,7 +622,7 @@ the events section, because the gateway is what emits them.
 `ModelRequest.model_policy` is a bare string in the plan (Section 10.1) and
 several documents need things that a string cannot answer: whether the model
 supports images, what its context window is, what it costs, whether it does
-native tool calling, how much output to reserve. `context-engine.md:220`
+native tool calling, how much output to reserve. `context-engine.md:221`
 wants "8,192 or the model's default" and has no carrier for the second half.
 Section 10.5's YAML defines only a `balanced` policy. There is no port that
 turns a policy name into any of this.
@@ -953,7 +953,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:629` because it answers the
+`policy_version` at `policy-and-approvals.md:632` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1405,7 +1405,7 @@ class ProviderReasoningItem(BaseModel):
 
 `engineering-plan.md:592` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:824-853` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:827-856` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.
@@ -1440,7 +1440,7 @@ Neither half is both readable and privileged.
 Section 10.4 specifies the turn shape and does not say what the gateway
 rejects. Several other documents depend on it rejecting things.
 `policy-and-approvals.md`'s denial-as-tool-result requires that every tool call
-be answerable by a tool result; `context-engine.md:367-371` requires that a
+be answerable by a tool result; `context-engine.md:380-384` requires that a
 call and its result never be separated by compaction. Both assume a pairing
 invariant that no document states. The gateway states and enforces it, because
 it is the last thing to touch the message list before it becomes a provider
