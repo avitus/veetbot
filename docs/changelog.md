@@ -32,6 +32,74 @@ title: Changelog
   Makefile's health poll. Milestone 0 remains in progress because hosted CI has
   not yet supplied its own execution evidence.
 
+## 2026-07-31 — The ledger now fingerprints the whole span
+
+- **A cited range was only ever checked on its first line.** `excerpt` is one
+  line because a human reads it in a diff, and it was also doing duty as the
+  integrity check, so `file.md:10-20` went on matching while lines 11 through
+  20 were rewritten underneath it. Each ledger entry now carries a `digest`
+  over every line of the cited span. A change anywhere inside a range is drift
+  and is reported as drift.
+- **Relocation now has to prove the whole span moved.** A first-line match only
+  proposes a candidate; the candidate survives when a span of the same width
+  starting there is in bounds and digests identically. That stops `--update`
+  from repointing a range onto text whose trailing lines differ, and more than
+  one survivor is still reported rather than guessed.
+- **Rule 6's runtime half is no longer claimed as covered by the contract
+  suite.** That suite asserts stream behaviour and cancellation, and two
+  adapters can agree on both while passing a provider object through a
+  parameter annotated `ModelRequest`, `ResolvedModel`, or `ModelAttempt`;
+  behavioural agreement is not type hygiene. ADR-0001 now requires
+  adapter-boundary validation or conversion, with a negative contract case per
+  SDK adapter.
+- No product implementation was performed.
+
+## 2026-07-31 — Twenty-one more findings, and a trust rule that did not hold
+
+CodeRabbit's re-review of the two preceding commits, all twenty-one posted as
+inline threads this time. All twenty-one were real.
+
+- **Argument trust was inferred from a value match, and that is unsound.**
+  `argument_trust` was raised to `USER` on a verbatim sixteen-character match
+  against `USER`-labelled context. Equality shows two values are equal, not
+  that one came from the other, so untrusted content could quote a string
+  visible in the same request and be labelled trusted for it. The stated
+  rationale had the direction backwards too — raising the label *removes* an
+  approval rather than costing one. Provenance is now carried from where the
+  call is constructed, the lower label stands wherever an untrusted item
+  contributed, and unknown provenance stays `EXTERNAL_UNTRUSTED`. Corrected in
+  ADR-0021 and in [tool-system.md](plan/tool-system.md), which had the same
+  rule.
+- **Device revocation no longer waits for a run to finish.** Section 29.7
+  requires revocation to be immediate and server-side; the stamped scope set
+  let an in-flight run keep acting under withdrawn scopes. Device-channel
+  actions now revalidate presence and granted scopes, with the stamped set as
+  a ceiling revalidation can only narrow.
+- **`run.fenced` is stated as non-terminal.** A stale worker's append can land
+  above the new owner's events, so a consumer deriving run lifecycle from the
+  log must read it as diagnostic. A compare-and-set guard was rejected: it
+  would make the record unwritable in exactly the case it documents.
+- **Three more in `scripts/check_citations.py`.** The malformed-reference
+  patterns missed `LINE 3`, `README.md 3`, and `foo_bar.md 3`; they are now
+  case-insensitive and accept underscores. A span is validated before use,
+  because `:0` indexed the *last* line of the file through Python's negative
+  indexing and a reversed range like `:10-2` produced an empty excerpt that
+  `--update` would have adopted as truth.
+- **Precision fixes**: exactly-once narrowed to the state transition it can
+  actually guarantee; `WAITING_FOR_USER`'s resume path stated, since the index
+  would otherwise deadlock every question the agent asks;
+  `expected_revision` demoted from idempotency key to concurrency
+  precondition; `policy_version`'s truncated hash demoted to a display label
+  with full digests recorded; the signature gate no longer rejects `str`; the
+  milestone map's seven gates reconciled with its own claim to own no
+  requirement; the evaluation suite drains post-run hooks before truncating;
+  the ingest secret-scan gate no longer deletes the caller's input artifact;
+  `make check` gained `docs` so the CI union claim holds; the loopback fixture
+  became function-scoped, since markers are per-test; the context engine's
+  history boundary and yield order stated in one unit and one order; and the
+  calculator's `"391"` and ADR-0033's route count corrected.
+- No product implementation was performed.
+
 ## 2026-07-31 — Twenty review findings, eighteen of them real
 
 A second pass over CodeRabbit's review of pull request #1, which had reported
@@ -1776,10 +1844,10 @@ No product implementation was performed.
   specifications' requirements meet, and at most of them the two disagree.
 - Found three places where the loop as written **cannot do what another document
   requires of it.** It cannot resolve its own agent, because
-  `engineering-plan.md`, at line 1408 as the plan then stood, reads
+  `engineering-plan.md:1408`, as the plan then stood, reads
   `agents.get_version(run.agent_id, run.agent_version)` and Section 6.3 puts
-  both fields on `Session`. It cannot suspend, because the same document's line
-  1437, again as it then stood, returns bare
+  both fields on `Session`. It cannot suspend, because
+  `engineering-plan.md:1437`, again as it then stood, returns bare
   while Section 27.2 requires the lease released, a checkpoint written, and an
   event emitted — so a run paused for approval holds its lease until expiry, at
   which point the queue hands it to a second worker. And it cannot compact,

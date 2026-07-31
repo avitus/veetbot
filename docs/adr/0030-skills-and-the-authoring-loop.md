@@ -102,10 +102,17 @@ Section 30.3 makes; Section 30.4 is loading and lifecycle.
     definition `tool-system.md` itself gives; the control-tool table
     never listed it; and this leaves the registration rule for
     control tools untouched rather than weakening it.
-14. **`CONDITIONALLY_IDEMPOTENT` with `expected_revision` as the
-    key**, rather than `NON_IDEMPOTENT`. It satisfies the classifier
-    and it makes a crashed skill write recoverable instead of
-    permanently `UNCERTAIN`.
+14. **`CONDITIONALLY_IDEMPOTENT`**, rather than `NON_IDEMPOTENT`. It
+    satisfies the classifier and it makes a crashed skill write
+    recoverable instead of permanently `UNCERTAIN`. `expected_revision`
+    is **not** the idempotency key. It is the concurrency precondition —
+    the compare-and-swap that makes a stale write fail — and it is not
+    unique to an invocation: two different edits of the same skill both
+    carry `expected_revision = 7`, so keying replay on it would serve the
+    second edit the first edit's result instead of rejecting it as stale.
+    The key is the invocation identity, the tool call id, together with a
+    canonical hash of the request parameters; a repeated key with
+    different parameters is a conflict rather than a replay.
 15. **The scope is `skill.write`, singular and enumerated**, joining
     the closed list in `http-api-and-streaming.md`. No `skill.read`:
     nothing reads skills over the API in 0.1, and an uncheckable

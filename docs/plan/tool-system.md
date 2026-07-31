@@ -1891,8 +1891,11 @@ evidence that the surface is the same one.
    five inputs, and deliberately excludes `attempt_number`.
 8. `effect_sent_at` makes recovery decidable. `UNCERTAIN` is reserved for
    non-idempotent calls whose watermark is set.
-9. `argument_trust` defaults to `EXTERNAL_UNTRUSTED` and is only ever raised,
-   on a verbatim sixteen-character match against `USER`-labelled context.
+9. `argument_trust` defaults to `EXTERNAL_UNTRUSTED` and is carried from where
+   the call is constructed, never inferred by matching argument text against
+   `USER`-labelled context: equality shows two values are equal, not that one
+   came from the other, and untrusted content can quote a string it can see.
+   Where an untrusted item contributed to a field, the lower label stands.
    `origin_trust` is the minimum label over the request's context items.
 10. Large output is excerpted head-and-tail and artifactized. It is never
     summarized, because a summarizer over untrusted output launders it.

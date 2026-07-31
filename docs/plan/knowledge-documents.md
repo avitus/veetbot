@@ -496,7 +496,12 @@ Twelve gates in a new fourteenth area, `knowledge`, all at Milestone 9.
 1. **Ingestion trust** — an ingest attempted from a turn below `USER` origin trust is
    refused, and nothing is written. **M9.**
 2. **No secrets ingested** — a source containing a credential pattern fails the
-   ingest, and no document, chunk, index row, or artifact survives the attempt. **M9.**
+   ingest, and no `KnowledgeDocument`, chunk, index row, ingest event, or
+   newly created knowledge-source artifact survives the attempt. The caller's
+   input artifact is untouched: `knowledge.ingest` is handed an existing
+   `ArtifactRef` and must read it to scan it, so deleting it would destroy a
+   caller-owned object that may be shared or retried, on the strength of a
+   refusal this tool had no authority to make. **M9.**
 3. **Chunk determinism** — the same bytes under the same `chunker_version` produce
    identical chunk ids, across processes and across runs. A property gate. **M9.**
 4. **Visibility isolation** — zero cross-tenant results, and zero results whose

@@ -116,10 +116,17 @@ and how they are gated.
     `PROPOSED` to `AUTHORIZED`.** All three proposing surfaces reach it. An
     import-boundary test asserts nothing else performs that transition.
 
-12. **`policy_version` is a content hash of the whole evaluated ruleset**, in
-    the form `{profile}@{profile_sha256[:12]}+h{hardline_sha256[:8]}`. A hash
-    rather than a counter because a counter requires someone to remember to
+12. **`policy_version` is a content hash of the whole evaluated ruleset**,
+    rendered for people as
+    `{profile}@{profile_sha256[:12]}+h{hardline_sha256[:8]}`. A hash rather
+    than a counter because a counter requires someone to remember to
     increment it, and a stale counter asserts a falsehood that a hash cannot.
+    The rendered form is a **label, not the identity**. Twelve and eight hex
+    characters are enough to recognize in a log line and not enough to resolve
+    a ruleset against an audit, so the recorded decision carries the full
+    `profile_sha256` and `hardline_sha256` beside it, and anything
+    reconstructing which rules produced a decision reads those rather than the
+    label.
 
 13. **Rules live in version-controlled files and are frozen per process.**
     Section 22 classifies policy rules as *Trusted*; a database table is

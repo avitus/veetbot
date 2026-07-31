@@ -149,7 +149,8 @@ produced by code we did not write.
 
 - Milestone 1's required demonstration becomes implementable and
   testable on the bytes rather than on a substring. The tool call is a
-  pure function from `{"expression": "17 * 23"}` to `391`, and every
+  pure function from `{"expression": "17 * 23"}` to the JSON string
+  `"391"` — quoted, per decision 9, not the JSON number `391` — and every
   stage of it — tokenize, parse, evaluate, render — is independently
   assertable.
 - Nine hard gates are added, four of which are adversarial rather than

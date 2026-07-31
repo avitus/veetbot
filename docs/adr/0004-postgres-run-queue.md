@@ -75,9 +75,13 @@ waiting on a chat turn from queueing behind a four-hour research run.
 
 ## Consequences
 
-- Exactly-once execution becomes assertable. Two workers racing on one run, with
-  the sweeper's reclaim interval driven to zero, must end with one executing and
-  the other writing nothing — a hard gate on Milestone 2.
+- Exactly-once *state transition* becomes assertable, which is a narrower claim
+  than exactly-once execution and is the one this design can actually make. Two
+  workers racing on one run, with the sweeper's reclaim interval driven to zero,
+  must end with one committing its transitions and the other writing nothing —
+  a hard gate on Milestone 2. External effects are not covered by it: the
+  residual-risk bullet below says why, and the guarantee there is at-most-once
+  only for effects behind an idempotency class.
 - Every worker write path gains an epoch predicate and a zero-row branch. This is
   invasive by design: a write that cannot be fenced is a write that can happen
   twice, so the compiler-visible cost is the point.
@@ -97,9 +101,18 @@ waiting on a chat turn from queueing behind a four-hour research run.
   fencing token retrofitted after a queue exists cannot be applied to in-flight
   runs.
 - The single-active-run constraint will surface as a user-visible error the first
-  time a client submits a turn while one is running. That is the correct
+  time a client submits a turn while one is *running*. That is the correct
   behaviour under ADR-0009 (`WAITING_FOR_USER` is a state, not a queue), and it
   needs an error class the API layer handles deliberately.
+- `WAITING_FOR_USER` is the case that constraint must **not** reject, and it is
+  worth stating because the index cannot tell the two apart. It is non-terminal,
+  so it holds the session's one active-run slot; a user answering
+  `conversation.ask_user` would therefore be unable to create a run at all. The
+  answer does not create one. The submit handler's routing decision resolves to
+  input delivery rather than to a new run, which resumes the waiting run in
+  place, and the conflict error is reserved for a submit against a run that is
+  genuinely executing. A design that routed the answer to a new run would
+  deadlock every question the agent asks.
 - Priority classes are three fixed integers rather than a scheduling policy. When
   Milestone 10 adds scheduled work at scale this may need revisiting; the column
   is a `SMALLINT`, so the classes can subdivide without a migration.

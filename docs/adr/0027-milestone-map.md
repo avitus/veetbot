@@ -57,10 +57,15 @@ supervisor task that Milestone 2 builds.
 
 ## Decision
 
-1.  **A new document owns scheduling and owns no requirement.**
-    `docs/plan/milestone-map.md` decides when each stated requirement
-    must hold. If a gate's statement is wrong, the fix belongs in the
-    spec that declares it and the map follows.
+1.  **A new document owns scheduling and owns no requirement about the
+    agent.** `docs/plan/milestone-map.md` decides when each stated
+    requirement must hold. If a gate's statement is wrong, the fix belongs
+    in the spec that declares it and the map follows. The seven gates the
+    map does declare, counted in decision 2, are the exception that proves
+    the rule: they are checks over the scheduling record itself — that
+    every declared gate has a milestone, that the registry reconciles —
+    which no subject specification is in a position to make. The map owns
+    no requirement about what the agent does.
 2.  **All eighty-nine declared gates get a milestone**, derived from
     the build sequence or section milestone the declaring spec already
     states, producing eighty-six registry entries once the three
