@@ -4,6 +4,40 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The route table, audited
+
+- Added the missing scope-table row to
+  [http-api-and-streaming.md](plan/http-api-and-streaming.md). The
+  document specifies fourteen routes and the table had thirteen
+  rows; the one missing is `GET /v1/sessions/{id}`, the route the
+  document itself adds. `session.read` was consequently a scope in
+  the closed vocabulary that no route required. The document's own
+  hard gate 5 walks the route table and fails the build on a route
+  that declares no scope, so it declared a gate its own table would
+  fail.
+- Corrected the overview, which said the document *"adds nothing to
+  the API surface that Section 16 did not already put there"* and
+  that *"every route below is a route the corpus already names"*.
+  Its own specification of `GET /v1/sessions/{id}`, its resolution
+  row 8, and its decision 20 all say otherwise.
+- Stated the sum. Thirteen is what the document inherited — nine
+  from Section 16, three named elsewhere, and the health probes that
+  Section 16 counts as one — and fourteen is what it leaves. The
+  heading now says "Thirteen inherited routes", the opening
+  paragraph carries the sum, and decision 21 records it.
+- Corrected five downstream sentences that closed the API at
+  thirteen routes: [readiness.md](plan/readiness.md),
+  [skills.md](plan/skills.md),
+  [knowledge-documents.md](plan/knowledge-documents.md) three times,
+  and [engineering-plan.md](plan/engineering-plan.md) twice, one of
+  which asks for an error mapping for each of thirteen routes in the
+  same paragraph that says one route is added.
+- Corrected a CLI ordinal. `knowledge-documents.md` called the next
+  command a fourteenth noun; the CLI is twelve commands and
+  [bootstrap-and-composition.md](plan/bootstrap-and-composition.md)
+  calls the next one a thirteenth. The CLI census is otherwise
+  sound.
+
 ## 2026-07-31 — The tool registry, audited
 
 - Removed `context.compact` from the control-tool table in

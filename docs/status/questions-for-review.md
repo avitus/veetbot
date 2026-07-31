@@ -5515,3 +5515,83 @@ and `delete` gap stands exactly as stated.
 **Question for you:** none.
 
 **Reversal cost:** none.
+
+### The scope table was a row short of the route table
+
+**Decided:** added `| \`GET /v1/sessions/{id}\` | \`session.read\` |`
+to the scope table in
+[http-api-and-streaming.md](../plan/http-api-and-streaming.md), and a
+paragraph naming what the scope gates, paralleling the one already
+there for `skill.write`.
+
+**Why:** the document specifies fourteen routes in `http` fences and
+its table had thirteen rows. Set comparison gives exactly one
+difference in one direction and none in the other: the missing row is
+`GET /v1/sessions/{id}`, which is the one route this document adds
+rather than one it inherited. The consequence was that `session.read`
+sat in the closed scope vocabulary, and in the nine the API document
+enumerates, with no route requiring it — a scope nothing could check.
+
+**Note:** the document's own hard gate 5 walks the route table and
+fails the build on any route but the two health probes that declares
+no scope. The document therefore declared a gate its own table would
+fail. `skill.write`'s absence from the same table is *not* this: it
+has a paragraph saying it is checked by the policy engine on a tool
+call rather than by the API on a route. `session.read` had no such
+paragraph, which is what separates an omission from a seam.
+
+**Question for you:** none.
+
+**Reversal cost:** none.
+
+### Five sentences closed the API at thirteen routes
+
+**Decided:** corrected them to fourteen, and made the API document
+state the resulting surface where a reader will find it.
+
+**Why:** thirteen is the count of what the document *inherited* —
+Section 16's nine, two approvals reads and one input route named
+elsewhere, and the two health probes that Section 16 counts as one.
+The document then adds `GET /v1/sessions/{id}`, which it argues for
+at the route, records as resolution row 8, and decides as decision
+20. Nothing stated the sum, so five downstream sentences quoted the
+heading instead: [readiness.md](../plan/readiness.md),
+[skills.md](../plan/skills.md),
+[knowledge-documents.md](../plan/knowledge-documents.md) three times,
+and [engineering-plan.md](../plan/engineering-plan.md) twice. The
+engineering plan is the sharpest case: one line asks for an error
+mapping for each of thirteen routes and the next sentence in the same
+paragraph says one route is added.
+
+**Note:** the overview also said the document *"adds nothing to the
+API surface that Section 16 did not already put there"* and that
+*"every route below is a route the corpus already names"*. Both
+clauses are false, and the second is contradicted three times inside
+the same document. The heading is now "Thirteen inherited routes",
+the opening paragraph carries the sum, and decision 21 states it.
+
+**Question for you:** none.
+
+**Reversal cost:** none.
+
+### The next CLI noun was numbered fourteenth
+
+**Decided:** corrected
+[knowledge-documents.md](../plan/knowledge-documents.md) to say a
+thirteenth CLI noun.
+
+**Why:** the CLI is twelve commands.
+[bootstrap-and-composition.md](../plan/bootstrap-and-composition.md)
+owns that census, prints the twelve in a table, and names the cost of
+adding one as *"a thirteenth top-level noun"*. The sentence appears to
+have taken its ordinal from the route count in the clause before it.
+
+**Note:** the CLI census is otherwise sound. The twelve commands, the
+four reserved words after `agent run`, and the rule that a subcommand
+under an existing command is not a new command all agree across
+`bootstrap-and-composition.md`, `evaluation-harness.md`, and
+`event-log-and-persistence.md`.
+
+**Question for you:** none.
+
+**Reversal cost:** none.

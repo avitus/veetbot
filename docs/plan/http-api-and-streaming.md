@@ -6,14 +6,16 @@ canonical: true
 
 # The HTTP API, the event stream, and what a client can rely on
 
-## Thirteen routes and a response body for one of them
+## Thirteen inherited routes and a response body for one of them
 
 Section 16 designs nine endpoints. Three more are named elsewhere —
 `GET /v1/approvals` and `GET /v1/approvals/{id}` in
 [policy-and-approvals.md](policy-and-approvals.md), and
 `POST /v1/runs/{id}/input` in ADR-0009 — and one, the two health probes,
 is really two. Thirteen routes, and the corpus writes a response body for
-exactly one of them: the session created by `POST /v1/sessions`.
+exactly one of them: the session created by `POST /v1/sessions`. This
+document writes the other twelve and adds one route of its own, which
+leaves a surface of fourteen.
 
 That is the gap this document exists to close, and it is worth being
 precise about its shape, because "the API is undocumented" is not true and
@@ -36,9 +38,10 @@ nothing turns an HTTP cancel into an observation by a worker in a
 different process.
 
 This document answers all seven — the six and the response bodies — and
-adds nothing to the API surface that Section 16 did not already put
-there. Every route below is a route the corpus already names. The
-additions are shapes, codes, orders, and rules.
+adds exactly one route, `GET /v1/sessions/{session_id}`, argued for
+where it is specified. Every other route below is a route the corpus
+already names, and what this document adds to those is shapes, codes,
+orders, and rules.
 
 ## What this document does not change
 
@@ -351,6 +354,7 @@ is not an authorization input.
 | Route | Scope |
 | --- | --- |
 | `POST /v1/sessions` | `session.write` |
+| `GET /v1/sessions/{id}` | `session.read` |
 | `POST /v1/sessions/{id}/messages` | `run.write` |
 | `GET /v1/runs/{id}` | `run.read` |
 | `GET /v1/runs/{id}/events` | `run.read` |
@@ -369,6 +373,13 @@ because submitting is what creates a run; `session.write` gates creating
 the session itself. `run.cancel` is separate from `run.write` because a
 surface that may stop work is not necessarily a surface that may start
 it — an operator console is the obvious case.
+
+`session.read` gates reading a session and gates nothing else. It is the
+only row that requires it, and that is the whole reason the string is in
+the vocabulary: a scope that gates no route is a scope nothing checks.
+Hard gate 5 is what keeps the row honest — it walks the route table and
+fails the build on a route that declares no scope — so a route added
+here without a row does not ship open.
 
 `skill.write` is in the vocabulary and in no row of the table, because it
 is checked by the policy engine on a tool call rather than by the API on a
@@ -1422,6 +1433,7 @@ an implementer does not move the DDL forward or the endpoint back.
 8  no route reads a session         GET /v1/sessions/{id} added
 9  five vs six observation points   already reconciled by the loop spec
 10 approval routes at M4 or M5      M5; the service and CLI are M4
+11 added route has no scope row      session.read; the surface is 14
 ```
 
 Row 3 is the one worth expanding, because the readiness review stated
@@ -1586,6 +1598,9 @@ build failure.
 20. **`GET /v1/sessions/{id}` is added and nothing else is.** It is
     the one route a reconnecting client cannot do without, and it
     exposes no capability a client with its own records lacked.
+21. **The surface this document leaves is fourteen routes.**
+    Thirteen inherited and one added. A document that closes the API
+    at a number closes it at fourteen.
 
 ## Open questions for review
 

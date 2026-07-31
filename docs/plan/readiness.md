@@ -900,7 +900,7 @@ trajectory export borrowed almost everything.
 
 The design decisions that carry the most weight elsewhere in the
 corpus are four. Ingestion is a tool, `knowledge.ingest`, rather than
-a route or a CLI noun, because the API is closed at thirteen routes
+a route or a CLI noun, because the API is closed at fourteen routes
 and an artifact is not uploaded through it in 0.1; it requires `USER`
 origin trust, so an agent cannot admit what it fetched. The secret
 scan blocks an ingest and the injection scan does not — a credential

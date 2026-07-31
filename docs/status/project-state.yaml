@@ -215,8 +215,25 @@ readiness:
     memory and skill as control domains is split. readiness.md said
     the agent facing memory surface is two tools and that both
     read, and memory.remember is a third and it writes.
+    A sixth pass audited the route registry. The API document
+    specifies fourteen routes in its http fences and its scope table
+    had thirteen rows. The missing row is the one route the document
+    adds, GET /v1/sessions/{id}, so session.read sat in the closed
+    scope vocabulary with no route requiring it. That document's own
+    hard gate five walks the route table and fails the build on a
+    route that declares no scope, so it declared a gate its own table
+    would fail. Its overview said it adds nothing to the API surface
+    that Section 16 did not already put there, which its own
+    specification of that route, its resolution row eight and its
+    decision twenty all contradict. Thirteen is what the document
+    inherited and fourteen is what it leaves; the sum is now stated
+    and five live sentences in four documents that closed the API at
+    thirteen are corrected. One of them numbered the next CLI noun
+    fourteenth when the CLI is twelve commands and the document that
+    owns that census calls the next one a thirteenth. The CLI census
+    is otherwise sound.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T19:50:00Z
-last_reviewed_commit: 1409469
+last_updated: 2026-07-31T21:40:00Z
+last_reviewed_commit: 9b76dc5
