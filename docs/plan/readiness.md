@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1927` states that device tools are *"a reserved
+    `tool-system.md:1936` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -553,12 +553,12 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:710`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1334`.
+bridge Section 8.5 requires is specified from `tool-system.md:1343`.
 
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3215` requires a container-escape attempt as
+    `engineering-plan.md:3227` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -847,6 +847,23 @@ persona and identity surface over `AgentSpec.instructions` (no
 statement of how a formed belief reaches the instruction text, or
 whether it may).
 
+One of the five is sharper than this review recorded, and the
+sharpening belongs here. The human-editable surface is not merely
+uncontracted: the `MemoryStore` port declares `list`, `edit`, and
+`delete` at `memory-formation-and-consolidation.md:357`, and no tool,
+route, or command in the corpus calls any of them. The agent-facing
+surface is two tools, `memory.search` and `memory.recall_episodes`,
+and both read. The twelve CLI commands include no memory command, and
+[http-api-and-streaming.md](http-api-and-streaming.md) registers no
+memory route. So *"A user can inspect and delete stored memories"* at
+`engineering-plan.md:2773` is the one Milestone 9 acceptance criterion
+with nothing behind it to test, and the three port methods are the
+shape of an answer rather than the answer. Whether the surface is a
+management tool on the `skill.manage` precedent, a route set, a CLI
+command, or all three is a Milestone 9 decision this review does not
+make, and it is recorded in
+[questions-for-review.md](../status/questions-for-review.md).
+
 One item was absent, and it was the larger one. **Knowledge documents
 had no design.** The milestone's own heading is *"Long-term memory and
 knowledge retrieval"*, the separate-stores subsection distinguished
@@ -1014,8 +1031,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1417` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1927` states that device tools are *"a reserved seam,
+`tool-system.md:1426` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1936` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1055,7 +1072,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1431` reserved by name —
+one of them the question `tool-system.md:1440` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1210,7 +1227,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1399` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:871`. The map
+    `model-gateway.md:1735` and `milestone-map.md:873`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1219,7 +1236,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     tables, two milestones, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3215` requires a test the harness's case set
+    `engineering-plan.md:3227` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

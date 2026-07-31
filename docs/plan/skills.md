@@ -862,13 +862,14 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-`tool-system.md:1316` says *"`skill.load` and `skill_manage` are
-control tools"* and then classifies `skill_manage` as
-`idempotency: NON_IDEMPOTENT`. Its own registration rule at
+Section 30.2 at `engineering-plan.md:3332` calls it *"a skill_manage
+control tool"*, and an earlier draft of `tool-system.md` repeated that
+classification while also giving `skill_manage`
+`idempotency: NON_IDEMPOTENT`. The registration rule at
 `tool-system.md:240` requires every control tool to be `READ_ONLY` or
 `IDEMPOTENT` and to carry `side_effect: NONE`. As written,
-`skill_manage` would be rejected at registration by the spec that
-declares it.
+`skill_manage` would have been rejected at registration by the spec
+that declared it.
 
 The contradiction resolves in the direction that makes the
 classification honest rather than the constraint softer. **A control
@@ -876,10 +877,11 @@ tool acts on the run. `skill_manage` acts on durable tenant state
 that outlives the run.** It is a capability tool, and it was never in
 `tool-system.md`'s control-tool table — that table has four entries
 and `skill_manage` is not one of them. The table was right and the
-sentence was wrong.
+sentence was wrong, and `tool-system.md:1316` carries the corrected
+sentence now.
 
 ```text
-skill_manage
+skill.manage
   kind          CAPABILITY
   target_kind   in_process
   side_effect   EXTERNAL_WRITE
@@ -887,6 +889,12 @@ skill_manage
   risk          HIGH
   scope         skill.write
 ```
+
+The registry name carries the dot the grammar at `tool-system.md:336`
+requires of every registry entry; `skill_manage` is Section 30.2's
+spelling and is not a name the registry can hold. Nothing else about the
+tool changes with it, and the rest of this document keeps the plan's
+spelling in prose where the string does not matter.
 
 `side_effect: EXTERNAL_WRITE` is chosen from the closed fifteen
 rather than added to them; the enum is total against Section 9.2's
@@ -1183,7 +1191,7 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:245` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:718` cited `engineering-plan.md:2690` for the
+`readiness.md:723` cited `engineering-plan.md:2690` for the
 version-pinning acceptance criterion, which is at
 `engineering-plan.md:2696`; the line it named is an MCP
 trust-labelling bullet. The ADR and the questions file are

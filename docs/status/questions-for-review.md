@@ -4855,3 +4855,131 @@ or a structured brief with a success condition. I have no view worth
 recording, because the answer depends on what the first real
 delegation is for, and Milestone 10's own gate says that should be
 driven by evaluation evidence.
+
+## The closing adversarial pass
+
+### Ten findings, eight confirmed and two cleared
+
+**Decided:** run one pass whose only job was to falsify the claim
+that the corpus is complete, then verify every finding it raised
+against the sources before treating any of them as fact.
+
+**Why:** the corpus had reached the point where every plan section
+had a specification and no specification named a blocker, which is
+exactly the point at which a completeness claim is least likely to
+be tested. So the pass was prompted to falsify the claim rather
+than to confirm it. It raised ten findings. Eight survived checking
+and are corrected in this pass. Two did not: one was an explicit
+deferral, and `readiness.md:56` already rules that a deferral
+recorded as a deferral is not a gap, and the other was already an
+open question in the document it was raised against and already an
+entry in this file.
+
+**Question for you:** none. The pass is the kind of work the
+standing instruction covers, and everything it produced is in the
+corrections below.
+
+### The approval routes are Milestone 5, and an earlier verdict was wrong
+
+**Decided:** narrow `policy-and-approvals.md`'s build step 11 to
+the approval service read methods and the CLI commands that call
+them, and leave all three approval routes at Milestone 5 with every
+other route in the API.
+
+**Why:** an earlier pass recorded this contradiction with the
+opposite verdict, reading `http-api-and-streaming.md` as the
+document in error. Checking the sources reversed it. Milestone 5's
+implement list in the plan is the entire HTTP surface, down to the
+error envelope and the health endpoints, and Milestone 1 has no
+HTTP API at all, so no route can land before Milestone 5. And what
+`agent approval list` calls is the application service, not the
+route: `policy-and-approvals.md:994` says so in the same paragraph
+that adds the routes, and decision 3 of
+`http-api-and-streaming.md` is the reason, because a service that
+raised an HTTP error would make the CLI import a web framework. So
+Milestone 4 owes the routes their service, which is what "Approval
+API and CLI" in Section 21's Milestone 4 implement list means here,
+and Milestone 5 owes the routes.
+
+**Question for you:** none, but this one is worth knowing about.
+Had the earlier verdict been trusted, three routes would have moved
+to the wrong milestone on the strength of a summary rather than a
+source. Every finding in this pass was checked against the files
+before it was written down, and this is the one that changed sign.
+
+### `skill_manage` is not a name the registry can hold
+
+**Decided:** the registered name is `skill.manage`. The correction
+is stated once in `tool-system.md`, which owns the grammar, and
+carried by the normative spec block in `skills.md`. The plan's
+spelling stays in prose everywhere the string does not matter.
+
+**Why:** the name grammar at `tool-system.md:336` requires at least
+one dot in every registry name, and a capability tool is a registry
+entry. The `skill` domain already holds `skill.load` and the
+`skill.write` scope already names the capability, so the dotted
+spelling is the one the domain partition table was built for and no
+new domain is needed. The alternative was a corpus wide rename of
+every occurrence, which would have rewritten the plan's own
+requirement text. The corpus has a precedent against that:
+`engineering-plan.md:3324` reclassified this same tool from control
+to capability with a pointer paragraph rather than a rewrite, and
+that paragraph now carries both corrections.
+
+**Question for you:** whether the prose should be renamed too. My
+view is that it should not. The plan's requirement lines are the
+record of what was asked for, and the one string that has to be
+exact is now exact in the two documents that specify it.
+
+### The memory management surface is three port methods and nothing else
+
+**Decided:** recorded and sharpened in the readiness review, not
+designed.
+
+**Why:** the review already listed this among five partials, and it
+is sharper than the review recorded. The `MemoryStore` port
+declares `list`, `edit`, and `delete` at
+`memory-formation-and-consolidation.md:357`, and no tool, route, or
+command in the corpus calls any of them. The agent facing surface
+is two tools, `memory.search` and `memory.recall_episodes`, and
+both read. None of the twelve CLI commands is a memory command, and
+no memory route is registered. So *"A user can inspect and delete
+stored memories"* at `engineering-plan.md:2773` is the one
+Milestone 9 acceptance criterion with nothing behind it to test,
+and the three port methods are the shape of an answer rather than
+the answer.
+
+**Question for you:** what the surface should be. A management tool
+on the `skill.manage` precedent, a route set, a CLI command, or all
+three. I did not choose, because edit semantics over an append only
+belief store that carries provenance and supersession is real
+Milestone 9 design and this documentation pass authorizes none.
+Reversal cost of deciding later is **cheap**; the cost of deciding
+now and deciding wrong is a migration.
+
+### Five smaller corrections, and what the citation check cannot see
+
+**Decided:** fixed in place.
+
+**Why:** two were cross references that pointed at the wrong place.
+`readiness.md` cited `engineering-plan.md:3215` twice for a
+requirement that sits at 3227, and
+`bootstrap-and-composition.md` sent a live provider job to Section
+20.6 instead of 20.4. One was a description of a sibling document
+that the sibling had outgrown: `skills.md` said `tool-system.md`
+classified `skill_manage` as a control tool while also giving it
+`NON_IDEMPOTENT`, which was true of a draft and is not true of the
+document. One was a sentence in `milestone-map.md` that still read
+as though Milestone 10 added no gates of its own, after `skills.md`
+gave it six; it now records the six and narrows the standing
+question to the routing and subagent half. And Section 31 of the
+plan had no outward pointer to the documents that expand it, which
+every other expanded section carries.
+
+**Question for you:** none, but the first and third are worth
+naming as a class. `scripts/check_citations.py --update` rewrites
+the ledger with whatever text sits at the cited line, so it cannot
+see a citation that points at the wrong line, and it cannot see a
+quotation in the citing document that no longer matches the cited
+text. Both were found by reading. If the check is ever extended,
+that is the gap to close.

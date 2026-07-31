@@ -1421,6 +1421,7 @@ an implementer does not move the DDL forward or the endpoint back.
 7  one error code, no vocabulary    the taxonomy, snake-cased
 8  no route reads a session         GET /v1/sessions/{id} added
 9  five vs six observation points   already reconciled by the loop spec
+10 approval routes at M4 or M5      M5; the service and CLI are M4
 ```
 
 Row 3 is the one worth expanding, because the readiness review stated
@@ -1438,6 +1439,21 @@ and it exists: the loop's own text maps points 1 through 5 onto the
 phases and identifies point 6 as Section 16's "during long-running
 sandbox execution where possible". This document introduces nothing
 there.
+
+Row 10 is a milestone reading rather than a design conflict.
+[policy-and-approvals.md](policy-and-approvals.md) added
+`GET /v1/approvals` and `GET /v1/approvals/{id}` so that
+`agent approval list` had something to call, and made them step 11 of
+its Milestone 4 build order. What `agent approval list` calls is the
+application service, not the route — that document says so in the same
+paragraph, and decision 3 above is why: a service that raised an HTTP
+error would make the CLI import a web framework. So the dependency is
+Milestone 4 and the route is not. Section 21 agrees: "Approval API and
+CLI" is a Milestone 4 implement item, and Milestone 5's implement list,
+which is the entire HTTP surface down to the error envelope and the
+health endpoints, names no approval work. The build order has been
+narrowed to the service methods, and all three approval routes land
+here at Milestone 5 with every other route.
 
 ## Hard gates
 

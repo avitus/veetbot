@@ -848,10 +848,12 @@ leaving for someone to notice.
     than as test doubles.
 
 The cumulative column reaches one hundred and seventy-two, which is
-every registry entry, at Milestone 10. Milestone 11 adds none: routing
-and subagents are covered by gates registered against the runtime loop
-and the policy engine, and the question this document used to raise
-about Milestone 8 now applies only to it.
+every registry entry, at Milestone 10, and the plan defines no
+milestone after it. All six of Milestone 10's gates are
+`gate.skill.*`: its routing and subagent half adds none, because
+routing and subagents are covered by gates registered against the
+runtime loop and the policy engine, and the question this document
+used to raise about Milestone 8 now applies only to that half.
 
 ## Build-sequence milestones
 

@@ -1323,6 +1323,15 @@ An agent whose turn saw untrusted content cannot write a skill in that turn.
 The mechanism already exists: `origin_trust` is computed for every proposed
 action, and this is one policy rule reading it.
 
+Its registry name is `skill.manage`. Section 30.2 spells it `skill_manage`,
+which the name grammar above rejects: every registry name needs at least one
+dot, and a capability tool is a registry entry. The `skill` domain already
+holds `skill.load` and the `skill.write` scope already names the capability,
+so the dotted spelling is the one the partition table was built for and no
+new domain is needed. `skill_manage` stays readable as the plan's word for
+the tool; the string the registry, the policy rules, and the model see is
+`skill.manage`.
+
 [skills.md](skills.md) carries this classification, the idempotency key that
 justifies the class, the four operations, and everything underneath the four
 paragraphs above. Nothing in this section is reversed there.

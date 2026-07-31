@@ -4,6 +4,51 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — A pass that tried to falsify the corpus
+
+- Ran a closing pass whose only job was to falsify the claim that
+  the corpus is complete and that no specification names an
+  unresolved blocker. It raised ten findings. Checking each against
+  the sources confirmed eight and cleared two: one is an explicit
+  deferral, which [readiness.md](plan/readiness.md) already rules is
+  not a gap, and the other was already an open question in the
+  document it was raised against.
+- Reversed a verdict an earlier pass had recorded, which read
+  [http-api-and-streaming.md](plan/http-api-and-streaming.md) as the
+  document in error about which milestone the approval routes land
+  in. It is not the document in error. Milestone 5's implement list
+  is the entire HTTP surface and Milestone 1 has no HTTP API at all,
+  so no route can precede Milestone 5, and
+  [policy-and-approvals.md](plan/policy-and-approvals.md) already
+  says the CLI calls the application service rather than the route.
+  Build step 11 in that document is narrowed to the service methods
+  and the CLI, and a new contradictions row records the split.
+- Registered the skill management tool as `skill.manage`. Section
+  30.2 spells it `skill_manage`, which the name grammar at
+  `tool-system.md:336` rejects, because every registry name needs at
+  least one dot and a capability tool is a registry entry. The
+  `skill` domain already holds `skill.load`, so no new domain is
+  needed. The plan's spelling stays as the word for the tool; the
+  string the registry, the policy rules, and the model see is the
+  dotted one.
+- Corrected two cross references that pointed at the wrong line and
+  the wrong section, one description of a sibling document that the
+  sibling had since outgrown, and one sentence in
+  [milestone-map.md](plan/milestone-map.md) that still read as
+  though Milestone 10 added no gates of its own, after
+  [skills.md](plan/skills.md) gave it six.
+- Gave Section 31 the outward pointer every expanded section
+  carries, naming the two documents that expand its production half
+  and the one that already held its consumption half.
+- Recorded the one finding this pass does not fix. The `MemoryStore`
+  port declares `list`, `edit`, and `delete`, and no tool, route, or
+  command in the corpus calls any of them, so *"A user can inspect
+  and delete stored memories"* is the one Milestone 9 acceptance
+  criterion with nothing behind it to test. Designing edit semantics
+  over an append-only belief store is Milestone 9 work, so the
+  finding is sharpened in [readiness.md](plan/readiness.md) and left
+  open.
+
 ## 2026-07-31 — Milestone 10, answered by re-measuring it
 
 - Answered the last open question in

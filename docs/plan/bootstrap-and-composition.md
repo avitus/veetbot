@@ -377,7 +377,7 @@ SANDBOX_MECHANISM=docker
 # Unset means run exactly as committed.
 AGENT_CONFIG_DIR=
 
-# Test-only. 1 enables the live-provider job (Section 20.6).
+# Test-only. 1 enables the live-provider job (Section 20.4).
 RUN_LIVE_MODEL_TESTS=
 ```
 

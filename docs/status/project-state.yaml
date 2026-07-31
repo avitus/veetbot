@@ -112,9 +112,28 @@ readiness:
     surfaced one conflict, that the single active run per session
     index leaves only the dedicated child session branch of Section
     27.6 implementable. That conflict is recorded, not resolved,
-    because resolving it is Milestone 10 work.
+    because resolving it is Milestone 10 work. A closing pass then
+    tried to falsify the claim that the corpus is complete and names
+    no unresolved blocker. It raised ten findings; checking each
+    against the sources confirmed eight and cleared two, and one of
+    the eight reversed a verdict an earlier pass had recorded. The
+    approval routes belong at Milestone 5 with every other route,
+    and what Milestone 4 owes them is the service behind them and
+    the CLI that calls it. Seven of the eight are corrected here:
+    two cross references that pointed at the wrong place, one
+    description of a sibling document the sibling had outgrown, one
+    sentence that still read as though Milestone 10 added no gates
+    of its own, the missing outward pointer from Section 31, the
+    approval milestone split, and one tool name the registry grammar
+    cannot hold, which is registered as skill.manage. The eighth is
+    recorded rather than fixed. No tool, route, or command reaches
+    the MemoryStore list, edit, and delete methods, so the one
+    Milestone 9 acceptance criterion about inspecting and deleting
+    memories has nothing behind it to test. Choosing that surface is
+    Milestone 9 design and this pass makes no Milestone 9 decisions.
+    The gate census is unchanged.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T18:20:00Z
-last_reviewed_commit: 69cc998
+last_updated: 2026-07-31T22:10:00Z
+last_reviewed_commit: 2e19ca1

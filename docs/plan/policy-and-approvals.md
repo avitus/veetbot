@@ -1006,7 +1006,10 @@ waiting to be discovered. Responses carry `action_summary`, `tool_name`,
 rule that fired.
 
 `POST /v1/approvals/{approval_id}/resolve` is unchanged in shape and gains the
-`409`-on-conflicting-resolution behaviour described above.
+`409`-on-conflicting-resolution behaviour described above. All three routes are
+Milestone 5, where [http-api-and-streaming.md](http-api-and-streaming.md) puts
+every route in the API; the service methods they call and the CLI commands that
+call the same methods are Milestone 4.
 
 ## Failure modes and defenses
 
@@ -1103,11 +1106,18 @@ Extending Section 19's `approval_requests_total`:
 8. The eight-step pause flow, checkpoint interaction, `WAITING_FOR_APPROVAL`.
 9. Resume and revalidation.
 10. The reaper and the cancellation edge, including the race test.
-11. `GET /v1/approvals`, `GET /v1/approvals/{id}`, and the CLI commands.
+11. The `ApprovalService` read methods and the CLI commands that call them.
 12. The advisory layer, behind a flag, default off, after Milestone 6.
 
 Steps 1 through 11 are Milestone 4. Step 12 is sequenced by Section 21.1 and is
-not a Milestone 4 dependency.
+not a Milestone 4 dependency. The two routes that expose step 11's read methods
+over HTTP are Milestone 5, with every other route:
+[http-api-and-streaming.md](http-api-and-streaming.md) places them there, and
+Section 21 agrees, naming the whole HTTP surface at Milestone 5 and no approval
+work in it. What Milestone 4 owes the routes is the service behind them, which
+is what "Approval API and CLI" in Section 21's Milestone 4 implement list means
+here — the CLI calls the application service directly, as the paragraph adding
+those routes already says.
 
 ## Decisions
 
