@@ -182,8 +182,25 @@ readiness:
     every identifier matches the grammar and uses one of the fourteen
     areas, and the written census is what the registry derives, per
     milestone and cumulative.
+    A fourth pass audited the event type catalogue and the error
+    taxonomy, the two enumerated registries that state their own
+    totals. Six declared event types sat outside the fifty one the
+    corpus called closed: mcp.server.reauthenticated,
+    knowledge.document.ingested, and four eval events. The first two
+    are session scoped and are now in the consolidated list, which
+    stands at fifty three. The four eval events are declared on the
+    harness rather than on a run, and events.session_id is NOT NULL,
+    so they have no row in events as the schema stands. That is the
+    same constraint multi-device-and-surfaces.md records for device
+    lifecycle events and leaves open; both documents now name each
+    other and one open question covers both. Three event names in live
+    prose do not exist and are replaced by the Section 6.8 names they
+    meant. The error taxonomy is twenty nine classes rather than
+    thirty one, because the eight the runtime loop classifies include
+    two that Section 13 already lists, and the two phantom classes the
+    API spec invented to make its own arithmetic close are gone.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-01T04:40:00Z
-last_reviewed_commit: b40bf54
+last_updated: 2026-08-01T06:20:00Z
+last_reviewed_commit: 6d0296f

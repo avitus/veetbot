@@ -158,6 +158,13 @@ Section 29.7 requires revocation to be immediate and observable —
 server-side"* — which is an audit requirement, and the log is where
 audit requirements go.
 
+The harness reaches the same wall and did not notice it.
+[evaluation-harness.md](evaluation-harness.md) declares four `eval.*`
+events on the harness rather than on a run, under a span root that is
+explicitly not `agent.run`, so those have no session either. Two
+documents arriving here independently is an argument for the second
+way out, and for taking it once rather than twice.
+
 ### A hand-off is a fourth suspension kind
 
 [runtime-loop.md](runtime-loop.md) tabulates three suspension kinds —

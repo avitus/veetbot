@@ -99,12 +99,12 @@ Three rules govern the envelope.
 ### The code list is the error taxonomy under one rule
 
 Section 13 declares twenty-three error classes and
-[runtime-loop.md](runtime-loop.md) adds eight, for thirty-one. Section 16
-gives one worked example, `tool_validation_error`, which is
-`ToolValidationError` in snake case. That single example fixes the
-convention, so the wire vocabulary is not invented here — it is the
-taxonomy the corpus already has, snake-cased, minus the classes that
-never cross the boundary.
+[runtime-loop.md](runtime-loop.md) classifies eight, six of them new, for
+twenty-nine in the union. Section 16 gives one worked example,
+`tool_validation_error`, which is `ToolValidationError` in snake case.
+That single example fixes the convention, so the wire vocabulary is not
+invented here — it is the taxonomy the corpus already has, snake-cased,
+minus the classes that never cross the boundary.
 
 ```text
 class                     code                       HTTP
@@ -138,13 +138,13 @@ ArtifactStorageError      artifact_storage_error     503
 ConcurrencyConflict       concurrency_conflict       409
 ```
 
-Four of the thirty-one never reach a client and are deliberately absent
-from the table: `WorkerFenced`, which is not a run failure at all;
-`EmptyModelTurn`, which is retried a step below; and the two internal
-counterparts the loop resolves itself. Anything raised that is not in
-this table is reported as `internal_error` with HTTP `500`, an empty
-`details`, and the request identifier — which is the only handle support
-has, and is why the identifier is mandatory rather than best-effort.
+Two of the twenty-nine never reach a client and are deliberately absent
+from the table: `WorkerFenced`, which is not a run failure at all, and
+`EmptyModelTurn`, which is retried a step below. The other twenty-seven
+are the table. Anything raised that is not in it is reported as
+`internal_error` with HTTP `500`, an empty `details`, and the request
+identifier — which is the only handle support has, and is why the
+identifier is mandatory rather than best-effort.
 
 Four codes are added here because the API raises conditions the taxonomy
 does not name:

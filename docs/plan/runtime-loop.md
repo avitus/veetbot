@@ -1142,10 +1142,12 @@ parent's `deadline_at` is copied onto every child at creation.
 
 ## Section 13 additions
 
-Section 13 lists twenty-three error classes. Eight more are raised by
-documents written since and appear in no taxonomy, and the taxonomy is what
-the retry table keys on, so an unclassified error is an error with undefined
-retry behaviour.
+Section 13 lists twenty-three error classes. Eight are raised by documents
+written since and are classified below; six of those are new, and two,
+`BudgetExceeded` and `ConflictError`, are already in Section 13's list but
+carry no classification there. The taxonomy is what the retry table keys
+on, so an unclassified error is an error with undefined retry behaviour.
+The union is twenty-nine classes, not thirty-one.
 
 ```text
 # class                  raised by            classification
@@ -1281,29 +1283,53 @@ projection.rebuild.started  event-log-and-persistence.md
 projection.rebuild.completed   event-log-and-persistence.md
 ```
 
-Thirteen more belong to subsystems this document does not touch. They are
+Fifteen more belong to subsystems this document does not touch. They are
 listed here for the same reason: Section 6.8's list is where an implementer
 looks for the vocabulary, and these are not in it either.
 
 ```text
-# event                    introduced by
-mcp.server.connected       tool-system.md, ADR-0021
-mcp.server.disconnected    tool-system.md, ADR-0021
-mcp.catalog.changed        tool-system.md, ADR-0021
-mcp.catalog.conflict       tool-system.md, ADR-0021
-mcp.tool.rejected          tool-system.md, ADR-0021
-bridge.session.opened      tool-system.md, ADR-0021
-bridge.session.closed      tool-system.md, ADR-0021
-memory.formed              memory-formation-and-consolidation.md
-memory.promoted            memory-formation-and-consolidation.md
-memory.reinforced          memory-formation-and-consolidation.md
-memory.superseded          memory-formation-and-consolidation.md
-memory.needs_confirmation  memory-formation-and-consolidation.md
-memory.recalled            memory-retrieval-and-ranking.md
+# event                      introduced by
+mcp.server.connected         tool-system.md, ADR-0021
+mcp.server.disconnected      tool-system.md, ADR-0021
+mcp.server.reauthenticated   tool-system.md, ADR-0021
+mcp.catalog.changed          tool-system.md, ADR-0021
+mcp.catalog.conflict         tool-system.md, ADR-0021
+mcp.tool.rejected            tool-system.md, ADR-0021
+bridge.session.opened        tool-system.md, ADR-0021
+bridge.session.closed        tool-system.md, ADR-0021
+memory.formed                memory-formation-and-consolidation.md
+memory.promoted              memory-formation-and-consolidation.md
+memory.reinforced            memory-formation-and-consolidation.md
+memory.superseded            memory-formation-and-consolidation.md
+memory.needs_confirmation    memory-formation-and-consolidation.md
+memory.recalled              memory-retrieval-and-ranking.md
+knowledge.document.ingested  knowledge-documents.md
 ```
 
-Twenty-four in Section 6.8 plus these twenty-seven is the whole vocabulary:
-fifty-one persisted event types, not one of them introduced here.
+Twenty-four in Section 6.8 plus these twenty-nine is the whole vocabulary
+of session-scoped events: fifty-three persisted event types, not one of
+them introduced here.
+
+Two of the fifteen were declared after this consolidation was written and
+never folded into it. `mcp.server.reauthenticated` sits in the same
+tool-system table as the seven that were taken;
+`knowledge.document.ingested` arrived with the knowledge spec. Both are
+session-scoped — the ingest path is a tool, so it runs inside a run — and
+both belong in the count above. This is the cost the decision closing the
+catalog named in advance, that the catalog is a second place to edit when
+an event is added, and it was paid twice before the two lists were read
+against each other.
+
+Four more are declared and are deliberately not in that total.
+`evaluation-harness.md` puts `eval.suite.completed`, `eval.gate.failed`,
+`eval.scenario.scored` and `eval.ceiling.hit` on the harness rather than on
+the run, under a span root that is explicitly not `agent.run`. A harness
+event has no session, and `events.session_id` is `NOT NULL`. They are event
+types by every other measure and they cannot be rows in `events` as the
+schema stands — the same wall `multi-device-and-surfaces.md` hits for
+device lifecycle events and leaves open. Fifty-three plus these four is
+fifty-seven declared types, of which fifty-three have somewhere to be
+stored.
 
 Two ownership assignments close gaps that were nobody's:
 
@@ -1674,9 +1700,9 @@ registry with identifiers, like every other gate.
 21. **Post-run hooks are enqueued after the terminal transition commits and
     can never fail the run.** The child-run join is the exception and is part
     of the lifecycle.
-22. **This document adds no event types.** It consolidates fourteen
-    introduced elsewhere and assigns owners to `run.claimed` and the two
-    `run.waiting_*` events.
+22. **This document adds no event types.** It consolidates fourteen the
+    loop emits and fifteen from subsystems it does not touch, and assigns
+    owners to `run.claimed` and the two `run.waiting_*` events.
 23. **`run.step` is a span and `prefix_sha256` is one of its attributes**,
     which gives the model gateway's "nested under the step span" something
     to refer to and ADR-0020's per-request hash a carrier.
@@ -1708,3 +1734,7 @@ registry with identifiers, like every other gate.
 6. Should the fenced worker's in-flight model stream be aborted, as decided
    here, or allowed to finish so its output can be logged for diagnosis?
    Aborting saves tokens; finishing preserves evidence.
+7. Where do the four `eval.*` events live? They are declared on the harness
+   rather than on a run, so they have no session, and `events.session_id`
+   is `NOT NULL`. `multi-device-and-surfaces.md` leaves the same question
+   open for device lifecycle events, and one answer should cover both.

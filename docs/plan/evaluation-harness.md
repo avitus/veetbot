@@ -1495,6 +1495,16 @@ Four new families, all on the harness rather than on the run:
 content. A gate failure's detail is the test runner's output, which belongs in
 CI logs and not in an append-only event log that will outlive the build.
 
+These four are the one place this document declares something the event log
+cannot store as specified. `events.session_id` is `NOT NULL`, and a harness
+event has no session: the suite is not a run, and the span root below is not
+`agent.run`. The consolidated catalogue in
+[runtime-loop.md](runtime-loop.md) therefore lists them apart from the
+fifty-three session-scoped types rather than in with them.
+[multi-device-and-surfaces.md](multi-device-and-surfaces.md) reaches the same
+constraint for device lifecycle events and leaves it open; one answer should
+cover both, and it is open question 8 below.
+
 Spans follow Section 19's hierarchy with two additions under the harness's own
 root, which is not `agent.run` — the harness drives runs and is not one:
 
@@ -1773,3 +1783,13 @@ invariants stop being prose.
    duplicating a fact the registry owns and of a second place to forget to
    update. Either answer beats the current silence, and the choice is worth
    making before the registry is written rather than after.
+
+8. **Where the four `eval.*` events are stored.** They are declared on the
+   harness rather than on a run, and `events.session_id` is `NOT NULL`, so
+   they have no row in `events` as the schema stands.
+   [multi-device-and-surfaces.md](multi-device-and-surfaces.md) enumerates
+   the three ways out for the identical problem — make `session_id`
+   nullable, give the events their own table, or synthesize a session to
+   charge them to — and calls the second the smallest. That reasoning
+   applies here unchanged, which is the argument for one decision covering
+   both rather than two tables arrived at separately.

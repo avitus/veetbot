@@ -913,7 +913,7 @@ audit needs what was true when the decision was made, and crash recovery must
 be able to dispatch on `idempotency` without loading a tool registry that may
 no longer contain that tool version.
 
-One new event type, added to Section 6.8's list:
+Two new event types, added to Section 6.8's list:
 
 ```text
 approval.invalidated      -- revalidation voided an approved request

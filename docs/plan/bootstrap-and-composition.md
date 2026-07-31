@@ -918,7 +918,8 @@ loop calls application services for every one of them:
 2.  Submit a user message — `RunService`, which returns a run id.
 3.  Stream events — the event broadcaster, filtered to that run.
 4.  Display tool activity concisely — one line per invocation, from
-    `tool.invoked` and `tool.completed`, never from model output.
+    `tool.call.started` and `tool.call.completed`, never from model
+    output.
 5.  Prompt for approvals — on `approval.requested`, read from the terminal
     and call `ApprovalService`.
 6.  Render the final assistant message — from the terminal event, not from

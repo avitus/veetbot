@@ -4,6 +4,51 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The event catalogue and the error taxonomy, audited
+
+- Read the event catalogue against the documents that declare into it.
+  Six declared types were outside the fifty-one that
+  [questions-for-review.md](status/questions-for-review.md) recorded
+  as closed. `mcp.server.reauthenticated` sits in the same
+  [tool-system.md](plan/tool-system.md) table as the seven the
+  consolidation took, and `knowledge.document.ingested` arrived with
+  [knowledge-documents.md](plan/knowledge-documents.md). Both are
+  session-scoped and both are now in the consolidated list in
+  [runtime-loop.md](plan/runtime-loop.md), which stands at
+  fifty-three.
+- The remaining four are the `eval.*` events, and they are a different
+  problem. [evaluation-harness.md](plan/evaluation-harness.md) puts
+  them on the harness rather than on a run, under a span root that is
+  explicitly not `agent.run`, so they have no session — and
+  `events.session_id` is `NOT NULL`. They are event types that cannot
+  be rows in `events` as the schema stands. That is the wall
+  [multi-device-and-surfaces.md](plan/multi-device-and-surfaces.md)
+  already names for device lifecycle events and leaves open. The two
+  documents now point at each other, and one open question covers both
+  rather than each inventing a table.
+- Corrected three event names in live prose that name nothing.
+  [skills.md](plan/skills.md) listed `session.opened` and
+  `tool.invoked` under the claim that none of the three is new;
+  [bootstrap-and-composition.md](plan/bootstrap-and-composition.md)
+  told the CLI to render tool activity from `tool.invoked` and
+  `tool.completed`. The Section 6.8 names are `session.created`,
+  `tool.call.started`, and `tool.call.completed`. This is the same
+  defect the harness had, and it was corrected there by the same rule.
+- Corrected [policy-and-approvals.md](plan/policy-and-approvals.md),
+  which said *"One new event type"* over a block of two. Its own
+  decision 28 says two.
+- The error taxonomy is twenty-nine classes, not thirty-one. The eight
+  that [runtime-loop.md](plan/runtime-loop.md) classifies include
+  `BudgetExceeded` and `ConflictError`, which Section 13 already lists
+  and leaves unclassified, so only six are new.
+  [http-api-and-streaming.md](plan/http-api-and-streaming.md)
+  inherited thirty-one and then invented *"the two internal
+  counterparts the loop resolves itself"* so that subtracting four
+  would leave the twenty-seven rows its table actually has. Set
+  arithmetic gives exactly two absent, `WorkerFenced` and
+  `EmptyModelTurn`, both already named in the same sentence. The
+  phantom pair is gone and both counts follow from the lists.
+
 ## 2026-07-31 — The evaluation case registry, audited
 
 - Read the case table against every statement that counts it. Eleven

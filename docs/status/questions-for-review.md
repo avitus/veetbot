@@ -5271,3 +5271,126 @@ which I think is right, but an erratum note is the alternative and it
 is your call rather than mine.
 
 **Reversal cost:** none. The corrected numbers follow from the table.
+
+### The event catalog is fifty-three types, not fifty-one
+
+**Decided:** added `mcp.server.reauthenticated` and
+`knowledge.document.ingested` to the consolidated list in
+[runtime-loop.md](../plan/runtime-loop.md) and moved the total.
+
+**Why:** *"The event catalog is fifty-one types and is now closed"*
+recorded its own cost — *"the catalog is a second place to edit when
+an event is added"* — and its own defence — *"Stating the total makes
+the next addition visible: a spec that adds an event now has to move
+the count."* The cost was paid twice and the defence did not fire. Git
+dates the two additions after the consolidation:
+[tool-system.md](../plan/tool-system.md) gained the reauthentication
+event and [knowledge-documents.md](../plan/knowledge-documents.md)
+gained the ingest event, and neither moved the count.
+
+**Note:** a third miss predates the consolidation rather than
+following it. The tool system's events table has eight rows and the
+consolidation took seven, so `mcp.server.reauthenticated` was in the
+corpus and in range when the list was written. That is a transcription
+error, not a maintenance one, and it is the argument for the check
+being mechanical rather than editorial.
+
+**Question for you:** none. The two are session-scoped, the ingest
+path is a tool and therefore runs inside a run, and the arithmetic is
+forced.
+
+**Reversal cost:** none. The list is the union of what the corpus
+declares.
+
+### Four harness events have no session to be stored under
+
+**Decided:** listed the four `eval.*` events apart from the
+fifty-three rather than in with them, and recorded the storage
+question as an open one in both documents that reach it.
+
+**Why:** [evaluation-harness.md](../plan/evaluation-harness.md)
+declares `eval.suite.completed`, `eval.gate.failed`,
+`eval.scenario.scored` and `eval.ceiling.hit` *"on the harness rather
+than on the run"*, under a span root it says *"is not `agent.run`"*. A
+harness event has no session, and `events.session_id` is `NOT NULL`.
+They are event types by every other measure and there is no row they
+can occupy. Folding them into the catalog would have hidden that.
+
+**Note:** the same wall is already named, once.
+[multi-device-and-surfaces.md](../plan/multi-device-and-surfaces.md)
+enumerates three ways out for device lifecycle events — nullable
+`session_id`, a separate table, or a synthesized session — picks none,
+and calls the second the smallest. Two documents arriving at the same
+constraint independently is the finding here; only one of them noticed
+it was a constraint. Each now points at the other.
+
+**Question for you:** which way out, and it is one decision rather
+than two. My weak preference is the second, a separate append-only
+table for events that are real and belong to no session, because it
+leaves the event log's central invariant alone and because a
+synthesized session makes the word mean two things.
+
+**Reversal cost:** a migration if the wrong table is built first,
+which is why it is worth answering before Milestone 3 rather than
+during it.
+
+### Three event names in live prose name nothing
+
+**Decided:** replaced `session.opened` with `session.created`, and
+`tool.invoked` and `tool.completed` with `tool.call.started` and
+`tool.call.completed`.
+
+**Why:** [skills.md](../plan/skills.md) listed `session.opened` and
+`tool.invoked` under the sentence *"Three events carry skill
+information, and none of them is new"*, which is the strongest
+possible claim to be wrong about, and
+[bootstrap-and-composition.md](../plan/bootstrap-and-composition.md)
+told the CLI to render tool activity from `tool.invoked` and
+`tool.completed`. None of the three is in Section 6.8 or anywhere
+else.
+
+**Note:** this is the third instance of one defect. The harness
+asserted `tool.proposed`, `tool.authorized` and `tool.succeeded`,
+which was corrected under the recorded precedent that Section 6.8's
+names are canonical, and [runtime-loop.md](../plan/runtime-loop.md)
+carries that as its thirteenth resolved conflict. Three documents
+independently invented plausible short forms of the same four names,
+which says the real names are longer than a writer reaching for them
+expects.
+
+**Question for you:** none. The substitutions are the nearest declared
+event to what each sentence meant.
+
+**Reversal cost:** none.
+
+### The error taxonomy is twenty-nine classes, not thirty-one
+
+**Decided:** corrected the count in
+[runtime-loop.md](../plan/runtime-loop.md) and
+[http-api-and-streaming.md](../plan/http-api-and-streaming.md), and
+deleted the two error classes the second invented.
+
+**Why:** the runtime loop says *"Eight more are raised by documents
+written since and appear in no taxonomy"* over a block of eight, two
+of which — `BudgetExceeded` and `ConflictError` — are in Section 13's
+twenty-three already. They are unclassified there, which is a real
+finding, but they are not new classes. Six are. The union is
+twenty-nine.
+
+**Note:** the interesting part is downstream. The API spec inherited
+thirty-one, has a table of twenty-seven, and closed the gap by writing
+*"and the two internal counterparts the loop resolves itself"* — two
+classes with no names, in no list, that exist only to make a
+subtraction work. Set arithmetic over the real union gives exactly two
+absent, `WorkerFenced` and `EmptyModelTurn`, and the same sentence
+already named both. A wrong total propagated one document and then
+manufactured evidence for itself in the next.
+
+**Question for you:** whether `BudgetExceeded` and `ConflictError`
+should get retry classifications in Section 13 itself rather than in
+the runtime loop's additions block. The classifications are stated and
+correct where they are; the objection is only that Section 13 is where
+a reader looks.
+
+**Reversal cost:** none. Both counts now follow from lists a reader
+can count.

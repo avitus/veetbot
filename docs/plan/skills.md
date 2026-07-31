@@ -817,8 +817,8 @@ explain its own `prefix_sha256`.
 Three events carry skill information, and none of them is new:
 
 ```text
-session.opened        skill_pins, entries dropped by the cap
-tool.invoked          for skill.load: name, revision, path,
+session.created       skill_pins, entries dropped by the cap
+tool.call.completed   for skill.load: name, revision, path,
                       trust, missing_tools, bytes returned
 model.request.started prefix_sha256 already covers the catalog
 ```
