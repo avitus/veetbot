@@ -1238,7 +1238,8 @@ Section 28.6 and
 [bootstrap-and-composition.md](bootstrap-and-composition.md) already
 settle the shape: a `SandboxMechanism` setting with three values, and
 startup check 4 asserting that `deployment_mode == "production"`
-implies `sandbox != "docker"`.
+implies `sandbox != "docker"`. Both are amended below: the fourth
+value is added here, and the check refuses it too.
 
 ```text
 mechanism   isolation            allowed in production

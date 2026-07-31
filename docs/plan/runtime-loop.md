@@ -1095,11 +1095,11 @@ text and tool calls                    not terminal; the batch runs
 no text, no tool calls                 see below
 ```
 
-The third case — a model turn with `StopReason.STOP`, no text, and no tool
+The third case — a model turn with `StopReason.END_TURN`, no text, and no tool
 calls — is a provider anomaly rather than a design case, and it must produce
-something deterministic. Failing the run immediately is the safest reading
-and it is wrong in practice: empty turns are overwhelmingly transient, and a
-run that fails on one has spent its entire context assembly for nothing.
+something deterministic. Failing the run immediately is the safest reading and
+it is wrong in practice: empty turns are overwhelmingly transient, and a run
+that fails on one has spent its entire context assembly for nothing.
 The loop treats an empty terminal turn as a failed attempt and retries the
 step under the ordinary attempt budget; on exhaustion the run fails with
 `EmptyModelTurn` and `FailureReason.EMPTY_MODEL_TURN`. This is recorded as

@@ -5881,3 +5881,111 @@ varies is whether the reader is standing where it is.
 **Question for you:** none.
 
 **Reversal cost:** none.
+
+### StopReason.STOP is not a member of StopReason
+
+**Decided:** changed it to `StopReason.END_TURN`.
+
+**Why:** [runtime-loop.md](../plan/runtime-loop.md) names the empty
+terminal turn by a stop reason that does not exist.
+[model-gateway.md](../plan/model-gateway.md) declares seven members
+and `STOP` is not among them. Of sixty five dotted enum member
+references in the corpus this was the only dangling one, and the two
+paragraphs immediately after it use `MAX_TOKENS` and `CANCELLED`
+correctly, so the wrong one reads as authoritative.
+
+**Note:** `END_TURN` rather than `INCOMPLETE` because the case being
+described is a turn the provider says finished normally while carrying
+neither text nor tool calls. `INCOMPLETE` is declared for a provider
+that ended without finishing, which is a different anomaly, and the
+gateway's `ScriptedTurn` already defaults its stop reason to
+`END_TURN`. The paragraph is load-bearing: it is the trigger for the
+empty-turn retry path and for `EmptyModelTurn` and
+`FailureReason.EMPTY_MODEL_TURN`.
+
+**Question for you:** none. Nothing else in the corpus reads `STOP` as
+a value.
+
+**Reversal cost:** one line.
+
+
+### SandboxMechanism had three values in the file that defines it
+
+**Decided:** added `fake` to the annotation and to startup check 4.
+
+**Why:** the enum is never declared anywhere, so the single site that
+enumerates its values is authoritative by default, and that site is
+[bootstrap-and-composition.md](../plan/bootstrap-and-composition.md)'s
+`Settings` comment, which listed three. Six other places say four:
+sandbox-isolation.md's mechanism table and its seventeenth
+requirement, ADR-0029 item thirteen, engineering-plan.md, and this
+file. The comment is what an implementer codes `config.py` from, and
+`sandbox: fake` would have failed to parse.
+
+**Note:** the second half matters more than the first. The seventeenth
+requirement says `fake` is refused in production by the same check
+that refuses `docker`, and startup check 4 asserted only `sandbox !=
+"docker"`. `fake` executes nothing and models the workspace as a
+dictionary, so a production deployment configured with it would have
+started, reported tool calls as run, and isolated less than the
+fallback the check was written to refuse. The setting and its refusal
+are both Milestone 1.
+
+**Question for you:** none. Four sources agree and none of them is
+ambiguous.
+
+**Reversal cost:** one comment and one clause.
+
+
+### The trajectory export used the tool vocabulary for a run outcome
+
+**Decided:** changed the exported `outcome` from `SUCCEEDED` to
+`COMPLETED`.
+
+**Why:** the run-level terminal vocabulary is `COMPLETED`, `FAILED`,
+`CANCELLED`, in `RunStatus`, in `OutcomeKind` lowercased, and in the
+three places the corpus writes the terminal subset as a SQL tuple.
+`SUCCEEDED` is the tool-invocation success spelling and exists nowhere
+at the run level. The arity was already right; only the success word
+was wrong.
+
+**Note:** this one is persisted and externally consumed. The export
+carries `schema_version: 1` and ADR-0016 and ADR-0032 put it in front
+of readers who are not us, so a consumer filtering on the vocabulary
+the rest of the system uses would have matched nothing and reported no
+successful runs. The word `outcome` occurs on two lines in the whole
+corpus, which is what made it invisible. A sentence under the fence
+now ties the field to `RunStatus` so the next reader does not have to
+rediscover which of the two vocabularies it belongs to.
+
+**Question for you:** none, unless you want the export to keep a
+vocabulary of its own, in which case the fix is to say so rather than
+to leave the divergence unremarked.
+
+**Reversal cost:** one word and one sentence.
+
+
+### SuspensionKind is never declared and appears in two spellings
+
+**Decided:** recorded, not edited.
+
+**Why:** the type is annotated in `Suspension` and its members appear
+only in trailing comments: `APPROVAL | USER | CHILD_RUN` in
+runtime-loop.md and `user_input | child_run` on the `suspended_kind`
+column in tool-system.md. No fence declares it. Unlike the three
+above, this one is already visible:
+[multi-device-and-surfaces.md](../plan/multi-device-and-surfaces.md)
+names the divergence while proposing a hand-off as a fourth kind, and
+readiness.md lists it among the identified gaps.
+
+**Note:** declaring it now would settle the fourth-kind question by
+writing the enum, and that question is yours. The two spellings are
+the same three members, so nothing is ambiguous today except the
+casing convention, which the corpus otherwise resolves by uppercasing
+the stored status and lowercasing the domain value. Whoever answers
+the hand-off question should declare the enum in the same pass.
+
+**Question for you:** the hand-off question you already have. This
+adds only that answering it should produce a declaration.
+
+**Reversal cost:** none. Nothing was changed.

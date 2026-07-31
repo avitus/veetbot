@@ -303,8 +303,35 @@ readiness:
     which is complete and correct, sits three hundred and fifty six
     lines below the fence that needs it, so a pointer was added
     under the fence.
+
+    Tenth pass, the values. Twenty eight enum declarations, twenty
+    seven distinct names, and one duplicate whose two member sets are
+    identical. Sixty five dotted member references were checked
+    against their declarations and exactly one was dangling:
+    runtime-loop.md named StopReason.STOP, which model-gateway.md does
+    not declare, on the paragraph that triggers the empty turn retry
+    path. It is now StopReason.END_TURN. Two further findings are the
+    same species one level down, a vocabulary declared in one place
+    and enumerated differently in another. SandboxMechanism is
+    declared nowhere, so the Settings comment in
+    bootstrap-and-composition.md was the authoritative enumeration by
+    default and it listed three values where six other places say
+    four; fake is added, and startup check 4 now refuses it in
+    production beside docker, which the seventeenth requirement of
+    sandbox-isolation.md already asked for and which matters because
+    fake executes nothing. The trajectory export in
+    event-log-and-persistence.md labelled a successful run SUCCEEDED,
+    which is the tool invocation spelling and exists nowhere at the
+    run level; it is now COMPLETED, tied to the terminal subset of
+    RunStatus by a sentence under the fence, because the export is
+    persisted, versioned, and read by consumers who are not us.
+    SuspensionKind is recorded and not changed: it is never declared,
+    its members appear in trailing comments in two spellings, and the
+    open hand-off question should produce the declaration. A numeric
+    constants cross-check over retry counts, approval expiries, lease
+    and heartbeat intervals, and token budgets found no conflict.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-01T02:30:00Z
-last_reviewed_commit: 7ab6007
+last_updated: 2026-07-31T21:55:00Z
+last_reviewed_commit: a819b7b

@@ -345,7 +345,7 @@ consumer's transformation, not a producer's obligation.
   "tenant_id":      "<uuid>",
   "agent_id":       "research-assistant",
   "agent_version":  4,
-  "outcome":        "SUCCEEDED" | "FAILED" | "CANCELLED",
+  "outcome":        "COMPLETED" | "FAILED" | "CANCELLED",
   "failure":        {"kind": "...", "at_step": 7} | null,
   "recorded_on":    "2026-07-28",
   "builder_version": "trajectory@3",
@@ -362,7 +362,10 @@ consumer's transformation, not a producer's obligation.
 captured and labeled distinctly — true by construction rather than by
 convention, and `failure` carries the classification without carrying the
 error text, which is the field most likely to have a path, a host, or a
-query string in it.
+query string in it. Its three values are `RunStatus`'s terminal subset
+(`runtime-loop.md:276`) and not a vocabulary of the export's own, so a
+consumer filtering exported runs and a reader querying `runs.status` ask the
+same question in the same words.
 
 `recorded_on` is a date, not a timestamp, and there are no per-message
 timestamps at all. Per-message timing is the highest-entropy correlatable
@@ -403,7 +406,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:982-987`) run over every message body,
+   (`bootstrap-and-composition.md:1054-1059`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -420,7 +423,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:992`).
+(`bootstrap-and-composition.md:1064`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -514,7 +517,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:855`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:926`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s four
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an

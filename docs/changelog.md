@@ -4,6 +4,43 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The values, audited
+
+- Corrected `StopReason.STOP` in [runtime-loop.md](plan/runtime-loop.md)
+  to `StopReason.END_TURN`. The member does not exist:
+  [model-gateway.md](plan/model-gateway.md) declares seven and `STOP` is
+  not among them. It was the only dangling member reference among sixty
+  five checked, and it names the empty-turn retry path, so the wrong
+  value sat on the trigger condition for `EmptyModelTurn`.
+- Gave `SandboxMechanism` its fourth value in the one file that
+  enumerates them.
+  [bootstrap-and-composition.md](plan/bootstrap-and-composition.md)'s
+  `Settings` comment listed three; six other places say four. The enum
+  is declared nowhere, so the comment was authoritative by default and
+  `sandbox: fake` would not have parsed.
+- Extended the same file's startup check 4 to refuse `fake` in
+  production beside `docker`, which
+  [sandbox-isolation.md](plan/sandbox-isolation.md)'s seventeenth
+  requirement already asks for. `fake` executes nothing, so a production
+  deployment configured with it would have started and reported tool
+  calls as run. The setting and its refusal are both Milestone 1.
+- Changed the trajectory export's `outcome` in
+  [event-log-and-persistence.md](plan/event-log-and-persistence.md) from
+  `SUCCEEDED` to `COMPLETED`. `SUCCEEDED` is the tool-invocation
+  spelling and exists nowhere at the run level. The export is persisted,
+  versioned, and read by consumers who are not us, so a filter on the
+  run vocabulary would have matched nothing.
+- Recorded `SuspensionKind` as an observation rather than a change. It
+  is never declared, its members live in trailing comments in two
+  spellings, and the open hand-off question should produce the
+  declaration.
+- The census behind all of it: twenty eight enum declarations, twenty
+  seven distinct, one benign duplicate with identical members, sixty
+  five dotted member references checked against their declarations, and
+  twenty two `Literal[...]` annotations. Also a numeric-constants
+  cross-check across retry counts, expiries, leases, and token budgets,
+  which found no conflict.
+
 ## 2026-07-31 — The types, audited
 
 - Added the supersession paragraph

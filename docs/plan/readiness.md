@@ -351,7 +351,7 @@ only at `engineering-plan.md:459`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:450` named `ApprovalService` as one of
+`bootstrap-and-composition.md:521` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -458,7 +458,7 @@ detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:998-999` and the resolve at
 `policy-and-approvals.md:1008`, and one reference in
-`runtime-loop.md:1174` to `POST /runs/{id}/input` that routed to an
+`runtime-loop.md:1180` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -546,7 +546,7 @@ two specifications pointed at the expansion as though it already
 existed. `tool-system.md:1002` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
-`bootstrap-and-composition.md:180` and `:183` assign ownership of
+`bootstrap-and-composition.md:201` and `:183` assign ownership of
 `ArtifactStore` and `ExecutionEnvironment` to the engineering plan
 itself, which is the corpus recording that nothing below the plan owns
 them.
@@ -949,7 +949,7 @@ That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1674`, and the sibling join
-at `runtime-loop.md:1134` reads it. Restricted context is
+at `runtime-loop.md:1140` reads it. Restricted context is
 `context-engine.md:278`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
@@ -958,7 +958,7 @@ gets fifteen beliefs against an interactive run's forty. The
 restricted tool set is `tool-system.md:972`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
-`runtime-loop.md:1141`: *"the parent's `deadline_at` is copied onto
+`runtime-loop.md:1147`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:968`. Two are partial: the explicit objective has a
@@ -971,7 +971,7 @@ separate trace and the artifact references, stated at
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
-`event-log-and-persistence.md:724` declares a unique index on
+`event-log-and-persistence.md:727` declares a unique index on
 `session_id` where status is not one of `COMPLETED`, `FAILED`, or
 `CANCELLED`, to enforce Section 27.5's one active run per session. A
 parent suspended on a child waits in `WAITING_FOR_APPROVAL` carrying
@@ -1228,7 +1228,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1459` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1735` and `milestone-map.md:910`. The map
+    `model-gateway.md:1761` and `milestone-map.md:910`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

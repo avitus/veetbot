@@ -381,7 +381,7 @@ class Settings:
     deployment_mode: DeploymentMode      # development | production
     auth_mode: AuthMode                  # dev | token
     auth_token: SecretStr | None
-    sandbox: SandboxMechanism            # microvm | gvisor | docker
+    sandbox: SandboxMechanism            # microvm | gvisor | docker | fake
     config_dir: Path | None              # operator overlay directory
     credentials: Mapping[str, SecretStr]
     interpolation: Mapping[str, str]     # what ${VAR} resolves to
@@ -394,6 +394,14 @@ adding a provider must not require editing this class. `interpolation` is the
 allow-list of names a YAML file may reference, so a typo in a config file
 fails at load with the offending name rather than silently producing an empty
 model identifier.
+
+`sandbox` carries four values rather than three. `fake` is added by
+[sandbox-isolation.md](sandbox-isolation.md) as a production adapter in the
+sense the plan uses for the in-memory repositories, a real implementation of
+the port that runs the contract suite unchanged
+(`sandbox-isolation.md:1252`), and it is what lets the whole system be
+exercised without a hypervisor. Startup check 4 below refuses it in
+production beside `docker`.
 
 `SecretStr` is the one place a Pydantic type is welcome in a value object.
 Dependency rule 6 keeps Pydantic-only behaviour out of the domain, and
@@ -462,9 +470,12 @@ checks run there, before any adapter exists:
 3.  `deployment_mode == "production"` implies `auth_mode != "dev"`. The dev
     mode is documented as localhost-only, and localhost-only is not a
     production posture.
-4.  `deployment_mode == "production"` implies `sandbox != "docker"`. ADR-0008:
-    "Production startup must refuse to run untrusted code under the
-    development fallback."
+4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
+    nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
+    code under the development fallback." `fake` is behind the same check
+    because it executes nothing (`sandbox-isolation.md:1603`), and a
+    mechanism that executes nothing isolates less than the fallback this
+    rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped
     default name. An overlay file with no counterpart is a typo, and a typo in
     a config filename is otherwise invisible.
