@@ -199,8 +199,24 @@ readiness:
     thirty one, because the eight the runtime loop classifies include
     two that Section 13 already lists, and the two phantom classes the
     API spec invented to make its own arithmetic close are gone.
+    A fifth pass audited the tool registry. The corpus declares
+    eighteen model callable build time tools and the builtin roster
+    is eight of them, so builtin-tools.md now names the other ten,
+    scopes its classification table and registration steps to the
+    eight it owns, and imports the rule that makes the count of
+    eight correct. Eight of the eighteen declare no ToolSpec fields
+    anywhere, which registration step six reads, and that is
+    recorded as a conflict rather than closed. The control tool
+    table listed context.compact, which is a span name and not a
+    tool anywhere in the corpus; context.update_working_state holds
+    that row instead and the set is still four. Two more live
+    sentences called skill_manage a control tool against the same
+    document's own table. The domain partition row that labelled
+    memory and skill as control domains is split. readiness.md said
+    the agent facing memory surface is two tools and that both
+    read, and memory.remember is a third and it writes.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-01T06:20:00Z
-last_reviewed_commit: 6d0296f
+last_updated: 2026-07-31T19:50:00Z
+last_reviewed_commit: 1409469

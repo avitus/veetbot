@@ -5394,3 +5394,124 @@ a reader looks.
 
 **Reversal cost:** none. Both counts now follow from lists a reader
 can count.
+
+### The control-tool table listed a span as a tool
+
+**Decided:** removed `context.compact` from the control-tool table
+in [tool-system.md](../plan/tool-system.md), put
+`context.update_working_state` in its place, and corrected the
+lead-in that said *"Three of the tool names"* over four rows.
+
+**Why:** nothing in the corpus declares `context.compact` as a tool.
+[runtime-loop.md](../plan/runtime-loop.md) uses it as a span nested
+under the step span, the event compaction emits is
+`context.compacted`, and
+[context-engine.md](../plan/context-engine.md) says compaction is a
+model call and therefore *"not something `build()` does"* — the loop
+measures pressure and invokes the compactor itself. A tool that let
+the model force one would hand it a lever over its own context
+budget that nothing in that document contemplates. What the context
+engine does put behind a control tool is
+`context.update_working_state`, which it declares in full: input
+schema, effect, and the event `context.working_state.updated`.
+
+**Note:** the set is still four, so [skills.md](../plan/skills.md)
+calling a hypothetical `skill.unload` *"a fifth entry"* and saying
+*"that table has four entries"* are both still correct and both
+untouched. The row was wrong, not the total.
+
+**Question for you:** whether the model should ever be able to force
+a compaction. This says no, because the context engine says the loop
+decides and the model is the thing being budgeted. The case for yes
+is a model that knows it is about to do something long and would
+rather compact deliberately than be compacted mid-step. Recorded as
+the tool system's seventh open question.
+
+**Reversal cost:** none. It would be a fifth row and a `ToolSpec`.
+
+### `skill_manage` was called a control tool in two more places
+
+**Decided:** corrected both sentences in
+[tool-system.md](../plan/tool-system.md) to match that document's
+own registration table.
+
+**Why:** the file names `skill_manage` among the tools that motivate
+a `kind` field at all, and states flatly that *"`skill_manage` is a
+control tool"* in the bullet explaining that control tools still
+pass the full pipeline. Its own table classifies `skill.manage` as a
+capability tool, and [skills.md](../plan/skills.md) argues at length
+that it must be one, because it writes files and a control tool by
+definition acts only on the run. The `kind` justification now names
+`context.update_working_state` instead, and the pipeline bullet uses
+`skill.load`, which is a control tool and carries the bullet's point
+better: skills.md labels agent-authored skill content
+`EXTERNAL_UNTRUSTED`, so exempting the category would exempt that
+labelling from the step that applies it.
+
+**Note:** an earlier pass corrected this document's registration
+table and the skills spec. These two sentences survived it, which is
+what a fix by search rather than by reading leaves behind.
+
+**Question for you:** none beyond the standing one about spelling it
+`skill.manage` in prose corpus-wide.
+
+**Reversal cost:** none.
+
+### The builtin roster is eight tools of eighteen
+
+**Decided:** added a subsection to
+[builtin-tools.md](../plan/builtin-tools.md) naming the ten
+model-callable build-time tools that other specifications declare,
+and scoped the classification table and the registration steps to
+the eight the roster owns.
+
+**Why:** the roster reads as the corpus's tool census and is not.
+Ten more tools are model-callable at build time:
+`conversation.ask_user` and `delegate.run` from
+[tool-system.md](../plan/tool-system.md),
+`context.update_working_state` from
+[context-engine.md](../plan/context-engine.md), `skill.load` and
+`skill.manage` from [skills.md](../plan/skills.md), three `memory.`
+tools, and two `knowledge.` tools. The rule that makes the count of
+eight correct was stated once, in
+[knowledge-documents.md](../plan/knowledge-documents.md): subject
+specifications declare their own tools, *"so this costs
+`builtin-tools.md` nothing, and the roster's count is unchanged"*.
+That sentence now lives where a reader of the roster will find it.
+
+**Note:** the classification gap is recorded as a conflict rather
+than closed. Registration step 6 reads `ToolSpec.side_effect` and
+`output_trust`, and eight of the eighteen declare no `ToolSpec`
+fields anywhere in the corpus. Step 3, domain membership, already
+passes for all eighteen.
+
+**Question for you:** whether the ten should be classified in
+`builtin-tools.md` or in the documents that declare them. Recorded
+as that document's ninth open question. One table is easier to check
+against the registry; against that, a tool and its fields living in
+different files is how the roster got read as the census in the
+first place.
+
+**Reversal cost:** low either way. The fields exist or they do not,
+and where they are written is a move rather than a redesign.
+
+### The agent-facing memory surface is three tools, not two
+
+**Decided:** corrected [readiness.md](../plan/readiness.md), which
+said the surface is two tools and that both of them read.
+
+**Why:** `memory.remember` is a third and it writes.
+`memory-retrieval-and-ranking.md` says two, correctly, because
+within its own scope there are two: `memory.search` and
+`memory.recall_episodes`. Formation declares the third. The
+readiness note was reading a retrieval sentence as a corpus-wide
+count.
+
+**Note:** the argument the sentence supports is unaffected and is
+kept as written. None of the three lists, edits, or deletes, and no
+route or CLI command does either, so the `MemoryStore.list`, `edit`,
+and `delete` gap stands exactly as stated.
+
+**Question for you:** none.
+
+**Reversal cost:** none.

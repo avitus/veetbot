@@ -219,7 +219,7 @@ class ToolSpec(BaseModel):
 ```
 
 `kind` exists because `conversation.ask_user` (Section 27.3),
-`skill_manage` (Section 30.2), and `context.update_working_state`
+`delegate.run` (Section 26), and `context.update_working_state`
 (context-engine.md) are all described as tools, are all called through the
 model's tool-calling channel, and none of them acts on the world. Every field
 of Section 8.1's `ToolSpec` presumes an outward action, and forcing a control
@@ -247,9 +247,13 @@ checked at registration:
   definition a piece of the runtime, and Section 30.1 is explicit that the
   agent "may not register arbitrary new tools at runtime".
 - Control tools still pass the full pipeline. They are validated, scoped,
-  policy-evaluated, timed, recorded, and traced like anything else. Section
-  30.3 requires that skill authoring be policy-gated, and `skill_manage` is a
-  control tool; exempting the category would exempt the requirement.
+  policy-evaluated, timed, recorded, and traced like anything else.
+  `skill.load` is a control tool, and [skills.md](skills.md) labels the
+  content it loads `EXTERNAL_UNTRUSTED` whenever the agent authored it;
+  exempting the category would exempt that labelling from the step that
+  applies it. Section 30.3's requirement that skill authoring be
+  policy-gated falls on `skill.manage`, which is a capability tool for the
+  reason given below.
 
 `output_trust` is required rather than defaulted, and it resolves a
 contradiction. ADR-0002's `ToolResultItem.trust` defaults to `INTERNAL_TOOL`,
@@ -342,10 +346,15 @@ The first segment is the **domain**, and domains are partitioned:
 | --- | --- | --- |
 | `system` `math` `workspace` `sandbox` `artifact` | builtin | build time |
 | `demo` `delegate` | builtin | build time |
-| `conversation` `context` `skill` `memory` | builtin, control | build time |
+| `conversation` `context` | builtin, control | build time |
+| `skill` `memory` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
+
+The control annotation is on the two domains that hold nothing else.
+`skill` holds `skill.load` and `skill.manage`, one of each kind, and
+`memory` holds three capability tools and no control tool.
 
 The reserved-domain list is a constant in the registry, and registering a
 builtin whose domain is `mcp` or `device` is a startup error. That is what
@@ -892,13 +901,14 @@ than fails.
 
 ## Control tools
 
-Three of the tool names the plan uses act on the run rather than on the world:
-`conversation.ask_user` (Section 27.3), `delegate.run` (Section 26), and the
-compaction trigger the context engine specifies. `ToolSpec` as defined in
-Section 8.1 cannot describe them, because every field on it presumes an
-outward-facing action: `side_effect` classifies an effect on an external
-system, `idempotency` describes whether repeating it is safe *out there*, and
-`required_scopes` names permissions on external resources.
+Four of the tool names the plan uses act on the run rather than on the world:
+`conversation.ask_user` (Section 27.3), `delegate.run` (Section 26),
+`context.update_working_state` (context-engine.md), and `skill.load`
+(skills.md). `ToolSpec` as defined in Section 8.1 cannot describe them,
+because every field on it presumes an outward-facing action: `side_effect`
+classifies an effect on an external system, `idempotency` describes whether
+repeating it is safe *out there*, and `required_scopes` names permissions on
+external resources.
 
 `ToolKind.CONTROL` is the flag that separates them. A control tool's effect is
 a run-state transition, it is executed by the runtime rather than dispatched
@@ -914,8 +924,21 @@ know that the question was already asked.
 | --- | --- | --- | --- |
 | `conversation.ask_user` | control | run to `WAITING_FOR_USER` | on reply |
 | `delegate.run` | control | spawn child run | on child terminal |
-| `context.compact` | control | force a compaction | immediate |
+| `context.update_working_state` | control | working-state write | immediate |
 | `skill.load` | control | load a skill into the turn | immediate |
+
+`context.compact` is not on this list, and it is worth saying why, because
+the name does appear in the corpus. It is a span:
+[runtime-loop.md](runtime-loop.md) nests `context.compact` under the step
+span, and the event compaction emits is `context.compacted`.
+[context-engine.md](context-engine.md) is explicit that compaction is not
+model-callable at all — it is a model call, so it is *"not something
+`build()` does"*, and the loop measures pressure before the call and invokes
+the compactor itself when the body will not fit. A tool that let the model
+force one would hand it a lever over its own context budget that nothing in
+that document contemplates. What the context engine does put behind a
+control tool is `context.update_working_state`, which the `kind` argument
+above already names.
 
 Two of these suspend. `conversation.ask_user` and `delegate.run` do not
 return a `ToolResult` in the executing worker at all; they commit the
@@ -1909,6 +1932,12 @@ evidence that the surface is the same one.
     `tool.auth_unsupported`, for the reason sampling and roots are declined
     at negotiation: there is no consent surface, and a half-working one is
     worse than a refusal.
+25. The control-tool set is four, and it is `conversation.ask_user`,
+    `delegate.run`, `context.update_working_state`, and `skill.load`.
+    `context.compact` was a row naming a span rather than a tool, and
+    `skill_manage` is a capability tool for the reason given above. The set
+    stays closed at build time, and every member is now derivable from the
+    document that declares it.
 
 ## Open questions for review
 
@@ -1943,3 +1972,9 @@ evidence that the surface is the same one.
    proxy's configuration rather than in `mcp_servers`. That is probably the
    right home. It is not obviously the only one, and the question should be
    reopened the first time an operator asks for it.
+7. **Whether the model should ever be able to force a compaction.** This
+   document says no, because [context-engine.md](context-engine.md) says the
+   loop decides and the model is the thing being budgeted. The case for yes
+   is a model that knows it is about to do something long and would rather
+   compact deliberately than be compacted mid-step. It would be a fifth
+   control tool and a `ToolSpec`, not a redesign, if it is ever wanted.

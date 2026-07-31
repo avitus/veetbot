@@ -4,6 +4,42 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The tool registry, audited
+
+- Removed `context.compact` from the control-tool table in
+  [tool-system.md](plan/tool-system.md). It is a span name:
+  [runtime-loop.md](plan/runtime-loop.md) nests it under the step
+  span, the event compaction emits is `context.compacted`, and
+  [context-engine.md](plan/context-engine.md) says compaction is a
+  model call and therefore *"not something `build()` does"*. The
+  context engine's actual control tool is
+  `context.update_working_state`, which now holds the row. The
+  lead-in said *"Three of the tool names"* over four rows, so the
+  set is still four and every sentence in
+  [skills.md](plan/skills.md) that counts it is still correct.
+- Corrected two more live sentences in
+  [tool-system.md](plan/tool-system.md) that called `skill_manage` a
+  control tool, against its own registration table and against
+  [skills.md](plan/skills.md), which argues at length that a tool
+  which writes files cannot be one. An earlier pass fixed the table
+  and the skills spec; these two are what a fix by search leaves
+  behind.
+- The builtin roster is eight tools of eighteen.
+  [builtin-tools.md](plan/builtin-tools.md) now names the ten that
+  other specifications declare, scopes its classification table and
+  its registration steps to the eight it owns, and imports the rule
+  from [knowledge-documents.md](plan/knowledge-documents.md) that
+  makes the count of eight correct. Eight of the eighteen declare no
+  `ToolSpec` fields anywhere, which registration step 6 reads; that
+  is recorded as a conflict rather than closed.
+- Split the domain partition row that labelled `memory` and `skill`
+  as control domains. `memory` holds three capability tools and no
+  control tool, and `skill` holds one of each.
+- Corrected [readiness.md](plan/readiness.md), which said the
+  agent-facing memory surface is two tools and that both read.
+  `memory.remember` is a third and it writes. The gap the sentence
+  supports is unchanged: none of the three lists, edits, or deletes.
+
 ## 2026-07-31 — The event catalogue and the error taxonomy, audited
 
 - Read the event catalogue against the documents that declare into it.

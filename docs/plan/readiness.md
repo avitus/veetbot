@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1936` states that device tools are *"a reserved
+    `tool-system.md:1965` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -458,7 +458,7 @@ detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
 at `policy-and-approvals.md:998-999` and the resolve at
 `policy-and-approvals.md:1008`, and one reference in
-`runtime-loop.md:1172` to `POST /runs/{id}/input` that routed to an
+`runtime-loop.md:1174` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -543,7 +543,7 @@ Section 28 of the plan is not empty — `engineering-plan.md:3152-3229`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:979` constrains MCP server URLs by *"the
+existed. `tool-system.md:1002` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:180` and `:183` assign ownership of
@@ -552,8 +552,8 @@ itself, which is the corpus recording that nothing below the plan owns
 them.
 
 Two bullets are covered. Output truncation and artifactization are
-specified at `tool-system.md:710`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1343`.
+specified at `tool-system.md:719`, and the programmatic orchestration
+bridge Section 8.5 requires is specified from `tool-system.md:1366`.
 
 Two further items deserved naming.
 
@@ -562,7 +562,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1399`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1459`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -591,7 +591,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:979` depends on by
+remaining. The egress allowlist `tool-system.md:1002` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -712,7 +712,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1275-1322` draws the line between
+had to be written. `tool-system.md:1298-1345` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -852,8 +852,9 @@ sharpening belongs here. The human-editable surface is not merely
 uncontracted: the `MemoryStore` port declares `list`, `edit`, and
 `delete` at `memory-formation-and-consolidation.md:357`, and no tool,
 route, or command in the corpus calls any of them. The agent-facing
-surface is two tools, `memory.search` and `memory.recall_episodes`,
-and both read. The twelve CLI commands include no memory command, and
+surface is three tools: `memory.search` and `memory.recall_episodes`
+read, and `memory.remember` creates. None of the three lists, edits,
+or deletes. The twelve CLI commands include no memory command, and
 [http-api-and-streaming.md](http-api-and-streaming.md) registers no
 memory route. So *"A user can inspect and delete stored memories"* at
 `engineering-plan.md:2773` is the one Milestone 9 acceptance criterion
@@ -954,15 +955,15 @@ for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:87`, which
 gets fifteen beliefs against an interactive run's forty. The
-restricted tool set is `tool-system.md:949`: *"the registry resolves
+restricted tool set is `tool-system.md:972`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
 `runtime-loop.md:1141`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
-`tool-system.md:945`. Two are partial: the explicit objective has a
+`tool-system.md:968`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
-`tool-system.md:916` and no input type for it exists anywhere, and
+`tool-system.md:926` and no input type for it exists anywhere, and
 the child budget is additive by `engineering-plan.md:553` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
@@ -1031,8 +1032,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1426` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1936` states that device tools are *"a reserved seam,
+`tool-system.md:1449` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1965` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1072,7 +1073,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1440` reserved by name —
+one of them the question `tool-system.md:1463` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1224,7 +1225,7 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1399` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1459` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
     `model-gateway.md:1735` and `milestone-map.md:910`. The map
@@ -1287,7 +1288,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:979` already depends on an egress
+    come first: `tool-system.md:1002` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two

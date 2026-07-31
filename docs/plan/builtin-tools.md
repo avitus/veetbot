@@ -121,6 +121,65 @@ Milestone 6 — Milestone 5 is the HTTP API and SSE.
 `artifact.export` is the one assignment the plan does not
 make, and it is placed at Milestone 6 below with its reason.
 
+### The roster is not the corpus's tool census
+
+Eight is the number of tools *this document* designs. It is not the
+number of tools the model can call, and the gap is wide enough to
+state here rather than leave a reader to assemble.
+
+Ten more model-callable tools are declared at build time by other
+specifications:
+
+```text
+tool                          kind        declared by
+----------------------------  ----------  -------------------
+conversation.ask_user         control     tool-system
+delegate.run                  control     tool-system
+context.update_working_state  control     context-engine
+skill.load                    control     skills
+skill.manage                  capability  skills
+memory.remember               capability  memory-formation
+memory.search                 capability  memory-retrieval
+memory.recall_episodes        capability  memory-retrieval
+knowledge.ingest              capability  knowledge-documents
+knowledge.search              capability  knowledge-documents
+```
+
+Eighteen model-callable tools in total, and this document's roster is
+eight of them. The rule that keeps both numbers right is
+[knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
+here because a reader who finds it only there has already been
+confused: *"Subject specifications declare their own tools ... so this
+costs `builtin-tools.md` nothing, and the roster's count is
+unchanged."* A tool belongs to the document that designs the subject
+it acts on. The roster is what is left over — the tools with no
+subject document of their own.
+
+Two consequences follow, and both read wrong if they are not said.
+
+**The classification table below is complete for the eight and for
+nothing else.** Of the other ten, only `skill.manage` is fully
+classified, in [skills.md](skills.md), which gives it six fields;
+`skill.load` carries three. The three remaining control tools inherit
+`side_effect: NONE` and `target_kind: in_process` from the
+registration constraint on their kind and declare nothing else. Of the
+five memory and knowledge tools, `memory.search`,
+`memory.recall_episodes`, and `knowledge.search` declare an
+`output_trust`, the two `knowledge.` tools declare `required_scopes`,
+and `memory.remember` declares neither. That is a gap in the corpus
+rather than a division of labour, because `ToolSpec` has no optional
+fields and registration step 6 below refuses a spec that is missing
+one. Whoever builds a tool on that list supplies its classification
+with it, in the document that owns it.
+
+**The registration check below runs over the registry, not over this
+roster.** Its subject is the checked-in builtin specs, which at freeze
+is all eighteen. Step 3, domain membership, already passes for every
+one of them: [tool-system.md](tool-system.md)'s partition table lists
+`delegate`, `conversation`, `context`, `skill`, and `memory` as
+builtin domains registered at build time, and `knowledge` beside them.
+It is step 6 that has nothing to read for eight of the eighteen.
+
 ### Why `artifact.export` is Milestone 6
 
 Nothing in the plan assigns it. Three placements are defensible and one
@@ -163,7 +222,8 @@ recorded as such.
 
 ## The classification table
 
-Every field of the completed `ToolSpec`, for all eight. The table is
+Every field of the completed `ToolSpec`, for all eight of the roster —
+the ten tools above are their own documents' to classify. The table is
 split across four fences for width, not for meaning; together they are
 one row per tool.
 
@@ -1417,7 +1477,8 @@ static test with nothing constructed.
 The order is fixed and each step refuses rather than warns.
 
 1.  **Name grammar.** Every name matches the registry pattern and is at
-    most 96 characters. All eight are well under.
+    most 96 characters. The longest name the corpus declares is
+    `context.update_working_state`, at 28.
 2.  **Reserved domains.** No builtin's domain is `mcp` or `device`.
     This is hard gate 10 in [tool-system.md](tool-system.md) and it is
     checked here because here is where a builtin is introduced.
@@ -1532,6 +1593,14 @@ These fail the build.
     a rule rather than an exception: the reason code carries the
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
+8.  **The roster reads as the corpus's tool census and is not.** Eight
+    is what this document designs; eighteen model-callable tools are
+    declared at build time across the corpus, and ten of them belong
+    to other specifications. Resolved by naming those ten here,
+    together with the rule that keeps the roster's count correct —
+    [knowledge-documents.md](knowledge-documents.md)'s, which had
+    written it down in the one place a reader of the roster would not
+    look.
 
 ## Decisions
 
@@ -1698,3 +1767,10 @@ These fail the build.
     it registered means a production registry contains a tool that
     does nothing, which is either honest or confusing depending on who
     is reading the catalog.
+9.  **Whether the ten non-roster tools should be classified here.**
+    This document says no: a classification belongs beside the design
+    that justifies it, and pulling ten rows in would make the word
+    roster mean two things. The argument for yes is that registration
+    validates one set and a reviewer checking the 9.2 matrix against
+    reality would have one table to read rather than six. Reversal
+    moves rows and changes no values.
