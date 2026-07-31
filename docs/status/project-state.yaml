@@ -47,7 +47,7 @@ milestones:
 
 verification:
   milestone_0:
-    recorded_at: 2026-07-31T23:52:08Z
+    recorded_at: 2026-07-31T23:57:06Z
     status: in_progress
     evidence:
       - check: make install
@@ -95,8 +95,16 @@ verification:
           from .circleci/config.yml all exited successfully. Workflow
           structure tests assert their triggers, commands, PostgreSQL service,
           Python version, and credential gate.
+      - check: hosted CircleCI for dev commit 103b0e5
+        outcome: not_run
+        detail: >-
+          The dev branch was pushed to origin. GitHub reported no commit status
+          contexts or check runs, and the CircleCI v2 project endpoint returned
+          404 Project not found for gh/avitus/veetbot, so the repository is not
+          yet connected as a CircleCI project.
     remaining:
-      - Observe the workflow on hosted CircleCI after the dev branch is pushed.
+      - Connect gh/avitus/veetbot as a CircleCI project.
+      - Observe the static, contract, and integration jobs on hosted CircleCI.
 
 documentation:
   canonical_format: markdown
