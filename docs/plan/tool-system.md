@@ -1425,15 +1425,18 @@ case, so it is a seam rather than a rewrite when it lands.
 A device tool is registered at attach with `ToolSource.DEVICE`, its
 `output_trust` is forced to `EXTERNAL_UNTRUSTED` like any other external
 source, and a call to a tool whose device is not connected returns
-`unavailable` with `tool.device_offline` — the third row of the availability
+`unavailable` with `tool.device_offline` — the last row of the availability
 table, already specified.
 
 What is deliberately not decided here: the device transport, the attach
 handshake, offline queueing, and whether a device tool may be advertised in a
 session opened while the device was absent. Those belong with the cross-device
-work. Reserving the domain and the target kind costs nothing now and prevents
-the device path from arriving as a parallel pipeline later, which is the
-failure mode this document is most concerned with.
+work, and [multi-device-and-surfaces.md](multi-device-and-surfaces.md) is where
+they are audited: the last of the four resolves against the pinned prefix on
+the same precedent as an MCP catalog change, and the other three stay open.
+Reserving the domain and the target kind costs nothing now and prevents the
+device path from arriving as a parallel pipeline later, which is the failure
+mode this document is most concerned with.
 
 ## Schema additions
 

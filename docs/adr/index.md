@@ -42,3 +42,4 @@ implementation without one.
 - [ADR-0031 — The ORM surface and the migration conventions](0031-persistence-authoring.md)
 - [ADR-0032 — Trajectory export, redaction, and consent](0032-trajectory-export-redaction-and-consent.md)
 - [ADR-0033 — The knowledge document, its corpus, and passage retrieval](0033-knowledge-documents.md)
+- [ADR-0034 — Section 29 as an audited seam rather than a design](0034-multi-device-and-surfaces-seam.md)

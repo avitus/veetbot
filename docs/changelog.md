@@ -4,6 +4,67 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Section 29's Device model, closed as an audit
+
+- Wrote
+  [multi-device-and-surfaces.md](plan/multi-device-and-surfaces.md)
+  and ADR-0034, the seventeenth detailed-design document and the
+  last gap [readiness.md](plan/readiness.md) named. It audits a seam
+  rather than designing one. Section 29's own last subsection says
+  *"Defer the Device concept, presence, device-scoped tool routing,
+  and notifications"*, and the plan's sequencing table puts inbound
+  surfaces and pairing at Milestone 10, so writing contracts for the
+  four ports Section 29.6 names would have been building the thing
+  the plan defers.
+- Made the check the deliverable. A deferred design has to be
+  additive when it lands, and the only way to know whether it is
+  additive is to walk the seam. Eight places already hold a
+  device-shaped hole and need no edit at all. Five do not, and each
+  is written down with what resolving it will cost: attach is a
+  third registration source and not at session open, device
+  lifecycle events have no session to be charged to, a hand-off is a
+  fourth suspension kind, no client is attributed on a write, and
+  `NotificationService` is a port name with nothing behind it.
+- Gave the four ports Section 29.6 names a home, which is what the
+  readiness finding actually asked for. They land under
+  [bootstrap-and-composition.md](plan/bootstrap-and-composition.md)'s
+  existing rule that a port lives in the module named for the
+  capability it abstracts, not for the component that calls it.
+- Found that per-device scopes are an intersection computed once at
+  submission and never consulted again. `runs.principal_scopes` is
+  stamped when the run is submitted and `PrincipalResolver.for_run`
+  reads the stamp and never a table, so the policy engine is never
+  told a device exists. The constraint that travels with it: a
+  per-device scope set must be a subset of the fifteen strings and
+  must never introduce a `device.` scope prefix, which would break
+  [policy-and-approvals.md](plan/policy-and-approvals.md)'s hard
+  gate 11. The `device.` that exists today is a tool-name domain, an
+  unrelated namespace.
+- Resolved three conflicts in the specifications' favour rather than
+  the plan's. Presence-based exposure yields to the pinned
+  advertisement prefix, on the same precedent as an MCP catalog
+  change: recorded and not applied, with the change visible at the
+  next session open. The registry accepting new entries from
+  *"exactly two sources"* needs its count corrected, because attach
+  is a third. Section 29.5's *"queue or reject"* is reject, because
+  ADR-0004's partial unique index makes a second active run on a
+  session impossible to enqueue rather than merely unwise.
+- Declared no gates, so the census is unchanged: 166 declared across
+  fourteen specifications, 175 declarations, 172 registry entries.
+  Gate-less specifications go from two to three.
+- Corrected a defect the audit turned up.
+  [tool-system.md](plan/tool-system.md) called `tool.device_offline`
+  *"the third row of the availability table"* when it is the last
+  row; the table gained rows for MCP authentication after that
+  sentence was written.
+- Moved the counts that move: sixteen detailed-design documents to
+  seventeen in `CLAUDE.md` and
+  [development-toolchain.md](plan/development-toolchain.md), and
+  thirty-three ADRs to thirty-four. Refreshed the prose summary in
+  [project state](status/index.md), which still said Milestones 0
+  through 4 were implementable and three named documents did not
+  exist.
+
 ## 2026-07-28 — Milestone 9's knowledge-document gap is closed
 
 - Wrote [knowledge-documents.md](plan/knowledge-documents.md) and

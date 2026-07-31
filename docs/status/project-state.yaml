@@ -92,9 +92,17 @@ readiness:
     as a tool, deterministic chunking, the index, visibility as the
     isolation predicate, passage retrieval with its own budget class,
     and twelve gates in a new fourteenth registry area. Its verdict
-    is now ready. No milestone now carries a named gap.
+    is now ready. No milestone now carries a named gap. The last
+    plan section that no specification expanded, Section 29's
+    Device model, is expanded by multi-device-and-surfaces.md and
+    ADR-0034 as an audit of the seam rather than a design. The plan
+    defers the area twice, so the document checks that the deferred
+    work lands additively, finding eight places that already hold
+    the shape and five that do not, and places the four Section
+    29.6 items under the existing port rule. It declares no gates,
+    so the gate census is unchanged.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-28T22:00:00Z
-last_reviewed_commit: e46f791
+last_updated: 2026-07-31T16:45:00Z
+last_reviewed_commit: 1164e0d

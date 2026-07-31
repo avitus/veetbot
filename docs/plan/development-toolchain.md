@@ -472,8 +472,8 @@ corpus, and a single self-contained HTML file listed in
 `docs-manifest.yaml`. The manifest names four sources — the index, the
 current milestone, the engineering plan, and the changelog — and that
 is deliberate rather than an oversight. Those four are the documents
-that are read start to finish. The sixteen specifications, the
-milestone map, the readiness review, and the thirty-three ADRs are
+that are read start to finish. The seventeen specifications, the
+milestone map, the readiness review, and the thirty-four ADRs are
 reference material reached by cross-reference, and the site is where
 cross-references work.
 

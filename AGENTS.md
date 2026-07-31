@@ -50,6 +50,7 @@ Read, in this order, before starting an assignment:
 | Isolated execution, egress, the artifact store | `sandbox-isolation.md` |
 | Skill packages, the catalog, the authoring loop | `skills.md` |
 | Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
+| Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 

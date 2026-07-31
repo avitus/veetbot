@@ -4582,3 +4582,187 @@ on citations resolving rather than dangling.
 
 **Question for you:** if you want a management surface before 0.1,
 it is a small API document rather than an addition to this one.
+
+## Section 29's Device model (ADR-0034)
+
+### An audit of the seam rather than a design
+
+**Decided:** the seventeenth specification does not design the
+`Device`. It walks the corpus for every place a deferred device
+design will have to touch, and records what it finds.
+
+**Why:** Section 29's own last subsection says *"Defer the Device
+concept, presence, device-scoped tool routing, and notifications to
+a milestone with concrete use cases"*, and the plan's sequencing
+table puts inbound surfaces and pairing at Milestone 10. Writing
+contracts for the four ports Section 29.6 names would be building
+the thing the plan defers, inside a document whose job is to expand
+the plan rather than overrule it.
+
+**Alternative:** write the design anyway and mark it deferred.
+Rejected because a design nobody is allowed to build is a design
+nobody reviews, and it would have been the only specification in the
+corpus that no milestone reaches.
+
+**Reversal cost:** low. The audit is a list of places, and a later
+design consumes the list rather than replacing it.
+
+### The document declares no gates
+
+**Decided:** no `## Hard gates` section. The census stays at 166
+declared, 175 declarations, 172 registry entries.
+
+**Why:** a gate is a test that runs against built code, and this
+document authorizes no code. The one obligation Section 29 actually
+places on 0.1 — that a second client can attach to a session and
+replay it — is already a hard gate somewhere else,
+`gate.api.replay_exact` at Milestone 5.
+
+**Cost:** gate-less specifications go from two to three. The other
+two, `bootstrap-and-composition.md` and `development-toolchain.md`,
+are gate-less for the same reason: they describe arrangement rather
+than behaviour.
+
+### The four Section 29.6 ports get a placement and nothing else
+
+**Decided:** each of the four is named with the module it will live
+in, and no signature is written.
+
+**Why:** the readiness review recorded that the model had no home,
+which is a question about placement rather than about contracts.
+`bootstrap-and-composition.md` already answers placement in general:
+a port lives in the module named for the capability it abstracts,
+not for the component that calls it. Applying a rule that already
+exists is not new design; writing four method signatures would be.
+
+**Note:** this is why the document is useful at all. A placement can
+be checked against the rule today. A contract could only be checked
+against a use case nobody has yet, which is the same use case
+Section 29.8 says it is waiting for.
+
+### A device that attaches mid-session is invisible until the next one
+
+**Decided:** presence does not change what a session advertises. A
+device that attaches after a session opens contributes no tools to
+that session.
+
+**Why:** `tool-system.md` pins the advertised tool prefix at session
+open and resolves availability at call time, and it already handles
+the disconnect direction — a device that goes away yields
+`unavailable` with `tool.device_offline`. The attach direction has
+the same shape as an MCP server sending
+`notifications/tools/list_changed`, which the same document records
+and does not apply, with the new tools available at the next session
+open. Resolving attach any other way means two rules for one
+behaviour.
+
+**Question for you:** the user-visible cost is that plugging in a
+phone mid-conversation does not make the phone's tools usable until
+the next session. That may be exactly wrong for a product whose
+premise is multi-device. If it is, the fix is to unpin the prefix
+for every source at once, not to special-case devices.
+
+### Per-device scopes are an intersection, and never a new prefix
+
+**Decided:** a per-device scope set is the intersection of the
+principal's scopes and the device's, computed once when the run is
+submitted, and every string in it comes from the closed fifteen.
+
+**Why:** `runs.principal_scopes` is stamped at submission and
+`PrincipalResolver.for_run` reads the stamp and never a table, which
+is hard gate 13, *"The scope set is the run's."* An intersection
+computed before the stamp needs no change to the policy engine at
+all — the engine is never told a device exists. The constraint that
+travels with it is that a device may not introduce a `device.` scope
+prefix, because the vocabulary is closed at fifteen strings with one
+exception for `mcp`, and hard gate 11 enforces that grammar. The
+`device.` that exists today is a tool-name domain, an unrelated
+namespace that happens to share a word.
+
+**Reversal cost:** low now, high later. Making device scopes
+anything other than a subset means changing the grammar gate, the
+stamp, and the resolver together.
+
+### Device lifecycle events are named as a gap, not placed
+
+**Decided:** the document records that a device attaching,
+detaching, or being revoked has nowhere to be written, and stops
+there.
+
+**Why:** `events.session_id` is `NOT NULL` and the uniqueness
+constraint is `(session_id, sequence)`, so the append-only log has
+no shape for an event that belongs to a principal rather than to a
+session. Every fix is a schema change: a nullable column, a second
+log, or a synthetic session. Choosing among them is design work on
+the deferred subject, and choosing wrong is a migration.
+
+**Question for you:** where should device lifecycle events go? My
+weak preference is a separate audit table rather than a nullable
+`session_id`, because that constraint is doing real work everywhere
+else in the log.
+
+### `NotificationService` is a name with nothing behind it
+
+**Decided:** recorded as a gap. Not defined here.
+
+**Why:** the name appears exactly twice in the whole corpus, once in
+the plan's port list and once in ADR-0011, and neither says what it
+does. It could be one port or two: pushing a message to a device is
+a transport concern, deciding whether to notify at all is a policy
+concern, and the two have different testability.
+
+**Question for you:** one port or two? Two is my weak preference, on
+the same split the corpus already draws between the tool broker and
+the policy engine.
+
+### Three plan sentences are corrected in the specifications' favour
+
+**Decided:** where Section 29 and a specification disagree, the
+specification wins and the plan sentence is the one recorded as
+needing correction.
+
+**Why:** the specifications are newer, they carry gates, and the
+plan delegates to them by name. Concretely: the registry accepting
+new entries from *"exactly two sources"* is wrong once attach
+exists, because attach is a third; Section 29.5's *"queue or
+reject"* is reject, because ADR-0004's partial unique index makes a
+second active run on a session impossible to enqueue rather than
+merely unwise; and presence-based exposure yields to the pinned
+prefix, as above.
+
+**Note:** none of the three is edited in `engineering-plan.md` on
+this pass. Correcting them in place would settle the deferred
+design's conflicts before the design exists. Recording them means
+the implementer meets each one with the resolution already attached.
+
+### A paired Surface is a Device with an empty capability set
+
+**Decided:** no second model. A Surface — a phone, a chat client, an
+email bridge — is a `Device` that advertises no tools.
+
+**Why:** the two differ in what they can do, not in what they are.
+Both attach to a principal, both are clients of the same API, both
+need the same revocation path. A second model would duplicate
+identity, pairing, and revocation in order to express *"and it has
+no tools"*, which an empty set already expresses.
+
+**Question for you:** what trust label does a message that arrives
+through a paired Surface carry? A message a user types on their own
+phone is `USER`. A message that arrives as an email through a bridge
+is not, and the corpus has no rule yet for the middle.
+
+### The order the deferred work lands in is left open
+
+**Decided:** the five gaps are listed with what each will cost, and
+not ordered.
+
+**Why:** even the cheapest sequencing question — whether the
+`Device` table lands before device-scoped tool routing — has an
+answer that depends on which use case forces the work, and Section
+29.8 defers precisely until there is a concrete use case. Ordering
+them now would be inventing that use case.
+
+**Question for you:** if you want an order anyway, my weak
+preference is identity first — the table, pairing, and revocation —
+with routing and notifications after. Identity is the part every
+other piece needs, and it is the part that is a migration.

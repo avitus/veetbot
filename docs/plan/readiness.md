@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1924` states that device tools are *"a reserved
+    `tool-system.md:1927` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -935,15 +935,16 @@ loop. Those gates come from a section of the plan rather than from
 this milestone's own criteria, which it still does not have, so the
 verdict is unchanged by them.
 
-## The three plan sections no specification expands
+## The three plan sections no specification expanded
 
-Sections 29 through 31 are the only major sections of the engineering
-plan with no outward cross-reference paragraph. A scan of
+Sections 29 through 31 were the only major sections of the
+engineering plan with no outward cross-reference paragraph. A scan of
 `engineering-plan.md:3231-3384` for links to other documents returned
 nothing when this review was written, where every other major section
-acquired one during the specification work. Two of the three are
-genuinely unexpanded; the third is half-expanded from the consuming
-side.
+acquired one during the specification work. Two of the three were
+genuinely unexpanded; the third was half-expanded from the consuming
+side. All three carry the paragraph now, and what follows is the
+finding in each case and what closed it.
 
 Section 28 was the fourth, and it is expanded now, by
 [sandbox-isolation.md](sandbox-isolation.md), which gives it the
@@ -964,10 +965,54 @@ and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
 `tool-system.md:1417` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1924` states that device tools are *"a reserved seam,
+`tool-system.md:1927` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
-and it is the right call for a Milestone 10-adjacent concern. The
-`Device` model itself still has no home.
+and it is the right call for a Milestone 10-adjacent concern. What it
+left behind was a model with no home.
+
+[multi-device-and-surfaces.md](multi-device-and-surfaces.md) and
+ADR-0034 close it, and they close it as an audit rather than a design,
+because Section 29.8 defers its own subject and a specification that
+wrote the four contracts would be building the deferred thing. What
+an audit produces instead is the answer to the question a deferral
+leaves hanging: whether the `Device` lands additively when it lands.
+Eight places in the corpus already hold a device-shaped hole and need
+no edit — the `DEVICE` tool source, forced untrusted output at
+registration and its enforcement in the composition root, the
+reserved `device.` domain, `ExecutionTarget.kind` with `device_id`
+beside it, the single authorization gate that already names the
+device channel, `tool.device_offline` as a row of the availability
+table rather than an exception to it, and idempotent approval
+resolution that cites Section 29 by name. Five do not, and naming
+them is the point of the exercise: attach is a third registration
+source and not at session open; device lifecycle events have no
+session to be charged to against a `NOT NULL` column; a capability
+hand-off is a fourth suspension kind against a closed two-value
+vocabulary; no client is attributed on a write, which matters for
+inbound content rather than for tool output; and
+`NotificationService` is a port name appearing twice in the corpus
+with no mechanism, transport, or durability behind it, which
+`LISTEN`/`NOTIFY` does not supply and was never meant to.
+
+The strongest result is the one that costs nothing. Section 29.4's
+per-device scopes read like a second evaluation path and are not one.
+The scope set is captured at submission and stamped on the run, and
+`PrincipalResolver.for_run` reads that stamp and never a table, so
+narrowing is an intersection computed once at submission and the
+policy engine is never told that a device exists. The constraint
+travelling with it is that a `device.` scope prefix would mean
+rewriting the fifteen-string grammar and the gate that asserts it,
+and the `device.` that already exists is a tool-name domain rather
+than a scope prefix. Three conflicts between Section 29 and later
+specifications are named and resolved in the specifications' favour,
+one of them the question `tool-system.md:1431` reserved by name —
+whether a device tool may be advertised in a session opened while the
+device was absent — which resolves against the pinned prefix on the
+same precedent that governs an MCP catalog change mid-session. None
+of it is 0.1 work, and 29.8's own scope paragraph is already
+satisfied: reads and writes are principal-scoped and served from the
+core, and a second client attaching and replaying is
+`gate.api.replay_exact` at Milestone 5.
 
 ### 30. Self-improving skills
 
@@ -1039,8 +1084,11 @@ code. `agent run export` is a subcommand rather than a thirteenth
 top-level command, on the precedent
 [evaluation-harness.md](evaluation-harness.md) set with `agent eval`.
 
-That leaves one. Section 29's `Device` model is the only part of
-Sections 29 through 31 that no specification now expands.
+That leaves none. Every part of Sections 29 through 31 is expanded
+by a specification now. The last of the three is expanded as an audit
+rather than a design, which is the only shape available for a section
+whose own scope paragraph defers it, and the audit is what turns
+"defer this" into a list of what deferring it will cost.
 
 ## What the evaluation suite does not reach
 
