@@ -1,11 +1,58 @@
-version: 1
-prefix_ceiling_tokens: 15000
+schema_version: 1
+prefix:
+  ceiling_tokens: 15000
 classes:
-  system_instructions: {cap: 6000, region: prefix}
-  policy_summary: {cap: 1500, region: prefix}
-  tool_schemas: {cap: 6000, region: prefix}
-  session_history: {cap: 12000, region: body}
-  current_turn: {cap: 8000, region: body}
-  working_state: {cap: 4000, region: body}
-  retrieved_context: {cap: 6000, region: body}
-max_compactions_per_step: 2
+  platform_policy:
+    region: A
+    max_tokens: 2000
+  agent_instructions:
+    region: A
+    max_tokens: 4000
+  tool_definitions:
+    region: A
+    max_items: 30
+    max_tokens: 6000
+  skill_catalog:
+    region: A
+    max_items: 20
+    max_tokens: 1500
+  memory_snapshot:
+    region: A
+    max_items: 40
+    max_tokens: 1500
+    max_window_ratio: 0.02
+  skill_bodies:
+    region: B
+    max_items: 2
+    max_tokens: 6000
+  working_state:
+    region: B
+    max_tokens: 1000
+  knowledge_passages:
+    region: B
+    max_items: 3
+    max_tokens: 3000
+  in_turn_recall:
+    region: B
+    max_tokens: 2000
+  tool_results:
+    region: B
+    max_body_ratio: 0.25
+  history:
+    region: B
+    floor_tokens: 8000
+  current_user_message:
+    region: B
+    uncapped: true
+output:
+  reserve_tokens: 8192
+estimator:
+  safety_margin_ratio: 0.05
+summary:
+  max_depth: 2
+working_state:
+  max_constraints: 20
+  max_open_tasks: 30
+  max_established_facts: 40
+  max_open_questions: 20
+  block_ceiling_tokens: 1000

@@ -11,10 +11,9 @@ title: Current Milestone
 
 The repository foundation and all locally runnable Milestone 0 gates are in
 place, including the Docker Compose startup, migration round trip, and the four
-CI target partitions. Completion remains open while the eight shipped YAML
-files still contain provisional subsets rather than all 106 version-controlled
-defaults required by the configuration design, and until the committed workflow
-has hosted execution evidence. See the machine-readable
+CircleCI target partitions. The 106 version-controlled defaults are present and
+enforced by an executable inventory. Completion remains open until the committed
+CircleCI workflow has hosted execution evidence. See the machine-readable
 [project state](../status/project-state.yaml) for the recorded checks.
 
 Authoritative acceptance criteria for every milestone are defined only by the

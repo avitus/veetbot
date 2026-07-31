@@ -11,9 +11,9 @@ project status changes; **status changes require evidence**.
 At the time of writing: phase **`implementation`**, current milestone
 **Milestone 0**, authorized milestones **0 and 1**. Milestone 0 is in progress;
 its locally runnable gates, Docker Compose migration round trip, and all four CI
-target partitions pass locally. The shipped configuration defaults remain
-incomplete, and hosted CI execution remains to be evidenced after the worktree
-changes are committed.
+target partitions pass locally. All 106 shipped configuration defaults are
+present. Hosted CircleCI execution remains to be evidenced after the `dev`
+branch is pushed.
 
 The milestone titles in `project-state.yaml` mirror the canonical
 [engineering plan](../plan/engineering-plan.md); keep the two synchronized.

@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Milestone 0 defaults and CircleCI
+
+- Replaced the GitHub Actions workflow with a CircleCI 2.1 configuration that
+  retains the static, contract, integration, and live partitions. ADR-0035
+  records the provider change.
+- Expanded the six overlayable default documents and the frozen hardline rules.
+  The executable configuration inventory now resolves exactly 106 unique,
+  non-null knob paths. ADR-0036 records the five initial operational defaults
+  the corpus named but did not value.
+- Merged every change from `origin/docs/plan-completion` before applying the
+  implementation updates.
+
 ## 2026-07-31 — Milestone 0 implementation started
 
 - Established the Python 3.12 `uv`/Hatch repository, `agent` CLI entry point,

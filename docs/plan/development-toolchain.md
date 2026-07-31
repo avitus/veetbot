@@ -275,7 +275,8 @@ now would be a service nobody starts and nobody maintains.
 
 ## The CI workflow
 
-One file, `.github/workflows/ci.yml`, and four jobs matching
+One file, `.circleci/config.yml`, using CircleCI configuration version 2.1 and
+four jobs matching
 [evaluation-harness.md](evaluation-harness.md) exactly.
 
 ```text
@@ -295,28 +296,30 @@ union of the two jobs is exactly `make check`, no check appears in
 both, and a developer who runs `make check` locally has run both
 jobs' contents.
 
-Job 3 uses a GitHub Actions service container rather than the compose
-file, because the compose file publishes a port on the developer's
-host and a service container does not need to. The database name,
-user, and password are the same three values, which keeps
-`DATABASE_URL` construction identical in both places.
+Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
+than the compose file, because the compose file publishes a port on the
+developer's host and a secondary container does not need to. The database
+name, user, and password are the same three values, which keeps `DATABASE_URL`
+construction identical in both places.
 
 Job 4 does not run on a pull request. Live tests cost money and
 require a credential that a fork's pull request cannot have, so the
-job runs on a schedule and on manual dispatch, and its absence from
-the pull-request path is a fact rather than an omission — Section 20.4
-already gates live tests behind `RUN_LIVE_MODEL_TESTS=1` and the
-workflow is the place that variable is set.
+job runs in the nightly workflow or when a manually triggered pipeline sets
+`run_live: true`, and its absence from the pull-request path is a fact rather
+than an omission — Section 20.4 already gates live tests behind
+`RUN_LIVE_MODEL_TESTS=1`. The `live-model` CircleCI context supplies provider
+credentials without placing them in the configuration file.
 
 Three workflow-level facts complete the definition:
 
-1.  **Triggers.** Push to the default branch, pull request against it,
-    and `workflow_dispatch`. Jobs 1 through 3 run on all three; job 4
-    runs on `workflow_dispatch` and a nightly `schedule`.
+1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 for ordinary VCS
+    pipelines, including pull-request branches. A pipeline with `run_live: true`
+    selects the manual live workflow instead. The fourth job also runs nightly
+    on `main` at 07:17 UTC.
 2.  **Python version.** A single version, 3.12, not a matrix. The
     project pins `requires-python >=3.12` and runs one deployment; a
     matrix here would test a configuration nothing runs.
-3.  **Caching.** The `uv` cache is keyed on `uv.lock`. The lockfile is
+3.  **Caching.** The CircleCI `uv` cache is keyed on `uv.lock`. The lockfile is
     committed, so a cache miss is a dependency change and never a
     coincidence.
 
@@ -563,7 +566,7 @@ done badly.
 9.  **One compose service at Milestone 0.** PostgreSQL and nothing
     else. Artifacts are the filesystem, the queue is PostgreSQL, and a
     placeholder service is one nobody starts and nobody maintains.
-10. **One workflow file, four jobs, one Python version.** No matrix:
+10. **One CircleCI configuration file, four jobs, one Python version.** No matrix:
     the project pins `>=3.12` and runs one deployment, so a matrix
     would test a configuration nothing runs. The `uv` cache keys on
     `uv.lock`, so a cache miss means a dependency changed.

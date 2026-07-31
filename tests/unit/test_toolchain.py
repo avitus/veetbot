@@ -67,37 +67,58 @@ def test_compose_has_one_healthy_postgres_service() -> None:
 
 
 def test_ci_has_the_four_required_partitions() -> None:
-    workflow = yaml.safe_load(
-        (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    )
-    jobs = workflow["jobs"]
-    assert set(jobs) == {"static", "contract", "integration", "live"}
-    assert jobs["integration"]["services"]["postgres"]["image"] == "postgres:16-alpine"
-    triggers = workflow.get("on", workflow.get(True))
-    assert set(triggers) == {"pull_request", "push", "workflow_dispatch", "schedule"}
-    assert triggers["push"]["branches"] == ["main"]
-    assert jobs["static"]["if"] == "github.event_name != 'schedule'"
-    assert jobs["contract"]["if"] == "github.event_name != 'schedule'"
-    assert jobs["integration"]["if"] == "github.event_name != 'schedule'"
-    assert jobs["live"]["if"] == (
-        "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
-    )
+    workflow_directory = ROOT / ".github" / "workflows"
+    assert not list(workflow_directory.glob("*.yml"))
+    assert not list(workflow_directory.glob("*.yaml"))
 
-    commands = {
-        name: [step["run"] for step in job["steps"] if "run" in step] for name, job in jobs.items()
+    config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
+    assert config["version"] == 2.1
+    jobs = config["jobs"]
+    assert set(jobs) == {"static", "contract", "integration", "live"}
+    for job in jobs.values():
+        assert job["docker"][0]["image"] == "cimg/python:3.12"
+
+    postgres = jobs["integration"]["docker"][1]
+    assert postgres == {
+        "image": "postgres:16-alpine",
+        "environment": {
+            "POSTGRES_DB": "agent",
+            "POSTGRES_USER": "agent",
+            "POSTGRES_PASSWORD": "agent",
+        },
     }
+
+    commands = {}
+    for name, job in jobs.items():
+        commands[name] = [
+            step["run"]["command"]
+            for step in job["steps"]
+            if isinstance(step, dict) and "run" in step
+        ]
     assert "make lint typecheck test-static docs-check" in commands["static"]
     assert "make test-contract" in commands["contract"]
     assert "make migrate test-integration" in commands["integration"]
     assert "make test-live" in commands["live"]
 
-    for job in jobs.values():
-        python_steps = [
-            step for step in job["steps"] if step.get("uses") == "actions/setup-python@v5"
-        ]
-        assert python_steps == [
-            {"uses": "actions/setup-python@v5", "with": {"python-version": "3.12"}}
-        ]
+    workflows = config["workflows"]
+    assert set(workflows) == {"verify", "live_manual", "live_nightly"}
+    assert workflows["verify"] == {
+        "unless": "<< pipeline.parameters.run_live >>",
+        "jobs": ["static", "contract", "integration"],
+    }
+    assert workflows["live_manual"]["when"] == "<< pipeline.parameters.run_live >>"
+    nightly = workflows["live_nightly"]
+    assert nightly["triggers"] == [
+        {
+            "schedule": {
+                "cron": "17 7 * * *",
+                "filters": {"branches": {"only": "main"}},
+            }
+        }
+    ]
+    assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
+        '{{ checksum "uv.lock" }}'
+    )
 
 
 def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:

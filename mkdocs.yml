@@ -123,4 +123,6 @@ nav:
       - ADR-0032 Trajectory export, redaction, and consent: adr/0032-trajectory-export-redaction-and-consent.md
       - ADR-0033 Knowledge documents and passage retrieval: adr/0033-knowledge-documents.md
       - ADR-0034 Section 29 as an audited seam: adr/0034-multi-device-and-surfaces-seam.md
+      - ADR-0035 CircleCI hosted CI: adr/0035-circleci-hosted-ci.md
+      - ADR-0036 The executable configuration inventory: adr/0036-configuration-default-inventory.md
   - Changelog: changelog.md

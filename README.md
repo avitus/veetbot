@@ -87,6 +87,12 @@ Static and contract tests deny network egress. Integration tests may use Unix
 sockets and loopback only. Live tests are the sole category that lifts the
 socket block.
 
+Hosted checks use [CircleCI](https://circleci.com/) via
+`.circleci/config.yml`. Connect the repository as a CircleCI project for the
+static, contract, and integration workflow. Create a restricted context named
+`live-model` for provider credentials; nightly runs and manually triggered
+pipelines with `run_live: true` are the only workflows that use it.
+
 ## Configuration
 
 Environment values are limited to deployment identity, addresses, and secrets.

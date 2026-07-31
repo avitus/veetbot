@@ -47,7 +47,7 @@ milestones:
 
 verification:
   milestone_0:
-    recorded_at: 2026-07-31T23:27:14Z
+    recorded_at: 2026-07-31T23:52:08Z
     status: in_progress
     evidence:
       - check: make install
@@ -56,13 +56,13 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff, strict mypy, 38 static tests, the empty contract partition,
-          the strict documentation build, 120 citation checks, and all 13
+          Ruff, strict mypy, 39 static tests, the empty contract partition,
+          the strict documentation build, 123 citation checks, and all 13
           active Milestone 0 gates passed.
       - check: make test against Compose PostgreSQL 16
         outcome: passed
         detail: >-
-          All 39 non-live tests passed, including a clean Alembic downgrade
+          All 40 non-live tests passed, including a clean Alembic downgrade
           and upgrade round trip against PostgreSQL 16.
       - check: make db-up
         outcome: passed
@@ -77,18 +77,26 @@ verification:
           This host already runs another PostgreSQL on loopback port 5432, so
           verification addressed Docker's published port through the host
           network address.
-      - check: four CI target partitions
+      - check: CircleCI configuration
+        outcome: passed_locally
+        detail: >-
+          CircleCI CLI validation accepted .circleci/config.yml. The sole
+          hosted definition contains static, contract, integration, and live
+          jobs on Python 3.12; GitHub Actions workflows are absent.
+      - check: 106 shipped configuration knobs
+        outcome: passed
+        detail: >-
+          The executable inventory resolves exactly 106 unique, non-null paths
+          across policy, model, context, tool, runtime, and memory defaults.
+      - check: four CircleCI target partitions
         outcome: passed_locally
         detail: >-
           The static, contract, integration, and currently empty live targets
-          from .github/workflows/ci.yml all exited successfully. Workflow
+          from .circleci/config.yml all exited successfully. Workflow
           structure tests assert their triggers, commands, PostgreSQL service,
           Python version, and credential gate.
     remaining:
-      - >-
-        Replace the provisional shipped YAML values with the complete set of
-        106 version-controlled defaults specified across the design corpus.
-      - Observe the workflow on hosted CI after the worktree changes are committed.
+      - Observe the workflow on hosted CircleCI after the dev branch is pushed.
 
 documentation:
   canonical_format: markdown

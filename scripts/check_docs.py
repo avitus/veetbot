@@ -84,7 +84,7 @@ def check_required_files() -> None:
         "scripts/check_citations.py",
         "docs/status/citation-ledger.yaml",
         ".github/copilot-instructions.md",
-        ".github/workflows/ci.yml",
+        ".circleci/config.yml",
         "evals/gates/structure.yaml",
         "evals/gates/harness.yaml",
         "migrations/versions/a3f19c2b7d04_repository_foundation.py",

@@ -1,10 +1,19 @@
-models:
+schema_version: 1
+aliases:
+  deterministic: fake/deterministic
+limits:
   deterministic:
-    provider: fake
-    context_window: 32768
+    context_window_tokens: 32768
     max_output_tokens: 4096
-    prices_per_million_tokens:
-      input: 0
-      cached_input: 0
-      output: 0
-      reasoning: 0
+context_windows:
+  deterministic: 32768
+prices:
+  deterministic:
+    input_per_mtok: "0"
+    cached_input_per_mtok: "0"
+    cache_write_per_mtok: null
+    output_per_mtok: "0"
+    reasoning_per_mtok: "0"
+    reasoning_priced_separately: true
+    source: model_catalog
+    effective_at: "2026-07-31T00:00:00Z"

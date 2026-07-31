@@ -1,8 +1,41 @@
-version: 1
+schema_version: 1
 rules:
-  - id: deny_secret_exfiltration
-    effect: deny
-    description: Never expose platform or provider credentials.
-  - id: deny_destructive_host_access
-    effect: deny
-    description: Never grant generated code access to the host.
+  - id: destructive_root_delete
+    kind: command_regex
+    applies_to: [code_execution, sandbox_network]
+    pattern: '\brm\s+(-[a-zA-Z]*[rf][a-zA-Z]*\s+)+/(\s|$)'
+    message_code: policy.hardline.destructive_command
+    near_miss: rm -rf ./build
+  - id: protected_host_path
+    kind: protected_path
+    applies_to: [workspace_write, code_execution]
+    paths: [/etc, /usr, ~/.ssh, .git/config, .env]
+    message_code: policy.hardline.host_path
+    near_miss: ./.env.example
+  - id: credential_class
+    kind: side_effect
+    applies_to: [credential_access]
+    message_code: policy.hardline.credential_access
+    near_miss: read a credential reference from configuration
+  - id: host_access_class
+    kind: side_effect
+    applies_to: [host_access]
+    message_code: policy.hardline.host_access
+    near_miss: read a file through the isolated workspace handle
+  - id: privileged_class
+    kind: side_effect
+    applies_to: [privileged]
+    message_code: policy.hardline.privileged
+    near_miss: run as the unprivileged sandbox user
+  - id: metadata_egress
+    kind: network_range
+    applies_to: [network_read, sandbox_network]
+    cidrs: [169.254.0.0/16, fe80::/10]
+    message_code: policy.hardline.metadata_egress
+    near_miss: https://example.com/
+  - id: credential_to_egress
+    kind: trust_flow
+    applies_to: [external_message, external_write, publication]
+    source: credential_shaped
+    message_code: policy.hardline.secret_exfiltration
+    near_miss: send the name of a credential reference

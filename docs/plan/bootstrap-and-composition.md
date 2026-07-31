@@ -365,6 +365,30 @@ The two under `policy/` are already named by
 additions, and each one is a home for knobs a spec has already fixed a value
 for — none of them introduces a knob that does not already exist.
 
+The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
+`agent_core.config` names every operator-reviewable dotted path, and a static
+test resolves every path from its shipped YAML document, rejects null values,
+and asserts the total is 106. Schema versions, profile names, rule identifiers,
+model-catalog records, conditions, and frozen hardline predicates are metadata
+or invariants rather than knobs and are not counted.
+
+| File | Knobs |
+| --- | ---: |
+| `policy/default.yaml` | 23 |
+| `models/policies.yaml` | 4 |
+| `context/plan.yaml` | 26 |
+| `tools/limits.yaml` | 20 |
+| `runtime/limits.yaml` | 16 |
+| `memory/profiles.yaml` | 17 |
+| **Total** | **106** |
+
+Five required operational defaults had no numeric value in the corpus. ADR-0036
+sets the initial values: a 4 MiB global tool-output ceiling, a 30-second worker
+lease, and default run caps of 32 steps, 16 model calls, and 32 tool calls. The
+values are versioned alongside the 101 values already fixed by the specs, so a
+later evidence-backed change is an ordinary reviewed configuration diff rather
+than an environment override.
+
 `hardline.yaml` is the one file the overlay may not touch. Section 15 requires
 the hardline set to be frozen at load "so no configuration or in-process code
 can disable them", and an overlay is configuration. Attempting to overlay it

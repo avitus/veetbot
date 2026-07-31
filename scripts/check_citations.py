@@ -144,9 +144,7 @@ def load_ledger() -> dict[str, str]:
 
 def as_yaml_scalar(text: str) -> str:
     """``text`` as a one-line double-quoted YAML scalar, correctly escaped."""
-    return yaml.safe_dump(
-        text, default_style='"', allow_unicode=True, width=10**9
-    ).rstrip("\n")
+    return yaml.safe_dump(text, default_style='"', allow_unicode=True, width=10**9).rstrip("\n")
 
 
 def write_ledger(entries: list[dict]) -> None:

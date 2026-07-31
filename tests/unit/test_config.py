@@ -1,10 +1,14 @@
 """Deployment configuration validation tests."""
 
 from pathlib import Path
+from typing import cast
 
 import pytest
+import yaml
 
 from agent_core.config import (
+    PACKAGE_ROOT,
+    SHIPPED_KNOB_PATHS,
     AuthMode,
     ConfigurationError,
     DeploymentMode,
@@ -80,7 +84,7 @@ def test_unknown_overlay_file_is_refused(tmp_path: Path) -> None:
 def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
     overlay = tmp_path / "tools" / "limits.yaml"
     overlay.parent.mkdir(parents=True)
-    overlay.write_text("maximum_parallel_calls: 4\n", encoding="utf-8")
+    overlay.write_text("parallel:\n  maximum_calls: 4\n", encoding="utf-8")
     settings = load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
     assert settings.config_dir == tmp_path.resolve()
 
@@ -104,3 +108,20 @@ def test_credentials_are_profile_keyed_and_repr_safe() -> None:
     )
     assert set(settings.credentials) == {"openai", "anthropic"}
     assert "synthetic-openai-credential" not in repr(settings)
+
+
+def test_all_106_versioned_knobs_are_present_and_non_null() -> None:
+    qualified_paths = {
+        f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
+    }
+    assert len(qualified_paths) == 106
+
+    for relative, paths in SHIPPED_KNOB_PATHS.items():
+        loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
+        assert isinstance(loaded, dict)
+        for path in paths:
+            value: object = loaded
+            for component in path.split("."):
+                assert isinstance(value, dict), f"{relative}:{path} is not a mapping path"
+                value = cast(dict[str, object], value)[component]
+            assert value is not None, f"{relative}:{path} is null"
