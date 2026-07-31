@@ -281,8 +281,30 @@ readiness:
     Protocol for, the formation half of the memory row, which is
     prose while the retrieval spec beside it declares five, and the
     MCP row.
+
+    Ninth pass, the types. The corpus declares one hundred and forty
+    four distinct types across one hundred and fifty nine
+    declarations, so thirteen types are declared more than once.
+    Four of the thirteen have identical member sets and cannot
+    mislead. Of the nine that differ, eight already say they differ,
+    by an unchanged fields comment inside the fence, an introducing
+    sentence that names what is extended, a supersession paragraph,
+    or in one case a whole reconciliation section. The ninth,
+    ProviderReasoningItem in model-gateway.md, said nothing. The
+    plan declares three fields and the gateway declares six, and
+    opaque_payload becomes provider_payload with no sentence
+    recording the rename anywhere in the corpus. The field is
+    persisted through RunCheckpoint.conversation, so the two
+    declarations would have written two different keys into the same
+    stored JSON. The missing paragraph is added. The plan side of
+    the rename is left as that document's ninth open question,
+    beside its sixth, which asks the same thing about tool_calling
+    and vision. Separately the ModelCapabilities reconciliation,
+    which is complete and correct, sits three hundred and fifty six
+    lines below the fence that needs it, so a pointer was added
+    under the fence.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T23:55:00Z
-last_reviewed_commit: 2be4ec5
+last_updated: 2026-08-01T02:30:00Z
+last_reviewed_commit: 7ab6007

@@ -5819,3 +5819,65 @@ in the corpus are the two that describe their interfaces in prose.
 0 opens, or is the walk meant to find only what exists?
 
 **Reversal cost:** low.
+
+### The type census found one silent re-declaration in thirteen
+
+**Decided:** added the missing supersession paragraph under
+`ProviderReasoningItem` in
+[model-gateway.md](../plan/model-gateway.md), and left the other
+twelve duplicated declarations alone.
+
+**Why:** the corpus declares one hundred and forty four distinct
+types across one hundred and fifty nine declarations, so thirteen
+types are declared more than once. Four of the thirteen have
+identical member sets and cannot mislead anyone. Of the nine that
+differ, eight already say that they differ: `Run`, `ToolSpec` and
+`MemoryRecord` carry an "existing fields, unchanged" comment inside
+the fence, `ContextBudget`, `RunCheckpoint` and `ModelRequest` are
+introduced by a sentence naming what they extend, `ModelProvider`
+has a supersession paragraph, and `ModelCapabilities` has a whole
+section reconciling it row by row. `ProviderReasoningItem` had
+nothing. The plan declares three fields, the gateway declares six,
+`opaque_payload` becomes `provider_payload`, and no sentence in the
+corpus says so.
+
+**Note:** the rename is not cosmetic, because the field is
+persisted. The plan's rules paragraph — store verbatim, never
+summarize, drop on a provider switch — governs a field name that no
+longer exists, and `RunCheckpoint.conversation` carries the item
+into the checkpoint, so an implementer working from the plan and an
+implementer working from the gateway write two different keys into
+the same stored JSON. The string `opaque_payload` occurs exactly
+once in the whole corpus, which is what made it invisible. The same
+document solves this problem correctly twice in the same file, and
+engages with the plan's block directly at the line above the
+rename, which is why I read the third as an oversight and not a
+style.
+
+**Question for you:** the paragraph itself invents nothing and needs
+no answer. The rename does, and it is now question nine in that
+document's own list, beside question six, which asks the same thing
+about `tool_calling` and `vision`. One answer covers both.
+
+**Reversal cost:** none.
+
+### The ModelCapabilities reconciliation is not where the fence is
+
+**Decided:** added a pointer sentence under the declaration.
+
+**Why:** [model-gateway.md](../plan/model-gateway.md) reconciles its
+`ModelCapabilities` against the plan's field by field, with a table,
+a stated reason for every changed row, a precedence rule, and an
+open question. That work sits three hundred and fifty six lines
+below the fence that needs it. A reader who arrives at the
+declaration, counts ten fields where the plan has eight, and does
+not read on has no signal that the divergence was considered at
+all.
+
+**Note:** this is the general shape of what the type census found.
+Every reconciliation in the corpus is sound where it exists. What
+varies is whether the reader is standing where it is.
+
+**Question for you:** none.
+
+**Reversal cost:** none.

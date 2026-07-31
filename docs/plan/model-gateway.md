@@ -670,6 +670,13 @@ class ModelCapabilities(BaseModel):
     streaming: bool = True
 ```
 
+This is not the `ModelCapabilities` of `engineering-plan.md:599`. Two
+fields are renamed, one moves into `ModelLimits` below, and three are
+added, so the two declarations are a divergence rather than an extension.
+They are reconciled field by field further down, under "The two
+`ModelCapabilities` declarations", and that table rather than this fence is
+what an implementer holding the plan open should read.
+
 ```python
 class ModelLimits(BaseModel):
     context_window_tokens: int
@@ -750,7 +757,7 @@ This section is that shape.
 ### Where a profile lives, and the two files it is not
 
 The routing section above says the registry is a YAML file per provider
-profile. `bootstrap-and-composition.md:295-296` places `models/policies.yaml`
+profile. `bootstrap-and-composition.md:355-356` places `models/policies.yaml`
 ("model_policies and provider profiles") and `models/catalog.yaml`
 ("aliases, limits, context windows, prices") inside the package. Read
 together those describe two layouts, and the difference is not cosmetic: one
@@ -771,7 +778,7 @@ src/agent_core/models/
 `policies.yaml` keeps `model_policies` unchanged and satisfies its "and
 provider profiles" half with the list of profile names this deployment
 loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
-the four things `bootstrap-and-composition.md:296` names it for and becomes
+the four things `bootstrap-and-composition.md:356` names it for and becomes
 the target of Section 10.5's fourth declaration, the model-catalog import,
 rather than a second place models are defined. A profile either declares a
 model inline or imports a catalog entry for it, never both.
@@ -916,7 +923,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:966-1003` is
+family of the secret scanner at `bootstrap-and-composition.md:1027-1064` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1401,6 +1408,25 @@ class ProviderReasoningItem(BaseModel):
     trust_level: TrustLevel = TrustLevel.PLATFORM
 ```
 
+This supersedes the `ProviderReasoningItem` declared in Section 6.6, which
+predates the adapters. `opaque_payload` becomes `provider_payload`, which
+is the same bytes under a name that says whose they are. `kind` is added
+because Section 6.6 names this item in a union whose five other members it
+never declares, this document declares those five above with a `kind`
+discriminator each, and a union member without one does not deserialize
+alongside members that have one. `item_index` is added for the reason
+`AssistantMessage` and `ToolCallItem` above carry one: provider output is
+ordered and the order has to survive a round trip. `token_count` is added
+because `ModelPricing.reasoning_priced_separately` exists and Section 6.5's
+cost precedence has nothing to attribute reasoning tokens to otherwise.
+`provider` and `trust_level` are unchanged, and the plan's rules for
+provider-opaque items at `engineering-plan.md:594` — store verbatim, never
+log or summarize or place in long-term memory, carry only for the life of
+the active tool loop, drop on a provider switch — govern the renamed field
+without change. The rename is recorded as an open question rather than
+fixed by editing a plan sentence, the same way the `ModelCapabilities`
+renames are.
+
 ### The PLATFORM default is a privilege inversion, and it is bounded here
 
 `engineering-plan.md:592` defaults `ProviderReasoningItem.trust_level` to
@@ -1834,10 +1860,15 @@ These are decisions taken to keep the plan moving. Each is recorded in
    the two declarations and cannot edit the plan's. The reconciliation table
    makes the divergence readable; it does not make it go away.
 7. Is one file per provider profile right, given that
-   `bootstrap-and-composition.md:295` describes a single `models/policies.yaml`
+   `bootstrap-and-composition.md:355` describes a single `models/policies.yaml`
    holding both policies and profiles? One file per profile is what ADR-0012's
    "without editing core" requires of an overlay, and merging the two back is
    a compatible change in the other direction.
 8. Should `request_id` be dropped from `model_calls` after a retention
    window? It is the one column whose only consumer is a vendor support
    ticket, and those have a shelf life measured in weeks.
+9. Should `ProviderReasoningItem.opaque_payload` be renamed in the plan
+   itself to `provider_payload`? This is question 6 again for a different
+   type, and the same answer should cover both. The field is declared once
+   in the plan and named nowhere else in the corpus, so the edit is one
+   line, and until it happens the divergence is reconciled only here.

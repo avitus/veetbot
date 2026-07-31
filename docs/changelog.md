@@ -4,6 +4,31 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — The types, audited
+
+- Added the supersession paragraph
+  [model-gateway.md](plan/model-gateway.md) never wrote for
+  `ProviderReasoningItem`. The plan declares three fields, the
+  gateway declares six, and `opaque_payload` becomes
+  `provider_payload` with no sentence anywhere saying so. The field
+  is persisted through `RunCheckpoint.conversation`, so the two
+  declarations would have produced two different keys in the same
+  stored JSON. The paragraph names all four differences, states
+  that the plan's rules for provider-opaque items still govern, and
+  leaves the plan's own field name to be settled as a question.
+- Added a pointer under the same document's `ModelCapabilities`
+  fence to the reconciliation table three hundred and fifty six
+  lines below it. The reconciliation was already complete; nothing
+  at the declaration said it existed.
+- Recorded the plan-side rename as that document's ninth open
+  question, beside the sixth, which asks the same thing about
+  `tool_calling` and `vision`.
+- The census behind all of it: one hundred and forty four distinct
+  types across one hundred and fifty nine declarations, thirteen
+  declared more than once, four of those with identical member
+  sets, and eight of the remaining nine already labelled as
+  extensions or supersessions.
+
 ## 2026-07-31 — The ports, audited
 
 - Corrected [runtime-loop.md](plan/runtime-loop.md), which said
