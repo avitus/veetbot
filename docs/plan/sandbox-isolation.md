@@ -1426,11 +1426,13 @@ twelfth area, `sandbox`. Eleven are Milestone 6, the milestone that
 had none; one is Milestone 1 and one is Milestone 4, because that is
 where the code they check is written.
 
-1. **Production refuses the development sandbox.** Startup with
-   `deployment_mode = production` and `sandbox = docker` fails,
-   and so does startup with `auth_mode != dev` and
-   `sandbox = docker`. Both failures name both settings. A warning
-   instead of a failure fails the gate.
+1. **Production refuses the development sandboxes.** Startup with
+   `deployment_mode = production` fails for every mechanism outside
+   `{microvm, gvisor}`, and so does startup with `auth_mode != dev`.
+   The gate is parameterized over that complement rather than naming a
+   mechanism, so it covers `docker` and `fake` today and a fifth value
+   inherits the check instead of escaping it. Both failures name both
+   settings. A warning instead of a failure fails the gate.
    `gate.sandbox.production_refuses_dev`, structural. **M1.**
 2. **The worker imports no container runtime.** The import-boundary
    walk is extended: no module under the runtime, tool, or worker

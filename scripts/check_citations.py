@@ -60,8 +60,8 @@ CITE = re.compile(r"`?([a-z0-9][a-z0-9-]*\.md):(\d+)(?:-(\d+))?`?")
 # one line break - "while line\n2202" - so these match across a single newline
 # but never across a blank line.
 _GAP = r"(?:[ \t]+|[ \t]*\n[ \t]*)"
-BARE = re.compile(rf"\b[Ll]ines?{_GAP}\d{{2,}}")
-LOOSE = re.compile(rf"\b[a-z0-9][a-z0-9-]*\.md{_GAP}\d{{2,}}")
+BARE = re.compile(rf"\b[Ll]ines?{_GAP}\d+")
+LOOSE = re.compile(rf"\b[a-z0-9][a-z0-9-]*\.md{_GAP}\d+")
 
 EXCERPT_CHARS = 60
 
@@ -124,11 +124,15 @@ def collect() -> list[dict]:
     return found
 
 
-def key(c: dict) -> str:
-    span = str(c["target_line"])
+def span_of(c: dict) -> str:
+    """A citation's target as written: ``LINE`` or ``LO-HI``."""
     if c["target_end"] != c["target_line"]:
-        span = f"{c['target_line']}-{c['target_end']}"
-    return f"{c['source']}#{c['target']}:{span}"
+        return f"{c['target_line']}-{c['target_end']}"
+    return str(c["target_line"])
+
+
+def key(c: dict) -> str:
+    return f"{c['source']}#{c['target']}:{span_of(c)}"
 
 
 def load_ledger() -> dict[str, str]:
@@ -136,6 +140,13 @@ def load_ledger() -> dict[str, str]:
         return {}
     data = yaml.safe_load(LEDGER.read_text(encoding="utf-8")) or {}
     return {e["cite"]: e["excerpt"] for e in data.get("citations", [])}
+
+
+def as_yaml_scalar(text: str) -> str:
+    """``text`` as a one-line double-quoted YAML scalar, correctly escaped."""
+    return yaml.safe_dump(
+        text, default_style='"', allow_unicode=True, width=10**9
+    ).rstrip("\n")
 
 
 def write_ledger(entries: list[dict]) -> None:
@@ -148,10 +159,13 @@ def write_ledger(entries: list[dict]) -> None:
         "",
         "citations:",
     ]
+    # Serialize both scalars with the YAML writer rather than by hand. An
+    # excerpt is arbitrary document text and regularly contains backslashes -
+    # `\d`, `\s` - which are not valid escapes inside a double-quoted YAML
+    # scalar, so quote-doubling alone produces a ledger that will not load.
     for e in entries:
-        text = e["excerpt"].replace('"', '\\"')
-        body.append(f'  - cite: "{e["cite"]}"')
-        body.append(f'    excerpt: "{text}"')
+        body.append(f"  - cite: {as_yaml_scalar(e['cite'])}")
+        body.append(f"    excerpt: {as_yaml_scalar(e['excerpt'])}")
     LEDGER.write_text("\n".join(body) + "\n", encoding="utf-8")
 
 
@@ -200,10 +214,13 @@ def run_check(update: bool) -> None:
         lines = c["_path"].read_text(encoding="utf-8").splitlines()
         k = key(c)
 
-        if c["target_line"] > len(lines):
+        # `target_end` is `target_line` for a single-line citation, so this
+        # covers both forms and catches a range whose end runs off the file
+        # even though its first line is real.
+        if c["target_end"] > len(lines):
             errors.append(
                 f"{c['source']}:{c['source_line']} cites {c['target']}:"
-                f"{c['target_line']}, past the end of a {len(lines)}-line file"
+                f"{span_of(c)}, past the end of a {len(lines)}-line file"
             )
             if k in ledger:
                 fresh[k] = ledger[k]

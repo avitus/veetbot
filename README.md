@@ -128,5 +128,11 @@ Start with [AGENTS.md](AGENTS.md). Markdown and YAML are canonical. Files under
 require ADRs, milestone status changes require evidence, and work beyond the
 authorized milestone must not begin speculatively.
 
+Canonical references are the [engineering plan](docs/plan/engineering-plan.md),
+the [current-milestone pointer](docs/plan/current-milestone.md), the
+[machine-readable project state](docs/status/project-state.yaml), and the
+[architecture decision records](docs/adr/). The original Word document under
+`archive/` is archival only.
+
 Security boundaries and the controls established so far are documented in
 [docs/security.md](docs/security.md).

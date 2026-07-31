@@ -1091,7 +1091,9 @@ Extending Section 19's `approval_requests_total`:
 
 ## Build sequence
 
-1. The vocabulary: the four enums, `ProposedAction`, `ExecutionTarget`. No
+1. The vocabulary: the six enums — `SideEffectClass`, `RiskLevel`,
+   `IdempotencyClass`, `ActionKind`, `ApprovalStatus`, and
+   `ApprovalResolutionType` — plus `ProposedAction`, `ExecutionTarget`. No
    logic, no callers. Everything below depends on this and nothing depends on
    the order of the rest.
 2. `default.yaml`, the loader, `policy_version` computation, and the totality

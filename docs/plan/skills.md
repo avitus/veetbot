@@ -430,6 +430,33 @@ the same prefix, a few hundred tokens above, and the model comparing
 two lists it can both see is more reliable than the platform
 computing a boolean whose meaning it would then have to explain.
 
+### `AuthoringContext`
+
+`install` takes the provenance to record rather than reading it from ambient
+state, because the composition root is the only place that knows both the run
+and the principal, and a repository that reached for either would be reaching
+outside its layer.
+
+```python
+@dataclass(frozen=True)
+class AuthoringContext:
+    """Who wrote a revision, for `SkillSource.AGENT` only."""
+
+    run_id: RunId
+    principal_id: PrincipalId
+```
+
+It carries exactly the two fields `SkillRevision` persists and no more. It is
+non-null when and only when `source is SkillSource.AGENT`, which is the same
+condition under which `authored_by_run_id` and `authored_by_principal_id` are
+non-null, so the argument and the columns cannot disagree. That is Section
+30.3's provenance requirement expressed once.
+
+The link to the events that produced a revision is `run_id` and needs no field
+of its own: a run's events are already addressable by run, so the revision
+reaches its authoring trace through the log rather than through a duplicated
+sequence number that could drift from it.
+
 ### `SkillRepository` and `SkillPackageStore`
 
 ```python
@@ -1188,7 +1215,7 @@ Rows 10 and 11 are citation errors and are worth listing because they
 propagate. Four documents — `policy-and-approvals.md:137`,
 `0005-deterministic-policy-engine.md:10` and
 `0005-deterministic-policy-engine.md:141`, and
-`docs/status/questions-for-review.md:245` — attribute the
+`docs/status/questions-for-review.md:275` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
 `readiness.md:723` cited `engineering-plan.md:2690` for the

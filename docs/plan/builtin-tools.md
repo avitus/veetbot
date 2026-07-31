@@ -1437,13 +1437,16 @@ The result carries no timestamp. The invocation row carries the
 timing, and a second one inside the payload would be a second thing to
 keep consistent with it.
 
-### It has no failures
+### Its body has no failures
 
-It reaches nothing that can fail: no network, no filesystem, no clock,
-no parser. The only way a call does not succeed is that policy denied
-it, and a denial is not a `ToolResult` — it is a `PolicyDecision`
-rendered by the pipeline, which is the whole reason this tool is the
-approvals fixture. A test that pauses on `demo.external_write` and
+The body reaches nothing that can fail: no network, no filesystem, no
+clock, no parser. Two things upstream of it can still stop a call, and
+neither is a body failure. Schema validation rejects an invocation that
+omits `destination` or `content`, or that exceeds either length limit,
+before the tool runs at all. Policy can deny it, and a denial is not a
+`ToolResult` — it is a `PolicyDecision` rendered by the pipeline, which
+is the whole reason this tool is the approvals fixture. Past schema
+validation and policy, there is no way for the call not to succeed. A test that pauses on `demo.external_write` and
 resumes is testing the approval path and nothing else, because there
 is nothing else in the tool for the test to be accidentally
 exercising.

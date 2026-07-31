@@ -20,6 +20,122 @@ title: Changelog
   Makefile's health poll. Milestone 0 remains in progress because hosted CI has
   not yet supplied its own execution evidence.
 
+## 2026-07-31 — Twenty review findings, eighteen of them real
+
+A second pass over CodeRabbit's review of pull request #1, which had reported
+one finding as an inline thread and nineteen more inside the review body.
+
+- **The citation checker missed three classes of input.** `BARE` and `LOOSE`
+  required two digits, so a prohibited `line 9` passed unseen; both now match
+  one or more. The end-of-file check tested only a citation's first line, so
+  `file.md:10-999` passed whenever line 10 existed; it now tests the span's end,
+  through a `span_of` helper shared with `key`. And the ledger writer escaped
+  quotation marks by hand, which produces invalid YAML for any excerpt
+  containing `\d` or `\s`; both scalars now go through `yaml.safe_dump`.
+- **Corrected the Pandoc version in the preceding entry.** `--syntax-highlighting`
+  arrived in Pandoc 3.8, not 3.10, and `--highlight-style` was deprecated in that
+  same release. The gate in `scripts/build_docs.py` moved from 3.10 to 3.8, so
+  Pandoc 3.8 and 3.9 now take the new spelling instead of emitting the
+  deprecation warning the change existed to remove.
+- **Aligned the Python version with the specification.**
+  [development-toolchain.md](plan/development-toolchain.md) and ADR-0025 both
+  pin `requires-python >=3.12` and one CI version with no matrix, while
+  `pyproject.toml` declared `>=3.11`, the README said 3.11+, and the workflow
+  pinned nothing at all. The implementation now follows the specification rather
+  than the reverse.
+- **Fixed six counts and identifiers that an audit would trip over**: the type
+  count in Section 18 (seven named, not eight), the four-versus-six enums in
+  policy-and-approvals.md's build sequence, ADR-0004's five columns that were
+  four columns and an index, ADR-0030's prose line reference, ADR-0033's
+  "eleventh gate" now named `gate.knowledge.no_belief_from_document`, and the
+  eight-fields-versus-ten-names ambiguity in `.env.example`.
+- **Closed four contract gaps**: `AuthoringContext` is defined rather than only
+  referenced; `knowledge.ingest` takes a title in both descriptions;
+  `ModelRequestStarted.prefix_sha256` is `NOT NULL`, because a null cannot
+  participate in the exact-one-hash stability gate; and the sandbox
+  production-startup gate is parameterized over every mechanism outside
+  `{microvm, gvisor}` instead of naming `docker` and silently exempting `fake`.
+- **Dropped the events index that served nothing.** The migration added
+  `(session_id, id)` for "watermark scans", but a projection scans
+  `session_id = ? AND sequence > watermark`, which Section 15's
+  `UNIQUE(session_id, sequence)` already serves.
+- **Two findings were rejected with cause.** `agent run export` is not an
+  undefined command: `event-log-and-persistence.md:557-558` gives its arguments
+  and output, and bootstrap-and-composition.md deliberately keeps it out of "the
+  twelve" as a subcommand of an existing command. And the superseded
+  `ModelProvider` and `RunRepository` blocks in the plan are already labelled as
+  superseded in the prose beneath them, and are retained on purpose as the
+  record of what they replaced.
+- No product implementation was performed.
+
+## 2026-07-31 — The append path's three wrong sentences
+
+- Required the append transaction to roll back when its guarded `UPDATE runs`
+  affects zero rows, in
+  [event-log-and-persistence.md](plan/event-log-and-persistence.md). The
+  document had claimed that a writer losing the status-and-lease race "commits
+  nothing at all", which is not what the SQL does: a zero-row `UPDATE` is not an
+  error and aborts nothing, so the sequence allocation and the event `INSERT`
+  would have committed without the state change — producing the
+  `run.completed`-while-`RUNNING` record the same paragraph forbids. An append
+  carrying no state change, the diagnostic `run.fenced`, is named as the
+  explicit exception.
+- Corrected the lock explanation behind the pinned allocation mechanism.
+  PostgreSQL holds a row lock until the transaction ends, not until the end of
+  the statement that took it, so the claim that the atomic increment "holds it
+  for one statement rather than for the caller's whole transaction" was false
+  and the stated reason for pinning it did not hold. The pin stands on the
+  correct reason: it is one atomic read-modify-write with no application
+  round-trip inside the lock.
+- Re-founded the silent-missing-write defence on the mechanism that actually
+  provides it. The document had credited the partial unique index, but `UNIQUE
+  INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to
+  one non-terminal run per session and says nothing about who appends events —
+  and a session already has two appenders, since the submit handler appends the
+  user message from its own transaction
+  ([http-api-and-streaming.md](plan/http-api-and-streaming.md)) while a worker
+  appends run events. The guarantee comes from every writer allocating its
+  sequence inside the transaction that inserts the event, which the corrected
+  lock lifetime makes serializing. The two errors were connected: the false lock
+  claim is what had made the multi-appender case look unsafe.
+- Widened hard gate 1 to append concurrently *within* one session and not only
+  across sessions. Separate sessions share no sequence space, so the gate as
+  written exercised none of the serialization it was there to protect, and the
+  document's claim that a test asserted the defence was not yet true.
+- Propagated the correction to ADR-0003, the failure table, and the document's
+  closing summary, and added a failure-table row for an event committed without
+  its state change. Revised the corresponding entry in
+  [questions-for-review.md](status/questions-for-review.md) and recorded the new
+  rollback requirement beside it.
+- Found by CodeRabbit on pull request #1; the third finding was re-derived
+  rather than applied as written.
+- No product implementation was performed.
+
+## 2026-07-31 — Pandoc's renamed highlighting flag
+
+- Selected the single-HTML build's syntax-highlighting flag by Pandoc
+  version in `scripts/build_docs.py`. Pandoc 3.8 added
+  `--syntax-highlighting` and deprecated `--highlight-style` in the same
+  release; Pandoc older than 3.8 does not accept the new spelling. Both
+  take the same style name, so the build reads `pandoc --version` and
+  passes the spelling that Pandoc understands, with the gate set at 3.8
+  because that is where the new option appears.
+- Chose the version gate over replacing the flag outright because the
+  repository fixes no Pandoc version and the two environments that build
+  the documentation disagree in practice. CI installs whatever
+  `apt-get install pandoc` supplies in
+  [docs.yml](https://github.com/avitus/veetbot/blob/main/.github/workflows/docs.yml),
+  and the README tells contributors to install it from their own package
+  manager, so a contributor on a current release and a CI runner on a
+  distribution package can differ by several minor versions. Switching the
+  spelling outright would have silenced the warning on the newer Pandoc and
+  broken the documentation build on the older one.
+- The style is unchanged: `pygments` remains a valid style name under both
+  spellings, and the generated
+  `dist/engineering-documentation.html` carries the same highlighting
+  rules as before.
+- No product implementation was performed.
+
 ## 2026-07-31 — The values, audited
 
 - Corrected `StopReason.STOP` in [runtime-loop.md](plan/runtime-loop.md)
@@ -1647,9 +1763,11 @@ No product implementation was performed.
   `context_builder.build`. Each of the other eleven names is a seam where two
   specifications' requirements meet, and at most of them the two disagree.
 - Found three places where the loop as written **cannot do what another document
-  requires of it.** It cannot resolve its own agent, because line 1408 reads
+  requires of it.** It cannot resolve its own agent, because
+  `engineering-plan.md`, at line 1408 as the plan then stood, reads
   `agents.get_version(run.agent_id, run.agent_version)` and Section 6.3 puts
-  both fields on `Session`. It cannot suspend, because line 1437 returns bare
+  both fields on `Session`. It cannot suspend, because the same document's line
+  1437, again as it then stood, returns bare
   while Section 27.2 requires the lease released, a checkpoint written, and an
   event emitted — so a run paused for approval holds its lease until expiry, at
   which point the queue hands it to a second worker. And it cannot compact,

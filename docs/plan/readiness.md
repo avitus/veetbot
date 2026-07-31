@@ -351,7 +351,7 @@ only at `engineering-plan.md:459`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:521` named `ApprovalService` as one of
+`bootstrap-and-composition.md:530` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -562,7 +562,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1459`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1462`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -971,7 +971,7 @@ separate trace and the artifact references, stated at
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
-`event-log-and-persistence.md:727` declares a unique index on
+`event-log-and-persistence.md:773` declares a unique index on
 `session_id` where status is not one of `COMPLETED`, `FAILED`, or
 `CANCELLED`, to enforce Section 27.5's one active run per session. A
 parent suspended on a child waits in `WAITING_FOR_APPROVAL` carrying
@@ -1225,10 +1225,10 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1459` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1462` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1761` and `milestone-map.md:910`. The map
+    `model-gateway.md:1765` and `milestone-map.md:910`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

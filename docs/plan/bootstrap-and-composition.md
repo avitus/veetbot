@@ -413,8 +413,8 @@ property of the type rather than a rule people have to remember.
 ### `.env.example`
 
 The plan makes this file a definition-of-done item for every milestone: "New
-configuration appears in `.env.example`." That is satisfied for the eight
-environment values by this file and for the 106 file-layer knobs by their
+configuration appears in `.env.example`." That is satisfied for the environment
+layer by this file and for the 106 file-layer knobs by their
 appearance in a committed default — the requirement is that no configuration
 is undocumented, and both layers meet it. The alternative reading, that all
 106 knobs become environment variables, contradicts the `policy_version` hash
@@ -449,6 +449,15 @@ AGENT_CONFIG_DIR=
 RUN_LIVE_MODEL_TESTS=
 ```
 
+Ten names for eight fields, which is not a discrepancy. `OPENAI_API_KEY` and
+`ANTHROPIC_API_KEY` both populate the `credentials` mapping, which is keyed by
+provider profile name and so grows a name per profile without growing a field.
+`OPENAI_MODEL` populates `interpolation`. `RUN_LIVE_MODEL_TESTS` populates no
+`Settings` field at all: it is read by the test harness to enable the
+live-provider job, and it is listed here because the definition-of-done rule is
+that no configuration is undocumented, not that every name is a field. The
+remaining six names map one-to-one onto the six scalar fields.
+
 `DATABASE_URL` does not appear anywhere in the plan. The plan names PostgreSQL
 as the source of truth in Section 2, gives the schema in Section 14, and
 requires migrations that "upgrade from a clean database" — and never says how
@@ -473,7 +482,7 @@ checks run there, before any adapter exists:
 4.  `deployment_mode == "production"` implies `sandbox` is neither `docker`
     nor `fake`. ADR-0008: "Production startup must refuse to run untrusted
     code under the development fallback." `fake` is behind the same check
-    because it executes nothing (`sandbox-isolation.md:1603`), and a
+    because it executes nothing (`sandbox-isolation.md:1605`), and a
     mechanism that executes nothing isolates less than the fallback this
     rule was written for.
 5.  `config_dir`, if set, exists and contains only files that mirror a shipped

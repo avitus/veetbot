@@ -179,8 +179,9 @@ area from a document that already owned all four.
   pointer to this document. None of these is a redesign.
 - `readiness.md`'s open question 5 is answered: a Milestone 9
   deliverable, sequenced after memory, not its own milestone.
-- The eleventh gate — that no belief is ever formed from a document —
-  is the one that constrains future work hardest, and it is
+- `gate.knowledge.no_belief_from_document` — that no belief is ever
+  formed from a document — is the one that constrains future work
+  hardest, and it is
   deliberate. It forecloses the cheapest wrong implementation, in
   which a consolidation pass mines the corpus for claims and asserts
   them in the agent's own voice with no source attached.

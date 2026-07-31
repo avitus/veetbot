@@ -74,28 +74,58 @@ value to backfill for events written before versioning.
 **Reversal cost:** moderate — trivial before Milestone 2, effectively impossible
 after.
 
-### One appender per session is treated as load-bearing for correctness
+### Serialized allocation, not one appender, is what projection correctness rests on
 
-**Decided:** Section 27.5's "one active run per session" default is kept as
-written, but ADR-0003 records that projection correctness now depends on it, and
-the `runs` table enforces it with a partial unique index.
+**Decided:** projection correctness rests on every event writer allocating its
+sequence with the atomic `UPDATE sessions` *inside* the transaction that inserts
+the event. That statement holds the session row lock until `COMMIT`, so appends
+to one session commit in allocation order. Section 27.5's "one active run per
+session" default is kept as written but is no longer claimed as the mechanism.
 
-**Why:** a monotonic sequence watermark is only safe if writes to a session are
-serialized. With concurrent appenders, a projection can advance past a sequence
-whose transaction has not committed and never see it — the log stays consistent
-and the loss reproduces identically on every rebuild.
+**Why the earlier record was wrong:** the first version of this entry, and
+ADR-0003 with it, attributed the guarantee to the one-active-run default and to
+the partial unique index enforcing it. That index constrains the `runs` table to
+one non-terminal run per session; it says nothing about who appends events. A
+session already has two appenders — the submit handler appends the user message
+from its own transaction while a worker appends run events — so the guarantee had
+to come from elsewhere, and it does: PostgreSQL holds a row lock until
+transaction end, not until statement end, which the specification had separately
+stated incorrectly.
 
-**The question:** should Section 27.5's *default* be promoted to an
-*invariant*? Making it an invariant closes the hazard permanently but forecloses
-concurrent runs per session, which may matter for multi-device use (ADR-0011).
+**The question:** unchanged in substance, but re-pointed. Should the allocation
+discipline be promoted from a documented rule to an enforced one — a single
+repository method no writer may bypass, with a test that fails when an append
+allocates outside its own transaction?
 
-**Interim position:** keep the wording, document the coupling, and specify the
-companion change — snapshot-aware watermarking with
+**Interim position:** state the discipline, name the two appenders that exist,
+and specify the companion change — snapshot-aware watermarking with
 `pg_snapshot_xmin(pg_current_snapshot())` — that must land in the same commit if
-the default is ever relaxed.
+a writer ever allocates ahead of its append. Hard gate 1 is widened accordingly:
+it appended concurrently *across* sessions, which share no sequence space and so
+exercise none of this, and now appends concurrently within one session as well.
 
-**Reversal cost:** cheap as prose; moderate if relaxed after projections exist,
-since every projection's cursor logic changes at once.
+**Reversal cost:** cheap as prose; moderate once projections exist, since every
+projection's cursor logic changes at once.
+
+### A zero-row guarded update rolls the append back
+
+**Decided:** when an append carries a state change, the writer inspects the
+affected-row count of the guarded `UPDATE runs` before `COMMIT` and rolls the
+whole transaction back when it is zero. An append carrying no state change — the
+diagnostic `run.fenced` — has no guarded `UPDATE` and is the explicit exception.
+
+**Why:** the specification previously asserted that a writer losing the
+status-and-lease race "commits nothing at all". That is not what the SQL does. A
+zero-row `UPDATE` is not an error and aborts nothing, so the sequence allocation
+and the event `INSERT` would commit without it, producing exactly the
+`run.completed`-while-`RUNNING` record the same section forbids.
+
+**The question:** none outstanding; this is a correction rather than a choice.
+Recorded because it adds a requirement to the append path that no reviewer has
+seen.
+
+**Reversal cost:** cheap as prose; the rule is one row-count check at one call
+site.
 
 ### No outbox table
 
