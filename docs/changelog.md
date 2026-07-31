@@ -4,6 +4,28 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Pandoc's renamed highlighting flag
+
+- Selected the single-HTML build's syntax-highlighting flag by Pandoc
+  version in `scripts/build_docs.py`. Pandoc 3.10 renamed
+  `--highlight-style` to `--syntax-highlighting` and warns on the old
+  spelling; Pandoc older than 3.10 does not accept the new one. Both take
+  the same style name, so the build now reads `pandoc --version` and
+  passes the spelling that Pandoc understands.
+- Chose the version gate over replacing the flag outright because the two
+  supported environments disagree. CI installs Pandoc with
+  `apt-get install pandoc` in
+  [docs.yml](https://github.com/avitus/veetbot/blob/main/.github/workflows/docs.yml),
+  which is packaged well behind 3.10, and the README tells contributors to
+  install it from their own package manager. Switching the spelling would
+  have silenced the warning on a current local Pandoc and broken the
+  documentation build on the older one.
+- The style is unchanged: `pygments` remains a valid style name under both
+  spellings, and the generated
+  `dist/engineering-documentation.html` carries the same highlighting
+  rules as before.
+- No product implementation was performed.
+
 ## 2026-07-31 — The values, audited
 
 - Corrected `StopReason.STOP` in [runtime-loop.md](plan/runtime-loop.md)
