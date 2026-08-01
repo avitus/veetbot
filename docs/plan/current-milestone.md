@@ -4,18 +4,17 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 1 — In-memory vertical slice (in progress)
+- **Current milestone:** Milestone 1 — In-memory vertical slice (complete)
 - **Authorized milestones:** Milestone 0 and Milestone 1
-- **Project status:** Milestone 0 is complete; Milestone 1 implementation and
-  all 28 of its hard gates are locally passing, with hosted CircleCI evidence
-  still to be recorded before completion.
+- **Project status:** Milestones 0 and 1 are complete. Milestone 1 passed all 28
+  of its hard gates, the full local suite, the required CLI demonstration, and
+  the hosted CircleCI workflow.
 
-The in-memory vertical slice now contains the provider-neutral domain and ports,
-five in-memory repositories, fake model, tool registry and execution pipeline,
-calculator and current-time builtins, deterministic context assembly, the
-inline runtime, CLI, and eleven evaluation cases. The machine-readable
-[project state](../status/project-state.yaml) records completion evidence as it
-is verified.
+The completed in-memory vertical slice contains the provider-neutral domain and
+ports, five in-memory repositories, fake model, tool registry and execution
+pipeline, calculator and current-time builtins, deterministic context assembly,
+the inline runtime, CLI, and eleven evaluation cases. The machine-readable
+[project state](../status/project-state.yaml) records its completion evidence.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -32,6 +31,6 @@ any later milestone speculatively.
 
 ## Completion rule
 
-Milestone 1 is complete only when every acceptance criterion in the canonical
-engineering plan, all 41 gates active through Milestone 1, local verification,
-and the hosted CircleCI workflow pass.
+Milestone 1 met its completion rule: every acceptance criterion in the
+canonical engineering plan, all 41 gates active through Milestone 1, local
+verification, and the hosted CircleCI workflow passed.

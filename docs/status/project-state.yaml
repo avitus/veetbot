@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_1_in_progress
+  status: milestone_1_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 1
   authorized_milestones:
@@ -16,7 +16,7 @@ milestones:
     status: complete
   "1":
     title: In-memory vertical slice
-    status: in_progress
+    status: complete
   "2":
     title: PostgreSQL persistence and durable worker
     status: not_started
@@ -102,8 +102,8 @@ verification:
           all three commit status contexts completed successfully.
     remaining: []
   milestone_1:
-    recorded_at: 2026-08-01T01:03:57Z
-    status: in_progress
+    recorded_at: 2026-08-01T01:19:23Z
+    status: complete
     evidence:
       - check: make check
         outcome: passed
@@ -124,9 +124,21 @@ verification:
         detail: >-
           All 107 non-live tests passed, including the eleven evaluation cases
           and the clean migration check against the healthy Compose service.
-    remaining:
-      - Record the exact CLI demonstration output in completion evidence.
-      - Push the implementation commit and record hosted CircleCI evidence.
+      - check: agent run calculator acceptance flow
+        outcome: passed
+        detail: >-
+          The required prompt exited zero, wrote exactly 391 followed by a
+          newline to stdout, and wrote the six required progress lines to
+          stderr in order: run created; model requests math.calculate; tool
+          executes; tool result returned to model; model produces final
+          response; run completes.
+      - check: hosted CircleCI for dev commit 30664ed
+        outcome: passed
+        detail: >-
+          CircleCI jobs 13, 14, and 15 ran the contract, integration, and
+          static partitions respectively; all three GitHub commit status
+          contexts completed successfully.
+    remaining: []
 
 documentation:
   canonical_format: markdown
@@ -416,5 +428,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-01T01:03:57Z
-last_reviewed_commit: 149b6c1
+last_updated: 2026-08-01T01:19:23Z
+last_reviewed_commit: 30664ed

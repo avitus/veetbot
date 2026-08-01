@@ -7,10 +7,10 @@ foundation. Milestone 1 adds the first complete, in-memory model/tool runtime.
 
 ## Current status
 
-Milestone 0 is complete. Milestone 1 is in final verification: the in-memory
-runtime, fake provider, calculator and current-time tools, deterministic
-evaluation harness, eleven initial cases, and all 28 Milestone 1 gates are
-implemented and passing locally.
+Milestones 0 and 1 are complete. The in-memory runtime, fake provider,
+calculator and current-time tools, deterministic evaluation harness, eleven
+initial cases, and all 28 Milestone 1 gates passed locally and in hosted
+CircleCI.
 
 ## Prerequisites
 
