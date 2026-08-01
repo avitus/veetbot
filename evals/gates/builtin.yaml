@@ -4,55 +4,55 @@
   kind: structural
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "All seven registration steps pass for the checked-in builtin specs, asserted as a static test with nothing else constructed."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_registration
 - id: gate.builtin.reserved_domain
   milestone: 1
   kind: structural
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "A test registers a builtin whose domain is `mcp` and expects a startup error."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_reserved_domain
 - id: gate.builtin.demonstration
   milestone: 1
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "`math.calculate` on `17 * 23` returns exactly `391` with `result_exact` true, asserted on the rendered bytes."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_demonstration
 - id: gate.builtin.parser_property
   milestone: 1
   kind: property
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "A property test over generated expressions asserts that every input either parses and evaluates within the bounds, or returns one of the eight reason codes — and never raises, never returns a non-`Decimal`, and never runs longer than the declared timeout."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_parser_property
 - id: gate.builtin.bounds_latency
   milestone: 1
   kind: property
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "`9**9**9`, `9^9^9`, a 1025-character expression, and a 33-deep nesting each return their specific reason code in under fifty milliseconds."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_bounds_latency
 - id: gate.builtin.int_differential
   milestone: 1
   kind: property
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "A differential test asserts `//` and `%` agree with Python's `int` operators on every combination of signs, which is the flooring semantics this document chose over `Decimal`'s."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_int_differential
 - id: gate.builtin.decimal_exact
   milestone: 1
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "`0.1 + 0.2` returns exactly `0.3`. This is the regression test for the entire reason the numeric type is `Decimal`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_decimal_exact
 - id: gate.builtin.clock_stability
   milestone: 1
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "`system.current_time` under a fixed `Clock` returns identical bytes across two invocations, and the module containing it does not appear in the ambient-time static check's allowed set."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_clock_stability
 - id: gate.builtin.message_table
   milestone: 1
   kind: structural
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "Every `reason_code` this document declares has an entry in the checked-in outcome message table, and every entry's message contains no interpolation."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m1.py::test_message_table
 - id: gate.builtin.handle_only
   milestone: 4
   kind: structural

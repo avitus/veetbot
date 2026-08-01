@@ -1,0 +1,12 @@
+turns:
+  - kind: tool_call
+    tool_name: math.calculate
+    arguments: {expression: "6 * 7"}
+    call_id: call_0001
+  - kind: tool_call
+    tool_name: system.current_time
+    arguments: {timezone: UTC}
+    call_id: call_0002
+  - kind: final
+    text: The result is 42 and the time was read.
+    stop_reason: end_turn

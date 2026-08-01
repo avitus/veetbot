@@ -252,6 +252,47 @@ def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str
             raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")
 
 
+def validate_settings(settings: Settings) -> None:
+    """Refuse unsafe deployment identities before constructing resources."""
+
+    if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
+        raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
+    if settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE} and (
+        settings.deployment_mode is DeploymentMode.PRODUCTION
+        or settings.auth_mode is not AuthMode.DEV
+    ):
+        raise ConfigurationError(
+            "unsafe sandbox configuration: "
+            f"DEPLOYMENT_MODE={settings.deployment_mode.value}, "
+            f"AUTH_MODE={settings.auth_mode.value}, "
+            f"SANDBOX_MECHANISM={settings.sandbox.value}; "
+            "startup refuses docker and fake unless DEPLOYMENT_MODE=development "
+            "and AUTH_MODE=dev"
+        )
+    if settings.deployment_mode is DeploymentMode.PRODUCTION and settings.auth_mode is AuthMode.DEV:
+        raise ConfigurationError(
+            "unsafe authentication configuration: DEPLOYMENT_MODE=production refuses AUTH_MODE=dev"
+        )
+
+
+def validate_runtime_identity(
+    settings: Settings, *, tenant_id: str, principal_id: str, policy_profile: str
+) -> None:
+    """Keep evaluation identities and profiles out of production compositions."""
+
+    if settings.deployment_mode is not DeploymentMode.PRODUCTION:
+        return
+    if (
+        tenant_id.startswith("tenant_eval")
+        or principal_id.startswith("eval.")
+        or policy_profile.startswith("eval.")
+    ):
+        raise ConfigurationError(
+            "production refuses evaluation identity: tenant_id, principal_id, and "
+            "policy_profile must not use evaluation namespaces"
+        )
+
+
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Load and validate the environment layer before constructing resources."""
 
@@ -269,14 +310,6 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
 
     if auth_mode is AuthMode.TOKEN and auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
-    if deployment_mode is DeploymentMode.PRODUCTION and auth_mode is AuthMode.DEV:
-        raise ConfigurationError("production refuses AUTH_MODE=dev")
-    if deployment_mode is DeploymentMode.PRODUCTION and sandbox in {
-        SandboxMechanism.DOCKER,
-        SandboxMechanism.FAKE,
-    }:
-        raise ConfigurationError("production refuses docker and fake sandbox mechanisms")
-
     raw_dir = values.get("AGENT_CONFIG_DIR", "").strip()
     config_dir = Path(raw_dir).expanduser().resolve() if raw_dir else None
     credentials = {
@@ -287,7 +320,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     interpolation = {"OPENAI_MODEL": values.get("OPENAI_MODEL", "")}
     _validate_documents(config_dir, interpolation)
 
-    return Settings(
+    settings = Settings(
         database_url=database_url,
         deployment_mode=deployment_mode,
         auth_mode=auth_mode,
@@ -297,3 +330,5 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         credentials=MappingProxyType(credentials),
         interpolation=MappingProxyType(interpolation),
     )
+    validate_settings(settings)
+    return settings

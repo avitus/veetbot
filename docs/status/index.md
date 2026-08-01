@@ -9,11 +9,10 @@ The authoritative, machine-readable project state lives in
 project status changes; **status changes require evidence**.
 
 At the time of writing: phase **`implementation`**, current milestone record
-**Milestone 0**, authorized milestones **0 and 1**. Milestone 0 is complete;
-its locally runnable gates, Docker Compose migration round trip, all 106 shipped
-configuration defaults, and all four CI target partitions pass. Hosted
-CircleCI's static, contract, and integration jobs passed for `dev` commit
-`5b60bca`. Milestone 1 remains not started.
+**Milestone 1**, authorized milestones **0 and 1**. Milestone 0 is complete.
+Milestone 1's implementation, eleven deterministic cases, and all 28 new hard
+gates pass locally; the status remains in progress until the full suite and
+hosted CircleCI evidence are recorded.
 
 The milestone titles in `project-state.yaml` mirror the canonical
 [engineering plan](../plan/engineering-plan.md); keep the two synchronized.

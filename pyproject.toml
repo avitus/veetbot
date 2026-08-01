@@ -13,13 +13,16 @@ dependencies = [
   "alembic>=1.14,<2",
   "asyncpg>=0.30,<1",
   "fastapi>=0.115,<1",
+  "jsonschema>=4.23,<5",
   "opentelemetry-api>=1.29,<2",
   "opentelemetry-sdk>=1.29,<2",
   "pydantic>=2.10,<3",
+  "pyyaml>=6.0,<7",
   "python-dotenv>=1.0,<2",
   "sqlalchemy[asyncio]>=2.0,<3",
   "structlog>=24.4,<26",
   "typer>=0.15,<1",
+  "tzdata>=2025.2",
   "uvicorn>=0.34,<1",
 ]
 
@@ -30,6 +33,7 @@ agent = "agent_core.cli.main:app"
 dev = [
   "mypy>=1.14,<2",
   "ruff>=0.9,<1",
+  "types-jsonschema>=4.23,<5",
 ]
 test = [
   "hypothesis>=6.124,<7",
@@ -41,7 +45,6 @@ docs = [
   "mkdocs>=1.6,<2",
   "mkdocs-material>=9.5,<10",
   "pymdown-extensions>=10.7,<11",
-  "pyyaml>=6.0,<7",
 ]
 
 [tool.hatch.build.targets.wheel]

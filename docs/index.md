@@ -25,9 +25,10 @@ as an archival record.
 
 ## Current status
 
-Milestone 0 implementation is in progress and its local acceptance checks are
-being completed. See the [current milestone](plan/current-milestone.md) and
-[project state](status/index.md) pages for recorded evidence.
+Milestone 0 is complete. Milestone 1's in-memory vertical slice and all 28 of
+its hard gates pass locally and are in final verification. See the
+[current milestone](plan/current-milestone.md) and [project state](status/index.md)
+pages for recorded evidence.
 
 ## For coding agents
 

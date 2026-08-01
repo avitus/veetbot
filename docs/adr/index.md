@@ -45,3 +45,4 @@ implementation without one.
 - [ADR-0034 — Section 29 as an audited seam rather than a design](0034-multi-device-and-surfaces-seam.md)
 - [ADR-0035 — CircleCI as the hosted CI provider](0035-circleci-hosted-ci.md)
 - [ADR-0036 — The executable 106-knob configuration inventory](0036-configuration-default-inventory.md)
+- [ADR-0037 — Milestone 1 in-memory seam decisions](0037-milestone-1-in-memory-seams.md)

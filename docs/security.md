@@ -31,7 +31,7 @@ The system prompt never contains secrets. Tools obtain credentials from a
 server-side resolver after authorization; the model receives only references or
 capabilities.
 
-## Milestone 0 controls
+## Controls implemented through Milestone 1
 
 Milestone 0 establishes two executable controls before provider or tool code
 exists:
@@ -43,6 +43,23 @@ exists:
 - The deterministic pytest suites block outbound sockets by default. Live tests
   lift the block explicitly, while integration tests may reach only loopback and
   Unix-domain sockets.
+
+Milestone 1 adds executable controls at the first model/tool boundary:
+
+- Tool registration rejects invalid names, reserved builtin domains, unsupported
+  schema dialects, remote schema references, and output limits above the global
+  ceiling. External tool sources are forced to untrusted output.
+- Arguments are schema-validated and canonically normalized before the tool
+  implementation is called. Invalid and unknown calls never enter a builtin.
+- The pre-policy vertical slice allows only side-effect-free tools; every other
+  classification is denied with fixed platform-authored narration.
+- Tool failure messages come only from the checked-in reason-code table. External
+  error text remains separately labelled untrusted and cannot enter `message`.
+- Production startup refuses `docker` and `fake` when either deployment mode or
+  authentication mode is unsafe, and production rejects evaluation tenants,
+  principals, and policy profiles.
+- Runtime limits, cancellation observation points, retry bounds, and the
+  identical-call breaker stop unbounded execution.
 
 Later controls remain requirements of their owning milestones and are not
 claimed as implemented here.

@@ -16,7 +16,7 @@ import unicodedata
 from pathlib import Path
 
 import yaml
-from gate_registry import registry_errors
+from gate_registry import load_registry, registry_errors
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "docs" / "plan" / "engineering-plan.md"
@@ -108,8 +108,21 @@ def check_project_state() -> None:
         if str(n) not in milestones:
             err(f"project-state.yaml missing milestone key '{n}'")
     current = (data or {}).get("project", {}).get("current_milestone")
-    if current != 0:
-        err(f"project-state.yaml current_milestone must be 0 (got {current!r})")
+    if not isinstance(current, int) or not 0 <= current <= 10:
+        err(
+            "project-state.yaml current_milestone must be an integer from 0 to 10 "
+            f"(got {current!r})"
+        )
+
+
+def project_current_milestone() -> int:
+    path = ROOT / "docs" / "status" / "project-state.yaml"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        current = data["project"]["current_milestone"]
+    except (OSError, KeyError, TypeError, yaml.YAMLError):
+        return 0
+    return current if isinstance(current, int) and 0 <= current <= 10 else 0
 
 
 def read_front_matter(text: str):
@@ -250,12 +263,18 @@ def check_citations() -> None:
 
 def check_gate_registry() -> None:
     """Reconcile declarations, map rows, checks, anchors, and census."""
-    findings = registry_errors(ROOT, current_milestone=0)
+    current_milestone = project_current_milestone()
+    findings = registry_errors(ROOT, current_milestone=current_milestone)
     if findings:
         for finding in findings:
             err(f"gate registry: {finding}")
     else:
-        note("gate registry: 172 entries reconciled; 13 Milestone 0 gates active")
+        entries, _ = load_registry(ROOT)
+        active = sum(entry.milestone <= current_milestone for entry in entries)
+        note(
+            f"gate registry: 172 entries reconciled; {active} gates active through "
+            f"Milestone {current_milestone}"
+        )
 
 
 def run_builds() -> None:

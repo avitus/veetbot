@@ -28,19 +28,19 @@
   kind: case
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "No policy profile, principal, or tenant whose name begins with `eval.` or `tenant_eval` loads when the deployment mode is production, asserted by a test that runs the production loader against the eval configuration root."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m1.py::test_no_eval_in_prod
 - id: gate.harness.case_schema
   milestone: 1
   kind: structural
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "Every case file validates against the case schema at collection, and every `model_fixture` resolves to a file that parses as the current `FakeModelScript` shape."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m1.py::test_case_schema
 - id: gate.harness.no_egress
   milestone: 1
   kind: case
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "The deterministic suite completes with no network access, asserted by running job 3 with egress blocked rather than by inspection."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m1.py::test_no_egress
 - id: gate.harness.corpus_minimum
   milestone: 4
   kind: structural
@@ -58,7 +58,7 @@
   kind: structural
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "Every `reason_code` produced by any case maps to exactly one message in the checked-in message table, and no message contains external text."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m1.py::test_reason_code_table
 - id: gate.harness.mcp_no_socket
   milestone: 8
   kind: case
@@ -106,4 +106,4 @@
   kind: structural
   spec: docs/plan/milestone-map.md#hard-gates
   statement: "**No gate is registered at a milestone later than the build step it observes**, for the specs whose build sequences carry step numbers, asserted against the build-sequence table above."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m1.py::test_milestone_order

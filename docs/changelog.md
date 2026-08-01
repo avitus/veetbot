@@ -4,6 +4,23 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-01 — Milestone 1 implementation entered hosted verification
+
+- Implemented the provider-neutral domain, ports, state machine, five in-memory
+  repositories, scripted fake model, minimal context builder, inline dispatcher
+  and runtime, and the shared session/run services.
+- Added the validated tool registry and execution pipeline plus the bounded
+  Decimal calculator and injected-clock current-time builtins.
+- Added the declarative evaluation schema, authored model fixtures, eleven
+  initial cases, CLI `agent run` and `agent eval run`, and shared contract suites
+  for every declared port.
+- Activated all 28 Milestone 1 hard gates. The 41 cumulative gates, 78 static
+  tests, 17 contracts, all 107 non-live tests, strict typing/linting, and documentation checks pass
+  locally.
+- Proposed ADR-0037 and added review notes for the reversible decisions at the
+  in-memory/durable, pre-policy, fixture-shape, eval-loading, and cross-process
+  CLI seams.
+
 ## 2026-07-31 — Milestone 0 completed
 
 - CircleCI pipeline 3 passed its hosted static, contract, and integration jobs

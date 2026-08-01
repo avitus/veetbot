@@ -1,14 +1,47 @@
-"""Top-level CLI command group."""
+"""Top-level CLI over the shared application services."""
+
+from __future__ import annotations
+
+import asyncio
+import importlib
+import json
+import signal
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Annotated, Any, Protocol, cast
+from uuid import UUID
 
 import typer
 
 from agent_core import __version__
+from agent_core.bootstrap import build
+from agent_core.config import ConfigurationError
+from agent_core.domain.errors import NotFoundError
+from agent_core.domain.events import EventEnvelope
+from agent_core.domain.runs import Run, RunStatus
 
 app = typer.Typer(
     name="agent",
     help="Modular general-purpose agent platform.",
     no_args_is_help=True,
 )
+run_app = typer.Typer(name="run", invoke_without_command=True, no_args_is_help=True)
+session_app = typer.Typer(name="session", no_args_is_help=True)
+eval_app = typer.Typer(name="eval", no_args_is_help=True)
+app.add_typer(run_app)
+app.add_typer(session_app)
+app.add_typer(eval_app)
+
+
+class _EvalRunnerModule(Protocol):
+    def run_selected_sync(
+        self,
+        repository_root: Path,
+        *,
+        current_milestone: int,
+        tag: str | None,
+        case_name: str | None,
+    ) -> list[Any]: ...
 
 
 def version_callback(value: bool) -> None:
@@ -29,6 +62,146 @@ def main(
         help="Show the installed version.",
     ),
 ) -> None:
-    """Provide the shared command group; runtime commands arrive in Milestone 1."""
+    """Provide the shared command group."""
 
     del version
+
+
+def _progress_lines(events: Sequence[EventEnvelope]) -> list[str]:
+    lines: list[str] = []
+    requested_tool = False
+    final_model_turn = False
+    for event in events:
+        if event.event_type == "run.queued" and "run created" not in lines:
+            lines.append("run created")
+        elif event.event_type == "model.response.completed":
+            names = event.payload.get("tool_names")
+            if isinstance(names, list) and names and not requested_tool:
+                lines.append(f"model requests {names[0]}")
+                requested_tool = True
+            elif not names and not final_model_turn:
+                lines.append("model produces final response")
+                final_model_turn = True
+        elif event.event_type == "tool.call.started" and "tool executes" not in lines:
+            lines.append("tool executes")
+        elif event.event_type in {"tool.call.completed", "tool.call.failed"} and (
+            "tool result returned to model" not in lines
+        ):
+            lines.append("tool result returned to model")
+        elif event.event_type == "run.completed" and "run completes" not in lines:
+            lines.append("run completes")
+    return lines
+
+
+async def _submit(prompt: str, session_id: UUID | None) -> tuple[Run, list[EventEnvelope]]:
+    async with build() as composition:
+        previous_handler = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, lambda _signum, _frame: composition.runs.interrupt())
+        try:
+            run_id = await composition.runs.submit(prompt, session_id=session_id)
+            run = await composition.runs.wait_terminal(run_id)
+            events = await composition.runs.events(run_id)
+            return run, events
+        finally:
+            signal.signal(signal.SIGINT, previous_handler)
+
+
+@run_app.callback(invoke_without_command=True)
+def run_command(
+    ctx: typer.Context,
+    prompt: Annotated[str | None, typer.Argument(help="User request to execute.")] = None,
+    session_id: Annotated[UUID | None, typer.Option("--session", help="Reuse a session.")] = None,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print the run record as JSON.")
+    ] = False,
+) -> None:
+    """Execute one run through the shared RunService."""
+
+    if ctx.invoked_subcommand is not None:
+        return
+    if prompt is None:
+        raise typer.BadParameter("a prompt is required")
+    try:
+        run, events = asyncio.run(_submit(prompt, session_id))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    for line in _progress_lines(events):
+        typer.echo(line, err=True)
+    if json_output:
+        typer.echo(run.model_dump_json())
+    elif run.status is RunStatus.COMPLETED and run.final_message is not None:
+        typer.echo(run.final_message)
+    else:
+        typer.echo(str(run.id), err=True)
+        raise typer.Exit(1)
+
+
+async def _ephemeral_read(run_id: UUID, *, events: bool) -> str:
+    async with build() as composition:
+        if events:
+            rows = await composition.runs.events(run_id)
+            return json.dumps([row.model_dump(mode="json") for row in rows], default=str)
+        run = await composition.runs.get(run_id)
+        return run.model_dump_json()
+
+
+@run_app.command("get")
+def run_get(run_id: UUID) -> None:
+    """Read a run when the selected composition has durable shared state."""
+
+    try:
+        typer.echo(asyncio.run(_ephemeral_read(run_id, events=False)))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+@run_app.command("events")
+def run_events(run_id: UUID) -> None:
+    """Read a run's persisted event sequence."""
+
+    try:
+        typer.echo(asyncio.run(_ephemeral_read(run_id, events=True)))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+
+async def _create_session() -> UUID:
+    async with build() as composition:
+        return await composition.sessions.create()
+
+
+@session_app.command("create")
+def session_create() -> None:
+    """Create a session and print only its identifier."""
+
+    try:
+        typer.echo(str(asyncio.run(_create_session())))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+
+
+@eval_app.command("run")
+def eval_run(
+    suite: Annotated[str, typer.Argument(help="Evaluation suite to run.")] = "deterministic",
+    tag: Annotated[str | None, typer.Option("--tag", help="Select one tag.")] = None,
+    case_name: Annotated[str | None, typer.Option("--case", help="Select one case name.")] = None,
+) -> None:
+    """Run checked-in deterministic cases without loading evals in normal startup."""
+
+    if suite != "deterministic":
+        raise typer.BadParameter("Milestone 1 provides only the deterministic suite")
+    try:
+        module = cast(_EvalRunnerModule, importlib.import_module("agent_core.evals.runner"))
+        results = module.run_selected_sync(
+            Path.cwd(), current_milestone=1, tag=tag, case_name=case_name
+        )
+    except (AssertionError, OSError, ValueError) as exc:
+        typer.echo(f"evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    for result in results:
+        typer.echo(f"pass {result.case.name}", err=True)
+    typer.echo(f"{len(results)} passed")

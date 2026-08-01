@@ -1,0 +1,8 @@
+turns:
+  - kind: tool_call
+    tool_name: math.calculate
+    arguments: {expression: 17}
+    call_id: call_0001
+  - kind: final
+    text: The calculator arguments were invalid.
+    stop_reason: end_turn

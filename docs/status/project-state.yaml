@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_0_complete
+  status: milestone_1_in_progress
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 0
+  current_milestone: 1
   authorized_milestones:
     - 0
     - 1
@@ -16,7 +16,7 @@ milestones:
     status: complete
   "1":
     title: In-memory vertical slice
-    status: not_started
+    status: in_progress
   "2":
     title: PostgreSQL persistence and durable worker
     status: not_started
@@ -101,6 +101,32 @@ verification:
           CircleCI pipeline 3 ran the static, contract, and integration jobs;
           all three commit status contexts completed successfully.
     remaining: []
+  milestone_1:
+    recorded_at: 2026-08-01T01:03:57Z
+    status: in_progress
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over source and tests, 78
+          static tests, 17 contract tests, 123 citation checks, strict
+          documentation builds, and all 41 hard gates active through Milestone
+          1 passed.
+      - check: deterministic evaluation corpus
+        outcome: passed
+        detail: >-
+          All eleven Milestone 1 cases passed without network access: direct
+          response, calculator, sequential tools, invalid and unknown calls,
+          tool error recovery, provider retry and permanent failure, step limit,
+          and the identical-call breaker.
+      - check: make test against Compose PostgreSQL 16
+        outcome: passed
+        detail: >-
+          All 107 non-live tests passed, including the eleven evaluation cases
+          and the clean migration check against the healthy Compose service.
+    remaining:
+      - Record the exact CLI demonstration output in completion evidence.
+      - Push the implementation commit and record hosted CircleCI evidence.
 
 documentation:
   canonical_format: markdown
@@ -390,5 +416,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-07-31T22:59:41Z
+last_updated: 2026-08-01T01:03:57Z
 last_reviewed_commit: 149b6c1

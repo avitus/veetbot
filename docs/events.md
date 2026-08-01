@@ -9,8 +9,10 @@ persistence design are defined by the
 [engineering plan](plan/engineering-plan.md#68-event-envelope) and the
 [event-log specification](plan/event-log-and-persistence.md).
 
-Milestone 0 implements no application events and no event store. It establishes
-only the linear Alembic graph and its pinned revision, so later event schemas
-cannot begin with a branched or ambiguous migration history. Event types first
-become executable with the in-memory vertical slice in Milestone 1 and become
-durable in PostgreSQL in Milestone 2.
+Milestone 1 implements the `EventRepository` contract and a process-local,
+append-only adapter with monotonically increasing per-session sequence numbers.
+The run, model, tool, assistant-message, and checkpoint events emitted by the
+vertical slice are executable and covered by the deterministic cases. This is
+event evidence, not durable event storage: all rows disappear with the process,
+and PostgreSQL transactions, payload upcasting, and recovery remain Milestone 2
+work.

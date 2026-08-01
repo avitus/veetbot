@@ -4,7 +4,7 @@
   kind: property
   spec: docs/plan/context-engine.md#hard-gates
   statement: "**Determinism.** `build()` invoked twice on the same checkpoint produces byte-identical output. Property-tested across generated checkpoints."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_context_m1.py::test_determinism
 - id: gate.context.prefix_stability
   milestone: 7
   kind: case

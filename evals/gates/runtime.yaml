@@ -4,31 +4,31 @@
   kind: structural
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**One terminal writer.** A structural gate asserts that `RunRepository.transition` and `RunQueue.release` are called from exactly one module, `runtime/executor.py`. A second call site anywhere under `agent_core` fails the build. This is the gate that keeps the suspension fix from eroding."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m1.py::test_one_terminal_writer
 - id: gate.runtime.no_ambient_time
   milestone: 1
   kind: structural
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**No ambient time.** No module under `agent_core` outside the clock adapter references `datetime.now`, `datetime.utcnow`, `time.time`, or `time.monotonic`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m1.py::test_no_ambient_time
 - id: gate.runtime.no_ambient_id
   milestone: 1
   kind: structural
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**No ambient identity.** No module under `agent_core` outside the id adapter calls `uuid.uuid4` or `uuid.uuid1`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m1.py::test_no_ambient_id
 - id: gate.runtime.step_identity
   milestone: 1
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**Every step has a persisted identity.** For every run in the suite, `runs.step_count` equals the count of distinct `step_number` values in `model_calls` for that run."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m1.py::test_step_identity
 - id: gate.runtime.budget_stops
   milestone: 1
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**The budget stops the loop.** A run whose `max_steps` is reached fails with `FailureReason.MAX_STEPS_EXCEEDED` and is never requeued; a run whose cost limit is reached mid-retry fails at the attempt check rather than after the attempt."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m1.py::test_budget_stops
 - id: gate.runtime.lease_once
   milestone: 2
   kind: case

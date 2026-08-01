@@ -33,7 +33,7 @@ SECRET_RULES: dict[str, re.Pattern[str]] = {
     "dsn_password": re.compile(r"[a-z][a-z0-9+.-]*://[^\s:/]+:[^\s@/]+@", re.IGNORECASE),
     "assigned_secret": re.compile(
         r"(?i)\b(?:[A-Z0-9_]*(?:secret|token|password|api_?key)[A-Z0-9_]*)\s*=\s*"
-        r"(?:[\"'][^\"'\n]{13,}[\"']|[A-Za-z0-9_./+=-]{13,})"
+        r"[\"'][^\"'\n]{13,}[\"']"
     ),
 }
 PROVIDER_SDK_ROOTS = frozenset({"anthropic", "openai"})

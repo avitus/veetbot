@@ -125,4 +125,5 @@ nav:
       - ADR-0034 Section 29 as an audited seam: adr/0034-multi-device-and-surfaces-seam.md
       - ADR-0035 CircleCI hosted CI: adr/0035-circleci-hosted-ci.md
       - ADR-0036 The executable configuration inventory: adr/0036-configuration-default-inventory.md
+      - ADR-0037 Milestone 1 in-memory seams: adr/0037-milestone-1-in-memory-seams.md
   - Changelog: changelog.md

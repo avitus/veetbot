@@ -2,15 +2,15 @@
 
 This repository is implementing the provider-neutral agent platform defined by
 the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
-strictly milestone-gated. Milestone 0 establishes the repository and engineering
-foundation; it does not yet contain the agent runtime.
+strictly milestone-gated. Milestone 0 established the repository and engineering
+foundation. Milestone 1 adds the first complete, in-memory model/tool runtime.
 
 ## Current status
 
-Milestone 0 is in progress. The Python package, configuration boundary,
-structured logging, PostgreSQL development definition, empty Alembic graph,
-CI workflow, test categories, gate registry, and structural checks exist.
-Agent execution begins in Milestone 1.
+Milestone 0 is complete. Milestone 1 is in final verification: the in-memory
+runtime, fake provider, calculator and current-time tools, deterministic
+evaluation harness, eleven initial cases, and all 28 Milestone 1 gates are
+implemented and passing locally.
 
 ## Prerequisites
 
@@ -87,6 +87,26 @@ Static and contract tests deny network egress. Integration tests may use Unix
 sockets and loopback only. Live tests are the sole category that lifts the
 socket block.
 
+## Run the in-memory agent
+
+After copying `.env.example` to `.env`, run the required calculator flow:
+
+```bash
+uv run agent run "What is 17 multiplied by 23?"
+```
+
+Progress is written to stderr and the final answer (`391`) to stdout. Run the
+eleven checked-in deterministic cases with:
+
+```bash
+uv run agent eval run
+```
+
+Milestone 1 state lasts only for one process. `agent session create`,
+`agent run get`, and `agent run events` are wired to the shared application
+services, but a later CLI process cannot read an identifier created by an
+earlier process until Milestone 2 adds PostgreSQL persistence.
+
 Hosted checks use [CircleCI](https://circleci.com/) via
 `.circleci/config.yml`. Connect the repository as a CircleCI project for the
 static, contract, and integration workflow. Create a restricted context named
@@ -106,7 +126,7 @@ Production validation refuses development authentication and the `docker` or
 secret values and structured-log processors redact sensitive keys, provider-key
 prefixes, prompts, messages, reasoning, tool results, and large content.
 
-## Planned operating commands
+## Operating roadmap
 
 The engineering plan reserves the following workflows. They are documented
 here so availability is not confused with implementation:
@@ -122,10 +142,9 @@ here so availability is not confused with implementation:
 | Start the HTTP API | Milestone 5 |
 | Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
 
-Do not invoke `agent api`, `agent worker`, `agent chat`, or `agent run` yet.
-The only installed CLI operation in Milestone 0 is `agent --version`; adding
-placeholder runtime commands would falsely imply that their acceptance criteria
-hold.
+`agent run`, `agent session create`, and `agent eval run` are available now.
+Do not invoke `agent api`, `agent worker`, or `agent chat`; their owning
+milestones have not been implemented.
 
 ## Documentation and governance
 
