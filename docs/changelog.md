@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-07-31 — Milestone 0 completed
+
+- CircleCI pipeline 3 passed its hosted static, contract, and integration jobs
+  for `dev` commit `5b60bca`, closing the last recorded Milestone 0 gap.
+- Project state now records the repository and engineering foundation as
+  complete. Milestone 1 remains authorized but has not started.
+
 ## 2026-07-31 — Milestone 0 defaults and CircleCI
 
 - Replaced the GitHub Actions workflow with a CircleCI 2.1 configuration that

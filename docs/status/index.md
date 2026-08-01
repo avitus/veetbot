@@ -8,12 +8,12 @@ The authoritative, machine-readable project state lives in
 [`project-state.yaml`](project-state.yaml). Update that file (not this page) when
 project status changes; **status changes require evidence**.
 
-At the time of writing: phase **`implementation`**, current milestone
-**Milestone 0**, authorized milestones **0 and 1**. Milestone 0 is in progress;
-its locally runnable gates, Docker Compose migration round trip, and all four CI
-target partitions pass locally. All 106 shipped configuration defaults are
-present. The `dev` branch is pushed, but `gh/avitus/veetbot` is not yet
-connected as a CircleCI project, so hosted execution remains to be evidenced.
+At the time of writing: phase **`implementation`**, current milestone record
+**Milestone 0**, authorized milestones **0 and 1**. Milestone 0 is complete;
+its locally runnable gates, Docker Compose migration round trip, all 106 shipped
+configuration defaults, and all four CI target partitions pass. Hosted
+CircleCI's static, contract, and integration jobs passed for `dev` commit
+`5b60bca`. Milestone 1 remains not started.
 
 The milestone titles in `project-state.yaml` mirror the canonical
 [engineering plan](../plan/engineering-plan.md); keep the two synchronized.

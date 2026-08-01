@@ -5,17 +5,17 @@ title: Current Milestone
 # Current milestone
 
 - **Current milestone:** Milestone 0 — Repository and engineering foundation
+  (complete)
 - **Authorized next milestone:** Milestone 1 — In-memory vertical slice
-- **Project status:** Milestone 0 implementation is in progress
-  (`milestone_0_in_progress`).
+- **Project status:** Milestone 0 is complete (`milestone_0_complete`); Milestone
+  1 has not started.
 
 The repository foundation and all locally runnable Milestone 0 gates are in
 place, including the Docker Compose startup, migration round trip, and the four
 CircleCI target partitions. The 106 version-controlled defaults are present and
-enforced by an executable inventory. Completion remains open until the committed
-CircleCI workflow has hosted execution evidence. The `dev` branch is pushed,
-but CircleCI reports that `gh/avitus/veetbot` is not yet a connected project.
-See the machine-readable
+enforced by an executable inventory. The hosted CircleCI static, contract, and
+integration jobs passed for `dev` commit `5b60bca`, satisfying the final open
+acceptance criterion. See the machine-readable
 [project state](../status/project-state.yaml) for the recorded checks.
 
 Authoritative acceptance criteria for every milestone are defined only by the

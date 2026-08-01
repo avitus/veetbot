@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_0_in_progress
+  status: milestone_0_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 0
   authorized_milestones:
@@ -13,7 +13,7 @@ project:
 milestones:
   "0":
     title: Repository and engineering foundation
-    status: in_progress
+    status: complete
   "1":
     title: In-memory vertical slice
     status: not_started
@@ -47,8 +47,8 @@ milestones:
 
 verification:
   milestone_0:
-    recorded_at: 2026-07-31T23:57:06Z
-    status: in_progress
+    recorded_at: 2026-08-01T00:01:44Z
+    status: complete
     evidence:
       - check: make install
         outcome: passed
@@ -95,16 +95,12 @@ verification:
           from .circleci/config.yml all exited successfully. Workflow
           structure tests assert their triggers, commands, PostgreSQL service,
           Python version, and credential gate.
-      - check: hosted CircleCI for dev commit 103b0e5
-        outcome: not_run
+      - check: hosted CircleCI for dev commit 5b60bca
+        outcome: passed
         detail: >-
-          The dev branch was pushed to origin. GitHub reported no commit status
-          contexts or check runs, and the CircleCI v2 project endpoint returned
-          404 Project not found for gh/avitus/veetbot, so the repository is not
-          yet connected as a CircleCI project.
-    remaining:
-      - Connect gh/avitus/veetbot as a CircleCI project.
-      - Observe the static, contract, and integration jobs on hosted CircleCI.
+          CircleCI pipeline 3 ran the static, contract, and integration jobs;
+          all three commit status contexts completed successfully.
+    remaining: []
 
 documentation:
   canonical_format: markdown
