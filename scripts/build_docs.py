@@ -11,6 +11,7 @@ Cross-platform (macOS/Linux); no shell-specific behaviour.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,31 @@ def build_site(mkdocs: str) -> None:
     subprocess.run([mkdocs, "build", "--strict", "--site-dir", "site"], cwd=ROOT, check=True)
 
 
+def pandoc_version(pandoc: str) -> tuple[int, ...]:
+    """Return Pandoc's version as a tuple, e.g. ``(3, 10, 1)``."""
+    out = subprocess.run(
+        [pandoc, "--version"], cwd=ROOT, check=True, capture_output=True, text=True
+    ).stdout
+    m = re.match(r"pandoc(?:\.exe)?\s+([0-9]+(?:\.[0-9]+)*)", out)
+    if not m:
+        fail("could not read the Pandoc version from `pandoc --version`")
+    return tuple(int(part) for part in m.group(1).split("."))
+
+
+def highlight_flag(pandoc: str) -> str:
+    """Select the syntax-highlighting flag this Pandoc accepts.
+
+    Pandoc 3.8 added ``--syntax-highlighting`` and deprecated
+    ``--highlight-style`` in the same release; Pandoc older than 3.8 does not
+    know the new spelling. Both take the same style name. Choose by version so
+    the build stays quiet on current Pandoc and keeps working on the
+    distro-packaged Pandoc that CI installs with apt, which predates 3.8.
+    """
+    if pandoc_version(pandoc) >= (3, 8):
+        return "--syntax-highlighting=pygments"
+    return "--highlight-style=pygments"
+
+
 def build_single_html(pandoc: str, manifest: dict) -> Path:
     sources: list[Path] = []
     missing: list[str] = []
@@ -108,7 +134,7 @@ def build_single_html(pandoc: str, manifest: dict) -> Path:
             "--standalone",                 # self-contained (no external resources in sources)
             "--wrap=none",                  # do not hard-wrap the generated HTML source
             "--toc", "--toc-depth=3",
-            "--highlight-style=pygments",
+            highlight_flag(pandoc),
             "--metadata", f"title={manifest['title']}",
             # deliberately NOT --number-sections: the plan already carries visible numbering
         ]

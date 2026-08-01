@@ -101,13 +101,19 @@ Assembly order is fixed and total:
 | 2 | A | Framing: how to treat memory, tool output, and untrusted spans | `PLATFORM` |
 | 3 | A | Agent instructions (pinned `AgentSpec` version) | `TRUSTED_CONFIGURATION` |
 | 4 | A | Tool definitions (filtered, canonically serialized) | `TRUSTED_CONFIGURATION` |
-| 5 | A | Session-open memory snapshot | `MEMORY` |
-| 6 | B | Compacted history summary, if any | `PLATFORM` (see below) |
-| 7 | B | Retained conversation items, oldest to newest | per item |
-| 8 | B | Working-state block | per entry |
-| 9 | B | In-turn recall and correction lines | `MEMORY` |
-| 10 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
-| 11 | B | The current user message | `USER` |
+| 5 | A | Skill catalog (pinned at session open) | per entry |
+| 6 | A | Session-open memory snapshot | `MEMORY` |
+| 7 | B | Compacted history summary, if any | `PLATFORM` (see below) |
+| 8 | B | Retained conversation items, oldest to newest | per item |
+| 9 | B | Loaded skill bodies, in load order | per skill |
+| 10 | B | Working-state block | per entry |
+| 11 | B | In-turn recall and correction lines | `MEMORY` |
+| 12 | B | Runtime metadata: current date, principal scope, surface | `PLATFORM` |
+| 13 | B | The current user message | `USER` |
+
+Rows 5 and 9 are added by [skills.md](skills.md), which owns their content,
+their caps, and their trust derivation. They are listed here because assembly
+order is fixed and total, and a table that omits two of its rows is neither.
 
 Platform policy comes first because it is the only content that must be read before
 anything that might try to override it. The current user message comes last because
@@ -203,11 +209,14 @@ ceiling.
 | A | Platform policy | 2,000 | No | Never — fails at plan time |
 | A | Agent instructions | 4,000 | No | Never — fails at plan time |
 | A | Tool definitions | 30 tools / 6,000 tokens | No | Only at an epoch boundary |
+| A | Skill catalog | 20 skills / 1,500 tokens | No | Only at an epoch boundary |
 | A | Memory snapshot | 40 items / 1,500 tokens | No | Only at an epoch boundary |
+| B | Skill bodies | 2 loaded / 6,000 tokens | No | Never — the load fails instead |
 | B | Working state | 1,000 | No | Never |
-| B | In-turn recall | 2,000 | No | First |
-| B | Tool results | 25% of body | Partly | Second |
-| B | History | remainder, floor 8,000 | Yes | Third |
+| B | Knowledge passages | 3 passages / 3,000 tokens | No | First |
+| B | In-turn recall | 2,000 | No | Second |
+| B | Tool results | 25% of body | Partly | Third |
+| B | History | remainder, floor 8,000 | Yes | Fourth |
 | B | Current user message | uncapped | — | Never |
 | — | Output reserve | 8,192 or the model's default | No | Never — subtracted first |
 
@@ -215,28 +224,160 @@ Tool definitions carry an **item cap as the primary limit**, exactly as the snap
 does and for exactly the same reason: selection accuracy degrades with the number of
 candidates, not with their token weight. Thirty tools is already generous; a
 deployment that needs more needs tool filtering or skills (Section 30.4, where only
-skill metadata enters ordinary context), not a bigger allowance.
+skill metadata enters ordinary context), not a bigger allowance. The skill catalog
+carries an item cap for the same reason and is capped at twenty;
+[skills.md](skills.md) argues that number and the 6,000-token body class beside
+it, which never yields because a third `skill.load` fails instead.
 
-The prefix classes sum to a hard ceiling of 13,500 tokens. If a plan exceeds it,
+Knowledge passages are a separate class from in-turn recall rather than a share of
+it, and [knowledge-documents.md](knowledge-documents.md) argues both the split and
+the number. A passage is a verbatim quotation the model may cite, so it is three
+times the weight of a belief and cannot be trimmed by sentence; the class is capped
+at three passages because a document that answers a question usually answers it in
+one or two, and it yields before recall because a corpus is re-queryable by an
+explicit `knowledge.search` while the beliefs in a snapshot are not.
+
+The prefix classes sum to a hard ceiling of 15,000 tokens. If a plan exceeds it,
 **the session fails to open with a structured error naming the offending class**.
 It does not silently truncate the agent's instructions. A truncated system prompt
 is an agent that behaves subtly wrong forever, which is far worse than a session
 that refuses to start with a clear reason.
+
+### What history selection retains
+
+The yield order below says which class gives up tokens first. It does not say
+which conversation items were in the request to begin with, and that is the
+decision that determines whether two runs with the same input produce the same
+prompt. Selection happens at two moments, on two different inputs, and they are
+two different functions.
+
+**At run seed, the input is a log prefix, not a projection.** The session-history
+projection is a live read model that advances from its watermark on a timer;
+asking it for "the session's history" returns whatever has been applied at the
+moment the question is asked. `seed_checkpoint` is called twice — once when the
+application service creates the run, and again when `CheckpointRepository.latest`
+returns `None` because the Milestone 2 dispensability gate deleted the run's
+checkpoints — and the two calls can be hours and a deploy apart. Reading the
+projection as it stands would make the second seed a different conversation from
+the first, which is precisely the failure that gate exists to catch and would
+instead be causing.
+
+So the seed reads the projection **cut at a fixed sequence**: the session sequence
+of the `user.message.created` event the run answers, recorded on the run row when
+the run is created.
+
+```text
+# additive column on the runs table
+runs.seed_event_sequence  BIGINT NULL   -- session sequence of the seeding
+                                        -- message; history is every item
+                                        -- strictly below it
+```
+
+The column is written in the transaction that appends the seeding event and
+inserts the run row — the transaction that already allocates the sequence, so it
+costs nothing. It is nullable for the child runs of Section 27.6, which seed from
+a parent's concise instruction rather than from session history and therefore
+select over an empty input, which is the same function rather than a branch in
+the caller.
+
+Projections are already required to be deterministic over a log prefix. Pinning
+the prefix is what turns that property into a guarantee about seeding, and it
+needs no gate of its own: the dispensability gate is the test, and it only tests
+anything because the cut is fixed.
+
+**At assembly, the retained set is a suffix, never a subset.** History is selected
+as a contiguous tail of the ordered item list — one cut index, everything at or
+after it in, everything before it out. Not a relevance ranking over past turns,
+and not "the important ones". Three reasons, in order of how much they cost to
+get wrong.
+
+A non-contiguous selection produces a conversation with holes, and a model reading
+a hole does not see a hole. It sees a conversation in which the thing that filled
+the gap never happened, and reasons confidently from that. The absence is
+invisible in the transcript and expensive in the answer.
+
+Contiguity also makes tool-pair atomicity a property of the cut rather than a
+pass that runs after it. With a suffix there is exactly one boundary that can
+split a pair, so the repair is one adjustment to one index. With a ranked subset
+any pair can split, and the repair changes the token total, which can require a
+second repair.
+
+And a relevance-ranked history would be a second retrieval system — a second
+ranker, a second set of tuning parameters, a second set of failure modes — beside
+the one this corpus already has. In-turn recall exists precisely to pull back the
+older thing that matters. **History is recency; recall is relevance.** Collapsing
+them makes both untestable, because a missing turn is then either a selection
+defect or a ranking miss and no test can tell which.
+
+**The cut is the largest suffix that fits.** Four rules compute it, and each is
+total:
+
+1. Scan backward from the newest item, accumulating estimated tokens, and stop at
+   the first item whose inclusion would exceed `budget.history_tokens`. The floor
+   is applied by the allocator before the predicate runs, so the predicate reads
+   one number and never re-derives it.
+2. The cut never falls earlier than `replaced_through_sequence`. Items the
+   summary already covers are represented at position 7; admitting them again
+   states the same turns twice in two voices, and the paraphrase and the original
+   will disagree about emphasis.
+3. If the cut splits a tool pair, it moves **later**, past the orphaned result, so
+   the pair is excluded as a unit. Never earlier: admitting the call would add
+   tokens to a set already at its limit, and the pair is atomic in both
+   directions.
+4. The never-yield items are not subject to the cut at all. The current user
+   message, the working-state block, the correction lines, and the pending pairs
+   of an active loop are assembled first and their cost is subtracted before the
+   scan begins. If they alone exceed the class, the request fails — the same rule
+   the prefix follows, for the same reason.
+
+```python
+def select_history(
+    items: Sequence[ConversationItem],   # ordered, oldest first
+    summary_floor: int,                  # replaced_through_sequence, or 0
+    history_tokens: int,                 # budget.history_tokens, floor applied
+    estimator: TokenEstimator,
+    model_id: str,
+) -> int: ...                            # cut index; items[cut:] are retained
+```
+
+**`summary_floor` is an event sequence; the return is an item index.** The two
+are different units and the function never compares them to each other. Each
+`ConversationItem` carries the sequence of the event it was built from, and the
+floor is applied by comparing *that* to `replaced_through_sequence`: an item at
+or below the floor has been replaced by the summary and is not a candidate. The
+index the function returns is then a position in `items`, derived after the
+floor has been applied, never a sequence number in disguise.
+
+**It returns an index, not a list.** An index can only describe a suffix, so the
+contiguity rule is carried by the return type instead of by a test somebody has
+to remember to write.
+
+**The estimator is pure.** `TokenEstimator.estimate` is permitted to be
+approximate and is now also required to be a pure function of its arguments — no
+clock, no sampling, and no cache that can change the number it returns rather
+than the time it takes to return it. An approximate estimator puts the cut in a
+slightly different place than an exact one would, which is a tuning question. A
+non-deterministic estimator puts the cut in a different place on two calls with
+the same input, which is the failure this whole subsection exists to prevent.
 
 ### Yield order under pressure
 
 When the assembled body will not fit, the builder yields in a fixed order, taking
 the cheapest and most recoverable loss first:
 
-1. **In-turn recall trims to its floor.** It is the marginal addition, it was
+1. **Knowledge passages drop, lowest-ranked first.** They are dropped whole and
+   never truncated, because a passage shortened to fit is a misquotation of a
+   document the model is about to cite. They go first because the corpus is still
+   there: an explicit `knowledge.search` re-reaches it in one tool call.
+2. **In-turn recall trims to its floor.** It is the marginal addition, it was
    selected against a relevance floor that can simply be raised, and it is the most
    recoverable thing in the request — the agent can call `memory.search` explicitly
    if it turns out to need it.
-2. **Tool results truncate to pointers, oldest first.** The full result is already
+3. **Tool results truncate to pointers, oldest first.** The full result is already
    in the event log and, above the inline threshold, in the artifact store. What
    remains is a typed pointer with the byte count and reference, so the model can
    see that content exists and ask for it rather than concluding it never existed.
-3. **History compacts.** Deliberately last: it is the only step that costs a model
+4. **History compacts.** Deliberately last: it is the only step that costs a model
    call on the critical path, and the only one that loses information the run
    cannot cheaply re-fetch.
 
@@ -309,7 +450,7 @@ has just rewritten the prefix, and the resulting cache miss will be attributed t
 whatever change shipped that week rather than to the compactor.
 
 Compaction replaces the **oldest end of the body** with a summary item that sits at
-position 6 in the assembly order. Section 10.1 places a rolling cache breakpoint
+position 7 in the assembly order. Section 10.1 places a rolling cache breakpoint
 over the last few non-system messages; compaction invalidates that rolling window
 and nothing above it. The cost of a compaction is therefore bounded and known in
 advance: re-cache the history window, keep the prefix.
@@ -330,7 +471,8 @@ So: **the summarizer runs on trusted content only.** Untrusted spans are not
 summarized. They are replaced with a typed pointer:
 
 ```text
-[elided] tool.result 8f21 (external_untrusted, 4,214 bytes) -> artifact:a/9d02
+[elided] tool.result 8f21 (external_untrusted, 4,214 bytes)
+         -> artifact:a/9d02
 ```
 
 The pointer states that content existed, what it was, how large, where it lives,
@@ -492,6 +634,7 @@ class ContextPlan(BaseModel):
     tool_schema_sha256: str
     snapshot_id: UUID | None
     snapshot_watermark: int         # retrieval spec: the recall delta
+    skill_pins: tuple[SkillPin, ...]  # skills spec: pinned at open
     cache_breakpoints: list[CacheBreakpoint]
     policy_version: str
     builder_version: str
@@ -508,11 +651,14 @@ class ContextBudget(BaseModel):
     platform_tokens: int
     agent_tokens: int
     tool_tokens: int
-    retrieved_context_tokens: int   # snapshot (frozen) + in-turn (elastic)
+    skill_catalog_tokens: int       # skills spec: Region A metadata
+    skill_body_tokens: int          # skills spec: Region B, loaded
+    retrieved_context_tokens: int   # frozen snapshot + elastic in-turn
     history_tokens: int
     # additions
     working_state_tokens: int
     tool_result_tokens: int
+    knowledge_tokens: int           # knowledge spec: Region B, passages
     safety_margin_ratio: float = 0.05
 ```
 
@@ -560,7 +706,9 @@ class ContextPlanner(Protocol):
 
     async def current(self, session_id: UUID) -> ContextPlan | None: ...
 
-    async def rotate(self, session_id: UUID, reason: str) -> ContextPlan: ...
+    async def rotate(
+        self, session_id: UUID, reason: str
+    ) -> ContextPlan: ...
 
 class TokenEstimator(Protocol):
     def estimate(
@@ -571,7 +719,9 @@ class TokenEstimator(Protocol):
         self, tools: Sequence[ToolSpec], model_id: str
     ) -> int: ...
 
-    def reconcile(self, model_id: str, estimated: int, actual: int) -> None: ...
+    def reconcile(
+        self, model_id: str, estimated: int, actual: int
+    ) -> None: ...
 
 class Compactor(Protocol):
     async def compact(
@@ -610,29 +760,36 @@ signal that tells an operator a deployment is chronically over-subscribed before
 | **Compaction amnesia** | A constraint set twenty turns ago is summarized away | Constraints never yield and never merge away; compaction-fidelity eval |
 | **Working-state drift** | State asserts something the log contradicts | Typed transitions only, each emitting an event; carry recomputed from the log, not copied |
 | **Epoch churn** | Routing or policy changes rotate the prefix repeatedly | Epochs are explicit, logged, and counted; epochs-per-session is a tracked metric with target 1.0 |
+| **Unstable history selection** | The seed reads the projection as it stands rather than at a fixed cut, or the estimator returns different numbers for the same items | Seeding reads the log below `runs.seed_event_sequence`; the estimator is pure; the cut is a suffix index, property-tested for stability |
 | **Reasoning-item leakage** | An opaque provider payload is summarized, logged, or carried across a run | Excluded from compaction input by type; dropped at run boundaries; never rendered into a summary (ADR-0007) |
 
-## Evaluation
+## Hard gates
 
-Five hard gates on Milestone 7, and four tracked metrics.
+Six hard gates. Five are on Milestone 7 with the rest of the engine; the
+first is on Milestone 1, because ADR-0024 places deterministic assembly in
+the vertical slice and a builder whose output is not reproducible cannot be
+built incrementally afterwards.
 
-**Hard gates.**
+1. **Determinism.** `build()` invoked twice on the same checkpoint produces
+   byte-identical output. Property-tested across generated checkpoints. **M1.**
+2. **Prefix stability.** The scripted fifty-turn session — clock crossing
+   midnight, a tool revoked, memory written and corrected, a forced compaction —
+   yields exactly one distinct `prefix_sha256`. **M7.**
+3. **Budget conformance.** No assembled request exceeds the model's window; the
+   output reserve is intact on every request; a synthetic overflow yields in the
+   specified order and no more than necessary. **M7.**
+4. **Tool-pair integrity.** No assembled request, under any yield path, contains
+   an unpaired tool call or tool result. **M7.**
+5. **Trust preservation.** A canary string placed in `EXTERNAL_UNTRUSTED` tool
+   output never appears outside an envelope, and never appears in a compaction
+   summary. Envelope-closing attempts in tool output do not escape the
+   envelope. **M7.**
+6. **History-cut determinism.** The retained set is always a contiguous suffix,
+   always fits `history_tokens`, never falls earlier than the summary floor,
+   never contains an orphaned tool call or result, and is identical across two
+   calls on the same input. Property-tested over generated item lists. **M7.**
 
-- **Determinism.** `build()` invoked twice on the same checkpoint produces
-  byte-identical output. Property-tested across generated checkpoints.
-- **Prefix stability.** The scripted fifty-turn session — clock crossing midnight,
-  a tool revoked, memory written and corrected, a forced compaction — yields exactly
-  one distinct `prefix_sha256`.
-- **Budget conformance.** No assembled request exceeds the model's window; the
-  output reserve is intact on every request; a synthetic overflow yields in the
-  specified order and no more than necessary.
-- **Tool-pair integrity.** No assembled request, under any yield path, contains an
-  unpaired tool call or tool result.
-- **Trust preservation.** A canary string placed in `EXTERNAL_UNTRUSTED` tool output
-  never appears outside an envelope, and never appears in a compaction summary.
-  Envelope-closing attempts in tool output do not escape the envelope.
-
-**Tracked metrics.**
+## Tracked metrics
 
 - **Cached prefix ratio** — prefix tokens served from cache after the first request
   of a session. Below roughly 90% means the invariant is leaking somewhere the hash
@@ -650,9 +807,9 @@ Five hard gates on Milestone 7, and four tracked metrics.
    fixed order, trust labels on every item, and `prefix_sha256` recorded from the
    first commit — the hash is not retrofittable onto traffic that has already been
    served unstably.
-2. **Budget allocator.** Fixed floors, absolute caps, the yield order, tool-pair
-   atomicity, and the estimator behind its port. Fail-at-plan-time for prefix
-   overflow.
+2. **Budget allocator.** Fixed floors, absolute caps, the selection cut, the yield
+   order, tool-pair atomicity, and the estimator behind its port.
+   Fail-at-plan-time for prefix overflow.
 3. **Trust envelopes.** Nonced delimiters, escaping, and the framing text in the
    prefix. This is security hardening and it precedes anything that transforms
    content.
@@ -685,9 +842,17 @@ Five hard gates on Milestone 7, and four tracked metrics.
 - **The prefix never yields.** If platform policy, agent instructions, tools, and
   snapshot do not fit their ceilings, the session fails to open with the offending
   class named. A silently truncated system prompt is worse than a refused session.
-- **Yield order is in-turn recall, then tool-result truncation, then compaction** —
-  cheapest and most recoverable first; compaction last because it alone costs a
-  model call and loses information irreversibly within the run.
+- **History selection is a contiguous suffix chosen by a deterministic cut, and
+  the seed reads the log at a pinned sequence.** A relevance ranking over history
+  would duplicate in-turn recall and leave a missing turn ambiguous between a
+  selection defect and a ranking miss; a live projection read would let two seeds
+  of one run disagree.
+- **Yield order is knowledge passages, then in-turn recall, then tool-result
+  truncation, then compaction** — cheapest and most recoverable first. Knowledge
+  passages lead because the corpus is still there and one `knowledge.search`
+  re-reaches it; compaction is last because it alone costs a model call and
+  loses information irreversibly within the run. This is the same order stated
+  where the ladder is specified, and the two must not drift apart.
 - **Tool call/result pairs are atomic budget units.** Dropping half a pair is a
   malformed request, not a smaller one.
 - **`build()` is a pure function; compaction is a write.** Pressure is resolved by
@@ -714,10 +879,30 @@ Five hard gates on Milestone 7, and four tracked metrics.
 
 ## Open questions
 
-None outstanding for assembly. Two adjacent items are deliberately out of scope:
-the **compaction summarizer's prompt and model tier** is an implementation choice
-to be tuned against the compaction-fidelity eval rather than fixed here, and
-**skill-content injection** (Section 30.4 loads full skill instructions on
-selection) needs its region assignment decided when skills are specified — it is
-mid-session and volatile, so it belongs in Region B, but the caching consequences of
-a large skill body in the turn layer deserve their own treatment.
+None outstanding for assembly. Two adjacent items were left open here and are
+now decided in [runtime-loop.md](runtime-loop.md), which gave compaction its call
+site and therefore had to say what the call resolves to.
+
+The **compaction summarizer's prompt and model tier** resolves through
+`ModelRouter` under a named `compaction` model policy rather than being fixed
+here or chosen at the call site. It defaults to the run's own provider, so
+provider pinning is not broken by a compaction mid-run, at the cheapest tier
+whose context window admits the region being summarized. The prompt is a
+versioned asset and its version is recorded on the checkpoint compaction writes,
+which is what makes a fidelity regression attributable to a prompt change rather
+than to a model change. The tuning itself still belongs to the
+compaction-fidelity eval; what is fixed is where the choice lives and what is
+recorded about it.
+
+**Skill-content injection** (Section 30.4 loads full skill instructions on
+selection) is assigned to **Region B**, as the reasoning above anticipated, with
+one addition that answers the caching objection: a skill body, once selected,
+is **sticky for the remainder of the session** unless the skill is deselected by
+a control tool. A skill that entered and left the prefix on alternating steps
+would invalidate the cached prefix on every one of them, which costs more than
+carrying an unused body. Stickiness is what makes Region B affordable for a
+large body; without it the right answer would have been the turn layer.
+[skills.md](skills.md) takes this decision as given and supplies the rest:
+the caps, the loading tool, the trust derivation, and the rule that a body
+never yields. It also settles the one thing this paragraph left open — a
+skill is never deselected, and a third load fails rather than evicting.

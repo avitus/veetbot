@@ -61,12 +61,36 @@ nav:
   - Current Milestone: plan/current-milestone.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
+      - Bootstrap & Composition: plan/bootstrap-and-composition.md
+      - Development Toolchain: plan/development-toolchain.md
+      - Builtin Tools: plan/builtin-tools.md
+      - Event Log & Persistence: plan/event-log-and-persistence.md
+      - Policy & Approvals: plan/policy-and-approvals.md
       - Context Engine: plan/context-engine.md
+      - Model Gateway: plan/model-gateway.md
+      - Tool System: plan/tool-system.md
       - Memory Formation & Consolidation: plan/memory-formation-and-consolidation.md
       - Memory Retrieval & Ranking: plan/memory-retrieval-and-ranking.md
-  - Project State: status/index.md
+      - Evaluation Harness: plan/evaluation-harness.md
+      - Runtime Loop: plan/runtime-loop.md
+      - HTTP API & Streaming: plan/http-api-and-streaming.md
+      - Sandbox Isolation & Artifacts: plan/sandbox-isolation.md
+      - Skills: plan/skills.md
+      - Knowledge Documents: plan/knowledge-documents.md
+      - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
+      - Milestone Map: plan/milestone-map.md
+  - Readiness: plan/readiness.md
+  - Project State:
+      - Overview: status/index.md
+      - Questions for Review: status/questions-for-review.md
   - Architecture Decisions:
       - Overview: adr/index.md
+      - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
+      - ADR-0002 Provider-neutral model protocol: adr/0002-provider-neutral-model-protocol.md
+      - ADR-0003 Event log, projections, and checkpoints: adr/0003-event-log-and-projections.md
+      - ADR-0004 The Postgres run queue: adr/0004-postgres-run-queue.md
+      - ADR-0005 The deterministic policy engine: adr/0005-deterministic-policy-engine.md
+      - ADR-0006 No private reasoning storage: adr/0006-no-private-reasoning-storage.md
       - ADR-0007 Provider-neutral reasoning state: adr/0007-provider-neutral-reasoning-state.md
       - ADR-0008 Sandbox isolation: adr/0008-sandbox-isolation.md
       - ADR-0009 Run, turn, and session model: adr/0009-run-turn-session-model.md
@@ -81,4 +105,18 @@ nav:
       - ADR-0018 Memory formation and consolidation: adr/0018-memory-formation-and-consolidation.md
       - ADR-0019 Memory retrieval and ranking: adr/0019-memory-retrieval-and-ranking.md
       - ADR-0020 Context engine: adr/0020-context-engine.md
+      - ADR-0021 Tool execution pipeline and MCP: adr/0021-tool-execution-pipeline-and-mcp.md
+      - ADR-0022 The evaluation harness: adr/0022-evaluation-harness.md
+      - ADR-0023 The run loop and the single terminal writer: adr/0023-runtime-loop.md
+      - ADR-0024 The composition root and configuration: adr/0024-bootstrap-and-composition.md
+      - ADR-0025 The development toolchain and make check: adr/0025-development-toolchain.md
+      - ADR-0026 The builtin tool roster: adr/0026-builtin-tools.md
+      - ADR-0027 Gate milestones and the milestone map: adr/0027-milestone-map.md
+      - ADR-0028 The HTTP API surface: adr/0028-http-api-and-streaming.md
+      - ADR-0029 Sandbox isolation and artifacts: adr/0029-sandbox-isolation-and-artifacts.md
+      - ADR-0030 Skills and the authoring loop: adr/0030-skills-and-the-authoring-loop.md
+      - ADR-0031 The ORM surface and migrations: adr/0031-persistence-authoring.md
+      - ADR-0032 Trajectory export, redaction, and consent: adr/0032-trajectory-export-redaction-and-consent.md
+      - ADR-0033 Knowledge documents and passage retrieval: adr/0033-knowledge-documents.md
+      - ADR-0034 Section 29 as an audited seam: adr/0034-multi-device-and-surfaces-seam.md
   - Changelog: changelog.md

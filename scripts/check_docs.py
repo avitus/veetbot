@@ -62,6 +62,7 @@ def check_required_files() -> None:
         "docs/status/project-state.yaml", "docs/status/index.md",
         "docs/assets/stylesheets/extra.css",
         "scripts/build_docs.py", "scripts/check_docs.py",
+        "scripts/check_citations.py", "docs/status/citation-ledger.yaml",
         ".github/copilot-instructions.md", ".github/workflows/docs.yml",
     ]
     for rel in required:
@@ -197,6 +198,27 @@ def check_agents_size() -> None:
     note(f"AGENTS.md size: {len(data)} bytes, {line_count} lines")
 
 
+def check_citations() -> None:
+    """Line-number citations must still point at the text they cited.
+
+    Delegated to scripts/check_citations.py, which owns the ledger. Run it
+    with --update to repoint citations an edit has moved.
+    """
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check_citations.py")],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    tail = [ln for ln in result.stdout.splitlines() if ln.startswith("  - ")]
+    if result.returncode != 0:
+        err(f"citation check failed with {len(tail)} drifted citation(s)")
+        for ln in tail:
+            err(f"  {ln.strip()[2:]}")
+    else:
+        for ln in result.stdout.splitlines():
+            if ln.startswith("note: ") and "checked" in ln:
+                note(ln[6:])
+
+
 def run_builds() -> None:
     print("Running strict MkDocs build and single-HTML build (scripts/build_docs.py) ...")
     result = subprocess.run([sys.executable, str(ROOT / "scripts" / "build_docs.py")], cwd=ROOT)
@@ -212,6 +234,7 @@ def main() -> None:
     check_manifest()
     check_no_root_docx_links()
     check_agents_size()
+    check_citations()
     if "--no-build" not in sys.argv:
         run_builds()
 

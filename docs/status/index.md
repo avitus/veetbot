@@ -14,3 +14,13 @@ started.
 
 The milestone titles in `project-state.yaml` mirror the canonical
 [engineering plan](../plan/engineering-plan.md); keep the two synchronized.
+
+The `readiness` block in that file is derived from the
+[readiness review](../plan/readiness.md), which traces every milestone's work
+items to the document that designs them. It records what the documentation
+covers; it does not authorize work. Milestones 0 through 9 are implementable
+from the corpus as it stands, no document named there is still missing, and
+Milestone 10 remains a direction rather than a milestone.
+
+Autonomous decisions taken while the plan was being written, and the questions
+they raise, are recorded in [questions for review](questions-for-review.md).

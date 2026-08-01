@@ -88,7 +88,7 @@ run per consolidation; stage 8 is background maintenance.
 episodic log ─▶ 1 trigger ─▶ 2 segment & select ─▶ 3 extract candidates
      ▲                                                     │
      │                                                     ▼
- 8 decay / re-derive ◀─ 7 commit ◀─ 6 gate ◀─ 5 resolve ◀─ 4 filter (salience)
+ 8 decay / re-derive ◀─ 7 commit ◀─ 6 gate ◀─ 5 resolve ◀─ 4 filter
 ```
 
 ### 1. Trigger — when consolidation runs
@@ -292,16 +292,18 @@ Extends the Milestone 9 `MemoryRecord`:
 
 ```python
 class MemoryRecord(BaseModel):
-    # ... existing Milestone 9 fields (id, tenant_id, principal_id, scope,
+    # ... existing Milestone 9 fields (id, tenant_id, principal_id,
+    #     scope,
     #     subject, statement, source_event_ids, confidence, sensitivity,
     #     valid_from, expires_at, status) ...
     belief_type: str
     polarity: str                       # "assert" | "retract"
     portability: str                    # portable | contextual | local
-    origin_scopes: list[str]            # every scope that corroborated it
+    origin_scopes: list[str]            # every scope corroborating it
     corroboration_count: int = 1
     last_reinforced_at: datetime
-    valid_to: datetime | None           # bi-temporal: when it stopped holding
+    # bi-temporal: when the belief stopped holding
+    valid_to: datetime | None
     superseded_by: UUID | None
     # `status` (from Milestone 9) carries the lifecycle state:
     #   candidate | provisional | active | superseded | expired
@@ -313,10 +315,13 @@ class BeliefRejection(BaseModel):
     id: UUID
     tenant_id: str
     principal_id: str
-    belief_id: UUID                     # as rejected; ids change on re-derive
-    kind: str                           # untrue | changed | not_here | unspecified
-    subject: str                        # content keys survive re-derivation
-    statement: str | None               # None once the user asked for deletion
+    belief_id: UUID                     # as rejected; ids may change
+    # kind: untrue | changed | not_here | unspecified
+    kind: str
+    # content keys survive re-derivation
+    subject: str
+    # statement is None once the user has asked for deletion
+    statement: str | None
     statement_sha256: str               # the tombstone key
     belief_type: str
     scope: str                          # where the rejection was made
@@ -328,7 +333,8 @@ class ConsolidationRun(BaseModel):
     id: UUID
     tenant_id: str
     principal_id: str
-    trigger: str                        # session | explicit | scheduled | ...
+    # trigger: session | explicit | scheduled | ...
+    trigger: str
     scope: str
     watermark_before: int
     watermark_after: int
@@ -373,26 +379,31 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - **Formation is fully autonomous**: no belief requires synchronous human confirmation. Safety rests on the deterministic eligibility gates, the untrusted-content write ban, and after-the-fact transparency and reversibility; sensitive or ambiguous beliefs are committed but flagged for review.
 - Every write is tenant- and principal-scoped.
 
-## Evaluation (gates the milestone)
+## Hard gates
 
 Formation cannot be tuned without measurement; build the harness alongside the
 first formation layer (Section 20).
 
+1. **Contradiction handling** — inject a preference change; verify supersession
+   (not duplication) and that retrieval returns the current belief. **M9.**
+2. **No fabrication** — it must not form beliefs unsupported by
+   episodes. **M9.**
+3. **Injection resistance** — an untrusted "remember X" must not form a
+   belief. **M9.**
+4. **Correction durability** — a rejected belief must not return, including after
+   a full re-derivation under a newer consolidation policy. A hard gate. **M9.**
+5. **No policy regression** — adapt LOCOMO-style long-horizon scenarios to
+   exercise the write path. Gate: memory improves target eval cases **without**
+   increasing policy failures. **M9.**
+
+## Tracked metrics
+
 - **Formation precision** — of committed beliefs, the fraction correct and
   worth keeping (rubric/graded). The primary metric.
 - **Recall of consequential facts** — does it capture what later tasks need.
-- **Contradiction handling** — inject a preference change; verify supersession
-  (not duplication) and that retrieval returns the current belief.
-- **No fabrication** — it must not form beliefs unsupported by episodes.
-- **Injection resistance** — an untrusted "remember X" must not form a belief.
-- **Correction durability** — a rejected belief must not return, including after a
-  full re-derivation under a newer consolidation policy. A hard gate.
 - **Rejection rate** — user corrections per hundred rendered beliefs. A precision
   proxy measured against real usage rather than a rubric.
 - **Cost** — consolidation tokens per session within budget.
-
-Adapt LOCOMO-style long-horizon scenarios to exercise the write path. Gate: memory
-improves target eval cases **without** increasing policy failures.
 
 ## Build sequence (incremental, each gated by evals)
 
@@ -421,7 +432,13 @@ The **builtin consolidation path is built to parity first** (steps 1-5); an exte
 
 None outstanding for the formation loop. The next specs off this one raise their
 own: [memory retrieval and ranking](memory-retrieval-and-ranking.md) is written and
-carries none; the temporal entity graph is not yet specified.
+carries none; the **temporal entity graph** is not specified and is deliberately
+not scheduled for version 0.1. Milestone 9 delivers beliefs with scopes,
+provenance, decay, and contradiction handling, which is what the retrieval path
+consumes; an entity graph with valid-time and transaction-time edges is a second
+storage model over the same evidence and would need its own consistency rule
+against the belief store. It is recorded as post-0.1 work rather than as an open
+question, so that nothing in Milestones 0 through 10 depends on it.
 
 Retrieval also closes a loop back into formation: recalled beliefs that are used
 resist decay, subjects that are repeatedly queried with no result queue targeted

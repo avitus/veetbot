@@ -99,6 +99,8 @@ The platform is a shared cloud core with many thin device clients: PostgreSQL ho
 
 Use a modular monolith with explicit interfaces between modules.
 
+ADR-0001 records this decision, defines replaceability as a port with a contract suite attached to it rather than as a service boundary, and names the mechanism that enforces the Section 5 dependency rules.
+
 ```text
 +------------------------------------------------------------+
 |                    Entry Points                            |
@@ -247,6 +249,8 @@ Version 0.1 is complete when all of the following work:
 20. The code passes formatting, linting, typing, unit tests, and integration tests.
 
 ## 4. Repository structure
+
+The detailed design - the settings object and the eight environment values that survive the test "differs between two deployments of the same revision and cannot be committed"; the three configuration layers and why the environment is interpolated into files at named points rather than allowed to override them; the six configuration files, the operator overlay directory, and the one file the overlay may not touch; `.env.example` reconciled with the 106 knobs the corpus declares; the composition root's five startup phases and where each of the seventeen stated startup constraints lands; the shape of `build` and what a `Composition` may expose; the three entry points and the deployment role each passes; the eleven files this tree gains and the one name it retires; the Milestone 1 in-memory repositories, the `RunDispatcher` Protocol, and the minimal context builder; the CLI's arguments, output streams, reserved words, and exit codes; and the secret scanner's five rule families - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024. That document expands Sections 4, 5, 7, 10.5, 10.7, 11.1, 15, 16, 17, 25, 26, and 28 and Milestones 0, 1, 2, and 3; it does not replace the requirements below, and it removes no file this tree names.
 
 Use a `src` layout.
 
@@ -409,7 +413,7 @@ Enforce these rules:
 
 1.  `domain` may depend only on the Python standard library and Pydantic.
 
-Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (validation and serialization ergonomics) that does let an external library shape core types. Keep domain models free of Pydantic-only behavior that would be costly to replace - custom validators that perform I/O, settings loading, ORM modes - and treat them as plain value objects that happen to use BaseModel.
+    Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (validation and serialization ergonomics) that does let an external library shape core types. Keep domain models free of Pydantic-only behavior that would be costly to replace - custom validators that perform I/O, settings loading, ORM modes - and treat them as plain value objects that happen to use BaseModel.
 
 2.  `ports` may depend on `domain`.
 3.  `runtime` and `application` may depend on `domain` and `ports`.
@@ -426,6 +430,10 @@ Note: allowing Pydantic in the domain is a deliberate pragmatic tradeoff (valida
 14. Use explicit dependency construction in `bootstrap.py`; do not add a dependency-injection framework.
 
 Add an import-boundary test or static rule that verifies these constraints where practical.
+
+[evaluation-harness.md](evaluation-harness.md) and ADR-0001 resolve "where practical" rule by rule rather than leaving it to judgement: eight of the fourteen rules above are decidable by walking the import graph, four need a different static check (signature resolution for rules 6 and 7, a module-scope check for rule 13, a dependency-manifest check for rule 14), rule 12 is the secret scanner, and rule 4 is the adapter-registration check. Two residues - the run-time half of rule 6 and "must not depend on model judgment" in rule 11 - are recorded as not mechanically checkable, with the contract suite and ADR-0005's determinism gate named as their compensating controls. The walk is a registered structural gate and a Milestone 0 deliverable. The fourteen rules themselves are unchanged.
+
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 give rule 14 the module it names. That document states the rule as a property - the composition root is the only module that knows both a port and its adapter - and adds four static checks that make the property testable: `bootstrap` is imported only by the three entry points, no module outside `bootstrap.py` instantiates an adapter class, no module outside `adapters/determinism.py` reads ambient time or generates an identifier, and no `AsyncSession` exists at module scope. The second check is what rules 4 and 13 look like once there is a construction site to check against. All four run against an almost-empty repository. No rule above is changed, reordered, or relaxed.
 
 ## 6. Core domain objects
 
@@ -712,6 +720,8 @@ class ModelProvider(Protocol):
 ```
 The iterator must end with exactly one completed or failed event.
 
+The `ModelProvider` signature above is superseded. [model-gateway.md](model-gateway.md) and ADR-0002 declare the canonical port: `provider_name` becomes `name` and matches the adapter key on `ResolvedModel`; `stream` gains the `ResolvedModel` and `ModelAttempt` the router has already produced, so no adapter resolves a model twice; `close` is added because a pooled HTTP client needs an owner and `bootstrap.py` is where ownership ends; and `capabilities` moves off the adapter onto `ModelRouter`, because a capability belongs to a resolved model rather than to the provider serving it - one provider serves models that differ in context window and in tool support. Implement the model-gateway signature; the one above remains here as the record of what it replaced. The rule stated immediately above is unchanged, and that document restates it as a contract-suite assertion.
+
 ```python
 class ContextBuilder(Protocol):
     async def build(
@@ -788,6 +798,8 @@ class EventRepository(Protocol):
     ) -> list[EventEnvelope]:
         ...
 ```
+Two methods above are superseded. `RunRepository.claim_next` and `RunRepository.heartbeat` were written before the queue had leases; [event-log-and-persistence.md](event-log-and-persistence.md) replaces them with `RunQueue.claim`, which returns a lease epoch, and `RunQueue.heartbeat`, which returns a boolean so a fenced worker learns it has been fenced. [runtime-loop.md](runtime-loop.md) and ADR-0023 make `RunQueue` the canonical port for both operations and restrict `RunRepository.transition` to a single caller. Implement `RunQueue`; the two signatures above remain here as the record of what they replaced.
+
 Also define ports for:
 
 - Session repository
@@ -804,6 +816,10 @@ Also define ports for:
 - Device registry and presence, device channel, and notification (multi-device; see Section 29)
 
 ## 8. Tool system
+
+The detailed design - definitions for `ToolResult` and `ToolExecutionContext`, the two types named by the Section 7 `Tool` port; the completed `ToolSpec` with its tool kind, source, and required output trust label; the registry name grammar and the reserved-domain partition that lets an MCP tool be a known tool; the fourteen-step execution pipeline with its four persistence points; the `effect_sent_at` watermark that makes crash recovery decidable rather than pessimistic; the derivation of `argument_trust` and `origin_trust`; output excerpting and artifactization; the single outcome shape shared by every non-success result; the unified repeated-call breaker; the batch step boundary for parallel calls; control-tool suspension; and the MCP adapter, its operator-owned classification, and its resource, prompt, sampling, and roots mappings - is specified in [tool-system.md](tool-system.md) and ADR-0021. That document expands Sections 7, 8, 9.2's unknown-tool row, 11.1, 12.4, 12.5, 13, 15, 18.3, 18.4, 19, 22, 26, 27.3, 29.4, and 30.4 and Milestones 1, 4, 6, and 8; it does not replace the requirements below, and it reorders none of the Section 8.3 steps.
+
+The builtin tools that pipeline runs - the roster reconciled where 8.1's seven names and 8.2's six specifications disagree; every `ToolSpec` field value for all eight, including the trust label, idempotency class, timeout, output ceiling, and scopes that registration validation refuses to start without; the complete design of `math.calculate` and `system.current_time`; and the seven ordered refusals that make up the startup registration check - is specified in [builtin-tools.md](builtin-tools.md) and ADR-0026. That document expands Sections 8.1, 8.2, 9.2, 11.2, and 26 and Milestones 1, 4, and 6; it does not replace the requirements below, and it changes no behaviour any tool below is given.
 
 ### 8.1 Tool specification
 
@@ -834,6 +850,8 @@ sandbox.run_command
 artifact.export
 ```
 ### 8.2 Initial tools
+
+[builtin-tools.md](builtin-tools.md) and ADR-0026 complete every tool named below and place the two this section leaves unassigned. `math.calculate` gets its grammar, its `Decimal` numeric model, its operator and function sets, the four bounds that make `9**9**9` a failure rather than an outage, and its eight reason codes; `system.current_time` gets its IANA-only timezone argument, its aware-UTC `Clock` contract, and the output fields that make Section 8.2's determinism claim testable. `demo.external_write`, which 8.1 omits, and `artifact.export`, which this section omits, are both in the roster; `artifact.export` is placed at Milestone 6. Nothing stated below changes.
 
 #### `math.calculate`
 
@@ -949,6 +967,8 @@ This collapses multi-step pipelines into near-zero model round-trips - a large t
 
 ## 9. Policy and approval model
 
+The detailed design - definitions for `ProposedAction`, `ApprovalStatus`, `SideEffectClass`, `RiskLevel`, and `IdempotencyClass`; the mechanizable key for the 9.2 matrix and how its three non-enum decision strings resolve; the restrictiveness ordering the layered model needs; the format, producer, and storage of `policy_version`; the hardline rule format and freeze; revalidation after approval; the denial tool-result shape; and the trust-label-to-tier mapping - is specified in [policy-and-approvals.md](policy-and-approvals.md), ADR-0005, and ADR-0006. That document expands Sections 8.3, 8.4, 9, 11.2, 13, and 22 and Milestone 4; it does not replace the requirements below, and it changes no outcome stated in the 9.2 matrix.
+
 ### 9.1 Policy decisions
 
 ```python
@@ -1034,6 +1054,8 @@ Approval is layered, with the deterministic engine always primary:
 - Human approval remains the gate for consequential actions (Section 9.3). Recorded as ADR-0017.
 
 ## 10. Model gateway
+
+The detailed design - the six invariants of the normalized stream and the shared assembler that folds it into a turn; definitions for the streaming event classes, conversation items, content parts, usage, stop reasons, and the three error classes; resolutions for the nine unfilled cells of the 10.2 mapping table including `server_tool_use`, the in-band `<think>` mapping, and the fifth token class; the `ModelRouter` port that turns a model policy into capabilities, limits, and pricing; how provider pinning and availability routing coexist; the retry ownership split; and the model-call timeouts - is specified in [model-gateway.md](model-gateway.md) and ADR-0002. That document expands this section and Milestones 1 and 3; it does not replace the requirements below, and it changes no mapping stated in the 10.2 table.
 
 ### 10.1 Normalized request
 
@@ -1333,6 +1355,8 @@ Do not load every registered tool. Filter tools by:
 - Policy profile
 - Runtime environment
 
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 identify which builder this is: build-sequence step 1 of [context-engine.md](context-engine.md), deterministic assembly with the two regions and `prefix_sha256` recorded from the first commit. That document assigns each of the seven inputs above to Region A or Region B, states the prompt-stability test as two assertions rather than one - the prefix hash is stable *and* the request bytes differ, in Region B only - and requires all four tool filters to exist from the first commit, two of them as identity stages until the milestones that give them data. The seven inputs and the four filters are unchanged.
+
 ### 11.2 Trust labels
 
 Every context item must have a trust classification.
@@ -1386,6 +1410,8 @@ Do not request or store private chain-of-thought. Persist only messages, actions
 Amendment (v2.0): "do not store" refers to durable logs, the event payload, and long-term memory. It does not forbid holding a provider’s opaque reasoning-continuation payload inside the active run checkpoint for the duration of a tool loop, which some providers require (Anthropic thinking blocks with signatures; OpenAI reasoning items or reasoning.encrypted_content). That payload is provider-tagged, replayed verbatim, excluded from logs and memory, and discarded when the loop ends or the provider changes. See Sections 10.6 and 27 and ADR-0007.
 
 ## 12. Runtime behavior
+
+The detailed design - the eleven callables 12.1 names and the ports or named functions each becomes; `Step` as a value object with a persisted identity on `model_calls.step_number`; the split between a `run_loop` that returns a typed `RunOutcome` and a `finalize` that performs every terminal transition, lease release, and terminal event exactly once; the six cancellation observation points and the rule that a cancellation observed after an effect watermark does not abandon the call; the three budget scopes and why "after" means "record in the same transaction"; the heartbeat as a supervisor task that also watches the deadline and polls for cancellation; the `build_with_pressure` call site that finally gives compaction one; the six checkpoint triggers and the `full` rule; the resume ladder for all four resumption paths; and the twenty cross-document contradictions the loop is where they meet - is specified in [runtime-loop.md](runtime-loop.md) and ADR-0023. That document expands Sections 6.4, 6.5, 6.9, this section, 13, 14.1, 14.2, 15, 16, 19, 26, and 27 and Milestones 1, 2, 4, 5, and 7; it does not replace the requirements below, and it reorders none of the Section 8.3 pipeline steps.
 
 ### 12.1 Main loop
 
@@ -1553,7 +1579,11 @@ Every retry must fit inside the run deadline.
 
 Use exponential backoff with jitter. Keep retry decisions in application code, not in provider adapters alone.
 
+[runtime-loop.md](runtime-loop.md) and ADR-0023 add the loop-facing half of this taxonomy: `FailureReason`, the fourteen-value enum a terminal `FAILED` run records so an operator can distinguish a provider outage from an exhausted budget from a policy denial; `RunFailure` on the run row; the three-way split of retry ownership between the adapter's transport retries, the gateway's attempt loop, and the runtime's step retry, with `stream_had_output` deciding which owns a given failure; the rule that a failed attempt is still charged to budget at the attempt check rather than after it; and the treatment of an empty terminal model turn as a failed step rather than as a completed run with an empty answer. The retry table above is unchanged; every row keeps its retryability and its owner is now named.
+
 ## 14. Durable worker and PostgreSQL queue
+
+The detailed design - the append transaction and why sequence gaps are legal while missing writes are not, projections with watermarks and a rebuild gate, upcasters for payload evolution, delta checkpoints, the claim query with priority classes and reserved capacity, and the `lease_epoch` fencing that makes it safe for lease expiry to guess wrong - is specified in [event-log-and-persistence.md](event-log-and-persistence.md), ADR-0003, and ADR-0004. That document expands Sections 6.8, 6.9, 12.2, 14, and 15 and Milestone 2; it does not replace the requirements below.
 
 ### 14.1 Worker model
 
@@ -1587,6 +1617,14 @@ Add a resilience integration test that terminates a worker process after a check
 ## 15. Database schema
 
 Create Alembic migrations for at least these tables.
+
+[event-log-and-persistence.md](event-log-and-persistence.md) adds columns and tables required by Section 6.8, Section 16, Section 27.5, and the Milestone 2 acceptance criteria that are not yet reflected below: `events.payload_schema_version`, the `runs` columns `priority`, `attempts`, `scheduled_for`, and `lease_epoch` with a partial unique index enforcing one non-terminal run per session, and the `idempotency_keys`, `projection_watermarks`, and `derived_event_keys` tables. All are additive to the tables specified here.
+
+That same document and ADR-0031 supply what the sentence above leaves open, which is what a migration looks like when someone writes one: a linear revision graph with exactly one head and no merge revisions, resolved by rebasing `down_revision` rather than by `alembic merge`; `<revision>_<slug>.py` file names that carry no order, because ordering lives in `down_revision` and nowhere else; structural and data changes in separate revisions, with `downgrade()` written for the former and refusing for the latter; `alembic revision --autogenerate` as a draft a person then edits, kept honest by an empty-diff round trip rather than by review; lock-taking DDL split into its own non-transactional revision; and a revision that may add a column or an index to `events` but may never rewrite a payload. Schema in tests is created by running the migrations, never by `metadata.create_all`. It adds no table to the list below.
+
+[model-gateway.md](model-gateway.md) adds the two tables Section 6.5's cost precedence and the Milestone 3 usage criteria require and this section does not yet carry: `model_calls`, one row per model attempt with all five token classes, cost, `cost_source`, and the resolved provider, model, and registry version; and `model_prices`, an append-only price history so a recorded cost stays reproducible after a vendor price change. `runs.usage` is unchanged in shape and becomes a rollup of `model_calls` maintained in the same transaction. Both are additive to the tables specified here.
+
+[policy-and-approvals.md](policy-and-approvals.md) likewise adds what Section 9, Section 11.2, and the Milestone 4 acceptance criteria require and this section does not yet carry: `tenant_id`, `principal_id`, `session_id`, `action_kind`, `action_id`, `risk`, `policy_version`, and `revalidated_policy_version` on `approvals`, with `tool_invocation_id` widened to nullable so non-tool actions can be approved, and the indexes the approval list, the resume path, and the expiry reaper each need; the classification columns `side_effect`, `risk`, `idempotency_class`, `origin_trust`, and `effective_arguments_hash` on `tool_invocations`; and a `policy_profiles` audit table that records which ruleset a `policy_version` refers to. Policy rules themselves are version-controlled files, not rows.
 
 ### `agents`
 
@@ -1754,6 +1792,8 @@ Do not store artifact bytes in PostgreSQL.
 
 ## 16. API contract
 
+The detailed design - the fourteen routes and a response body for each of them, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. The nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
+
 ### Authentication
 
 Version 0.1 may support:
@@ -1907,6 +1947,8 @@ Do not expose tracebacks through the API.
 
 ## 17. CLI contract
 
+The detailed design - each command's arguments and options, what it writes to stdout versus stderr, the reserved words after `agent run` and the `--` escape that keeps a prompt beginning with one of them runnable, the six exit codes, the milestone at which each command first works, and the application service each of the seven `agent chat` steps below calls - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024. Four options are added where this section names none, each because a command is otherwise unusable rather than merely less convenient. That document adds no command, removes none, and restates the last rule of this section as a structural check rather than a convention.
+
 Provide these commands:
 
 ```text
@@ -1936,6 +1978,8 @@ agent api
 The CLI must call the same application services as the API. Do not implement a second runtime loop inside the CLI.
 
 ## 18. Sandbox and artifacts
+
+The detailed design - the seven types Section 7's `ExecutionEnvironment` and `ArtifactStore` ports name and no document defines, namely `EnvironmentSpec`, `ResourceLimits`, `EnvironmentHandle`, `ExecutionCommand`, `ExecutionResult`, `ArtifactMetadata`, and `ArtifactRef`, together with `WorkspaceHandle`, `ArtifactWriter`, and `CredentialResolver` from `ToolExecutionContext`; the eight `KillReason` values that let a caller tell a program that failed from a limit that stopped it; the argument for why the port stays at three methods and why `read_file` beside `execute` would hand arbitrary execution to every tool that only needed to read; the workspace as a cache rather than state, held for a worker's lease rather than a run's logical lifetime, which makes crash-resume a restart rather than a recovery; every restriction in 18.2 as a default and an operator ceiling rather than a word; the four-way minimum that produces an effective timeout, in which the model-supplied `timeout_seconds` is the weakest input and never the only one; the three-tier environment a sandbox sees and the tier that is never present and not configurable; the full `ToolSpec` for `sandbox.run_command`; and the artifact store's derived storage key, its origin vocabulary, and its retention rule - is specified in [sandbox-isolation.md](sandbox-isolation.md) and ADR-0029. That document expands this section and Sections 7, 8.2, 11.2, 20.4, 22, and 28 and Milestones 1, 4, and 6; it does not replace the requirements below. The argument vector, the refusal of a shell string by default, the request and result field names in 18.3, and 18.4's four storage rules are unchanged, and output truncation and artifactization remain [tool-system.md](tool-system.md)'s.
 
 ### 18.1 Execution boundary
 
@@ -2014,6 +2058,8 @@ Large tool results should be converted into artifacts, with only a summary and a
 
 ## 19. Observability
 
+The detailed design of the logging half - the library, where the bootstrap runs, the two renderers and the deployment mode that selects between them, the four points at which the eight fields below are bound as context variables, and the redaction processor that enforces the do-not-record list rather than leaving it to convention - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this section and Milestone 0; it does not replace the requirements below, and it removes no field from the list.
+
 Create an OpenTelemetry span hierarchy:
 
 ```text
@@ -2090,6 +2136,8 @@ budget_exceeded_total
 ## 20. Evaluation framework
 
 Build evaluations before advanced features.
+
+The detailed design - what a hard gate is, and the registry that makes the one hundred and seventy-two gates fifteen specs and this plan declare reconcilable against a test run; the four gate kinds, and why seventy-seven of those gates cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
 
 ### 20.1 Evaluation case format
 
@@ -2173,6 +2221,8 @@ The deterministic suite above uses fake fixtures and belongs in CI; it verifies 
 
 ### 20.4 Test categories
 
+The detailed design - the mapping from each of the six test directories to a pytest marker, the marker declarations and strict-marker settings, the naming convention, which of the four CI jobs runs each category, and the reconciliation of Milestone 1's "Deterministic tests" with the harness's cases 1 through 11 as one deliverable - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this section and Milestones 0, 1, 2, and 3; it does not replace the requirements below, and it adds no test category.
+
 #### Unit tests
 
 Test pure logic:
@@ -2244,6 +2294,8 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
+The milestone each stated requirement must hold at - all one hundred and sixty-six gates the fourteen detailed-design specifications declare, the import-boundary walk and the secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself, which is one hundred and seventy-five declarations and one hundred and seventy-two registry entries once three aliases are subtracted; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 10; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the one hundred and seventy-two registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+
 ### 21.1 Sequencing of the version 2.2 additions
 
 The version 2.2 additions do not all belong at the milestone their descriptive section implies. Sort them by cost-to-defer, not by topic. Three categories:
@@ -2276,6 +2328,8 @@ Keep late - deliberately deferred. Self-improving skills stay behind the static-
 \* Self-improving skills and inbound surfaces are the two additions kept deliberately late; everything marked M1-M3 is either a cheap data-model decision or a high-leverage fast-follow that is cheaper to do early than to bolt on. The single most consequential move is bringing the OpenAI-compatible adapter into Milestone 3, which also buys a no-cost local live-test path.
 
 ### Milestone 0: Repository and engineering foundation
+
+The detailed design of the toolchain deliverables below - what each of the eight required commands runs, the six targets added so that continuous integration invokes no command the Makefile does not define, the compose file's version, port, volume, credentials, and healthcheck, the workflow file with its four jobs and their triggers, the structured-logging bootstrap, the pinned test-directory markers, the egress block, and what "Initial ADRs" resolves to - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this milestone and Sections 2.2, 19, 20.4, 22, 24, and 25; it does not replace the requirements below, and it adds no deliverable to this list.
 
 #### Implement
 
@@ -2311,7 +2365,25 @@ make migrate
 - CI executes `make check`.
 - No application code exists outside the documented module boundaries.
 
+[evaluation-harness.md](evaluation-harness.md), ADR-0001, and ADR-0022 place two deliverables in this milestone that need no runtime: the gate registry, with the docs check that reconciles each spec's declared gates against it, and the structural gates - the import-boundary walk, the transaction-hygiene check, the secret scanner, and contract-module coverage. Both run against an almost-empty repository and stay correct as it fills; added later, they are added against existing violations, which is the situation in which they get relaxed rather than obeyed. The last acceptance criterion above is what the import-boundary walk turns from a statement into a test.
+
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 give the "configuration module" and "`.env.example`" items above their bodies: the settings object and its eight fields, the three layers, the six committed YAML files, and the operator overlay. They also specify the secret scanner this milestone owes - five rule families, a report that never prints what it matched, an allowlist whose entries require prose, and `.env.example` scanned rather than exempted - and resolve the transaction-hygiene placement by separating two words: the *check* is a Milestone 0 deliverable, and the *gate* it feeds is a Milestone 2 acceptance criterion, because this milestone has no database code to walk. Four static checks join the import-boundary walk here. No acceptance criterion above is changed.
+
+[milestone-map.md](milestone-map.md) and ADR-0027 name the thirteen registry entries that land in this milestone, every one of them true of a repository with no agent in it: the generic import-boundary walk, which this milestone declares and owns as `gate.structure.import_boundary` and which [tool-system.md](tool-system.md) restates rather than declares a second time; the secret scanner, declared here as `gate.structure.no_committed_secrets` and specified in [bootstrap-and-composition.md](bootstrap-and-composition.md); four the evaluation harness owns over the registry, the contract modules, and the evals package; six the map owns over the scheduling record itself; and the migration-graph walk [event-log-and-persistence.md](event-log-and-persistence.md) declares, which registers against this milestone rather than Milestone 2 because the empty Alembic migration the criteria above already require is a graph, and a walk that only begins once a dozen revisions exist has already missed the branch it exists to prevent. The first two are the only registry entries whose owner is this plan rather than a detailed-design spec, because this is where they are declared. The transaction-hygiene check is a deliverable here whose gate is registered later, which is the same separation of two words ADR-0024 made. No deliverable or acceptance criterion above is changed.
+
 ### Milestone 1: In-memory vertical slice
+
+The tool registry, the execution pipeline, and the two types the `Tool` port names are specified in [tool-system.md](tool-system.md) and ADR-0021; its build order places steps 1 through 5 in this milestone.
+
+[builtin-tools.md](builtin-tools.md) and ADR-0026 supply the bodies for the two tool items in the list below. `math.calculate` is a hand-written tokenizer and precedence-climbing parser over `decimal.Decimal` at fifty significant digits - not an allowlist over `ast.parse` - with four bounds enforced by the decimal context rather than by the evaluator, and every failure a single `ToolFailureKind` with one of eight reason codes. `system.current_time` reads the injected `Clock` and nothing else, which is what makes its determinism a property of a port rather than a claim about a tool; that document also fixes `Clock.now()` as returning an aware UTC `datetime`, a clarification of a declaration [runtime-loop.md](runtime-loop.md) leaves open. The required demonstration below is a pure function from `17 * 23` to `391`, asserted on the rendered bytes.
+
+[evaluation-harness.md](evaluation-harness.md) and ADR-0022 place the determinism harness in this milestone - the `Clock` and `IdFactory` ports and their pinned implementations, before anything depends on ambient time - along with the case schema, the loader, and the runner. Eleven of the twenty-five Section 20.3 cases are writable here, which is what makes "build evaluations before advanced features" a schedule rather than an aspiration. Cases above this milestone are reported as pending, not failed.
+
+[runtime-loop.md](runtime-loop.md) and ADR-0023 specify the loop this milestone builds: the executor and loop split, `RunOutcome` and its five kinds, `Step`, `FailureReason`, the nine additive `Run` fields, and the `Clock` and `IdFactory` ports the harness above depends on - declared here because the runtime is their heaviest consumer. Five of its fourteen hard gates land in this milestone, including the structural gate that only `runtime/executor.py` may call `RunRepository.transition` or `RunQueue.release`. "State transition logic" in the implement list above is the item that document expands.
+
+[bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024 supply the bodies for three items in the list below. "In-memory repositories" is five adapters in `adapters/persistence/memory.py` - agent, session, run, event, and tool invocation - which are production adapters run against the same contract suites as their PostgreSQL counterparts, not test doubles; there is no in-memory `RunQueue`, because that port's entire content is a locking discipline a simulation cannot tell the truth about. "Inline run dispatcher" is a `RunDispatcher` port with one method whose postcondition both adapters satisfy, called after the creating unit of work commits. "Minimal context builder" is context-engine build-sequence step 1. That document also resolves this milestone's event criterion against Milestone 2's event storage by separating repository from storage - one port, two implementations - and specifies the composition root, the settings object, and the CLI contract the acceptance command below runs through.
+
+[milestone-map.md](milestone-map.md) and ADR-0027 place twenty-eight registry entries in this milestone, more than any other, and resolve two placements the items below depend on. The tool system's build step 3 is separated the same way: the idempotency port, its semantics, and its contract suite are here, and the unique index that makes deduplication correct under concurrency is Milestone 2, so the in-memory adapter declares that gap against the checked-in capability table rather than simulating a race it cannot observe. And `CancellationToken` becomes buildable here as a lazily evaluated deadline plus a `SIGINT` handler, both of which need only `Clock` and the process rather than the queue, the lease, or the supervisor Milestone 2 builds; `CancelReason` splits by dependency, with `DEADLINE` in this milestone, `FENCED` at Milestone 2, and `REQUESTED` arriving twice - by poll at Milestone 2 and by endpoint at Milestone 5. No deliverable or acceptance criterion above is changed.
 
 #### Implement
 
@@ -2356,6 +2428,8 @@ run completes
 - Every state transition is represented by an event.
 - No provider-specific code exists in the runtime.
 
+[model-gateway.md](model-gateway.md) and ADR-0002 supply the domain types this milestone designs in and Milestone 3 consumes: the five conversation items, the content parts, the six streaming event classes, `ModelUsage` with its five token classes, the neutral `StopReason` vocabulary, the three error classes, and `FakeModelScript` for the fake provider above. They also give "no provider-specific code exists in the runtime" a test: an import-graph walk rather than a search for SDK names, since the failure that matters is a transitive import through a shared helper.
+
 ### Milestone 2: PostgreSQL persistence and durable worker
 
 #### Implement
@@ -2385,6 +2459,12 @@ run completes
 - Duplicate event sequence numbers are impossible.
 - Idempotent tool calls are not executed twice after recovery.
 - Database transactions are never held across provider or tool I/O.
+
+The persistence design for this milestone - the observation-not-durability contract, watermarked projections and the build sequence that reaches them, upcaster totality, checkpoint dispensability, and exactly-once execution under fencing - is specified in [event-log-and-persistence.md](event-log-and-persistence.md), ADR-0003, and ADR-0004, which add seven hard gates and five tracked metrics to the criteria above.
+
+[runtime-loop.md](runtime-loop.md) and ADR-0023 add the runtime side of the same milestone: the heartbeat supervisor and its lease-interval-over-three cadence, `heartbeat -> bool` with `False` meaning fenced, the `WHERE lease_epoch = :lease_epoch` guard on every non-append write, what a fenced worker does with an in-flight model stream, the six checkpoint triggers with the `full` rule and the two additive `checkpoints` columns it needs, and `seed_checkpoint` as a function with two call sites so that deleting a run's checkpoints and resuming reaches the same terminal state. Four more hard gates land here, of which "the lease is released exactly once, including in the crash and fence cases" is the one the acceptance criterion "two workers do not execute the same claimed run concurrently" turns into a test.
+
+[event-log-and-persistence.md](event-log-and-persistence.md) and ADR-0031 give the first two implement bullets above their bodies, and change no criterion. The ORM surface is settled by elimination rather than by preference: declarative mapping of a domain type puts SQLAlchemy inside `domain` and fails Section 5's first rule on the import walk, imperative mapping avoids the import and fails its seventh silently because the domain object becomes the ORM object, and what survives is one declarative row class per table in `adapters/persistence/sqlalchemy_models.py`, two hand-written translation functions per table in a `mappers.py` beside them, and a repository constructed with a live session that never commits, with the unit of work owned by the caller that opens it. The Alembic conventions are the linear graph, the slugged file name, the structure-and-data split, autogenerate as a draft, and `EXPECTED_REVISION` as a module-level constant compared against `alembic_version` at startup rather than a head computed at runtime from the migrations that shipped in the same image - which is the mechanism ADR-0024 decision 6 required and left open. Five more hard gates land across this milestone and Milestone 0, four of them observing Section 24 criteria that until now nothing evaluated.
 
 ### Milestone 3: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
 
@@ -2419,6 +2499,8 @@ run completes
 - A local OpenAI-compatible endpoint (e.g. Ollama) passes the calculator scenario, giving a no-cost live-test path.
 - The normalized protocol passes the same contract suite against OpenAI, Anthropic, and a chat_completions endpoint.
 
+[model-gateway.md](model-gateway.md) and ADR-0002 expand these criteria into ten hard gates and six tracked metrics, and specify the fourteen-step build order for this milestone. Three of the criteria above need definitions this section does not carry: "the runtime passes all tests against fake and recorded adapters" gets `FakeModelScript` and the recorded-fixture format there, "tool-call IDs are preserved correctly" gets the stream invariant that makes preservation testable, and "provider errors are mapped to internal error types" gets the three error classes and the `stream_had_output` split that decides who retries. The fixture list under Implement names OpenAI only; the contract-suite criterion naming three providers is the controlling requirement.
+
 ### Milestone 4: Policy, approvals, and complete tool lifecycle
 
 #### Implement
@@ -2444,6 +2526,12 @@ run completes
 - Path traversal is rejected.
 - Cross-tenant approval access is rejected.
 - Unknown tools and missing scopes are denied before execution.
+
+[policy-and-approvals.md](policy-and-approvals.md) expands these criteria into ten hard gates and six tracked metrics, and specifies the twelve-step build order for this milestone. Two of the criteria above need definitions this section does not carry: "denial becomes a structured tool result" gets its field allowlist there, and "cross-tenant approval access is rejected" gets the `approvals.tenant_id` column and the not-found-rather-than-forbidden response it requires. The optional LLM-assisted approval layer remains sequenced after Milestone 6 per Section 21.1 and is not a dependency of this milestone.
+
+[builtin-tools.md](builtin-tools.md) and ADR-0026 fix the classification of the four tools this milestone implements before their behaviour is designed: the three `workspace.` tools and `demo.external_write` each carry a side-effect class, risk level, idempotency class, trust label, scope, timeout, and output ceiling, which is what lets this milestone's policy work run against real registry rows rather than fixtures. Two constraints on the workspace design are stated there rather than left to be noticed - the reader must lower `output_trust` to `EXTERNAL_UNTRUSTED` for any file whose provenance within the run is not established, and `allow_parallel` is false for every tool that writes. The behaviour of all four remains this milestone's to specify.
+
+[runtime-loop.md](runtime-loop.md) and ADR-0023 specify what "approval creates a durable paused run" means on the runtime side: the suspension outcome, the single `finalize` path that releases the lease before the `run.waiting_for_approval` event is visible to a second worker, the resume ladder that re-enters the tool pipeline at step 6 for each pending call rather than re-proposing it, and the gate that a waiting run holds no lease, no worker slot, and no open transaction and is not reclaimed by the lease sweep. That gate is what makes "approval after worker restart resumes correctly" checkable rather than asserted.
 
 ### Milestone 5: HTTP API and SSE
 
@@ -2472,6 +2560,10 @@ run completes
 - Production mode cannot start without configured authentication.
 
 Version 0.1 may be considered minimally usable after this milestone, but sandbox execution and artifact support are still required for the full target.
+
+[http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028 expand every item in the implement list above and give each of the seven acceptance criteria something to test against: a request shape, a response shape, a status code, a required scope, and an error mapping for each of fourteen routes rather than nine; the code list the error envelope needed; request identifiers with a stated provenance and a stated relationship to the trace identifier; `Idempotency-Key` separated from the Milestone 1 tool-call port it shares a name with; authentication specified at what it produces rather than only at what it refuses; and the cross-process half of cancellation, which is that the endpoint writes `runs.cancel_requested_at` - the worker half was already specified. Ten hard gates land here, every gate that document declares, taking this milestone from one registered invariant to eleven. One route is added: `GET /v1/sessions/{session_id}`, so that a client reconnecting with only a session identifier can find its active run.
+
+"Cancellation reaches the worker" is specified in [runtime-loop.md](runtime-loop.md) and ADR-0023 as one `CancellationToken` per run, observed at six points and shared by the loop, the tool executor, and the sandbox, with the rule that a cancellation observed after a call's `effect_sent_at` watermark is set completes the disposition rather than abandoning a half-sent side effect. That document proposes splitting cancellation across Milestones 1, 4, and 5 rather than introducing it whole here, and records the split as an open question, since collapsing it back into this milestone is cheap and introducing it late is not.
 
 ### Milestone 6: Isolated execution and artifacts
 
@@ -2538,9 +2630,13 @@ class WorkingState(BaseModel):
 
 The assembly design for this milestone - region membership and the prefix hash gate, absolute class caps with history as the only window-scaling class, the yield order, purity of `build()` with compaction as a checkpoint write, elision rather than paraphrase of untrusted spans, and the working-state carry rules - is specified in [context-engine.md](context-engine.md) and ADR-0020, which adds five hard gates and four tracked metrics to the criteria above.
 
+[runtime-loop.md](runtime-loop.md) and ADR-0023 give compaction the call site it has lacked in every prior version of this plan: `build_with_pressure`, which measures pressure, invokes the compactor if the assembled body will not fit, adopts the checkpoint the compactor returns, and measures again, capped at two compactions per step with `ContextOverflow` permanent on the third. The purity of `build()` above is preserved exactly because the write happens at the call site. Two hard gates land here: every `context.build` span is preceded in its step by a pressure measurement, and two builds of one checkpoint produce the same `prefix_sha256`.
+
 ### Milestone 8: Skills and MCP integration
 
 #### Skills
+
+The package format below, its front matter, the validator that decides what is storable, the catalog pinned at session open, `skill.load` and the two context classes it fills, the two tables that hold revisions, and every type this milestone needs are specified in [skills.md](skills.md) and ADR-0030. Ten of that document's sixteen hard gates land here; the six that cover authoring land at Milestone 10.
 
 Use a skill package format:
 
@@ -2575,6 +2671,8 @@ Only load skill metadata into ordinary context. Load full instructions and files
 Skills are also the substrate for agent self-improvement: the agent can author and refine its own procedural-memory skills under governance. See Section 30 and ADR-0013.
 
 #### MCP
+
+The MCP adapter, the `mcp.{server_id}.{tool}` namespace join, the operator-owned server classification, the two transports and their trust zones, and the resource, prompt, sampling, and roots mappings are specified in [tool-system.md](tool-system.md) and ADR-0021.
 
 Implement MCP as an adapter at the integration boundary. MCP distinguishes tools, resources, and prompts; map these to the internal tool, context-source, and skill abstractions rather than allowing MCP concepts to become the application’s core domain model. See the [Model Context Protocol specification](https://modelcontextprotocol.io/specification/2025-11-25).
 
@@ -2683,6 +2781,8 @@ Never automatically store:
 
 These are separate optional extensions.
 
+A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill_manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, and the threshold is the one number that document leaves open.
+
 #### Scheduling
 
 Implement a scheduler only after durable on-demand runs are reliable.
@@ -2744,6 +2844,8 @@ Add subagents only when evaluation evidence shows that a single agent fails beca
 Do not add role-named agents merely for planning, writing, or criticism without evidence of improvement.
 
 ## 22. Security baseline
+
+[development-toolchain.md](development-toolchain.md) and ADR-0025 place the file this section requires: `docs/security.md` exists from Milestone 0, because the definition of done in Section 24 requires security implications to be documented for every milestone and Milestone 0 already ships two security controls. That document also specifies the secret scanner's treatment of `.env.example` and the Milestone 0 egress block; it changes no control listed below.
 
 Create `docs/security.md` documenting these trust boundaries:
 
@@ -2826,6 +2928,10 @@ The coding agent must follow these rules:
 
 ## 24. Definition of done for every milestone
 
+The last item below - "`make check` succeeds" - is defined in [development-toolchain.md](development-toolchain.md) and ADR-0025, which fix `make check` as `lint typecheck test-fast` so that it stays runnable on a fresh checkout with no database and no provider credential, and which make it the exact union of the two continuous-integration jobs that need neither. That document adds no item to this list.
+
+Two items below - "Database migrations upgrade from a clean database" and "Database migrations upgrade from the previous revision" - are conditions of every milestone that nothing evaluated. [event-log-and-persistence.md](event-log-and-persistence.md) and ADR-0031 give them the checks that decide them: `gate.event.migration_clean` runs `upgrade head` against an empty database and then requires an autogenerate run against the same metadata to produce an empty diff, and `gate.event.migration_stepwise` walks the revision graph one revision at a time, upgrading and downgrading each, with data revisions exempt from the downgrade half by declaration. Both depend on schema in tests being created by running the migrations rather than by `metadata.create_all`, which is the shortcut that makes these two items unfalsifiable. That document adds no item to this list either.
+
 A milestone is not complete until:
 
 - All acceptance criteria pass.
@@ -2846,6 +2952,8 @@ A milestone is not complete until:
 Do not leave untracked TODO comments. Convert deferred work into documented issues or a roadmap section.
 
 ## 25. Initial local-development experience
+
+The detailed design of the commands below - the contents of every Makefile target, why `docker compose up -d postgres` and `alembic upgrade head` remain two steps, the compose service the first of them starts, and the console script that makes `uv run agent api` the invocation rather than a module path - is specified in [development-toolchain.md](development-toolchain.md) and ADR-0025. That document expands this section and Milestone 0; it does not replace the sequence below, and it removes no item from the README list.
 
 The final setup should support:
 
@@ -2948,6 +3056,8 @@ The coding agent should not begin Milestone 2 until Milestones 0 and 1 pass all 
 
 This section resolves the domain’s load-bearing ambiguity: what a run is relative to a conversational turn and a session, where a new run’s prior conversation comes from, how the agent can pause for user input mid-run, and whether a session may have concurrent runs. It expands Sections 6.3, 6.4, 12, and 16, and is recorded as ADR-0009.
 
+[runtime-loop.md](runtime-loop.md) and ADR-0023 supply the mechanism this section specifies the behaviour of: suspension as one mechanism with three kinds, so that entering either `WAITING_*` state releases the lease, checkpoints, and emits an event in one place rather than at each of the loop's five exits; a child-run wait reusing `WAITING_FOR_APPROVAL` with a typed suspension kind rather than adding a fourth non-terminal status, which is recorded as an open question; and 27.5's "reject or queue" resolved to reject, with `ConflictError` and HTTP 409, except where the active run is `WAITING_FOR_USER` and the deterministic routing rule sends the text to that run's input endpoint - because ADR-0004's partial unique index makes queueing impossible at the database level as currently specified. The definitions in 27.1 are unchanged, including that a turn has no domain object.
+
 ### 27.1 Definitions
 
 - Session: a durable, ordered conversation between one principal and one agent version. It owns the authoritative event log and the per-session sequence, and is long-lived.
@@ -3041,6 +3151,8 @@ Turn creation is idempotent on the client Idempotency-Key (Section 16): a repeat
 
 ## 28. Sandbox isolation architecture
 
+The mechanism design for this section - the egress allowlist that 28.5 requires and [tool-system.md](tool-system.md) already depends on by name, given a YAML grammar, an owner, one leftmost wildcard label, mandatory explicit ports, and two independent enforcement points, of which the address denylist runs first and cannot be waived by any allowlist entry; the credentials rule stated as a topology rather than a discipline, so that the execution service holds nothing worth stealing and an escape lands somewhere empty; the fourth `SandboxMechanism` value that makes the development fake a production adapter and refuses it alongside plain Docker; the reaper that makes lease expiry destroy sandboxes rather than leak them; and one contract suite run against four adapters so 28.6's promise is a test rather than an intention - is specified in [sandbox-isolation.md](sandbox-isolation.md) and ADR-0029. That document is subordinate to this one the way [runtime-loop.md](runtime-loop.md) is subordinate to Section 12: where the two overlap, the sentence below is the requirement and the specification's is the mechanism. The threat model, the rejection of the Docker socket, the choice of a kernel-isolating runtime, the execution-service topology, and every restriction in 28.4 are unchanged.
+
 Section 18 lists what the sandbox must forbid; this section decides how the platform actually provides isolated compute and where the trust boundary sits. "Docker-compatible containers" understates a real security decision, because the mechanism the worker uses to create containers is itself the thing an escape will target. Recorded as ADR-0008.
 
 ### 28.1 Threat model
@@ -3119,6 +3231,8 @@ Make the strength of the boundary a configured choice with a safe default:
 ## 29. Multi-device operation and the shared core
 
 The agent must be usable from many devices - phone, laptop, desktop, web - while behaving as one continuous assistant. This is largely a consequence of the existing architecture: because PostgreSQL is the source of truth and devices are clients of the API, the durable state is already shared. This section makes the split explicit, identifies every component that must be cloud-shared (not only memory), introduces the Device concept for capabilities that are inherently local to one machine, and defines the cross-device flows. Recorded as ADR-0011.
+
+Section 29.8 defers this section's own subject, so it is audited rather than expanded. [multi-device-and-surfaces.md](multi-device-and-surfaces.md) and ADR-0034 check the seam instead of building behind it: the eight places the corpus already holds a device-shaped hole and needs no edit at all, the five where it does not - a third registration source at attach, device lifecycle events with no session to be charged to, a fourth suspension kind for a hand-off, no client attributed on a write, and `NotificationService` as a port name with no mechanism behind it - the placement of 29.6's four items under the rule that a port lives in the module named for the capability it abstracts, per-device scopes as an intersection stamped on the run at submission rather than a second evaluation path, and a Surface as this section's `Device` model with an empty capability set and one genuinely new mechanism, the session-key resolver. That document declares no gates and changes no requirement below. 29.1 through 29.3 stand as written, and 29.4's eight bullets, 29.5's four flows, 29.6's model and ports, 29.7's four security notes, and 29.8's scope for 0.1 are carried forward rather than reinterpreted. Two conflicts with later specifications are named there and resolved in the specifications' favour: 29.5's "queue or reject" for a second device on a busy session is reject, which [runtime-loop.md](runtime-loop.md) settled against ADR-0004's partial unique index, and 29.4's presence-based exposure yields to the pinned prefix, which [tool-system.md](tool-system.md) states as advertisement is pinned and availability is resolved at call time. The 0.1 obligation 29.8 states is already discharged: reads and writes are principal-scoped and served from the core, and a second client attaching and replaying is a hard gate at Milestone 5.
 
 ### 29.1 Principle: one shared core, many thin clients
 
@@ -3207,6 +3321,8 @@ The shared core is already multi-device by construction; do not build device-sco
 
 Skills in the plan begin as static packages (Milestone 8). This section adds the capability that most distinguishes a modern general-purpose agent: the agent authoring and refining its own procedural memory - under governance our architecture is uniquely positioned to provide. Recorded as ADR-0013.
 
+The detailed design - the package layout, its `SKILL.md` front matter, and the ten numbered rules a validator applies before a package is storable; the identity and revision grammar that makes a pin resolvable and an archived revision still readable; seven types the corpus had never named, among them `SkillManifest`, `SkillRevision`, `SkillPin`, and `CatalogEntry`, and the two ports that store them; two tables, one archive, and no expiry; the catalog pinned at session open, so publishing mid-session cannot change what a run can already see; the two new context classes and the prefix ceiling that moves from 13,500 to 15,000 to hold them; `skill.load`, what sticks after a load, and the third load that fails rather than evicting the first; `required_tools` checked at load and recorded as a note rather than a refusal; why a skill that ships a script still ships no tool; MCP prompts as read-only skills; `skill_manage` at `risk: HIGH` and `CONDITIONALLY_IDEMPOTENT`, requiring the `skill.write` scope, denied below `USER` trust, and carrying a diff into approval rather than an argument blob; `expected_revision` and the edit that loses; the background review as a child run with four restrictions; and rollback as an `AgentSpec` edit rather than a delete - is specified in [skills.md](skills.md) and ADR-0030. That document expands this section and Sections 8, 9, 11, 16, 20, 27, and 28 and Milestones 8 and 10; it does not replace the requirements below. 30.1's distinction between procedural memory and a tool, 30.2's two authoring paths, all six of 30.3's governance guarantees, 30.4's metadata-only rule, 30.5's evidence gate, and 30.6's five acceptance criteria are unchanged. Two corrections: 30.2 calls `skill_manage` a control tool and it is not one, because it writes durable tenant state that outlives the run; and `skill_manage` is not a name a registry built on Section 8.1's `domain.verb` grammar can hold, because that grammar requires a dot, so the registered name is `skill.manage`, in the domain `skill.load` already occupies. Both lines are [tool-system.md](tool-system.md)'s and both corrections are made there.
+
 ### 30.1 Skills as procedural memory
 
 A skill is procedural memory - instructions and references that shape how a task is done - not a new code tool. It is distinct from declarative memory (user facts, Milestone 9) and from tools (executable capabilities). The agent may create and edit skills; it may not register arbitrary new tools at runtime. Adopt the agentskills.io open format so skills interoperate with the wider ecosystem.
@@ -3249,6 +3365,8 @@ Gate rollout behind evaluation evidence (Section 20) that self-authored skills i
 ## 31. Trajectory capture and export
 
 The event log already records every run in full (Section 6.8). This section adds a projection that turns those runs into two assets: evaluation fixtures and model-training data. Recorded as ADR-0016.
+
+[event-log-and-persistence.md](event-log-and-persistence.md) and ADR-0032 expand this section’s production half. The consumption half already had a specification - [evaluation-harness.md](evaluation-harness.md) gives the conversion from a captured run to an evaluation case, the `source: trajectory` marking that keeps a promoted case distinguishable from an authored one, the `agent eval promote` command, and a hard gate - and the production half had nothing. The export is one versioned JSON document in the `messages` shape, with ShareGPT left to a consumer as the role rename it is, written into the artifact store under a new `TRAJECTORY_EXPORT` origin rather than into a new table, so it inherits content addressing, an authorized read path, and the `expires_at` sweeper. Redaction is structural exclusion, then pattern replacement reusing the committed-secret scanner’s rule families and the log processor’s key-name families, then a verification scan that raises and writes nothing rather than redacting a second time; 31.1’s exclusion of raw reasoning is structural rather than a redaction rule, because ADR-0006 and ADR-0007 mean it is never persisted and the builder has nothing to remove. Consent is a record granted per principal, evaluated at run start and stamped on the run, withdrawn backward across every run and every artifact already produced, with the deletion routed through `expires_at` and the sweeper. `agent run export` is a subcommand rather than a thirteenth top-level command. That document expands this section; it does not replace the requirements below, and 31.1’s three bullets, 31.2’s three uses, and 31.3’s four acceptance criteria are unchanged.
 
 ### 31.1 What is exported
 
