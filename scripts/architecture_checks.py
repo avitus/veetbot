@@ -291,7 +291,7 @@ def architecture_errors(root: Path) -> list[str]:
                         for name in _annotation_names(annotation):
                             resolved = _resolve_name(name, bindings)
                             if resolved.startswith("agent_core.") and not resolved.startswith(
-                                "agent_core.domain"
+                                ("agent_core.domain", "agent_core.ports")
                             ):
                                 errors.append(
                                     f"{relative}:{member.lineno}: port signature exposes {resolved}"
@@ -352,7 +352,9 @@ def architecture_errors(root: Path) -> list[str]:
             for provider_sdk in sorted(imported_roots & PROVIDER_SDK_ROOTS):
                 errors.append(f"{relative}: provider SDK {provider_sdk} crosses adapter boundary")
 
-        if module != "agent_core.bootstrap":
+        if module != "agent_core.bootstrap" and not module.startswith(
+            "agent_core.adapters.persistence"
+        ):
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
@@ -394,7 +396,7 @@ def architecture_errors(root: Path) -> list[str]:
                             f"{relative}:{node.lineno}: module-scope database resource {called}"
                         )
 
-        if module != "agent_core.adapters.persistence.sqlalchemy_models":
+        if not module.startswith("agent_core.adapters.persistence"):
             for node in ast.walk(tree):
                 annotations = (
                     _function_annotations(node)

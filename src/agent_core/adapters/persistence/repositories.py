@@ -1,0 +1,905 @@
+"""PostgreSQL repositories constructed over one live async session."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Protocol
+from uuid import UUID
+
+from sqlalchemy import Text, delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import cast as sql_cast
+
+from agent_core.adapters.persistence.mappers import (
+    agent_to_domain,
+    agent_values,
+    event_to_domain,
+    event_values,
+    idempotency_to_domain,
+    idempotency_values,
+    invocation_to_domain,
+    invocation_values,
+    model_call_values,
+    run_to_domain,
+    run_values,
+    session_to_domain,
+    session_values,
+)
+from agent_core.adapters.persistence.sqlalchemy_models import (
+    AgentRow,
+    CheckpointRow,
+    DerivedEventKeyRow,
+    EventRow,
+    IdempotencyKeyRow,
+    ModelCallRow,
+    ProjectionWatermarkRow,
+    RunRow,
+    SessionRow,
+    ToolInvocationRow,
+)
+from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
+from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.errors import ConflictError, NotFoundError, WorkerFencedError
+from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.persistence import (
+    IdempotencyRecord,
+    ModelCallRecord,
+    SessionHistory,
+    UsageRollup,
+    WorkerLease,
+)
+from agent_core.domain.runs import Run, RunCheckpoint, RunFailure, RunStatus, RunUsage
+from agent_core.domain.sessions import Session
+from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+from agent_core.ports.determinism import Clock
+from agent_core.runtime.state_machine import require_transition
+
+ACTIVE_RUN_CONSTRAINT = "uq_runs_one_active_per_session"
+SESSION_HISTORY_PROJECTION = "session_history"
+TRAJECTORY_PROJECTION = "trajectory_export"
+
+
+def _rowcount(result: Any) -> int:
+    """Return affected rows from an async DML result."""
+
+    return int(result.rowcount or 0)
+
+
+def _constraint_name(exc: IntegrityError) -> str | None:
+    candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        name = getattr(candidate, "constraint_name", None)
+        if isinstance(name, str):
+            return name
+        diagnostic = getattr(candidate, "diag", None)
+        name = getattr(diagnostic, "constraint_name", None)
+        if isinstance(name, str):
+            return name
+    return None
+
+
+async def execute_run_insert(session: AsyncSession, statement: Any) -> int:
+    """Insert a run while preserving the active-run conflict as a typed error."""
+
+    try:
+        async with session.begin_nested():
+            return _rowcount(await session.execute(statement))
+    except IntegrityError as exc:
+        if _constraint_name(exc) == ACTIVE_RUN_CONSTRAINT:
+            raise ConflictError("session already has a non-terminal run") from exc
+        raise
+
+
+class PostgresAgentRepository:
+    def __init__(self, session: AsyncSession, clock: Clock) -> None:
+        self._session = session
+        self._clock = clock
+
+    async def put(self, agent: AgentSpec) -> None:
+        statement = (
+            pg_insert(AgentRow)
+            .values(**agent_values(agent, created_at=self._clock.now()))
+            .on_conflict_do_nothing(index_elements=[AgentRow.id, AgentRow.version])
+        )
+        inserted = _rowcount(await self._session.execute(statement))
+        if inserted:
+            return
+        existing = await self.get_version(agent.id, agent.version)
+        if existing != agent:
+            raise ConflictError("agent version already exists with different content")
+
+    async def get_version(self, agent_id: UUID, agent_version: str) -> AgentSpec:
+        row = await self._session.get(AgentRow, (agent_id, agent_version))
+        if row is None:
+            raise NotFoundError("agent version not found")
+        return agent_to_domain(row)
+
+    async def latest_version(self, agent_id: UUID) -> AgentSpec:
+        row = (
+            await self._session.scalars(
+                select(AgentRow)
+                .where(AgentRow.id == agent_id)
+                .order_by(AgentRow.created_at.desc(), AgentRow.version.desc())
+                .limit(1)
+            )
+        ).first()
+        if row is None:
+            raise NotFoundError("agent not found")
+        return agent_to_domain(row)
+
+
+class PostgresSessionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, session: Session) -> None:
+        statement = pg_insert(SessionRow).values(**session_values(session)).on_conflict_do_nothing()
+        if not _rowcount(await self._session.execute(statement)):
+            raise ConflictError("session already exists")
+
+    async def get(self, session_id: UUID, principal: Principal) -> Session:
+        row = (
+            await self._session.scalars(
+                select(SessionRow).where(
+                    SessionRow.id == session_id,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("session not found")
+        return session_to_domain(row)
+
+
+def _lease_predicates(lease: WorkerLease | None) -> list[Any]:
+    if lease is None:
+        return []
+    return [
+        RunRow.lease_owner == lease.worker_id,
+        RunRow.lease_epoch == lease.lease_epoch,
+    ]
+
+
+class PostgresRunRepository:
+    def __init__(self, session: AsyncSession, clock: Clock) -> None:
+        self._session = session
+        self._clock = clock
+
+    async def create(self, run: Run) -> None:
+        statement = (
+            pg_insert(RunRow)
+            .values(**run_values(run))
+            .on_conflict_do_nothing(index_elements=[RunRow.id])
+        )
+        if not await execute_run_insert(self._session, statement):
+            raise ConflictError("run already exists")
+
+    async def get(self, run_id: UUID, principal: Principal) -> Run:
+        row = (
+            await self._session.scalars(
+                select(RunRow)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    RunRow.id == run_id,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("run not found")
+        return run_to_domain(row)
+
+    async def transition(
+        self,
+        run_id: UUID,
+        expected_status: RunStatus,
+        new_status: RunStatus,
+        *,
+        failure: object | None = None,
+        final_message: str | None = None,
+        lease: WorkerLease | None = None,
+    ) -> Run:
+        require_transition(expected_status, new_status)
+        typed_failure = None if failure is None else RunFailure.model_validate(failure)
+        assignments: dict[str, Any] = {
+            "status": new_status.value,
+            "updated_at": self._clock.now(),
+        }
+        if typed_failure is not None:
+            assignments["failure"] = typed_failure.model_dump(mode="json")
+        if final_message is not None:
+            assignments["final_message"] = final_message
+        statement = (
+            update(RunRow)
+            .where(
+                RunRow.id == run_id,
+                RunRow.status == expected_status.value,
+                *_lease_predicates(lease),
+            )
+            .values(**assignments)
+            .returning(RunRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            if lease is not None:
+                raise WorkerFencedError("run transition guard failed; worker was fenced")
+            raise ConflictError("run transition guard failed")
+        return run_to_domain(row)
+
+    async def update_counters(self, run: Run, *, lease: WorkerLease | None = None) -> None:
+        statement = (
+            update(RunRow)
+            .where(
+                RunRow.id == run.id,
+                RunRow.status == run.status.value,
+                *_lease_predicates(lease),
+            )
+            .values(
+                step_count=run.step_count,
+                model_call_count=run.model_call_count,
+                tool_call_count=run.tool_call_count,
+                usage=run.usage.model_dump(mode="json"),
+                updated_at=run.updated_at,
+            )
+        )
+        if not _rowcount(await self._session.execute(statement)):
+            if lease is not None:
+                raise WorkerFencedError("counter update guard failed; worker was fenced")
+            raise ConflictError("counter update guard failed")
+
+    async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
+        statement = (
+            update(RunRow)
+            .where(RunRow.id == run_id, RunRow.seed_event_sequence == 0)
+            .values(seed_event_sequence=sequence, updated_at=self._clock.now())
+        )
+        if not _rowcount(await self._session.execute(statement)):
+            raise ConflictError("run seed sequence was already assigned")
+
+
+class PostgresEventRepository:
+    def __init__(
+        self, session: AsyncSession, clock: Clock, upcasters: EventUpcasterRegistry
+    ) -> None:
+        self._session = session
+        self._clock = clock
+        self._upcasters = upcasters
+
+    async def append(self, event: NewEvent, *, lease: WorkerLease | None = None) -> EventEnvelope:
+        if lease is not None:
+            if event.run_id is not None and event.run_id != lease.run_id:
+                raise ConflictError("leased event run does not match the worker lease")
+            guard = (
+                update(RunRow)
+                .where(RunRow.id == lease.run_id, *_lease_predicates(lease))
+                .values(updated_at=RunRow.updated_at)
+            )
+            if not _rowcount(await self._session.execute(guard)):
+                raise WorkerFencedError("event append guard failed; worker was fenced")
+        if event.derivation_key is not None:
+            await self._session.execute(
+                select(func.pg_advisory_xact_lock(func.hashtextextended(event.derivation_key, 0)))
+            )
+            existing = (
+                await self._session.scalars(
+                    select(EventRow)
+                    .join(DerivedEventKeyRow, DerivedEventKeyRow.event_id == EventRow.id)
+                    .where(DerivedEventKeyRow.derivation_key == event.derivation_key)
+                )
+            ).one_or_none()
+            if existing is not None:
+                return event_to_domain(existing, self._upcasters)
+
+        allocation = (
+            update(SessionRow)
+            .where(SessionRow.id == event.session_id)
+            .values(next_event_sequence=SessionRow.next_event_sequence + 1)
+            .returning(SessionRow.next_event_sequence - 1)
+        )
+        sequence = (await self._session.execute(allocation)).scalar_one_or_none()
+        if sequence is None:
+            raise NotFoundError("session not found")
+        statement = (
+            pg_insert(EventRow)
+            .values(**event_values(event, sequence=sequence, created_at=self._clock.now()))
+            .returning(EventRow)
+        )
+        row = (await self._session.scalars(statement)).one()
+        if event.derivation_key is not None:
+            await self._session.execute(
+                pg_insert(DerivedEventKeyRow).values(
+                    derivation_key=event.derivation_key,
+                    event_id=row.id,
+                    created_at=self._clock.now(),
+                )
+            )
+        await self._session.execute(
+            select(func.pg_notify("agent_events", f"{event.session_id}:{sequence}"))
+        )
+        return event_to_domain(row, self._upcasters)
+
+    async def list_after(
+        self, session_id: UUID, sequence: int, principal: Principal
+    ) -> list[EventEnvelope]:
+        allowed = await self._session.scalar(
+            select(SessionRow.id).where(
+                SessionRow.id == session_id,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+        )
+        if allowed is None:
+            raise NotFoundError("session not found")
+        rows = (
+            await self._session.scalars(
+                select(EventRow)
+                .where(EventRow.session_id == session_id, EventRow.sequence > sequence)
+                .order_by(EventRow.sequence, EventRow.id)
+            )
+        ).all()
+        return [event_to_domain(row, self._upcasters) for row in rows]
+
+
+def _checkpoint_delta(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
+    changes: dict[str, Any] = {}
+    for key in previous.keys() - current.keys():
+        changes[key] = {"$remove": True}
+    for key, value in current.items():
+        old = previous.get(key)
+        if old == value:
+            continue
+        if isinstance(old, list) and isinstance(value, list) and value[: len(old)] == old:
+            changes[key] = {"$append": value[len(old) :]}
+        else:
+            changes[key] = {"$replace": value}
+    return {"kind": "delta", "changes": changes}
+
+
+def _apply_checkpoint_delta(state: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
+    result = dict(state)
+    changes = delta.get("changes")
+    if not isinstance(changes, dict):
+        raise ConflictError("checkpoint delta has no changes mapping")
+    for key, operation in changes.items():
+        if not isinstance(operation, dict):
+            raise ConflictError("checkpoint delta operation is malformed")
+        if "$remove" in operation:
+            result.pop(key, None)
+        elif "$append" in operation:
+            prior = result.get(key, [])
+            if not isinstance(prior, list) or not isinstance(operation["$append"], list):
+                raise ConflictError("checkpoint append delta is malformed")
+            result[key] = [*prior, *operation["$append"]]
+        elif "$replace" in operation:
+            result[key] = operation["$replace"]
+        else:
+            raise ConflictError("checkpoint delta operation is unknown")
+    return result
+
+
+class _CheckpointHistory(Protocol):
+    async def catch_up(self, session_id: UUID) -> SessionHistory: ...
+
+    async def read(
+        self, session_id: UUID, through_sequence: int | None = None
+    ) -> SessionHistory: ...
+
+
+class PostgresCheckpointRepository:
+    def __init__(
+        self,
+        session: AsyncSession,
+        clock: Clock,
+        history: _CheckpointHistory,
+    ) -> None:
+        self._session = session
+        self._clock = clock
+        self._history = history
+
+    async def _rows(self, run_id: UUID) -> list[CheckpointRow]:
+        return list(
+            (
+                await self._session.scalars(
+                    select(CheckpointRow)
+                    .where(CheckpointRow.run_id == run_id)
+                    .order_by(CheckpointRow.version)
+                )
+            ).all()
+        )
+
+    @staticmethod
+    def _stored_state(rows: list[CheckpointRow]) -> dict[str, Any] | None:
+        if not rows:
+            return None
+        state: dict[str, Any] | None = None
+        for row in rows:
+            if row.full:
+                value = row.state.get("value")
+                if not isinstance(value, dict):
+                    raise ConflictError("full checkpoint has no value mapping")
+                state = dict(value)
+            else:
+                if state is None:
+                    raise ConflictError("checkpoint delta chain has no full base")
+                state = _apply_checkpoint_delta(state, row.state)
+        if state is None:
+            raise ConflictError("checkpoint chain has no full snapshot")
+        return state
+
+    async def _materialize(self, rows: list[CheckpointRow]) -> RunCheckpoint | None:
+        state = self._stored_state(rows)
+        if state is None:
+            return None
+        reference = state.get("conversation")
+        if not isinstance(reference, dict) or not isinstance(
+            (history_ref := reference.get("$session_history")), dict
+        ):
+            raise ConflictError("checkpoint conversation is not an event-history reference")
+        try:
+            session_id = UUID(str(history_ref["session_id"]))
+            through_sequence = int(history_ref["through_sequence"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ConflictError("checkpoint conversation reference is malformed") from exc
+        await self._history.catch_up(session_id)
+        history = await self._history.read(session_id, through_sequence)
+        state["conversation"] = [item.model_dump(mode="json") for item in history.items]
+        return RunCheckpoint.model_validate(state)
+
+    async def write(
+        self,
+        run_id: UUID,
+        checkpoint: RunCheckpoint,
+        *,
+        full: bool,
+        lease: WorkerLease | None = None,
+    ) -> int:
+        if run_id != checkpoint.run_id:
+            raise ConflictError("checkpoint run identity cannot change")
+        if lease is not None:
+            guard = (
+                update(RunRow)
+                .where(RunRow.id == run_id, *_lease_predicates(lease))
+                .values(updated_at=RunRow.updated_at)
+            )
+            if not _rowcount(await self._session.execute(guard)):
+                raise WorkerFencedError("checkpoint write guard failed; worker was fenced")
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(f"checkpoint:{run_id}", 0)))
+        )
+        rows = await self._rows(run_id)
+        previous = self._stored_state(rows)
+        expected_version = 1 if not rows else rows[-1].version + 1
+        if checkpoint.version != expected_version:
+            raise ConflictError(
+                f"checkpoint version {checkpoint.version} does not follow {expected_version - 1}"
+            )
+        effective_full = full or previous is None
+        state = checkpoint.model_dump(mode="json")
+        run_row = await self._session.get(RunRow, run_id)
+        if run_row is None:
+            raise NotFoundError("run not found")
+        await self._history.catch_up(run_row.session_id)
+        state["conversation"] = {
+            "$session_history": {
+                "session_id": str(run_row.session_id),
+                "through_sequence": checkpoint.last_event_sequence,
+            }
+        }
+        stored = {"kind": "full", "value": state}
+        base_version: int | None = None
+        if not effective_full and previous is not None:
+            stored = _checkpoint_delta(previous, state)
+            base_version = next(
+                (row.version for row in reversed(rows) if row.full),
+                None,
+            )
+            if base_version is None:
+                raise ConflictError("checkpoint chain has no full snapshot")
+        try:
+            async with self._session.begin_nested():
+                await self._session.execute(
+                    pg_insert(CheckpointRow).values(
+                        run_id=run_id,
+                        version=checkpoint.version,
+                        state=stored,
+                        last_event_sequence=checkpoint.last_event_sequence,
+                        full=effective_full,
+                        base_version=base_version,
+                        created_at=self._clock.now(),
+                    )
+                )
+        except IntegrityError as exc:
+            raise ConflictError(
+                f"checkpoint version {checkpoint.version} was written concurrently"
+            ) from exc
+        return checkpoint.version
+
+    async def latest(self, run_id: UUID) -> RunCheckpoint | None:
+        return await self._materialize(await self._rows(run_id))
+
+    async def prune(self, run_id: UUID, *, terminal: bool) -> int:
+        rows = await self._rows(run_id)
+        if len(rows) <= 1:
+            return 0
+        latest_full = next((row.version for row in reversed(rows) if row.full), None)
+        if latest_full is None:
+            raise ConflictError("checkpoint chain has no full snapshot")
+        keep = {row.version for row in rows if row.version >= latest_full}
+        if terminal:
+            keep.add(rows[-1].version)
+        result = await self._session.execute(
+            delete(CheckpointRow).where(
+                CheckpointRow.run_id == run_id, CheckpointRow.version.not_in(keep)
+            )
+        )
+        return _rowcount(result)
+
+    async def delete_nonterminal(self, run_id: UUID) -> int:
+        rows = await self._rows(run_id)
+        if not rows:
+            return 0
+        run_row = await self._session.get(RunRow, run_id)
+        if run_row is None:
+            raise NotFoundError("run not found")
+        terminal = RunStatus(run_row.status) in {
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+        }
+        if terminal:
+            latest_full = next((row.version for row in reversed(rows) if row.full), None)
+            if latest_full is None:
+                raise ConflictError("checkpoint chain has no full snapshot")
+            removable = [row.version for row in rows if row.version < latest_full]
+        else:
+            removable = [row.version for row in rows]
+        if not removable:
+            return 0
+        result = await self._session.execute(
+            delete(CheckpointRow).where(
+                CheckpointRow.run_id == run_id, CheckpointRow.version.in_(removable)
+            )
+        )
+        return _rowcount(result)
+
+
+_ALLOWED_TOOL_TRANSITIONS: dict[ToolInvocationStatus, set[ToolInvocationStatus]] = {
+    ToolInvocationStatus.PROPOSED: {
+        ToolInvocationStatus.AUTHORIZED,
+        ToolInvocationStatus.DENIED,
+    },
+    ToolInvocationStatus.AUTHORIZED: {ToolInvocationStatus.RUNNING},
+    ToolInvocationStatus.WAITING_FOR_APPROVAL: {
+        ToolInvocationStatus.AUTHORIZED,
+        ToolInvocationStatus.DENIED,
+    },
+    ToolInvocationStatus.RUNNING: {
+        ToolInvocationStatus.RUNNING,
+        ToolInvocationStatus.SUCCEEDED,
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.UNCERTAIN,
+    },
+    ToolInvocationStatus.SUCCEEDED: set(),
+    ToolInvocationStatus.FAILED: set(),
+    ToolInvocationStatus.DENIED: set(),
+    ToolInvocationStatus.UNCERTAIN: set(),
+}
+
+
+class PostgresToolInvocationRepository:
+    def __init__(self, session: AsyncSession, runs: PostgresRunRepository) -> None:
+        self._session = session
+        self._runs = runs
+
+    async def _guard_lease(self, lease: WorkerLease | None) -> None:
+        if lease is None:
+            return
+        statement = (
+            update(RunRow)
+            .where(RunRow.id == lease.run_id, *_lease_predicates(lease))
+            .values(updated_at=RunRow.updated_at)
+        )
+        if not _rowcount(await self._session.execute(statement)):
+            raise WorkerFencedError("tool invocation guard failed; worker was fenced")
+
+    async def create(
+        self, invocation: ToolInvocation, *, lease: WorkerLease | None = None
+    ) -> ToolInvocation:
+        await self._guard_lease(lease)
+        statement = (
+            pg_insert(ToolInvocationRow)
+            .values(**invocation_values(invocation))
+            .on_conflict_do_nothing(index_elements=[ToolInvocationRow.idempotency_key])
+            .returning(ToolInvocationRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            existing = await self.find_by_idempotency_key(
+                invocation.run_id, invocation.idempotency_key
+            )
+            if existing is None:
+                raise ConflictError("tool idempotency key already belongs to another run")
+            return existing
+        return invocation_to_domain(row)
+
+    async def find_by_idempotency_key(
+        self, run_id: UUID, idempotency_key: str
+    ) -> ToolInvocation | None:
+        row = (
+            await self._session.scalars(
+                select(ToolInvocationRow).where(
+                    ToolInvocationRow.run_id == run_id,
+                    ToolInvocationRow.idempotency_key == idempotency_key,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else invocation_to_domain(row)
+
+    async def transition(
+        self,
+        invocation_id: UUID,
+        expected_status: ToolInvocationStatus,
+        invocation: ToolInvocation,
+        *,
+        lease: WorkerLease | None = None,
+    ) -> ToolInvocation:
+        await self._guard_lease(lease)
+        row = (
+            await self._session.scalars(
+                select(ToolInvocationRow)
+                .where(ToolInvocationRow.id == invocation_id)
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("tool invocation not found")
+        current = invocation_to_domain(row)
+        if current.status is not expected_status:
+            raise ConflictError(f"expected {expected_status.value}, found {current.status.value}")
+        if invocation.id != invocation_id or invocation.run_id != current.run_id:
+            raise ConflictError("tool invocation identity cannot change")
+        if invocation.status not in _ALLOWED_TOOL_TRANSITIONS[current.status]:
+            raise ConflictError(
+                f"invalid tool transition {current.status.value}->{invocation.status.value}"
+            )
+        expected = current.model_copy(
+            update={
+                "status": invocation.status,
+                "effect_sent_at": invocation.effect_sent_at,
+                "outcome": invocation.outcome,
+                "result_item": invocation.result_item,
+                "updated_at": invocation.updated_at,
+            },
+            deep=True,
+        )
+        if expected != invocation:
+            raise ConflictError("tool transition may not change immutable fields")
+        statement = (
+            update(ToolInvocationRow)
+            .where(
+                ToolInvocationRow.id == invocation_id,
+                ToolInvocationRow.status == expected_status.value,
+            )
+            .values(
+                status=invocation.status.value,
+                effect_sent_at=invocation.effect_sent_at,
+                outcome=(
+                    None
+                    if invocation.outcome is None
+                    else invocation.outcome.model_dump(mode="json")
+                ),
+                result_item=(
+                    None
+                    if invocation.result_item is None
+                    else invocation.result_item.model_dump(mode="json")
+                ),
+                outcome_status=(
+                    None if invocation.outcome is None else invocation.outcome.status.value
+                ),
+                reason_code=(
+                    None if invocation.outcome is None else invocation.outcome.reason_code
+                ),
+                updated_at=invocation.updated_at,
+            )
+            .returning(ToolInvocationRow)
+        )
+        updated = (await self._session.scalars(statement)).one_or_none()
+        if updated is None:
+            raise ConflictError("tool invocation transition lost a concurrency race")
+        return invocation_to_domain(updated)
+
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ToolInvocation]:
+        await self._runs.get(run_id, principal)
+        rows = (
+            await self._session.scalars(
+                select(ToolInvocationRow)
+                .where(ToolInvocationRow.run_id == run_id)
+                .order_by(
+                    ToolInvocationRow.step_number,
+                    ToolInvocationRow.created_at,
+                    ToolInvocationRow.id,
+                )
+            )
+        ).all()
+        return [invocation_to_domain(row) for row in rows]
+
+
+class PostgresIdempotencyRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, key: str, tenant_id: str, principal_id: str) -> IdempotencyRecord | None:
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(f"request:{key}", 0)))
+        )
+        row = (
+            await self._session.scalars(
+                select(IdempotencyKeyRow).where(
+                    IdempotencyKeyRow.key == key,
+                    IdempotencyKeyRow.tenant_id == tenant_id,
+                    IdempotencyKeyRow.principal_id == principal_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else idempotency_to_domain(row)
+
+    async def create(self, record: IdempotencyRecord) -> IdempotencyRecord:
+        statement = (
+            pg_insert(IdempotencyKeyRow)
+            .values(**idempotency_values(record))
+            .on_conflict_do_nothing(index_elements=[IdempotencyKeyRow.key])
+            .returning(IdempotencyKeyRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is not None:
+            return idempotency_to_domain(row)
+        existing = await self.get(record.key, record.tenant_id, record.principal_id)
+        if existing is None:
+            raise ConflictError("idempotency key belongs to another principal")
+        if existing.request_hash != record.request_hash:
+            raise ConflictError("idempotency key was reused with a different request")
+        return existing
+
+
+class PostgresUsageRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def record_attempt(self, call: ModelCallRecord) -> None:
+        inserted = _rowcount(
+            await self._session.execute(
+                pg_insert(ModelCallRow)
+                .values(**model_call_values(call))
+                .on_conflict_do_nothing(index_elements=[ModelCallRow.attempt_id])
+            )
+        )
+        if not inserted:
+            return
+
+    async def run_usage(self, run_id: UUID) -> RunUsage:
+        row = await self._session.get(RunRow, run_id)
+        if row is None:
+            raise NotFoundError("run not found")
+        return RunUsage.model_validate(row.usage)
+
+    async def tenant_usage(
+        self, tenant_id: str, *, since: datetime, until: datetime
+    ) -> UsageRollup:
+        statement = select(
+            func.coalesce(func.sum(ModelCallRow.input_tokens), 0),
+            func.coalesce(func.sum(ModelCallRow.cached_input_tokens), 0),
+            func.coalesce(func.sum(ModelCallRow.cache_write_tokens), 0),
+            func.coalesce(func.sum(ModelCallRow.output_tokens), 0),
+            func.sum(ModelCallRow.reasoning_tokens),
+            func.coalesce(func.sum(ModelCallRow.cost), Decimal("0")),
+        ).where(
+            ModelCallRow.tenant_id == tenant_id,
+            ModelCallRow.started_at >= since,
+            ModelCallRow.started_at < until,
+        )
+        values = (await self._session.execute(statement)).one()
+        return UsageRollup(
+            input_tokens=values[0],
+            cached_input_tokens=values[1],
+            cache_write_input_tokens=values[2],
+            output_tokens=values[3],
+            reasoning_tokens=values[4],
+            cost=values[5],
+        )
+
+
+class PostgresMaintenanceRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def _acquire(self, sweep_name: str) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(func.pg_try_advisory_xact_lock(func.hashtextextended(sweep_name, 0)))
+            )
+        )
+
+    async def projection_sessions(self, limit: int) -> list[UUID]:
+        if not await self._acquire("maintenance.session_history"):
+            return []
+        return list(
+            (
+                await self._session.scalars(
+                    select(SessionRow.id)
+                    .outerjoin(
+                        ProjectionWatermarkRow,
+                        (ProjectionWatermarkRow.projection_name == SESSION_HISTORY_PROJECTION)
+                        & (ProjectionWatermarkRow.scope == sql_cast(SessionRow.id, Text)),
+                    )
+                    .where(
+                        SessionRow.next_event_sequence - 1
+                        > func.coalesce(ProjectionWatermarkRow.watermark_seq, 0)
+                    )
+                    .order_by(
+                        ProjectionWatermarkRow.updated_at.asc().nulls_first(),
+                        SessionRow.updated_at,
+                    )
+                    .limit(limit)
+                )
+            ).all()
+        )
+
+    async def checkpoint_runs(self, limit: int) -> list[tuple[UUID, bool]]:
+        if not await self._acquire("maintenance.checkpoint_prune"):
+            return []
+        rows = (
+            await self._session.execute(
+                select(
+                    CheckpointRow.run_id,
+                    RunRow.status,
+                    func.min(CheckpointRow.created_at).label("oldest_checkpoint"),
+                )
+                .join(RunRow, RunRow.id == CheckpointRow.run_id)
+                .group_by(CheckpointRow.run_id, RunRow.status)
+                .having(func.count(CheckpointRow.id) > 1)
+                .order_by(func.min(CheckpointRow.created_at), CheckpointRow.run_id)
+                .limit(limit)
+            )
+        ).all()
+        return [
+            (
+                run_id,
+                RunStatus(status) in {RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED},
+            )
+            for run_id, status, _oldest_checkpoint in rows
+        ]
+
+    async def trajectory_runs(self, limit: int) -> list[UUID]:
+        if not await self._acquire("maintenance.trajectory_projection"):
+            return []
+        watermark = func.coalesce(ProjectionWatermarkRow.watermark_seq, 0)
+        rows = (
+            await self._session.scalars(
+                select(EventRow.run_id)
+                .outerjoin(
+                    ProjectionWatermarkRow,
+                    (ProjectionWatermarkRow.projection_name == TRAJECTORY_PROJECTION)
+                    & (ProjectionWatermarkRow.scope == sql_cast(EventRow.run_id, Text)),
+                )
+                .where(EventRow.run_id.is_not(None))
+                .group_by(
+                    EventRow.run_id,
+                    ProjectionWatermarkRow.watermark_seq,
+                    ProjectionWatermarkRow.updated_at,
+                )
+                .having(func.max(EventRow.sequence) > watermark)
+                .order_by(
+                    ProjectionWatermarkRow.updated_at.asc().nulls_first(),
+                    func.min(EventRow.created_at),
+                )
+                .limit(limit)
+            )
+        ).all()
+        return [run_id for run_id in rows if run_id is not None]

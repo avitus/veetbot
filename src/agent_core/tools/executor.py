@@ -4,14 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import timedelta
+from enum import StrEnum
 from typing import Any
 
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.errors import NotFoundError, ToolValidationError
+from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import ContentPart, TextPart, ToolCallItem, ToolResultItem
-from agent_core.domain.policies import ExecutionTarget, SideEffectClass, TrustLevel
+from agent_core.domain.persistence import WorkerLease
+from agent_core.domain.policies import (
+    ExecutionTarget,
+    IdempotencyClass,
+    SideEffectClass,
+    TrustLevel,
+)
 from agent_core.domain.runs import Run, RunCheckpoint, Step
 from agent_core.domain.tools import (
     ToolExecutionContext,
@@ -25,7 +35,7 @@ from agent_core.domain.tools import (
 )
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
-from agent_core.ports.events import EventRepository
+from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.messages import message_for
@@ -35,6 +45,52 @@ from agent_core.tools.validation import validate_and_normalize, validate_output
 class _UnavailableCollaborator:
     def __getattr__(self, name: str) -> object:
         raise RuntimeError(f"collaborator {name!r} is unavailable in the Milestone 1 tier")
+
+
+class ToolRecoveryAction(StrEnum):
+    RETURN_OUTCOME = "return_outcome"
+    RESUME_AUTHORIZATION = "resume_authorization"
+    RESUME_APPROVAL = "resume_approval"
+    REEXECUTE = "reexecute"
+    REPLAY_IDEMPOTENCY_KEY = "replay_idempotency_key"
+    MARK_UNCERTAIN = "mark_uncertain"
+
+
+@dataclass(slots=True)
+class _KeyLockEntry:
+    lock: asyncio.Lock
+    users: int = 0
+
+
+def tool_recovery_action(invocation: ToolInvocation) -> ToolRecoveryAction:
+    """Return the total recovery-table decision for one persisted invocation."""
+
+    if invocation.outcome is not None or invocation.status in {
+        ToolInvocationStatus.SUCCEEDED,
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.DENIED,
+        ToolInvocationStatus.UNCERTAIN,
+    }:
+        return ToolRecoveryAction.RETURN_OUTCOME
+    if invocation.status in {
+        ToolInvocationStatus.PROPOSED,
+        ToolInvocationStatus.AUTHORIZED,
+    }:
+        return ToolRecoveryAction.RESUME_AUTHORIZATION
+    if invocation.status is ToolInvocationStatus.WAITING_FOR_APPROVAL:
+        return ToolRecoveryAction.RESUME_APPROVAL
+    if invocation.status is not ToolInvocationStatus.RUNNING:
+        raise ConflictError(f"unknown tool recovery status {invocation.status.value}")
+    if invocation.idempotency_class in {
+        IdempotencyClass.READ_ONLY,
+        IdempotencyClass.IDEMPOTENT,
+    }:
+        return ToolRecoveryAction.REEXECUTE
+    if invocation.effect_sent_at is None:
+        return ToolRecoveryAction.REEXECUTE
+    if invocation.idempotency_class is IdempotencyClass.CONDITIONALLY_IDEMPOTENT:
+        return ToolRecoveryAction.REPLAY_IDEMPOTENCY_KEY
+    return ToolRecoveryAction.MARK_UNCERTAIN
 
 
 def _idempotency_key(
@@ -77,13 +133,19 @@ async def authorize_tool_invocation(
     repository: ToolInvocationRepository,
     invocation: ToolInvocation,
     clock: Clock,
+    lease: WorkerLease | None = None,
 ) -> ToolInvocation:
     """The sole PROPOSED-to-AUTHORIZED transition in the tool system."""
 
     authorized = invocation.model_copy(
         update={"status": ToolInvocationStatus.AUTHORIZED, "updated_at": clock.now()}, deep=True
     )
-    return await repository.transition(invocation.id, ToolInvocationStatus.PROPOSED, authorized)
+    return await repository.transition(
+        invocation.id,
+        ToolInvocationStatus.PROPOSED,
+        authorized,
+        lease=lease,
+    )
 
 
 class ToolPipeline:
@@ -92,16 +154,34 @@ class ToolPipeline:
     def __init__(
         self,
         registry: ToolRegistry,
-        invocations: ToolInvocationRepository,
-        events: EventRepository,
+        uow_factory: UnitOfWorkFactory,
         clock: Clock,
         ids: IdFactory,
     ) -> None:
         self._registry = registry
-        self._invocations = invocations
-        self._events = events
+        self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
+        self._key_locks: dict[str, _KeyLockEntry] = {}
+        self._key_locks_guard = asyncio.Lock()
+
+    @asynccontextmanager
+    async def _key_lock(self, key: str) -> AsyncIterator[None]:
+        async with self._key_locks_guard:
+            entry = self._key_locks.setdefault(key, _KeyLockEntry(lock=asyncio.Lock()))
+            entry.users += 1
+        acquired = False
+        try:
+            await entry.lock.acquire()
+            acquired = True
+            yield
+        finally:
+            if acquired:
+                entry.lock.release()
+            async with self._key_locks_guard:
+                entry.users -= 1
+                if entry.users == 0 and self._key_locks.get(key) is entry:
+                    del self._key_locks[key]
 
     async def dispatch(
         self,
@@ -113,6 +193,7 @@ class ToolPipeline:
         step: Step,
         agent: AgentSpec,
         token: CancellationToken,
+        lease: WorkerLease | None = None,
     ) -> list[ToolResultItem]:
         del checkpoint
         results: list[ToolResultItem] = []
@@ -126,6 +207,7 @@ class ToolPipeline:
                     step=step,
                     agent=agent,
                     token=token,
+                    lease=lease,
                 )
             )
             token.raise_if_cancelled()
@@ -140,6 +222,7 @@ class ToolPipeline:
         step: Step,
         agent: AgentSpec,
         token: CancellationToken,
+        lease: WorkerLease | None,
     ) -> ToolResultItem:
         try:
             tool = self._registry.get(call.name)
@@ -149,6 +232,7 @@ class ToolPipeline:
                 call,
                 "policy.matrix.unknown_tool",
                 ToolOutcomeStatus.DENIED,
+                lease,
             )
         if call.name not in agent.enabled_tools:
             return await self._refusal(
@@ -156,12 +240,15 @@ class ToolPipeline:
                 call,
                 "policy.matrix.unknown_tool",
                 ToolOutcomeStatus.DENIED,
+                lease,
             )
         if not tool.spec.required_scopes.issubset(principal.scopes):
-            return await self._refusal(run, call, "policy.scope.missing", ToolOutcomeStatus.DENIED)
+            return await self._refusal(
+                run, call, "policy.scope.missing", ToolOutcomeStatus.DENIED, lease
+            )
         if call.parse_error is not None:
             return await self._refusal(
-                run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED
+                run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED, lease
             )
         try:
             arguments, _rendered, arguments_hash = validate_and_normalize(
@@ -169,16 +256,40 @@ class ToolPipeline:
             )
         except ToolValidationError:
             return await self._refusal(
-                run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED
+                run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED, lease
             )
 
         key = _idempotency_key(run, step, call, tool, arguments_hash)
-        existing = await self._invocations.find_by_idempotency_key(run.id, key)
-        if existing is not None and existing.outcome is not None:
-            return _outcome_item(call.call_id, existing.outcome, tool.spec.output_trust)
+        async with self._key_lock(key):
+            return await self._execute_once(
+                run=run,
+                call=call,
+                principal=principal,
+                step=step,
+                tool=tool,
+                arguments=arguments,
+                arguments_hash=arguments_hash,
+                key=key,
+                token=token,
+                lease=lease,
+            )
 
+    async def _execute_once(
+        self,
+        *,
+        run: Run,
+        call: ToolCallItem,
+        principal: Principal,
+        step: Step,
+        tool: Tool,
+        arguments: dict[str, Any],
+        arguments_hash: str,
+        key: str,
+        token: CancellationToken,
+        lease: WorkerLease | None,
+    ) -> ToolResultItem:
         now = self._clock.now()
-        invocation = ToolInvocation(
+        candidate = ToolInvocation(
             id=self._ids.new_id(),
             run_id=run.id,
             session_id=run.session_id,
@@ -186,16 +297,78 @@ class ToolPipeline:
             call_id=call.call_id,
             tool_name=tool.spec.name,
             tool_version=tool.spec.version,
+            tool_source=tool.spec.source,
+            server_id=tool.spec.server_id,
+            idempotency_class=tool.spec.idempotency,
             status=ToolInvocationStatus.PROPOSED,
             raw_arguments=call.raw_arguments,
             normalized_arguments=arguments,
             normalized_arguments_hash=arguments_hash,
             idempotency_key=key,
+            origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
             created_at=now,
             updated_at=now,
         )
-        invocation = await self._invocations.create(invocation)
-        await self._event(run, "tool.call.proposed", {"name": call.name, "call_id": call.call_id})
+        async with self._uow_factory() as uow:
+            existing = await uow.invocations.find_by_idempotency_key(run.id, key)
+            if existing is not None:
+                invocation = existing
+            else:
+                invocation = await uow.invocations.create(candidate, lease=lease)
+                if invocation.id == candidate.id:
+                    await self._event_in(
+                        uow,
+                        run,
+                        "tool.call.proposed",
+                        {"name": call.name, "call_id": call.call_id},
+                        lease,
+                    )
+        if invocation.outcome is not None:
+            return invocation.result_item or _outcome_item(
+                call.call_id, invocation.outcome, tool.spec.output_trust
+            )
+        recovery = tool_recovery_action(invocation)
+        if recovery is ToolRecoveryAction.MARK_UNCERTAIN:
+            outcome = ToolOutcome(
+                status=ToolOutcomeStatus.UNCERTAIN,
+                action=call.name,
+                reason_code="tool.outcome_unknown",
+                message=message_for("tool.outcome_unknown"),
+                retryable=False,
+                remediation="none",
+            )
+            result_item = _outcome_item(call.call_id, outcome, tool.spec.output_trust)
+            uncertain = invocation.model_copy(
+                update={
+                    "status": ToolInvocationStatus.UNCERTAIN,
+                    "outcome": outcome,
+                    "result_item": result_item,
+                    "updated_at": self._clock.now(),
+                },
+                deep=True,
+            )
+            async with self._uow_factory() as uow:
+                await uow.invocations.transition(
+                    invocation.id,
+                    ToolInvocationStatus.RUNNING,
+                    uncertain,
+                    lease=lease,
+                )
+                await self._event_in(
+                    uow,
+                    run,
+                    "tool.call.uncertain",
+                    {
+                        "name": call.name,
+                        "call_id": call.call_id,
+                        "reason_code": outcome.reason_code,
+                        "result_item": result_item.model_dump(mode="json"),
+                    },
+                    lease,
+                )
+            return result_item
+        if recovery is ToolRecoveryAction.RESUME_APPROVAL:
+            raise ConflictError("approval recovery is not authorized before Milestone 4")
 
         if tool.spec.side_effect is not SideEffectClass.NONE:
             denied = ToolOutcome(
@@ -206,42 +379,89 @@ class ToolPipeline:
                 retryable=False,
                 remediation="none",
             )
+            result_item = _outcome_item(call.call_id, denied, tool.spec.output_trust)
             final = invocation.model_copy(
                 update={
                     "status": ToolInvocationStatus.DENIED,
                     "outcome": denied,
+                    "result_item": result_item,
                     "updated_at": self._clock.now(),
                 },
                 deep=True,
             )
-            await self._invocations.transition(invocation.id, ToolInvocationStatus.PROPOSED, final)
-            await self._event(
-                run,
-                "tool.call.denied",
-                {"name": call.name, "call_id": call.call_id, "reason_code": denied.reason_code},
-            )
-            return _outcome_item(call.call_id, denied, tool.spec.output_trust)
+            async with self._uow_factory() as uow:
+                await uow.invocations.transition(
+                    invocation.id,
+                    invocation.status,
+                    final,
+                    lease=lease,
+                )
+                await self._event_in(
+                    uow,
+                    run,
+                    "tool.call.denied",
+                    {
+                        "name": call.name,
+                        "call_id": call.call_id,
+                        "reason_code": denied.reason_code,
+                    },
+                    lease,
+                )
+            return result_item
 
-        invocation = await authorize_tool_invocation(self._invocations, invocation, self._clock)
-        await self._event(run, "tool.call.authorized", {"name": call.name, "call_id": call.call_id})
-        running = invocation.model_copy(
-            update={"status": ToolInvocationStatus.RUNNING, "updated_at": self._clock.now()},
-            deep=True,
-        )
-        invocation = await self._invocations.transition(
-            invocation.id, ToolInvocationStatus.AUTHORIZED, running
-        )
-        await self._event(run, "tool.call.started", {"name": call.name, "call_id": call.call_id})
+        if invocation.status is ToolInvocationStatus.PROPOSED:
+            async with self._uow_factory() as uow:
+                invocation = await authorize_tool_invocation(
+                    uow.invocations, invocation, self._clock, lease
+                )
+                await self._event_in(
+                    uow,
+                    run,
+                    "tool.call.authorized",
+                    {"name": call.name, "call_id": call.call_id},
+                    lease,
+                )
+        if invocation.status is ToolInvocationStatus.AUTHORIZED:
+            running = invocation.model_copy(
+                update={"status": ToolInvocationStatus.RUNNING, "updated_at": self._clock.now()},
+                deep=True,
+            )
+            async with self._uow_factory() as uow:
+                invocation = await uow.invocations.transition(
+                    invocation.id,
+                    ToolInvocationStatus.AUTHORIZED,
+                    running,
+                    lease=lease,
+                )
+                await self._event_in(
+                    uow,
+                    run,
+                    "tool.call.started",
+                    {"name": call.name, "call_id": call.call_id},
+                    lease,
+                )
+        if invocation.status is not ToolInvocationStatus.RUNNING:
+            raise ConflictError(f"cannot recover tool invocation in {invocation.status.value}")
+
+        effect_guard = asyncio.Lock()
 
         async def mark_effect_sent() -> None:
             nonlocal invocation
-            invocation = invocation.model_copy(
-                update={"effect_sent_at": self._clock.now(), "updated_at": self._clock.now()},
-                deep=True,
-            )
-            invocation = await self._invocations.transition(
-                invocation.id, ToolInvocationStatus.RUNNING, invocation
-            )
+            async with effect_guard:
+                if invocation.effect_sent_at is not None:
+                    return
+                marked_at = self._clock.now()
+                pending = invocation.model_copy(
+                    update={"effect_sent_at": marked_at, "updated_at": marked_at},
+                    deep=True,
+                )
+                async with self._uow_factory() as uow:
+                    invocation = await uow.invocations.transition(
+                        pending.id,
+                        ToolInvocationStatus.RUNNING,
+                        pending,
+                        lease=lease,
+                    )
 
         deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
         if run.deadline_at is not None:
@@ -270,6 +490,8 @@ class ToolPipeline:
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
+        if self._uow_factory.is_open():
+            raise RuntimeError("tool execution cannot begin while a unit of work is open")
         try:
             async with asyncio.timeout(tool.spec.timeout_seconds):
                 result = await tool.execute(arguments, execution_context)
@@ -327,7 +549,7 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        return await self._finish(run, call, tool, invocation, result)
+        return await self._finish(run, call, tool, invocation, result, lease)
 
     async def _finish(
         self,
@@ -336,6 +558,7 @@ class ToolPipeline:
         tool: Tool,
         invocation: ToolInvocation,
         result: ToolResult,
+        lease: WorkerLease | None,
     ) -> ToolResultItem:
         if result.ok:
             outcome = ToolOutcome(
@@ -361,31 +584,47 @@ class ToolPipeline:
             )
             status = ToolInvocationStatus.FAILED
             event_type = "tool.call.failed"
-        finished = invocation.model_copy(
-            update={"status": status, "outcome": outcome, "updated_at": self._clock.now()},
-            deep=True,
-        )
-        await self._invocations.transition(invocation.id, ToolInvocationStatus.RUNNING, finished)
-        await self._event(
-            run,
-            event_type,
-            {
-                "name": call.name,
-                "call_id": call.call_id,
-                "reason_code": outcome.reason_code,
-            },
-        )
         if result.ok:
             trust = result.output_trust or tool.spec.output_trust
             if tool.spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED:
                 trust = TrustLevel.EXTERNAL_UNTRUSTED
-            return ToolResultItem(call_id=call.call_id, content=result.content, trust=trust)
-        return _outcome_item(
-            call.call_id,
-            outcome,
-            tool.spec.output_trust,
-            result.failure.external_text if result.failure is not None else None,
+            result_item = ToolResultItem(call_id=call.call_id, content=result.content, trust=trust)
+        else:
+            result_item = _outcome_item(
+                call.call_id,
+                outcome,
+                tool.spec.output_trust,
+                result.failure.external_text if result.failure is not None else None,
+            )
+        finished = invocation.model_copy(
+            update={
+                "status": status,
+                "outcome": outcome,
+                "result_item": result_item,
+                "updated_at": self._clock.now(),
+            },
+            deep=True,
         )
+        async with self._uow_factory() as uow:
+            await uow.invocations.transition(
+                invocation.id,
+                ToolInvocationStatus.RUNNING,
+                finished,
+                lease=lease,
+            )
+            await self._event_in(
+                uow,
+                run,
+                event_type,
+                {
+                    "name": call.name,
+                    "call_id": call.call_id,
+                    "reason_code": outcome.reason_code,
+                    "result_item": result_item.model_dump(mode="json"),
+                },
+                lease,
+            )
+        return result_item
 
     async def _refusal(
         self,
@@ -393,6 +632,7 @@ class ToolPipeline:
         call: ToolCallItem,
         reason_code: str,
         status: ToolOutcomeStatus,
+        lease: WorkerLease | None,
     ) -> ToolResultItem:
         outcome = ToolOutcome(
             status=status,
@@ -405,20 +645,37 @@ class ToolPipeline:
         event_type = (
             "tool.call.failed" if status is ToolOutcomeStatus.FAILED else "tool.call.denied"
         )
-        await self._event(
-            run,
-            event_type,
-            {"name": call.name, "call_id": call.call_id, "reason_code": reason_code},
-        )
-        return _outcome_item(call.call_id, outcome, TrustLevel.INTERNAL_TOOL)
+        result_item = _outcome_item(call.call_id, outcome, TrustLevel.INTERNAL_TOOL)
+        async with self._uow_factory() as uow:
+            await self._event_in(
+                uow,
+                run,
+                event_type,
+                {
+                    "name": call.name,
+                    "call_id": call.call_id,
+                    "reason_code": reason_code,
+                    "result_item": result_item.model_dump(mode="json"),
+                },
+                lease,
+            )
+        return result_item
 
-    async def _event(self, run: Run, event_type: str, payload: dict[str, Any]) -> None:
-        await self._events.append(
+    @staticmethod
+    async def _event_in(
+        uow: RepositoryUnitOfWork,
+        run: Run,
+        event_type: str,
+        payload: dict[str, Any],
+        lease: WorkerLease | None,
+    ) -> None:
+        await uow.events.append(
             NewEvent(
                 session_id=run.session_id,
                 run_id=run.id,
                 event_type=event_type,
                 actor_type="runtime",
                 payload=payload,
-            )
+            ),
+            lease=lease,
         )

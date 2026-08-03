@@ -28,6 +28,7 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.output_invalid": "The tool returned data outside its declared contract.",
     "tool.timeout": "The tool did not finish within its allowed time.",
     "tool.internal_error": "The tool could not complete because of an internal error.",
+    "tool.outcome_unknown": "The outcome of this call is unknown. Do not repeat it.",
     "policy.scope.missing": "Not performed. The principal lacks a required scope.",
     "policy.milestone1.non_pure": (
         "Not performed. This milestone authorizes only side-effect-free tools."

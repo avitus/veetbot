@@ -16,6 +16,13 @@ def test_evals_isolation() -> None:
     assert not [error for error in errors if "agent_core.evals" in error]
 
 
+def test_orm_confined() -> None:
+    errors = architecture_errors(ROOT)
+    assert not [
+        error for error in errors if "sqlalchemy" in error.lower() or "ORM type crosses" in error
+    ]
+
+
 def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text("[project]\nname = 'fixture'\n", encoding="utf-8")
     package = tmp_path / "src" / "agent_core"

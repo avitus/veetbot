@@ -19,6 +19,48 @@ schema that has not been written yet, so they are cheap now and expensive after
 Milestone 2 ships. Items marked **expensive** would require rewriting a
 committed spec and its dependents.
 
+## Milestone 2 implementation decisions
+
+ADR-0038 records the implementation decisions made while the owner was away.
+The highest-value review points are:
+
+- **Usage schema now, provider behavior later (moderate):** the normative
+  Milestone 2 schema owns model-call and price tables, while the model-gateway
+  build sequence places real provider accounting in Milestone 3. The tables and
+  fake-attempt write path exist now; no real provider behavior was pulled
+  forward.
+- **Fixed PostgreSQL agent identity (cheap):** independent CLI and worker
+  compositions use one fixed UUID for the immutable built-in agent version.
+  The memory tier keeps injected identifiers.
+- **Text tenant and principal keys (expensive after deployment):** SQL follows
+  the current string domain and evaluation namespaces rather than one UUID-typed
+  pseudocode table.
+- **Additive read-model schema (moderate):** session-history items, trajectory
+  projection state, the pinned run seed sequence, final-message read model, and
+  exact tool result are persisted because the active gates require them and the
+  base schema is explicitly a minimum.
+- **Event-range checkpoint references (moderate):** portable conversation items
+  are projected from events through a pinned sequence rather than copied into
+  checkpoint JSON. This is what makes checkpoint deletion a tested recovery
+  path.
+- **Polling is the durable queue signal (cheap):** workers poll the committed
+  queue row at the configured interval. Notifications may reduce latency later,
+  but correctness does not depend on receiving one.
+- **One composed unit-of-work port (moderate):** application and runtime code
+  select transaction boundaries through a port that groups repository ports;
+  SQLAlchemy and row types remain confined to the persistence adapter.
+- **One injected checkpoint seeder (cheap):** creation and total-loss recovery
+  share the same event-prefix reconstruction callable, so the two required call
+  sites cannot drift.
+- **Projection failures remain hard errors (moderate):** a known event whose
+  current-schema payload is malformed blocks projection progress. Silently
+  skipping or quarantining it was rejected because the normative projection
+  and upcaster contracts require a surfaced error; an operator repair path can
+  be added only through an explicit later design.
+
+The complete rationale, consequences, and rejected alternatives are in
+[ADR-0038](../adr/0038-milestone-2-durable-runtime-seams.md).
+
 ## Process and environment
 
 ### The plan is committed but not pushed

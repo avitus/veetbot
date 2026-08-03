@@ -4,6 +4,36 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-03 — Milestone 2 completed
+
+- Authorized Milestone 2 and advanced the current milestone to PostgreSQL
+  persistence and the durable worker.
+- Began implementation against the 16 new gates for event sequencing,
+  projections, upcasting, migration round trips, checkpoint recovery, fenced
+  claiming, resume idempotency, transaction hygiene, and ORM confinement.
+- Added the linear durable-runtime migration, confined SQLAlchemy rows and
+  hand-written mappers, PostgreSQL repositories and short units of work,
+  atomic per-session event sequencing, version upcasting, watermarked session
+  history, trajectory scaffolding, referenced full/delta checkpoints, usage
+  records, the fenced `SKIP LOCKED` queue, and worker/maintenance process roles.
+- Refactored the shared session, run, executor, budget, and tool paths so state
+  changes and events commit together while provider and tool I/O occurs outside
+  transactions. Tool recovery now snapshots idempotency classification, uses an
+  effect watermark, and returns the exact persisted result on deduplication.
+- Activated all 16 Milestone 2 gates (57 cumulative) and added PostgreSQL race,
+  rollback, projection rebuild, checkpoint deletion, crash/reclaim, stale-fence,
+  migration, concurrent-tool, and fourteen-boundary recovery cases.
+- Proposed ADR-0038 with the durable seam and schema decisions that require
+  owner review.
+- Passed Ruff, strict mypy, 80 static tests, 29 contracts, all 138 non-live
+  tests, the clean Alembic metadata check, 123 citation checks, strict
+  documentation builds, and all 57 active gates. A separate worker process
+  completed the calculator flow and a repeated idempotency key returned the
+  same committed run.
+- CircleCI jobs 19, 20, and 21 passed the PostgreSQL integration, contract, and
+  static partitions for `dev` commit `75964a0`, closing the final acceptance
+  gap.
+
 ## 2026-08-01 — Milestone 1 completed
 
 - Implemented the provider-neutral domain, ports, state machine, five in-memory

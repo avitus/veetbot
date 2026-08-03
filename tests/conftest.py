@@ -2,15 +2,37 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from collections.abc import Generator
 from contextvars import ContextVar
+from functools import cache
 from typing import Literal
+from urllib.parse import urlparse
 
 import pytest
 
 NetworkMode = Literal["blocked", "integration", "live"]
 NETWORK_MODE: ContextVar[NetworkMode] = ContextVar("test_network_mode", default="blocked")
+
+
+@cache
+def _integration_hosts() -> set[str]:
+    configured = urlparse(os.environ.get("DATABASE_URL", "")).hostname
+    hosts = {"127.0.0.1", "::1", "localhost"}
+    if configured is None:
+        return hosts
+    hosts.add(configured)
+    try:
+        for _family, _type, _protocol, _canonical, address in socket.getaddrinfo(
+            configured, None, type=socket.SOCK_STREAM
+        ):
+            resolved = address[0]
+            if isinstance(resolved, str):
+                hosts.add(resolved)
+    except socket.gaierror:
+        pass
+    return hosts
 
 
 class GuardedSocket(socket.socket):
@@ -22,7 +44,7 @@ class GuardedSocket(socket.socket):
             super().connect(address)  # type: ignore[arg-type]
             return
         host = address[0] if isinstance(address, tuple) and address else None
-        if mode == "integration" and host in {"127.0.0.1", "::1", "localhost"}:
+        if mode == "integration" and host in _integration_hosts():
             super().connect(address)  # type: ignore[arg-type]
             return
         raise RuntimeError(f"test attempted blocked network connection to host {host!r}")

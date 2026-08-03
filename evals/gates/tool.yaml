@@ -34,13 +34,13 @@
   kind: case
   spec: docs/plan/tool-system.md#hard-gates
   statement: "A recorded crash at each of the fourteen pipeline steps recovers to the state the recovery table specifies, asserted as a resilience test."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/resilience/test_tool_recovery_m2.py::test_crash_recovery_table_is_total_across_all_pipeline_boundaries
 - id: gate.tool.dedup_concurrent
   milestone: 2
   kind: case
   spec: docs/plan/tool-system.md#hard-gates
   statement: "Two concurrent submissions of the same call produce one execution."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_tool_m2.py::test_concurrent_duplicate_tool_calls_execute_once_and_resume_is_idempotent
 - id: gate.tool.normalization_stable
   milestone: 1
   kind: property

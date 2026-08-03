@@ -34,19 +34,19 @@
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**The lease is released exactly once.** In every case in the suite, including the crash and fence cases, the count of `release` calls per run execution is at most one, and a suspended run's lease is released before its `run.waiting_*` event is visible to a second worker."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_event_runtime_m2.py::test_two_workers_race_but_only_one_claim_executes_and_releases
 - id: gate.runtime.fenced_no_write
   milestone: 2
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**Fenced workers do not write.** In the `kill_worker` intervention cases, after a fence the fenced worker performs zero row-affecting writes other than the single `run.fenced` append."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_event_runtime_m2.py::test_stale_fenced_worker_cannot_affect_rows
 - id: gate.runtime.resume_idempotent
   milestone: 2
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**Resume is idempotent on the pipeline boundary.** Resuming a run whose checkpoint carries `pending_tool_calls` re-enters the pipeline at step 6 and produces no duplicate `tool.call.proposed` event and no second effect for any call whose watermark was already set."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_tool_m2.py::test_concurrent_duplicate_tool_calls_execute_once_and_resume_is_idempotent
 - id: gate.runtime.waiting_holds_nothing
   milestone: 4
   kind: case

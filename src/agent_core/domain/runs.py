@@ -133,11 +133,12 @@ class Run(BaseModel):
     lease_epoch: int = 0
     attempts: int = 0
     priority: int = 0
-    scheduled_for: datetime
+    scheduled_for: datetime | None = None
     deadline_at: datetime | None = None
     cancel_requested_at: datetime | None = None
     failure: RunFailure | None = None
     final_message: str | None = None
+    seed_event_sequence: int = 0
     created_at: datetime
     updated_at: datetime
 

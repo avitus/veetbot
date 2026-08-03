@@ -4,12 +4,30 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from datetime import datetime
+from decimal import Decimal
 from uuid import UUID
 
+from agent_core.adapters.persistence.conversation import conversation_items
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
-from agent_core.domain.runs import Run, RunFailure, RunStatus
+from agent_core.domain.persistence import (
+    IdempotencyRecord,
+    ModelCallRecord,
+    SessionHistory,
+    TrajectoryProjection,
+    UsageRollup,
+    WorkerLease,
+)
+from agent_core.domain.runs import (
+    TERMINAL_RUN_STATUSES,
+    Run,
+    RunCheckpoint,
+    RunFailure,
+    RunStatus,
+    RunUsage,
+)
 from agent_core.domain.sessions import Session
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.ports.determinism import Clock
@@ -118,7 +136,10 @@ class InMemoryRunRepository:
         *,
         failure: object | None = None,
         final_message: str | None = None,
+        lease: WorkerLease | None = None,
     ) -> Run:
+        if lease is not None:
+            raise ConflictError("the in-memory repository does not support worker leases")
         async with self._lock:
             try:
                 current = self._runs[run_id]
@@ -142,7 +163,9 @@ class InMemoryRunRepository:
             self._runs[run_id] = updated
             return updated.model_copy(deep=True)
 
-    async def update_counters(self, run: Run) -> None:
+    async def update_counters(self, run: Run, *, lease: WorkerLease | None = None) -> None:
+        if lease is not None:
+            raise ConflictError("the in-memory repository does not support worker leases")
         async with self._lock:
             try:
                 current = self._runs[run.id]
@@ -164,6 +187,17 @@ class InMemoryRunRepository:
                 raise ConflictError("counter update may change only counters and usage")
             self._runs[run.id] = updated
 
+    async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
+        async with self._lock:
+            try:
+                current = self._runs[run_id]
+            except KeyError as exc:
+                raise NotFoundError("run not found") from exc
+            self._runs[run_id] = current.model_copy(
+                update={"seed_event_sequence": sequence, "updated_at": self._clock.now()},
+                deep=True,
+            )
+
 
 class InMemoryEventRepository:
     def __init__(self, sessions: SessionRepository, clock: Clock) -> None:
@@ -173,7 +207,9 @@ class InMemoryEventRepository:
         self._next_id = 1
         self._lock = asyncio.Lock()
 
-    async def append(self, event: NewEvent) -> EventEnvelope:
+    async def append(self, event: NewEvent, *, lease: WorkerLease | None = None) -> EventEnvelope:
+        if lease is not None:
+            raise ConflictError("the in-memory repository does not support worker leases")
         async with self._lock:
             stream = self._events[event.session_id]
             envelope = EventEnvelope(
@@ -197,6 +233,28 @@ class InMemoryEventRepository:
                 if event.sequence > sequence
             ]
 
+    async def raw_list(self, session_id: UUID, sequence: int = 0) -> list[EventEnvelope]:
+        """Support the in-process projection without bypassing its lock."""
+
+        async with self._lock:
+            return [
+                event.model_copy(deep=True)
+                for event in self._events[session_id]
+                if event.sequence > sequence
+            ]
+
+    async def raw_for_run(self, run_id: UUID) -> list[EventEnvelope]:
+        async with self._lock:
+            return sorted(
+                (
+                    event.model_copy(deep=True)
+                    for stream in self._events.values()
+                    for event in stream
+                    if event.run_id == run_id
+                ),
+                key=lambda event: (event.sequence, event.id),
+            )
+
 
 class InMemoryToolInvocationRepository:
     def __init__(self, runs: RunRepository) -> None:
@@ -205,7 +263,11 @@ class InMemoryToolInvocationRepository:
         self._idempotency: dict[tuple[UUID, str], UUID] = {}
         self._lock = asyncio.Lock()
 
-    async def create(self, invocation: ToolInvocation) -> ToolInvocation:
+    async def create(
+        self, invocation: ToolInvocation, *, lease: WorkerLease | None = None
+    ) -> ToolInvocation:
+        if lease is not None:
+            raise ConflictError("the in-memory repository does not support worker leases")
         async with self._lock:
             if invocation.id in self._invocations:
                 raise ConflictError("tool invocation already exists")
@@ -231,7 +293,11 @@ class InMemoryToolInvocationRepository:
         invocation_id: UUID,
         expected_status: ToolInvocationStatus,
         invocation: ToolInvocation,
+        *,
+        lease: WorkerLease | None = None,
     ) -> ToolInvocation:
+        if lease is not None:
+            raise ConflictError("the in-memory repository does not support worker leases")
         async with self._lock:
             try:
                 current = self._invocations[invocation_id]
@@ -277,6 +343,11 @@ class InMemoryToolInvocationRepository:
                         if invocation.outcome is None
                         else invocation.outcome.model_copy(deep=True)
                     ),
+                    "result_item": (
+                        None
+                        if invocation.result_item is None
+                        else invocation.result_item.model_copy(deep=True)
+                    ),
                     "updated_at": invocation.updated_at,
                 },
                 deep=True,
@@ -295,3 +366,204 @@ class InMemoryToolInvocationRepository:
                 if invocation.run_id == run_id
             ]
             return sorted(rows, key=lambda row: (row.step_number, row.created_at, row.id.int))
+
+
+class InMemoryCheckpointRepository:
+    def __init__(self) -> None:
+        self._checkpoints: dict[UUID, list[RunCheckpoint]] = defaultdict(list)
+        self._lock = asyncio.Lock()
+
+    async def write(
+        self,
+        run_id: UUID,
+        checkpoint: RunCheckpoint,
+        *,
+        full: bool,
+        lease: WorkerLease | None = None,
+    ) -> int:
+        del full
+        if lease is not None:
+            raise ConflictError("the in-memory repository does not support worker leases")
+        async with self._lock:
+            rows = self._checkpoints[run_id]
+            expected = rows[-1].version + 1 if rows else 1
+            if checkpoint.version != expected:
+                raise ConflictError(f"checkpoint version must be {expected}")
+            rows.append(checkpoint.model_copy(deep=True))
+            return checkpoint.version
+
+    async def latest(self, run_id: UUID) -> RunCheckpoint | None:
+        async with self._lock:
+            rows = self._checkpoints[run_id]
+            return None if not rows else rows[-1].model_copy(deep=True)
+
+    async def prune(self, run_id: UUID, *, terminal: bool) -> int:
+        del terminal
+        async with self._lock:
+            rows = self._checkpoints[run_id]
+            removed = max(0, len(rows) - 1)
+            if rows:
+                self._checkpoints[run_id] = [rows[-1]]
+            return removed
+
+    async def delete_nonterminal(self, run_id: UUID) -> int:
+        async with self._lock:
+            rows = self._checkpoints.pop(run_id, [])
+            return len(rows)
+
+
+class InMemoryIdempotencyRepository:
+    def __init__(self) -> None:
+        self._records: dict[str, IdempotencyRecord] = {}
+        self._lock = asyncio.Lock()
+
+    async def get(self, key: str, tenant_id: str, principal_id: str) -> IdempotencyRecord | None:
+        async with self._lock:
+            record = self._records.get(key)
+            if (
+                record is None
+                or record.tenant_id != tenant_id
+                or record.principal_id != principal_id
+            ):
+                return None
+            return record.model_copy(deep=True)
+
+    async def create(self, record: IdempotencyRecord) -> IdempotencyRecord:
+        async with self._lock:
+            existing = self._records.get(record.key)
+            if existing is not None:
+                if (
+                    existing.tenant_id != record.tenant_id
+                    or existing.principal_id != record.principal_id
+                ):
+                    raise ConflictError("idempotency key belongs to another principal")
+                if existing.request_hash != record.request_hash:
+                    raise ConflictError("idempotency key was reused with a different request")
+                return existing.model_copy(deep=True)
+            self._records[record.key] = record.model_copy(deep=True)
+            return record.model_copy(deep=True)
+
+
+class InMemoryUsageRepository:
+    def __init__(self, runs: InMemoryRunRepository) -> None:
+        self._runs = runs
+        self._calls: dict[UUID, ModelCallRecord] = {}
+        self._lock = asyncio.Lock()
+
+    async def record_attempt(self, call: ModelCallRecord) -> None:
+        async with self._lock:
+            self._calls.setdefault(call.attempt_id, call.model_copy(deep=True))
+
+    async def run_usage(self, run_id: UUID) -> RunUsage:
+        async with self._lock:
+            calls = [call for call in self._calls.values() if call.run_id == run_id]
+            reasoning = [
+                call.usage.reasoning_tokens
+                for call in calls
+                if call.usage.reasoning_tokens is not None
+            ]
+            return RunUsage(
+                input_tokens=sum(call.usage.input_tokens for call in calls),
+                cached_input_tokens=sum(call.usage.cached_input_tokens for call in calls),
+                cache_write_input_tokens=sum(call.usage.cache_write_input_tokens for call in calls),
+                output_tokens=sum(call.usage.output_tokens for call in calls),
+                reasoning_tokens=sum(reasoning) if reasoning else None,
+                model_calls=len(calls),
+                cost=sum((call.cost for call in calls), Decimal("0")),
+            )
+
+    async def tenant_usage(
+        self, tenant_id: str, *, since: datetime, until: datetime
+    ) -> UsageRollup:
+        async with self._lock:
+            calls = [
+                call
+                for call in self._calls.values()
+                if call.tenant_id == tenant_id and since <= call.started_at < until
+            ]
+            reasoning = [
+                call.usage.reasoning_tokens
+                for call in calls
+                if call.usage.reasoning_tokens is not None
+            ]
+            return UsageRollup(
+                input_tokens=sum(call.usage.input_tokens for call in calls),
+                cached_input_tokens=sum(call.usage.cached_input_tokens for call in calls),
+                cache_write_input_tokens=sum(call.usage.cache_write_input_tokens for call in calls),
+                output_tokens=sum(call.usage.output_tokens for call in calls),
+                reasoning_tokens=sum(reasoning) if reasoning else None,
+                cost=sum((call.cost for call in calls), Decimal("0")),
+            )
+
+
+class InMemorySessionHistoryRepository:
+    def __init__(self, events: InMemoryEventRepository) -> None:
+        self._events = events
+
+    @staticmethod
+    def _project(session_id: UUID, events: list[EventEnvelope]) -> SessionHistory:
+        items = [item for event in events for item in conversation_items(event)]
+        return SessionHistory(
+            session_id=session_id,
+            through_sequence=events[-1].sequence if events else 0,
+            items=items,
+            builder_version="session-history-memory@1",
+        )
+
+    async def catch_up(self, session_id: UUID) -> SessionHistory:
+        return self._project(session_id, await self._events.raw_list(session_id))
+
+    async def rebuild(self, session_id: UUID) -> SessionHistory:
+        return await self.catch_up(session_id)
+
+    async def read(self, session_id: UUID, through_sequence: int | None = None) -> SessionHistory:
+        events = await self._events.raw_list(session_id)
+        history = self._project(session_id, events)
+        if through_sequence is None or through_sequence >= history.through_sequence:
+            return history
+        truncated = self._project(
+            session_id, [event for event in events if event.sequence <= through_sequence]
+        )
+        return truncated.model_copy(update={"through_sequence": through_sequence})
+
+
+class InMemoryTrajectoryProjectionRepository:
+    def __init__(self, events: InMemoryEventRepository) -> None:
+        self._events = events
+
+    async def catch_up(self, run_id: UUID) -> TrajectoryProjection | None:
+        events = await self._events.raw_for_run(run_id)
+        if not events:
+            return None
+        return TrajectoryProjection(
+            run_id=run_id,
+            first_sequence=events[0].sequence,
+            last_sequence=events[-1].sequence,
+            terminal=any(
+                event.event_type
+                in {f"run.{status.value.lower()}" for status in TERMINAL_RUN_STATUSES}
+                for event in events
+            ),
+            builder_version="trajectory@1",
+            updated_at=events[-1].created_at,
+        )
+
+    async def rebuild(self, run_id: UUID) -> TrajectoryProjection | None:
+        return await self.catch_up(run_id)
+
+    async def read(self, run_id: UUID) -> TrajectoryProjection | None:
+        return await self.catch_up(run_id)
+
+
+class InMemoryMaintenanceRepository:
+    async def projection_sessions(self, limit: int) -> list[UUID]:
+        del limit
+        return []
+
+    async def checkpoint_runs(self, limit: int) -> list[tuple[UUID, bool]]:
+        del limit
+        return []
+
+    async def trajectory_runs(self, limit: int) -> list[UUID]:
+        del limit
+        return []

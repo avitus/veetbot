@@ -15,6 +15,10 @@ class ConflictError(AgentCoreError):
     """The requested guarded state change is not valid."""
 
 
+class WorkerFencedError(ConflictError):
+    """A durable worker no longer owns the lease epoch used for a write."""
+
+
 class BudgetExceededError(AgentCoreError):
     """A configured run limit was reached before more work began."""
 

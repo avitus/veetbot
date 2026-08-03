@@ -25,10 +25,11 @@ as an archival record.
 
 ## Current status
 
-Milestones 0 and 1 are complete. Milestone 1's in-memory vertical slice, all 28
-of its hard gates, full local suite, required CLI demonstration, and hosted
-CircleCI workflow passed. See the [current milestone](plan/current-milestone.md)
-and [project state](status/index.md) pages for recorded evidence.
+Milestones 0, 1, and 2 are complete. Milestone 2's PostgreSQL persistence and
+durable-worker implementation passed its local and hosted acceptance evidence.
+No later milestone is authorized. See the
+[current milestone](plan/current-milestone.md) and
+[project state](status/index.md) pages for recorded evidence.
 
 ## For coding agents
 

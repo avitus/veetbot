@@ -22,6 +22,7 @@ from agent_core.domain.messages import (
     TextPart,
     ToolResultItem,
 )
+from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import (
     BudgetScope,
     FailureReason,
@@ -35,9 +36,9 @@ from agent_core.domain.runs import (
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
-from agent_core.ports.events import EventRepository
 from agent_core.ports.models import ModelProvider
-from agent_core.ports.repositories import BudgetLedger, RunRepository
+from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.repositories import BudgetLedger
 
 type ToolDispatch = Callable[..., Awaitable[list[ToolResultItem]]]
 
@@ -52,8 +53,8 @@ class RunContext:
     model_provider: ModelProvider
     resolved_model: ResolvedModel
     budgets: BudgetLedger
-    runs: RunRepository
-    events: EventRepository
+    uow_factory: UnitOfWorkFactory
+    lease: WorkerLease | None
     clock: Clock
     ids: IdFactory
     token: CancellationToken
@@ -63,28 +64,58 @@ class RunContext:
 async def _append_event(
     context: RunContext, event_type: str, payload: dict[str, Any] | None = None
 ) -> None:
-    await context.events.append(
-        NewEvent(
-            session_id=context.run.session_id,
-            run_id=context.run.id,
-            event_type=event_type,
-            actor_type="runtime",
-            payload=payload or {},
+    async with context.uow_factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=context.run.session_id,
+                run_id=context.run.id,
+                event_type=event_type,
+                actor_type="runtime",
+                payload=payload or {},
+            ),
+            lease=context.lease,
         )
-    )
 
 
 async def checkpoint(context: RunContext, trigger: str) -> None:
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
+    context.checkpoint.budget_state = {
+        "step_count": context.run.step_count,
+        "model_call_count": context.run.model_call_count,
+        "tool_call_count": context.run.tool_call_count,
+        "usage": context.run.usage.model_dump(mode="json"),
+    }
     context.checkpoint.version += 1
     context.checkpoint.status = context.run.status
     context.checkpoint.created_at = context.clock.now()
-    await _append_event(
-        context,
-        "run.checkpointed",
-        {"version": context.checkpoint.version, "trigger": trigger},
+    full = (
+        context.checkpoint.version == 1
+        or context.checkpoint.version % 8 == 1
+        or trigger in {"compaction", "suspended", "cancelled", "failed", "final"}
     )
+    async with context.uow_factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=context.run.session_id,
+                run_id=context.run.id,
+                event_type="run.checkpointed",
+                actor_type="runtime",
+                payload={
+                    "version": context.checkpoint.version,
+                    "trigger": trigger,
+                    "full": full,
+                },
+            ),
+            lease=context.lease,
+        )
+        context.checkpoint.last_event_sequence = event.sequence
+        await uow.checkpoints.write(
+            context.run.id,
+            context.checkpoint,
+            full=full,
+            lease=context.lease,
+        )
 
 
 def _failure(
@@ -143,6 +174,8 @@ async def _invoke_model(
         )
         expected_sequence = 0
         terminal: ModelCompletedEvent | ModelFailedEvent | None = None
+        if context.uow_factory.is_open():
+            raise RuntimeError("model I/O cannot begin while a unit of work is open")
         async for event in context.model_provider.stream(request, context.resolved_model, attempt):
             if event.sequence != expected_sequence:
                 return _failure(
@@ -187,6 +220,12 @@ async def _invoke_model(
                 if terminal.partial_turn is not None
                 else ModelUsage(provider=terminal.error.provider, model=terminal.error.model),
                 step=step,
+                attempt=attempt,
+                request=request,
+                resolved_model=context.resolved_model,
+                error_kind=(
+                    "transient" if isinstance(terminal.error, ModelTransientError) else "permanent"
+                ),
             )
             if (
                 isinstance(terminal.error, ModelTransientError)
@@ -214,12 +253,27 @@ async def _invoke_model(
                 "step_number": step.step_number,
                 "stop_reason": terminal.stop_reason.value,
                 "tool_names": [call.name for call in terminal.turn.tool_calls],
+                "conversation_items": [
+                    item.model_dump(mode="json")
+                    for item in [
+                        *(terminal.turn.assistant_messages if terminal.turn.tool_calls else []),
+                        *terminal.turn.tool_calls,
+                    ]
+                ],
             },
+        )
+        await context.budgets.record_model_usage(
+            context.run,
+            terminal.turn.usage,
+            step=step,
+            attempt=attempt,
+            request=request,
+            resolved_model=context.resolved_model,
+            stop_reason=terminal.stop_reason,
         )
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
-            await context.budgets.record_model_usage(context.run, terminal.turn.usage, step=step)
             if step.attempt_count < 3:
                 continue
             return _failure(
@@ -247,7 +301,8 @@ async def run_loop(context: RunContext) -> RunOutcome:
         context.budgets.check(context.run, BudgetScope.STEP)
         context.run.step_count += 1
         context.run.updated_at = context.clock.now()
-        await context.runs.update_counters(context.run)
+        async with context.uow_factory() as uow:
+            await uow.runs.update_counters(context.run, lease=context.lease)
         step = Step(
             run_id=context.run.id,
             step_number=context.run.step_count,
@@ -262,7 +317,6 @@ async def run_loop(context: RunContext) -> RunOutcome:
         turn = invoked
         if turn.stop_reason is StopReason.CANCELLED:
             return RunOutcome(kind=OutcomeKind.CANCELLED)
-        await context.budgets.record_model_usage(context.run, turn.usage, step=step)
         context.token.raise_if_cancelled()
         context.checkpoint.conversation.extend(turn.assistant_messages)
         context.checkpoint.conversation.extend(turn.tool_calls)
@@ -284,7 +338,6 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 "assistant.message.completed",
                 {"message": message.model_dump(mode="json")},
             )
-            await checkpoint(context, "final")
             return RunOutcome(kind=OutcomeKind.COMPLETED, final_message=message)
 
         call_counts = context.checkpoint.working_state.setdefault("identical_calls", {})
@@ -309,6 +362,12 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     step,
                 )
 
+        context.checkpoint.pending_tool_calls = [
+            call.model_dump(mode="json") for call in turn.tool_calls
+        ]
+        await checkpoint(context, "tool_pending")
+        if context.uow_factory.is_open():
+            raise RuntimeError("tool I/O cannot begin while a unit of work is open")
         results = await context.dispatch_tools(
             run=context.run,
             checkpoint=context.checkpoint,
@@ -317,9 +376,22 @@ async def run_loop(context: RunContext) -> RunOutcome:
             step=step,
             agent=context.agent,
             token=context.token,
+            lease=context.lease,
         )
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
-        for result in results:
-            context.checkpoint.conversation.append(result)
-            await checkpoint(context, "tool_call")
+        recorded_steps = context.checkpoint.working_state.setdefault(
+            "tool_usage_recorded_steps", {}
+        )
+        if not isinstance(recorded_steps, dict):
+            return _failure(
+                context,
+                FailureReason.INTERNAL_ERROR,
+                "WorkingStateError",
+                "the tool-usage marker was malformed",
+                step,
+            )
+        recorded_steps[str(step.step_number)] = len(results)
+        context.checkpoint.conversation.extend(results)
+        context.checkpoint.pending_tool_calls = []
+        await checkpoint(context, "tool_call")
