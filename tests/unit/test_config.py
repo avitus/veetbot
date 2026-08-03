@@ -94,6 +94,44 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
     assert merged["output"]["global_maximum_bytes"] == 4_194_304
 
 
+@pytest.mark.parametrize(
+    ("relative", "document", "message"),
+    [
+        (
+            "runtime/limits.yaml",
+            "model:\n  max_internal_attempts: 0\n",
+            r"model\.max_internal_attempts must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "run_defaults: disabled\n",
+            r"run_defaults must be a mapping",
+        ),
+        (
+            "tools/limits.yaml",
+            "circuit_breaker:\n  identical_call_threshold: 1\n",
+            r"identical_call_threshold must be at least 2",
+        ),
+        (
+            "context/plan.yaml",
+            "classes:\n  tool_definitions:\n    max_items: many\n",
+            r"tool_definitions\.max_items must be an integer",
+        ),
+    ],
+)
+def test_operator_overlay_values_are_validated(
+    tmp_path: Path,
+    relative: str,
+    document: str,
+    message: str,
+) -> None:
+    overlay = tmp_path / relative
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(document, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match=message):
+        load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
+
+
 def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
     overlay = tmp_path / "models" / "policies.yaml"
     overlay.parent.mkdir(parents=True)

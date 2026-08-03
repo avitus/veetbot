@@ -24,7 +24,9 @@ class GuardedSocket(socket.socket):
         host = address[0] if isinstance(address, tuple) and address else None
         if mode == "integration" and host in {"127.0.0.1", "::1", "localhost"}:
             return
-        raise RuntimeError(f"test attempted blocked network connection to host {host!r}")
+        raise RuntimeError(
+            f"test attempted blocked network connection to host {host!r} (destination {address!r})"
+        )
 
     def connect(self, address: object) -> None:
         self._guard_address(address)

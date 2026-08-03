@@ -169,15 +169,15 @@ async def _invoke_model(
                         step,
                     )
                 expected_sequence += 1
+                if terminal is not None:
+                    return _failure(
+                        context,
+                        FailureReason.MODEL_PERMANENT_ERROR,
+                        "ModelProtocolError",
+                        "the normalized model stream continued after its terminal event",
+                        step,
+                    )
                 if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
-                    if terminal is not None:
-                        return _failure(
-                            context,
-                            FailureReason.MODEL_PERMANENT_ERROR,
-                            "ModelProtocolError",
-                            "the normalized model stream had multiple terminal events",
-                            step,
-                        )
                     terminal = event
         if terminal is None:
             return _failure(

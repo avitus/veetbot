@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 class _FinalizationContext:
     run: Run
     checkpoint: RunCheckpoint
+    principal: Principal
     runs: RunRepository
     events: EventRepository
     clock: Clock
@@ -90,6 +91,7 @@ class RunExecutor:
         token = RunCancellationToken(self._clock, run.deadline_at)
         finalization = _FinalizationContext(
             run=run,
+            principal=principal,
             runs=self._runs,
             events=self._events,
             clock=self._clock,
@@ -208,7 +210,33 @@ def _message_text(message: AssistantMessage | None) -> str | None:
 
 
 async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
-    """Perform the terminal checkpoint, transition, and event exactly once."""
+    """Finalize once, falling back to FAILED while the run remains RUNNING."""
+
+    try:
+        await _finalize_once(context, outcome)
+    except Exception as exc:
+        current = await context.runs.get(context.run.id, context.principal)
+        if current.status is not RunStatus.RUNNING:
+            raise
+        logger.exception(
+            "run_finalization_failed",
+            extra={"run_id": str(context.run.id), "error_class": type(exc).__name__},
+        )
+        failure = RunFailure(
+            reason=FailureReason.INTERNAL_ERROR,
+            error_class=type(exc).__name__,
+            message="an unexpected finalization error ended the run",
+            step_number=context.run.step_count or None,
+            occurred_at=context.clock.now(),
+        )
+        await _finalize_once(
+            context,
+            RunOutcome(kind=OutcomeKind.FAILED, failure=failure),
+        )
+
+
+async def _finalize_once(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
+    """Apply one terminal outcome without retrying its persistence operations."""
 
     if outcome.kind is OutcomeKind.COMPLETED:
         message = AssistantMessage.model_validate(outcome.final_message)
