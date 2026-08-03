@@ -4,13 +4,13 @@ This repository is implementing the provider-neutral agent platform defined by
 the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
 strictly milestone-gated. Milestone 0 established the repository and engineering
 foundation. Milestone 1 added the first complete, in-memory model/tool runtime;
-Milestone 2 is replacing its process-local seams with PostgreSQL and workers.
+Milestone 2 replaced its process-local seams with PostgreSQL and workers.
 
 ## Current status
 
-Milestones 0 and 1 are complete. Milestone 2, which adds PostgreSQL persistence,
-durable checkpoints, fenced run claiming, crash recovery, and the separate
-worker process, is in progress.
+Milestones 0, 1, and 2 are complete. PostgreSQL persistence, durable
+checkpoints, fenced run claiming, crash recovery, and separate worker and
+maintenance processes are implemented. No later milestone is authorized.
 
 ## Prerequisites
 

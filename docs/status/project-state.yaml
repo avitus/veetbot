@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_2_in_progress
+  status: milestone_2_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 2
   authorized_milestones:
@@ -20,7 +20,7 @@ milestones:
     status: complete
   "2":
     title: PostgreSQL persistence and durable worker
-    status: in_progress
+    status: complete
   "3":
     title: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
     status: not_started
@@ -141,14 +141,51 @@ verification:
           contexts completed successfully.
     remaining: []
   milestone_2:
-    recorded_at: 2026-08-03T18:42:10Z
-    status: in_progress
-    evidence: []
-    remaining:
-      - Implement the PostgreSQL schema, repositories, event log, checkpoints,
-        projections, run queue, worker supervision, and recovery path.
-      - Activate and pass all 16 Milestone 2 gates.
-      - Record local, migration, resilience, and hosted CircleCI evidence.
+    recorded_at: 2026-08-03T20:34:58Z
+    status: complete
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 126 source files, 80
+          static tests, 29 port contracts, 123 citation checks, strict
+          documentation builds, and all 57 gates active through Milestone 2
+          passed.
+      - check: make test against PostgreSQL 16
+        outcome: passed
+        detail: >-
+          All 138 non-live tests passed, including the 29-test integration
+          partition covering migrations, concurrent event allocation,
+          projections, durable claims, checkpoint loss, crash recovery, lease
+          fencing, idempotency, usage accounting, and tool recovery.
+      - check: Alembic revision and metadata
+        outcome: passed
+        detail: >-
+          A clean downgrade and upgrade round trip passed, revision
+          50f3618a97d0 is the single head, and alembic check reported no new
+          upgrade operations.
+      - check: cross-process durable calculator and request idempotency
+        outcome: passed
+        detail: >-
+          A separately running worker completed the CLI request with final
+          message 391. Repeating idempotency key m2-e2e-final-20260803 returned
+          the identical completed run ddcb700f-5539-457d-b250-327da9274845 with
+          one attempt and one tool call.
+      - check: CodeRabbit implementation review
+        outcome: passed_with_documented_exceptions
+        detail: >-
+          Two full local review passes were applied and revalidated. Suggestions
+          to quarantine malformed known events, truncate complete session
+          history, scope the globally primary idempotency key, and add run-level
+          retry jitter were rejected where they conflict with the normative
+          persistence contract or its deliberately bounded three-attempt queue.
+      - check: hosted CircleCI for dev commit 75964a0
+        outcome: passed
+        detail: >-
+          CircleCI jobs 19, 20, and 21 ran the PostgreSQL integration, contract,
+          and static partitions respectively; all three GitHub commit status
+          contexts completed successfully.
+    remaining: []
 
 documentation:
   canonical_format: markdown

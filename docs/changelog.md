@@ -4,7 +4,7 @@ title: Changelog
 
 # Changelog
 
-## 2026-08-03 — Milestone 2 implementation started
+## 2026-08-03 — Milestone 2 completed
 
 - Authorized Milestone 2 and advanced the current milestone to PostgreSQL
   persistence and the durable worker.
@@ -24,8 +24,15 @@ title: Changelog
   rollback, projection rebuild, checkpoint deletion, crash/reclaim, stale-fence,
   migration, concurrent-tool, and fourteen-boundary recovery cases.
 - Proposed ADR-0038 with the durable seam and schema decisions that require
-  owner review. Milestone 2 remains in progress until the full local suite and
-  hosted CircleCI workflow provide completion evidence.
+  owner review.
+- Passed Ruff, strict mypy, 80 static tests, 29 contracts, all 138 non-live
+  tests, the clean Alembic metadata check, 123 citation checks, strict
+  documentation builds, and all 57 active gates. A separate worker process
+  completed the calculator flow and a repeated idempotency key returned the
+  same committed run.
+- CircleCI jobs 19, 20, and 21 passed the PostgreSQL integration, contract, and
+  static partitions for `dev` commit `75964a0`, closing the final acceptance
+  gap.
 
 ## 2026-08-01 — Milestone 1 completed
 

@@ -5,12 +5,12 @@ title: Current Milestone
 # Current milestone
 
 - **Current milestone:** Milestone 2 — PostgreSQL persistence and durable worker
-  (in progress)
+  (complete)
 - **Authorized milestones:** Milestones 0, 1, and 2
-- **Project status:** Milestones 0 and 1 are complete. Milestone 2 is authorized
-  and implementation is in progress against its 16 new hard gates.
+- **Project status:** Milestones 0, 1, and 2 are complete. All 16 Milestone 2
+  hard gates and all 57 cumulative gates pass. No later milestone is authorized.
 
-Milestone 2 adds the specified SQLAlchemy/PostgreSQL repositories, append-only
+Milestone 2 added the specified SQLAlchemy/PostgreSQL repositories, append-only
 event log, durable checkpoints, fenced run queue, worker and maintenance roles,
 recovery path, and projection scaffolds for ordinary process roles. The
 process-local composition remains a supported implementation of the same ports
@@ -33,6 +33,7 @@ any later milestone speculatively.
 
 ## Completion rule
 
-Milestone 2 is complete only when every acceptance criterion in the canonical
+Milestone 2 is complete: every acceptance criterion in the canonical
 engineering plan, all 57 gates active through Milestone 2, local database and
-resilience verification, and the hosted CircleCI workflow pass.
+resilience verification, and the hosted CircleCI workflow pass. The exact
+commands and hosted job identifiers are recorded in project state.
