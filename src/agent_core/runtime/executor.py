@@ -230,12 +230,6 @@ class RunExecutor:
             )
         except WorkerFencedError:
             outcome = RunOutcome(kind=OutcomeKind.FENCED)
-        except ConflictError as exc:
-            logger.exception(
-                "run_execution_failed",
-                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
-            )
-            outcome = self._internal_failure(run, exc)
         except Exception as exc:
             logger.exception(
                 "run_execution_failed",
@@ -278,10 +272,6 @@ class RunExecutor:
             await context.budgets.record_tool_usage(context.run, len(results), step=step)
         elif recorded != len(results):
             raise ConflictError("persisted tool usage does not match the pending batch")
-        markers = context.checkpoint.working_state.setdefault("tool_usage_recorded_steps", {})
-        if not isinstance(markers, dict):
-            raise ConflictError("checkpoint tool-usage marker is malformed")
-        markers[str(step.step_number)] = len(results)
         context.checkpoint.conversation.extend(results)
         context.checkpoint.pending_tool_calls = []
         await checkpoint(context, "tool_recovered")
@@ -306,7 +296,34 @@ def _message_text(message: AssistantMessage | None) -> str | None:
 
 
 async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
-    """Commit terminal checkpoint, state transition, event, and lease release once."""
+    """Commit one terminal transaction, falling back to FAILED on local errors."""
+
+    original_checkpoint = context.checkpoint.model_copy(deep=True)
+    try:
+        await _finalize_once(context, outcome)
+    except WorkerFencedError:
+        raise
+    except Exception as exc:
+        context.checkpoint = original_checkpoint
+        logger.exception(
+            "run_finalization_failed",
+            extra={"run_id": str(context.run.id), "error_class": type(exc).__name__},
+        )
+        failure = RunFailure(
+            reason=FailureReason.INTERNAL_ERROR,
+            error_class=type(exc).__name__,
+            message="an unexpected finalization error ended the run",
+            step_number=context.run.step_count or None,
+            occurred_at=context.clock.now(),
+        )
+        await _finalize_once(
+            context,
+            RunOutcome(kind=OutcomeKind.FAILED, failure=failure),
+        )
+
+
+async def _finalize_once(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
+    """Apply one terminal outcome without retrying its persistence operations."""
 
     if outcome.kind is OutcomeKind.FENCED:
         return

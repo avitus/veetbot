@@ -353,12 +353,22 @@ def architecture_errors(root: Path) -> list[str]:
             for provider_sdk in sorted(imported_roots & PROVIDER_SDK_ROOTS):
                 errors.append(f"{relative}: provider SDK {provider_sdk} crosses adapter boundary")
 
-        if module != "agent_core.bootstrap" and not module.startswith("agent_core.adapters"):
+        if module != "agent_core.bootstrap":
+            module_parts = module.split(".")
+            adapter_family = (
+                ".".join(module_parts[:3])
+                if len(module_parts) >= 3 and module_parts[:2] == ["agent_core", "adapters"]
+                else None
+            )
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
                 called = _resolve_name(_call_name(node.func), bindings)
                 if called.startswith("agent_core.adapters."):
+                    if adapter_family is not None and (
+                        called == adapter_family or called.startswith(f"{adapter_family}.")
+                    ):
+                        continue
                     errors.append(
                         f"{relative}:{node.lineno}: adapter constructed outside bootstrap"
                     )

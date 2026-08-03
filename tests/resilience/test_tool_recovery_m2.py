@@ -1,6 +1,8 @@
 from datetime import timedelta
 from uuid import UUID
 
+import pytest
+
 from agent_core.domain.policies import IdempotencyClass
 from agent_core.domain.tools import (
     ToolInvocation,
@@ -49,76 +51,88 @@ def _invocation(
     )
 
 
+SCENARIOS = [
+    (_invocation(ToolInvocationStatus.PROPOSED), ToolRecoveryAction.RESUME_AUTHORIZATION),
+    (_invocation(ToolInvocationStatus.AUTHORIZED), ToolRecoveryAction.RESUME_AUTHORIZATION),
+    (
+        _invocation(ToolInvocationStatus.WAITING_FOR_APPROVAL),
+        ToolRecoveryAction.RESUME_APPROVAL,
+    ),
+    (_invocation(ToolInvocationStatus.RUNNING), ToolRecoveryAction.REEXECUTE),
+    (
+        _invocation(
+            ToolInvocationStatus.RUNNING,
+            IdempotencyClass.IDEMPOTENT,
+            effect_sent=True,
+        ),
+        ToolRecoveryAction.REEXECUTE,
+    ),
+    (
+        _invocation(
+            ToolInvocationStatus.RUNNING,
+            IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+        ),
+        ToolRecoveryAction.REEXECUTE,
+    ),
+    (
+        _invocation(
+            ToolInvocationStatus.RUNNING,
+            IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
+            effect_sent=True,
+        ),
+        ToolRecoveryAction.REPLAY_IDEMPOTENCY_KEY,
+    ),
+    (
+        _invocation(ToolInvocationStatus.RUNNING, IdempotencyClass.NON_IDEMPOTENT),
+        ToolRecoveryAction.REEXECUTE,
+    ),
+    (
+        _invocation(
+            ToolInvocationStatus.RUNNING,
+            IdempotencyClass.NON_IDEMPOTENT,
+            effect_sent=True,
+        ),
+        ToolRecoveryAction.MARK_UNCERTAIN,
+    ),
+    (
+        _invocation(ToolInvocationStatus.SUCCEEDED, terminal=True),
+        ToolRecoveryAction.RETURN_OUTCOME,
+    ),
+    (
+        _invocation(ToolInvocationStatus.FAILED, terminal=True),
+        ToolRecoveryAction.RETURN_OUTCOME,
+    ),
+    (
+        _invocation(ToolInvocationStatus.DENIED, terminal=True),
+        ToolRecoveryAction.RETURN_OUTCOME,
+    ),
+    (
+        _invocation(ToolInvocationStatus.UNCERTAIN, terminal=True),
+        ToolRecoveryAction.RETURN_OUTCOME,
+    ),
+    (
+        _invocation(
+            ToolInvocationStatus.RUNNING,
+            IdempotencyClass.READ_ONLY,
+            effect_sent=True,
+        ),
+        ToolRecoveryAction.REEXECUTE,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("invocation", "expected"),
+    SCENARIOS,
+    ids=[
+        f"{invocation.status.value}-{invocation.idempotency_class.value}-"
+        f"effect-{invocation.effect_sent_at is not None}"
+        for invocation, _expected in SCENARIOS
+    ],
+)
+def test_crash_recovery_action(invocation: ToolInvocation, expected: ToolRecoveryAction) -> None:
+    assert tool_recovery_action(invocation) is expected
+
+
 def test_crash_recovery_table_is_total_across_all_pipeline_boundaries() -> None:
-    scenarios = [
-        (_invocation(ToolInvocationStatus.PROPOSED), ToolRecoveryAction.RESUME_AUTHORIZATION),
-        (_invocation(ToolInvocationStatus.AUTHORIZED), ToolRecoveryAction.RESUME_AUTHORIZATION),
-        (
-            _invocation(ToolInvocationStatus.WAITING_FOR_APPROVAL),
-            ToolRecoveryAction.RESUME_APPROVAL,
-        ),
-        (_invocation(ToolInvocationStatus.RUNNING), ToolRecoveryAction.REEXECUTE),
-        (
-            _invocation(
-                ToolInvocationStatus.RUNNING,
-                IdempotencyClass.IDEMPOTENT,
-                effect_sent=True,
-            ),
-            ToolRecoveryAction.REEXECUTE,
-        ),
-        (
-            _invocation(
-                ToolInvocationStatus.RUNNING,
-                IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
-            ),
-            ToolRecoveryAction.REEXECUTE,
-        ),
-        (
-            _invocation(
-                ToolInvocationStatus.RUNNING,
-                IdempotencyClass.CONDITIONALLY_IDEMPOTENT,
-                effect_sent=True,
-            ),
-            ToolRecoveryAction.REPLAY_IDEMPOTENCY_KEY,
-        ),
-        (
-            _invocation(ToolInvocationStatus.RUNNING, IdempotencyClass.NON_IDEMPOTENT),
-            ToolRecoveryAction.REEXECUTE,
-        ),
-        (
-            _invocation(
-                ToolInvocationStatus.RUNNING,
-                IdempotencyClass.NON_IDEMPOTENT,
-                effect_sent=True,
-            ),
-            ToolRecoveryAction.MARK_UNCERTAIN,
-        ),
-        (
-            _invocation(ToolInvocationStatus.SUCCEEDED, terminal=True),
-            ToolRecoveryAction.RETURN_OUTCOME,
-        ),
-        (
-            _invocation(ToolInvocationStatus.FAILED, terminal=True),
-            ToolRecoveryAction.RETURN_OUTCOME,
-        ),
-        (
-            _invocation(ToolInvocationStatus.DENIED, terminal=True),
-            ToolRecoveryAction.RETURN_OUTCOME,
-        ),
-        (
-            _invocation(ToolInvocationStatus.UNCERTAIN, terminal=True),
-            ToolRecoveryAction.RETURN_OUTCOME,
-        ),
-        (
-            _invocation(
-                ToolInvocationStatus.RUNNING,
-                IdempotencyClass.READ_ONLY,
-                effect_sent=True,
-            ),
-            ToolRecoveryAction.REEXECUTE,
-        ),
-    ]
-    assert len(scenarios) == 14
-    assert [tool_recovery_action(row) for row, _expected in scenarios] == [
-        expected for _row, expected in scenarios
-    ]
+    assert len(SCENARIOS) == 14

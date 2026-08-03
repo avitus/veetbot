@@ -337,6 +337,8 @@ class ToolPipeline:
                 call.call_id, invocation.outcome, tool.spec.output_trust
             )
         recovery = tool_recovery_action(invocation)
+        if recovery is ToolRecoveryAction.RETURN_OUTCOME:
+            raise ConflictError("terminal tool invocation has no persisted outcome")
         if recovery is ToolRecoveryAction.MARK_UNCERTAIN:
             outcome = ToolOutcome(
                 status=ToolOutcomeStatus.UNCERTAIN,
@@ -378,6 +380,12 @@ class ToolPipeline:
             return result_item
         if recovery is ToolRecoveryAction.RESUME_APPROVAL:
             raise ConflictError("approval recovery is not authorized before Milestone 4")
+        if recovery not in {
+            ToolRecoveryAction.RESUME_AUTHORIZATION,
+            ToolRecoveryAction.REEXECUTE,
+            ToolRecoveryAction.REPLAY_IDEMPOTENCY_KEY,
+        }:
+            raise AssertionError(f"unhandled tool recovery action {recovery.value}")
 
         if tool.spec.side_effect is not SideEffectClass.NONE:
             denied = ToolOutcome(

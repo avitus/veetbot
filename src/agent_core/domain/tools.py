@@ -143,6 +143,29 @@ class ToolInvocationStatus(StrEnum):
     UNCERTAIN = "UNCERTAIN"
 
 
+ALLOWED_TOOL_TRANSITIONS: dict[ToolInvocationStatus, frozenset[ToolInvocationStatus]] = {
+    ToolInvocationStatus.PROPOSED: frozenset(
+        {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
+    ),
+    ToolInvocationStatus.AUTHORIZED: frozenset({ToolInvocationStatus.RUNNING}),
+    ToolInvocationStatus.WAITING_FOR_APPROVAL: frozenset(
+        {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
+    ),
+    ToolInvocationStatus.RUNNING: frozenset(
+        {
+            ToolInvocationStatus.RUNNING,
+            ToolInvocationStatus.SUCCEEDED,
+            ToolInvocationStatus.FAILED,
+            ToolInvocationStatus.UNCERTAIN,
+        }
+    ),
+    ToolInvocationStatus.SUCCEEDED: frozenset(),
+    ToolInvocationStatus.FAILED: frozenset(),
+    ToolInvocationStatus.DENIED: frozenset(),
+    ToolInvocationStatus.UNCERTAIN: frozenset(),
+}
+
+
 class ToolInvocation(BaseModel):
     id: UUID
     run_id: UUID

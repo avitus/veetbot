@@ -9,6 +9,7 @@ import os
 import signal
 import socket
 from collections.abc import Sequence
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
 from uuid import UUID
@@ -29,6 +30,18 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.runs import Run, RunStatus
 
 RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
+RUN_WAIT_TIMEOUT_SECONDS = 30.0
+
+
+class WorkerRole(StrEnum):
+    WORKER = "worker"
+    MAINTENANCE = "maintenance"
+
+
+class QueuedRunTimeoutError(TimeoutError):
+    def __init__(self, run_id: UUID) -> None:
+        super().__init__(f"run remains queued: {run_id}")
+        self.run_id = run_id
 
 
 class ReservedRunGroup(TyperGroup):
@@ -128,7 +141,11 @@ async def _submit(
                 session_id=session_id,
                 idempotency_key=idempotency_key,
             )
-            run = await composition.runs.wait_terminal(run_id)
+            try:
+                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS):
+                    run = await composition.runs.wait_terminal(run_id)
+            except TimeoutError as exc:
+                raise QueuedRunTimeoutError(run_id) from exc
             events = await composition.runs.events(run_id)
             return run, events
         finally:
@@ -158,6 +175,9 @@ def run_command(
 
     try:
         run, events = asyncio.run(_submit(prompt, session_id, idempotency_key, model_policy))
+    except QueuedRunTimeoutError as exc:
+        typer.echo(f"run queued: {exc.run_id}", err=True)
+        raise typer.Exit(5) from exc
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -233,11 +253,11 @@ async def _create_session() -> UUID:
         return await composition.sessions.create()
 
 
-async def _serve_worker(role: str) -> None:
+async def _serve_worker(role: WorkerRole) -> None:
     async with build(storage="postgres") as composition:
         loop = asyncio.get_running_loop()
         worker_id = f"{socket.gethostname()}:{os.getpid()}"
-        if role == "worker":
+        if role is WorkerRole.WORKER:
             service = composition.worker_factory(worker_id)
         else:
             service = composition.maintenance_factory()
@@ -249,13 +269,11 @@ async def _serve_worker(role: str) -> None:
 @app.command("worker")
 def worker_command(
     role: Annotated[
-        str, typer.Option("--role", help="Process role: worker or maintenance.")
-    ] = "worker",
+        WorkerRole, typer.Option("--role", help="Process role: worker or maintenance.")
+    ] = WorkerRole.WORKER,
 ) -> None:
     """Execute the durable worker or maintenance queue role."""
 
-    if role not in {"worker", "maintenance"}:
-        raise typer.BadParameter("role must be worker or maintenance")
     try:
         asyncio.run(_serve_worker(role))
     except ConfigurationError as exc:
@@ -312,7 +330,7 @@ def eval_run(
         results = module.run_selected_sync(
             Path.cwd(), current_milestone=3, tag=tag, case_name=case_name
         )
-    except (EvalExpectationError, OSError, ValueError) as exc:
+    except (EvalExpectationError, ImportError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)
         raise typer.Exit(1) from exc
     for result in results:

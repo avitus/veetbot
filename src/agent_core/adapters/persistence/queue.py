@@ -21,6 +21,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.runs import FailureReason, Run, RunFailure, RunStatus
 from agent_core.ports.determinism import Clock
+from agent_core.runtime.state_machine import require_transition
 
 
 def _rowcount(result: Any) -> int:
@@ -163,6 +164,7 @@ class PostgresRunQueue:
         for row in rows:
             previous_epoch = row.lease_epoch
             if row.attempts >= self._max_attempts:
+                require_transition(RunStatus.RUNNING, RunStatus.FAILED)
                 failure = RunFailure(
                     reason=FailureReason.MAX_ATTEMPTS_EXCEEDED,
                     error_class="MaxAttemptsExceeded",
@@ -175,6 +177,7 @@ class PostgresRunQueue:
                 event_type = "run.failed"
                 payload = {"failure": row.failure, "reclaimed_epoch": previous_epoch}
             else:
+                require_transition(RunStatus.RUNNING, RunStatus.QUEUED)
                 row.status = RunStatus.QUEUED.value
                 row.scheduled_for = now + timedelta(seconds=2 ** max(0, row.attempts - 1))
                 event_type = "run.requeued"

@@ -14,6 +14,7 @@ async def test_repository_unit_of_work_exposes_one_repository_set() -> None:
         runs=runs,
         events=events,
         invocations=InMemoryToolInvocationRepository(runs),
+        clock=clock,
     )
     async with factory() as uow:
         configured = agent()

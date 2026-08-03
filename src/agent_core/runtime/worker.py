@@ -167,11 +167,20 @@ class MaintenanceWorker:
             if uow.queue is None:
                 raise RuntimeError("maintenance worker requires a queue repository")
             reclaimed = await uow.queue.reclaim_expired(self._reclaim_limit)
-            for session_id in await uow.maintenance.projection_sessions(self._reclaim_limit):
+        async with self._uow_factory() as uow:
+            sessions = await uow.maintenance.projection_sessions(self._reclaim_limit)
+        for session_id in sessions:
+            async with self._uow_factory() as uow:
                 await uow.history.catch_up(session_id)
-            for run_id in await uow.maintenance.trajectory_runs(self._reclaim_limit):
+        async with self._uow_factory() as uow:
+            trajectories = await uow.maintenance.trajectory_runs(self._reclaim_limit)
+        for run_id in trajectories:
+            async with self._uow_factory() as uow:
                 await uow.trajectory.catch_up(run_id)
-            for run_id, terminal in await uow.maintenance.checkpoint_runs(self._reclaim_limit):
+        async with self._uow_factory() as uow:
+            checkpoints = await uow.maintenance.checkpoint_runs(self._reclaim_limit)
+        for run_id, terminal in checkpoints:
+            async with self._uow_factory() as uow:
                 await uow.checkpoints.prune(run_id, terminal=terminal)
         if self._sweep_exports is not None:
             await self._sweep_exports()

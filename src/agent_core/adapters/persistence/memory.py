@@ -29,7 +29,11 @@ from agent_core.domain.runs import (
     RunUsage,
 )
 from agent_core.domain.sessions import Session
-from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+from agent_core.domain.tools import (
+    ALLOWED_TOOL_TRANSITIONS,
+    ToolInvocation,
+    ToolInvocationStatus,
+)
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 from agent_core.ports.determinism import Clock
 from agent_core.ports.repositories import RunRepository, SessionRepository
@@ -144,7 +148,7 @@ class InMemoryRunRepository:
         lease: WorkerLease | None = None,
     ) -> Run:
         if lease is not None:
-            raise ConflictError("the in-memory repository does not support worker leases")
+            raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
             try:
                 current = self._runs[run_id]
@@ -170,7 +174,7 @@ class InMemoryRunRepository:
 
     async def update_counters(self, run: Run, *, lease: WorkerLease | None = None) -> None:
         if lease is not None:
-            raise ConflictError("the in-memory repository does not support worker leases")
+            raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
             try:
                 current = self._runs[run.id]
@@ -198,6 +202,8 @@ class InMemoryRunRepository:
                 current = self._runs[run_id]
             except KeyError as exc:
                 raise NotFoundError("run not found") from exc
+            if current.seed_event_sequence != 0:
+                raise ConflictError("run seed sequence was already assigned")
             self._runs[run_id] = current.model_copy(
                 update={"seed_event_sequence": sequence, "updated_at": self._clock.now()},
                 deep=True,
@@ -230,7 +236,7 @@ class InMemoryEventRepository:
 
     async def append(self, event: NewEvent, *, lease: WorkerLease | None = None) -> EventEnvelope:
         if lease is not None:
-            raise ConflictError("the in-memory repository does not support worker leases")
+            raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
             stream = self._events[event.session_id]
             envelope = EventEnvelope(
@@ -288,7 +294,7 @@ class InMemoryToolInvocationRepository:
         self, invocation: ToolInvocation, *, lease: WorkerLease | None = None
     ) -> ToolInvocation:
         if lease is not None:
-            raise ConflictError("the in-memory repository does not support worker leases")
+            raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
             if invocation.id in self._invocations:
                 raise ConflictError("tool invocation already exists")
@@ -318,7 +324,7 @@ class InMemoryToolInvocationRepository:
         lease: WorkerLease | None = None,
     ) -> ToolInvocation:
         if lease is not None:
-            raise ConflictError("the in-memory repository does not support worker leases")
+            raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
             try:
                 current = self._invocations[invocation_id]
@@ -330,28 +336,7 @@ class InMemoryToolInvocationRepository:
                 )
             if invocation.id != invocation_id or invocation.run_id != current.run_id:
                 raise ConflictError("tool invocation identity cannot change")
-            allowed: dict[ToolInvocationStatus, set[ToolInvocationStatus]] = {
-                ToolInvocationStatus.PROPOSED: {
-                    ToolInvocationStatus.AUTHORIZED,
-                    ToolInvocationStatus.DENIED,
-                },
-                ToolInvocationStatus.AUTHORIZED: {ToolInvocationStatus.RUNNING},
-                ToolInvocationStatus.WAITING_FOR_APPROVAL: {
-                    ToolInvocationStatus.AUTHORIZED,
-                    ToolInvocationStatus.DENIED,
-                },
-                ToolInvocationStatus.RUNNING: {
-                    ToolInvocationStatus.RUNNING,
-                    ToolInvocationStatus.SUCCEEDED,
-                    ToolInvocationStatus.FAILED,
-                    ToolInvocationStatus.UNCERTAIN,
-                },
-                ToolInvocationStatus.SUCCEEDED: set(),
-                ToolInvocationStatus.FAILED: set(),
-                ToolInvocationStatus.DENIED: set(),
-                ToolInvocationStatus.UNCERTAIN: set(),
-            }
-            if invocation.status not in allowed[current.status]:
+            if invocation.status not in ALLOWED_TOOL_TRANSITIONS[current.status]:
                 raise ConflictError(
                     f"invalid tool transition {current.status.value}->{invocation.status.value}"
                 )
@@ -391,7 +376,7 @@ class InMemoryToolInvocationRepository:
 
 class InMemoryCheckpointRepository:
     def __init__(self) -> None:
-        self._checkpoints: dict[UUID, list[RunCheckpoint]] = defaultdict(list)
+        self._checkpoints: dict[UUID, list[tuple[RunCheckpoint, bool]]] = defaultdict(list)
         self._lock = asyncio.Lock()
 
     async def write(
@@ -402,39 +387,57 @@ class InMemoryCheckpointRepository:
         full: bool,
         lease: WorkerLease | None = None,
     ) -> int:
-        del full
         if lease is not None:
-            raise ConflictError("the in-memory repository does not support worker leases")
+            raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
             rows = self._checkpoints[run_id]
-            expected = rows[-1].version + 1 if rows else 1
+            expected = rows[-1][0].version + 1 if rows else 1
             if checkpoint.version != expected:
                 raise ConflictError(f"checkpoint version must be {expected}")
-            rows.append(checkpoint.model_copy(deep=True))
+            rows.append((checkpoint.model_copy(deep=True), full))
             return checkpoint.version
 
     async def latest(self, run_id: UUID) -> RunCheckpoint | None:
         async with self._lock:
             rows = self._checkpoints[run_id]
-            return None if not rows else rows[-1].model_copy(deep=True)
+            return None if not rows else rows[-1][0].model_copy(deep=True)
 
     async def prune(self, run_id: UUID, *, terminal: bool) -> int:
-        del terminal
         async with self._lock:
             rows = self._checkpoints[run_id]
-            removed = max(0, len(rows) - 1)
-            if rows:
-                self._checkpoints[run_id] = [rows[-1]]
+            if len(rows) <= 1:
+                return 0
+            latest_full = next(
+                (index for index in range(len(rows) - 1, -1, -1) if rows[index][1]),
+                None,
+            )
+            if latest_full is None:
+                raise ConflictError("checkpoint chain has no full snapshot")
+            if terminal:
+                checkpoint, full = rows[-1]
+                if not full or checkpoint.status not in TERMINAL_RUN_STATUSES:
+                    raise ConflictError(
+                        "terminal checkpoint retention requires a final full snapshot"
+                    )
+                keep_from = len(rows) - 1
+            else:
+                keep_from = latest_full
+            removed = keep_from
+            self._checkpoints[run_id] = rows[keep_from:]
             return removed
 
     async def delete_nonterminal(self, run_id: UUID) -> int:
         async with self._lock:
+            rows = self._checkpoints[run_id]
+            if rows and rows[-1][0].status in TERMINAL_RUN_STATUSES:
+                raise ConflictError("delete_nonterminal refuses a terminal run")
             rows = self._checkpoints.pop(run_id, [])
             return len(rows)
 
 
 class InMemoryIdempotencyRepository:
-    def __init__(self) -> None:
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
         self._records: dict[str, IdempotencyRecord] = {}
         self._lock = asyncio.Lock()
 
@@ -443,6 +446,7 @@ class InMemoryIdempotencyRepository:
             record = self._records.get(key)
             if (
                 record is None
+                or record.expires_at <= self._clock.now()
                 or record.tenant_id != tenant_id
                 or record.principal_id != principal_id
             ):
@@ -452,6 +456,9 @@ class InMemoryIdempotencyRepository:
     async def create(self, record: IdempotencyRecord) -> IdempotencyRecord:
         async with self._lock:
             existing = self._records.get(record.key)
+            if existing is not None and existing.expires_at <= self._clock.now():
+                del self._records[record.key]
+                existing = None
             if existing is not None:
                 if (
                     existing.tenant_id != record.tenant_id

@@ -7,13 +7,14 @@ from tests.contract.support import memory_stack
 
 
 async def test_unit_of_work_factory_returns_fresh_boundaries_over_shared_state() -> None:
-    _clock, sessions, runs, events = await memory_stack()
+    clock, sessions, runs, events = await memory_stack()
     factory = MemoryUnitOfWorkFactory(
         agents=InMemoryAgentRepository(),
         sessions=sessions,
         runs=runs,
         events=events,
         invocations=InMemoryToolInvocationRepository(runs),
+        clock=clock,
     )
     assert factory() is not factory()
     assert not factory.is_open()

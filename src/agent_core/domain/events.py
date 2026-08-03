@@ -12,12 +12,14 @@ from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
     TextPart,
-    ToolCallItem,
     ToolResultItem,
     UserMessage,
 )
 
 CONVERSATION_ADAPTER: TypeAdapter[ConversationItem] = TypeAdapter(ConversationItem)
+TOOL_RESULT_EVENTS = frozenset(
+    {"tool.call.completed", "tool.call.failed", "tool.call.denied", "tool.call.uncertain"}
+)
 
 
 class NewEvent(BaseModel):
@@ -66,13 +68,14 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
         if not isinstance(message, dict):
             raise ValueError(f"assistant.message.completed payload has no message: {event.id}")
         return [AssistantMessage.model_validate(message)]
-    raw_items = payload.get("conversation_items")
-    if isinstance(raw_items, list):
+    if event.event_type == "model.response.completed":
+        raw_items = payload.get("conversation_items")
+        if not isinstance(raw_items, list):
+            raise ValueError(f"model.response.completed has no conversation items: {event.id}")
         return [CONVERSATION_ADAPTER.validate_python(item) for item in raw_items]
-    raw_call = payload.get("tool_call")
-    if isinstance(raw_call, dict):
-        return [ToolCallItem.model_validate(raw_call)]
-    raw_result = payload.get("result_item")
-    if isinstance(raw_result, dict):
+    if event.event_type in TOOL_RESULT_EVENTS:
+        raw_result = payload.get("result_item")
+        if not isinstance(raw_result, dict):
+            raise ValueError(f"{event.event_type} has no result item: {event.id}")
         return [ToolResultItem.model_validate(raw_result)]
     return []
