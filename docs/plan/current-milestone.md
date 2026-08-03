@@ -4,9 +4,17 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 0 — Repository and engineering foundation
-- **Authorized next milestone:** Milestone 1 — In-memory vertical slice
-- **Project status:** implementation has not started (`pre_implementation`).
+- **Current milestone:** Milestone 1 — In-memory vertical slice (complete)
+- **Authorized milestones:** Milestone 0 and Milestone 1
+- **Project status:** Milestones 0 and 1 are complete. Milestone 1 passed all 28
+  of its hard gates, the full local suite, the required CLI demonstration, and
+  the hosted CircleCI workflow.
+
+The completed in-memory vertical slice contains the provider-neutral domain and
+ports, five in-memory repositories, fake model, tool registry and execution
+pipeline, calculator and current-time builtins, deterministic context assembly,
+the inline runtime, CLI, and eleven evaluation cases. The machine-readable
+[project state](../status/project-state.yaml) records its completion evidence.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -23,6 +31,6 @@ any later milestone speculatively.
 
 ## Completion rule
 
-Milestone 1 must not be considered complete until Milestone 0 is complete and
-**both** milestones satisfy every acceptance criterion defined in the canonical
-engineering plan.
+Milestone 1 met its completion rule: every acceptance criterion in the
+canonical engineering plan, all 41 gates active through Milestone 1, local
+verification, and the hosted CircleCI workflow passed.

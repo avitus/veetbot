@@ -1,0 +1,12 @@
+name: recoverable_tool_error
+milestone: 1
+tags: [tools, recovery]
+input: {text: Recover after a bad calculation.}
+model_fixture: recoverable_tool_error
+expected:
+  terminal_status: COMPLETED
+  final_text: "4"
+  model_calls: 3
+  tool_started_count: 2
+  reason_codes: [tool.invalid_arguments.division_by_zero]
+  event_order: [tool.call.failed, tool.call.completed, run.completed]

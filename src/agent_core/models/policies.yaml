@@ -1,0 +1,15 @@
+schema_version: 1
+enabled_profiles: [fake, openai]
+model_policies:
+  balanced:
+    provider: openai
+    model: ${OPENAI_MODEL}
+  deterministic:
+    provider: fake
+    model: deterministic
+request_defaults:
+  timeout_seconds: 600
+  stream_idle_seconds: 60
+  max_internal_attempts: 3
+cache:
+  expected_hit_ratio_floor: 0.9

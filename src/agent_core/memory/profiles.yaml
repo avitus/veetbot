@@ -1,0 +1,25 @@
+schema_version: 1
+formation:
+  session_boundary_enabled: true
+  scheduled_enabled: true
+  scheduled_interval_seconds: 86400
+retrieval:
+  semantic_enabled: false
+  reciprocal_rank_fusion_k: 60
+  durable_item_share: 0.6666666667
+  lifecycle_weights:
+    active: 1.0
+    provisional: 0.4
+snapshots:
+  interactive:
+    max_items: 40
+    max_tokens: 1500
+    max_window_ratio: 0.02
+  async:
+    max_items: 80
+    max_tokens: 3000
+    max_window_ratio: 0.02
+  child:
+    max_items: 15
+    max_tokens: 500
+    max_window_ratio: 0.02

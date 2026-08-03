@@ -6,6 +6,7 @@ MkDocs build and the single-HTML build via ``scripts/build_docs.py``. Exits
 non-zero if any check fails. This is intentionally not a prose-comparison system;
 it verifies structure, links, and the absence of conversion artifacts.
 """
+
 from __future__ import annotations
 
 import re
@@ -15,6 +16,7 @@ import unicodedata
 from pathlib import Path
 
 import yaml
+from gate_registry import load_registry, registry_errors
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "docs" / "plan" / "engineering-plan.md"
@@ -54,16 +56,38 @@ def lines_without_code(text: str) -> list[str]:
 
 def check_required_files() -> None:
     required = [
-        "AGENTS.md", "CLAUDE.md", "README.md", "mkdocs.yml", "docs-manifest.yaml",
-        "Makefile", "pyproject.toml",
-        "archive/README.md", "archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx",
-        "docs/index.md", "docs/changelog.md",
-        "docs/plan/engineering-plan.md", "docs/plan/current-milestone.md",
-        "docs/status/project-state.yaml", "docs/status/index.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "README.md",
+        "mkdocs.yml",
+        "docs-manifest.yaml",
+        "Makefile",
+        "pyproject.toml",
+        "uv.lock",
+        ".env.example",
+        "docker-compose.yml",
+        "alembic.ini",
+        "docs/security.md",
+        "docs/architecture.md",
+        "docs/events.md",
+        "archive/README.md",
+        "archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx",
+        "docs/index.md",
+        "docs/changelog.md",
+        "docs/plan/engineering-plan.md",
+        "docs/plan/current-milestone.md",
+        "docs/status/project-state.yaml",
+        "docs/status/index.md",
         "docs/assets/stylesheets/extra.css",
-        "scripts/build_docs.py", "scripts/check_docs.py",
-        "scripts/check_citations.py", "docs/status/citation-ledger.yaml",
-        ".github/copilot-instructions.md", ".github/workflows/docs.yml",
+        "scripts/build_docs.py",
+        "scripts/check_docs.py",
+        "scripts/check_citations.py",
+        "docs/status/citation-ledger.yaml",
+        ".github/copilot-instructions.md",
+        ".circleci/config.yml",
+        "evals/gates/structure.yaml",
+        "evals/gates/harness.yaml",
+        "migrations/versions/a3f19c2b7d04_repository_foundation.py",
     ]
     for rel in required:
         if not (ROOT / rel).exists():
@@ -84,8 +108,21 @@ def check_project_state() -> None:
         if str(n) not in milestones:
             err(f"project-state.yaml missing milestone key '{n}'")
     current = (data or {}).get("project", {}).get("current_milestone")
-    if current != 0:
-        err(f"project-state.yaml current_milestone must be 0 (got {current!r})")
+    if not isinstance(current, int) or not 0 <= current <= 10:
+        err(
+            "project-state.yaml current_milestone must be an integer from 0 to 10 "
+            f"(got {current!r})"
+        )
+
+
+def project_current_milestone() -> int:
+    path = ROOT / "docs" / "status" / "project-state.yaml"
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        current = data["project"]["current_milestone"]
+    except (OSError, KeyError, TypeError, yaml.YAMLError):
+        return 0
+    return current if isinstance(current, int) and 0 <= current <= 10 else 0
 
 
 def read_front_matter(text: str):
@@ -113,7 +150,7 @@ def check_plan() -> None:
     nocode = lines_without_code(text)
     joined = "\n".join(nocode)
 
-    h1 = [l for l in nocode if re.match(r"# [^#]", l)]
+    h1 = [line for line in nocode if re.match(r"# [^#]", line)]
     if len(h1) != 1:
         err(f"engineering-plan.md must have exactly one level-one heading (found {len(h1)})")
 
@@ -137,7 +174,10 @@ def check_plan() -> None:
         note(f"numbered sections present: 1..{mx} ({len(nums)} total)")
 
     artifacts = [
-        r"<w:", r"\bxmlns:", r"OOXML", r"Page \d+ of \d+",
+        r"<w:",
+        r"\bxmlns:",
+        r"OOXML",
+        r"Page \d+ of \d+",
         r"MODULAR GENERAL-PURPOSE AI AGENT\s*\|\s*ENGINEERING PLAN",
     ]
     for pat in artifacts:
@@ -206,7 +246,9 @@ def check_citations() -> None:
     """
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "check_citations.py")],
-        cwd=ROOT, capture_output=True, text=True,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
     )
     tail = [ln for ln in result.stdout.splitlines() if ln.startswith("  - ")]
     if result.returncode != 0:
@@ -217,6 +259,22 @@ def check_citations() -> None:
         for ln in result.stdout.splitlines():
             if ln.startswith("note: ") and "checked" in ln:
                 note(ln[6:])
+
+
+def check_gate_registry() -> None:
+    """Reconcile declarations, map rows, checks, anchors, and census."""
+    current_milestone = project_current_milestone()
+    findings = registry_errors(ROOT, current_milestone=current_milestone)
+    if findings:
+        for finding in findings:
+            err(f"gate registry: {finding}")
+    else:
+        entries, _ = load_registry(ROOT)
+        active = sum(entry.milestone <= current_milestone for entry in entries)
+        note(
+            f"gate registry: 172 entries reconciled; {active} gates active through "
+            f"Milestone {current_milestone}"
+        )
 
 
 def run_builds() -> None:
@@ -235,6 +293,7 @@ def main() -> None:
     check_no_root_docx_links()
     check_agents_size()
     check_citations()
+    check_gate_registry()
     if "--no-build" not in sys.argv:
         run_builds()
 

@@ -4,6 +4,62 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-01 — Milestone 1 completed
+
+- Implemented the provider-neutral domain, ports, state machine, five in-memory
+  repositories, scripted fake model, minimal context builder, inline dispatcher
+  and runtime, and the shared session/run services.
+- Added the validated tool registry and execution pipeline plus the bounded
+  Decimal calculator and injected-clock current-time builtins.
+- Added the declarative evaluation schema, authored model fixtures, eleven
+  initial cases, CLI `agent run` and `agent eval run`, and shared contract suites
+  for every declared port.
+- Activated all 28 Milestone 1 hard gates. The 41 cumulative gates, 78 static
+  tests, 17 contracts, all 107 non-live tests, strict typing/linting, and
+  documentation checks pass locally.
+- Verified the required calculator CLI flow: stdout is exactly `391` plus a
+  newline and stderr contains the six progress lines in the specified order.
+- CircleCI's static, contract, and integration jobs passed for `dev` commit
+  `30664ed`, closing the final completion gap.
+- Proposed ADR-0037 and added review notes for the reversible decisions at the
+  in-memory/durable, pre-policy, fixture-shape, eval-loading, and cross-process
+  CLI seams.
+
+## 2026-07-31 — Milestone 0 completed
+
+- CircleCI pipeline 3 passed its hosted static, contract, and integration jobs
+  for `dev` commit `5b60bca`, closing the last recorded Milestone 0 gap.
+- Project state now records the repository and engineering foundation as
+  complete. Milestone 1 remains authorized but has not started.
+
+## 2026-07-31 — Milestone 0 defaults and CircleCI
+
+- Replaced the GitHub Actions workflow with a CircleCI 2.1 configuration that
+  retains the static, contract, integration, and live partitions. ADR-0035
+  records the provider change.
+- Expanded the six overlayable default documents and the frozen hardline rules.
+  The executable configuration inventory now resolves exactly 106 unique,
+  non-null knob paths. ADR-0036 records the five initial operational defaults
+  the corpus named but did not value.
+- Merged every change from `origin/docs/plan-completion` before applying the
+  implementation updates.
+
+## 2026-07-31 — Milestone 0 implementation started
+
+- Established the Python 3.12 `uv`/Hatch repository, `agent` CLI entry point,
+  typed settings, structured logging, configuration assets, and documented
+  security baseline.
+- Added the single-service PostgreSQL Compose stack, an empty Alembic revision,
+  the pinned expected revision, and the four CI partitions.
+- Materialized the 172-entry gate registry and made all 13 Milestone 0 gates
+  executable, including import boundaries, secret scanning, transaction
+  hygiene, migration-graph validation, and the six registry invariants.
+- Passed `make install`, `make check`, Docker Compose startup, and an
+  empty-database migration against the Compose PostgreSQL 16 service. The live
+  check exposed and corrected a Compose-version portability bug in the
+  Makefile's health poll. Milestone 0 remains in progress because hosted CI has
+  not yet supplied its own execution evidence.
+
 ## 2026-07-31 — The ledger now fingerprints the whole span
 
 - **A cited range was only ever checked on its first line.** `excerpt` is one

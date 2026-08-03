@@ -1,0 +1,97 @@
+# Canonical gate registry entries for the skill area.
+- id: gate.skill.metadata_only
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Only metadata reaches the prefix.** A session opens with five skills enabled, each carrying a distinctive sentinel string in its body. The rendered prefix contains every `description` and no sentinel. Repeated after `skill.load`, which must place the sentinel in the body and still not in the prefix. `gate.skill.metadata_only`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.catalog_pinned
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**The catalog is pinned at session open.** A skill is installed mid-session. It does not appear in the catalog, `skill.load` on its name fails, and `prefix_sha256` is unchanged across the installation. Repeated for an archive, which must also not take an entry out of a live session. `gate.skill.catalog_pinned`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.no_tool_from_skill
+  milestone: 8
+  kind: structural
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**A skill never becomes a tool.** A structural check asserts that no module in the skills package calls `register_dynamic` or otherwise reaches the tool registry's write path, and that the registry's declared sources remain the build and MCP discovery. A package containing a file named like a tool manifest installs normally and registers nothing. `gate.skill.no_tool_from_skill`, structural."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.untrusted_body
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Untrusted skill content is labelled and stays out of Region A.** An agent-authored and an MCP-sourced skill both render their catalog entries as `EXTERNAL_UNTRUSTED` inside an envelope, and both bodies appear only in Region B when loaded. A region assignment placing either body in A is a build failure, which is the mechanism `context-engine.md` already requires. `gate.skill.untrusted_body`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.revision_pinned
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**A pinned skill resolves to the same bytes forever.** A run loads a skill; two newer revisions are installed; replaying the run resolves the original revision and the original `content_sha256`. The same replay with the stored archive corrupted raises rather than proceeding. `gate.skill.revision_pinned`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.missing_tool_loads
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**A missing required tool does not fail the load.** A skill naming three tools, one of which the session did not pin, loads; the missing name is in `missing_tools` and in `skill.tool.missing`; and a call to the missing tool is still denied by the pipeline. `gate.skill.missing_tool_loads`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.catalog_capped
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**The catalog is capped and deterministic.** A tenant with forty active skills and two MCP servers yields exactly twenty entries, configured skills before MCP prompts, in configuration order, and the dropped names are on the session-open event. Opening the same session twice produces byte-identical catalogs. `gate.skill.catalog_capped`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.validation_total
+  milestone: 8
+  kind: property
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Package validation is total.** A property test over generated packages — names, versions, descriptions, tool lists, body lengths, file counts, archive members including traversal paths and symlinks — asserts that every package either produces a revision or raises a named `SkillValidationError` subtype, and that no rejected package leaves a row, an archive object, or a partially written revision behind. `gate.skill.validation_total`, property."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.body_cap
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Loaded bodies are bounded by construction.** A third `skill.load` fails and names the two loaded skills; no context plan in a thousand generated sessions carries more than two bodies or more than 6,000 body tokens; and an unload followed by a load succeeds. `gate.skill.body_cap`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.mcp_read_only
+  milestone: 8
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**An MCP skill cannot be written.** `SkillRepository.install` raises for `source: mcp` from every caller, no MCP prompt produces a row that outlives its session, and an MCP skill's pin records revision `0` with the hash of the text as it arrived. `gate.skill.mcp_read_only`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.authoring_trust
+  milestone: 10
+  kind: corpus
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**An untrusted turn cannot write a skill.** A corpus of runs, each of which reads untrusted content — a web page, an MCP tool result, another skill's body, a file the user uploaded — and then proposes a `skill_manage` write. Every proposal is denied with `origin_trust` as the reason, every denial is an event, and no revision exists afterwards. `gate.skill.authoring_trust`, corpus."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.authoring_scope
+  milestone: 10
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Authoring without the scope is denied.** A principal lacking `skill.write` is denied at the policy stage rather than at the store, the denial names the scope, and the same call with the scope succeeds. The scope string is matched by exact equality: `skill.writex` and `skill` are both denied. `gate.skill.authoring_scope`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.review_confined
+  milestone: 10
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**The background review is confined.** A review run is denied every tool outside `{memory.*, skill.load, skill_manage}`; is denied `edit` and `patch` on a skill it has not loaded; and is denied `edit`, `patch`, and `archive` on any skill whose source is not `AGENT`. Each denial is asserted separately. `gate.skill.review_confined`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.review_never_fatal
+  milestone: 10
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**A failed review never touches its parent.** A review run that raises, times out, or is killed leaves its parent `COMPLETED`, leaves the parent's events unchanged, and produces exactly one logged failure. Repeated with the review enqueued and the worker killed before it starts. `gate.skill.review_never_fatal`, case."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.provenance_complete
+  milestone: 10
+  kind: structural
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Every agent-authored revision has provenance.** A structural check plus a query: every `skill_revisions` row whose skill has `source = agent` carries a non-null `authored_by_run_id` and `authored_by_principal_id`, and every one of those run ids resolves to a run in the event log. The insert path has no branch that can write the row without them. `gate.skill.provenance_complete`, structural."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.skill.edit_conflict
+  milestone: 10
+  kind: case
+  spec: docs/plan/skills.md#hard-gates
+  statement: "**Concurrent edits do not lose one.** Two runs `patch` the same skill with the same `expected_revision`. Exactly one revision is written, the loser receives `SkillRevisionConflict` carrying the winner's revision, no revision number is skipped, and the loser's content appears nowhere. `gate.skill.edit_conflict`, case."
+  check: tests/gates/pending.py::pending_gate

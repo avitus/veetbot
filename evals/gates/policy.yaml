@@ -1,0 +1,79 @@
+# Canonical gate registry entries for the policy area.
+- id: gate.policy.totality
+  milestone: 4
+  kind: property
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Totality.** Every `SideEffectClass` value has exactly one rule in every loaded profile, and every Section 9.2 row maps to exactly one value. A profile missing a rule fails to load rather than defaulting."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.determinism
+  milestone: 4
+  kind: property
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Determinism.** The same `(action, principal, run, ruleset)` evaluated one thousand times returns byte-identical output including `reason_code` and `policy_version`. The evaluator's module imports nothing from `infrastructure` and calls no clock."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.single_gate
+  milestone: 4
+  kind: structural
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Single gate.** Exactly one function transitions a tool invocation from `PROPOSED` to `AUTHORIZED`, asserted by an import-boundary test, and the sandbox bridge and device channel both reach it."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.monotonicity
+  milestone: 4
+  kind: property
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Monotonicity.** Over the full cross product of deterministic and advisory outputs, the combined rank is never below the deterministic rank."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.hardline_immutable
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Hardline immutability and precision.** The loaded set cannot be mutated after import; every rule blocks its target *and* permits its declared `near_miss`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.revalidation
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Revalidation.** Each of the four changes in the revalidation table produces its stated consequence, including after a worker restart."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.cross_tenant
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Cross-tenant.** Get, list, and resolve against another tenant's approval all return not-found."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.no_leakage
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**No leakage.** The serialized denial result matches the field allowlist exactly, for every `reason_code`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.idempotent_resolve
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Idempotent resolution.** Two concurrent identical resolutions produce one state change and two successes; two concurrent differing resolutions produce one state change and one conflict."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.prompt_not_authz
+  milestone: 4
+  kind: corpus
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Prompt is not authorization.** Across the injection corpus Section 22 requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces an approval request in every case and an execution in none."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.scope_grammar
+  milestone: 4
+  kind: structural
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Scope grammar.** Every entry in the fifteen-string vocabulary and every `required_scopes` entry on a registered `ToolSpec` matches the grammar, and registration rejects an MCP tool declaring a scope that is neither in the vocabulary nor prefixed `mcp.{server_id}.`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.scope_match
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**Scope matching is a subset test over exact strings.** A principal holding one of a tool's two required scopes is denied with `policy.scope.missing`, the denial names the missing scope and not the held one, holding both succeeds, and holding `run.write` does not satisfy a requirement for `run.read`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.policy.scope_stamped
+  milestone: 4
+  kind: case
+  spec: docs/plan/policy-and-approvals.md#hard-gates
+  statement: "**The scope set is the run's.** Narrowing a principal's scopes after submission changes no decision in the run already submitted, and the next run that principal submits is denied."
+  check: tests/gates/pending.py::pending_gate

@@ -1,68 +1,163 @@
 # Modular General-Purpose AI Agent
 
-This repository is building the modular, general-purpose AI agent platform defined
-by the canonical engineering plan at
-[`docs/plan/engineering-plan.md`](docs/plan/engineering-plan.md).
+This repository is implementing the provider-neutral agent platform defined by
+the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
+strictly milestone-gated. Milestone 0 established the repository and engineering
+foundation. Milestone 1 adds the first complete, in-memory model/tool runtime.
 
-Implementation has not started; the project is at **Milestone 0**
-(pre-implementation). Coding agents should begin with
-[`AGENTS.md`](AGENTS.md).
+## Current status
 
-## Documentation
+Milestones 0 and 1 are complete. The in-memory runtime, fake provider,
+calculator and current-time tools, deterministic evaluation harness, eleven
+initial cases, and all 28 Milestone 1 gates passed locally and in hosted
+CircleCI.
 
-Markdown and YAML are the canonical, editable sources. HTML under `site/` and
-`dist/` is **generated** and must never be edited by hand.
+## Prerequisites
 
-Canonical files:
+- Python 3.12 or newer
+- [uv](https://docs.astral.sh/uv/)
+- Docker with the Compose plugin for the development PostgreSQL service
+- [Pandoc](https://pandoc.org/) for the single-file documentation build
 
-- [`docs/plan/engineering-plan.md`](docs/plan/engineering-plan.md) — the normative plan.
-- [`docs/plan/current-milestone.md`](docs/plan/current-milestone.md) — currently authorized work.
-- [`docs/status/project-state.yaml`](docs/status/project-state.yaml) — machine-readable project state.
-- [`docs/adr/`](docs/adr/) — architecture decision records.
-- `archive/` — the original Word document (archival only).
-
-### Prerequisites
-
-- Python 3.12+
-- [Pandoc](https://pandoc.org) as a system dependency (used to build the single
-  standalone HTML document). Install it from your package manager, e.g.
-  `apt-get install pandoc` or `brew install pandoc`.
-
-### Install documentation dependencies
-
-Using [uv](https://docs.astral.sh/uv/) (recommended):
+## Install
 
 ```bash
-uv sync
+cp .env.example .env
+make install
 ```
 
-Or using pip in a virtual environment:
+`make install` runs `uv sync --all-groups`. The committed `uv.lock` is the
+only dependency resolution used by development and CI.
+
+## PostgreSQL and migrations
+
+Start the pinned PostgreSQL 16 service, wait for its healthcheck, and apply the
+linear Alembic graph as separate operations:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install mkdocs mkdocs-material pymdown-extensions PyYAML
+make db-up
+make migrate
 ```
 
-### Build and serve
+The database, user, and development-only password are all `agent`; PostgreSQL
+is exposed on `localhost:5432`. The composition root will never migrate on
+startup. The first migration is intentionally empty because Milestone 0 adds no
+application schema.
+
+Port 5432 must be free before startup. Stop any separately installed PostgreSQL
+service using that port; otherwise `make migrate` may connect to that server
+instead of the Compose database.
+
+To reset the development database, remove the compose service and its named
+volume, then recreate it. This permanently deletes local development data:
 
 ```bash
-make docs         # build the MkDocs site (site/) and the single HTML (dist/…)
-make docs-serve   # serve the site locally with live reload
-make docs-check   # validate the docs and build them in strict mode
-make check        # currently runs docs-check
+docker compose down -v
+make db-up
+make migrate
 ```
 
-With uv, prefix make commands with `uv run` (e.g. `uv run make docs`).
+## Checks
 
-### Generated outputs
+The pull-request gate is:
 
-- `site/` — the navigable documentation site (open `site/index.html`).
-- `dist/engineering-documentation.html` — a single self-contained HTML document.
+```bash
+make check
+```
 
-These are generated; do not edit them, and do not commit them (they are
-git-ignored).
+It runs formatting validation, linting, strict type checking, the static and
+contract partitions, citation validation, the 172-entry gate-registry
+reconciliation, and strict documentation builds. It requires neither a database
+nor a provider credential.
 
-## Status
+Additional targets are explicit about their requirements:
 
-Documentation and coding-agent bootstrap files only. No agent product code has
-been written yet. See [`docs/changelog.md`](docs/changelog.md).
+| Command | Purpose |
+| --- | --- |
+| `make format` | Apply Ruff formatting and safe lint fixes |
+| `make test` | Run every non-live test; integration tests need PostgreSQL once present |
+| `make test-static` | Run unit tests and structural/property gates without I/O |
+| `make test-contract` | Run shared port contracts against in-memory/fake adapters |
+| `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
+| `make test-live` | Explicitly enable credentialed provider tests |
+| `make docs` | Build the MkDocs site and standalone HTML publication |
+| `make docs-check` | Validate citations, registry structure, and strict docs output |
+
+Static and contract tests deny network egress. Integration tests may use Unix
+sockets and loopback only. Live tests are the sole category that lifts the
+socket block.
+
+## Run the in-memory agent
+
+After copying `.env.example` to `.env`, run the required calculator flow:
+
+```bash
+uv run agent run "What is 17 multiplied by 23?"
+```
+
+Progress is written to stderr and the final answer (`391`) to stdout. Run the
+eleven checked-in deterministic cases with:
+
+```bash
+uv run agent eval run
+```
+
+Milestone 1 state lasts only for one process. `agent session create`,
+`agent run get`, and `agent run events` are wired to the shared application
+services, but a later CLI process cannot read an identifier created by an
+earlier process until Milestone 2 adds PostgreSQL persistence.
+
+Hosted checks use [CircleCI](https://circleci.com/) via
+`.circleci/config.yml`. Connect the repository as a CircleCI project for the
+static, contract, and integration workflow. Create a restricted context named
+`live-model` for provider credentials; nightly runs and manually triggered
+pipelines with `run_live: true` are the only workflows that use it.
+
+## Configuration
+
+Environment values are limited to deployment identity, addresses, and secrets.
+Tuning values live in reviewed YAML beside the package that owns them. An
+optional `AGENT_CONFIG_DIR` overlays shipped YAML by top-level key; it cannot
+replace `policy/hardline.yaml`. Environment values are interpolated only where
+a YAML file explicitly names `${VAR}`.
+
+Production validation refuses development authentication and the `docker` or
+`fake` sandbox mechanisms. Provider credentials are represented as Pydantic
+secret values and structured-log processors redact sensitive keys, provider-key
+prefixes, prompts, messages, reasoning, tool results, and large content.
+
+## Operating roadmap
+
+The engineering plan reserves the following workflows. They are documented
+here so availability is not confused with implementation:
+
+| Workflow | Availability |
+| --- | --- |
+| Use the fake provider and run `agent run` | Milestone 1 |
+| Start the durable worker | Milestone 2 |
+| Configure OpenAI, Anthropic, or an OpenAI-compatible endpoint | Milestone 3 |
+| Run optional live-provider tests | Milestone 3 |
+| Inspect model/tool traces and usage | Milestone 3 |
+| Resolve an approval through the CLI | Milestone 4 |
+| Start the HTTP API | Milestone 5 |
+| Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
+
+`agent run`, `agent session create`, and `agent eval run` are available now.
+Do not invoke `agent api`, `agent worker`, or `agent chat`; their owning
+milestones have not been implemented.
+
+## Documentation and governance
+
+Start with [AGENTS.md](AGENTS.md). Markdown and YAML are canonical. Files under
+`site/` and `dist/` are generated and must not be edited. Architectural changes
+require ADRs, milestone status changes require evidence, and work beyond the
+authorized milestone must not begin speculatively.
+
+Canonical references are the [engineering plan](docs/plan/engineering-plan.md),
+the [current-milestone pointer](docs/plan/current-milestone.md), the
+[machine-readable project state](docs/status/project-state.yaml), and the
+[architecture decision records](docs/adr/). The original Word document under
+`archive/` is archival only.
+
+Security boundaries and the controls established so far are documented in
+[docs/security.md](docs/security.md).

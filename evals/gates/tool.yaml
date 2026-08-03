@@ -1,0 +1,91 @@
+# Canonical gate registry entries for the tool area.
+- id: gate.tool.registration_valid
+  milestone: 1
+  kind: structural
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "Every registered `ToolSpec` passes registration validation: name grammar, reserved domains, schema dialect, no remote `$ref`, `maximum_output_bytes` under the global ceiling, `output_trust` present."
+  check: tests/gates/test_tool_m1.py::test_registration_valid
+- id: gate.tool.forced_trust
+  milestone: 1
+  kind: structural
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "The forced-trust table holds: no tool with `source` in `{mcp, device, sandbox}` has `output_trust` above `EXTERNAL_UNTRUSTED` after registration."
+  check: tests/gates/test_tool_m1.py::test_forced_trust
+- id: gate.tool.watermark_first
+  milestone: 1
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "Every `NON_IDEMPOTENT` and `CONDITIONALLY_IDEMPOTENT` builtin sets the effect watermark before its first outbound operation."
+  check: tests/gates/test_tool_m1.py::test_watermark_first
+- id: gate.tool.outcome_shape
+  milestone: 1
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "The outcome object serializes to exactly six fields for all four statuses, and `message` matches the checked-in table for every `reason_code`."
+  check: tests/gates/test_tool_m1.py::test_outcome_shape
+- id: gate.tool.no_external_text
+  milestone: 1
+  kind: corpus
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "No external text appears in `message` for any failure path, asserted with a fake MCP server that returns a hostile error string."
+  check: tests/gates/test_tool_m1.py::test_no_external_text
+- id: gate.tool.crash_recovery
+  milestone: 2
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "A recorded crash at each of the fourteen pipeline steps recovers to the state the recovery table specifies, asserted as a resilience test."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.dedup_concurrent
+  milestone: 2
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "Two concurrent submissions of the same call produce one execution."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.normalization_stable
+  milestone: 1
+  kind: property
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "Normalization is stable: a property test asserts the canonical form and hash are invariant under key reordering and Unicode recomposition."
+  check: tests/gates/test_tool_m1.py::test_normalization_stable
+- id: gate.tool.reserved_domains
+  milestone: 1
+  kind: structural
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "`mcp.{server}.{name}` collides with no builtin domain, asserted by a test that attempts to register a builtin in a reserved domain and expects a startup error."
+  check: tests/gates/test_tool_m1.py::test_reserved_domains
+- id: gate.tool.mcp_pipeline_parity
+  milestone: 8
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "An MCP tool call traverses the same fourteen steps in the same order as a builtin call, asserted by comparing the recorded step sequence for an MCP call against the sequence for a builtin call rather than by asserting the steps individually."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.mcp_disconnect
+  milestone: 8
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "A server that disconnects mid-call yields `unavailable` with `tool.server_unreachable` and a run that continues, asserted against a scripted server that drops the connection rather than against a mocked exception."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.mcp_sdk_confined
+  milestone: 8
+  kind: structural
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "No module outside `adapters.mcp` imports an MCP SDK type, asserted by the import-graph walk rather than by grep, because the import this catches is transitive through a shared helper."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.mcp_auth_config
+  milestone: 8
+  kind: structural
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "Configuration validation rejects every invalid authentication row: a scheme outside the closed five, a scheme on the wrong transport, `none` with a credential reference, `header` or `env` without a name, `header` naming `Authorization`, `env` naming a tier-0 variable, and `oauth2_client` whose token endpoint the egress allowlist does not permit. Asserted over the validator, with no server and no broker."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.mcp_reauth_bounded
+  milestone: 8
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "The re-authentication ladder is bounded and routes through recovery. Against a scripted server that returns 401 on demand: exactly one re-authentication per server per session, one retry of an idempotent call, `UNCERTAIN` rather than a retry for a non-idempotent call whose watermark is set, `unavailable` with `tool.server_unauthorized` thereafter, and a run that continues throughout."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.tool.mcp_stdio_env_built
+  milestone: 8
+  kind: case
+  spec: docs/plan/tool-system.md#hard-gates
+  statement: "A stdio server's child process receives a constructed environment: the synthesized tier plus the one declared credential variable and nothing else, asserted against a server that echoes its environment back, with a sentinel planted in the worker's own environment that must not appear in what comes back."
+  check: tests/gates/pending.py::pending_gate

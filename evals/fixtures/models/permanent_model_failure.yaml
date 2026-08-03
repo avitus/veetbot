@@ -1,0 +1,4 @@
+turns:
+  - kind: error
+    error_class: permanent
+    message: Scripted permanent provider failure.

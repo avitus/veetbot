@@ -6019,3 +6019,91 @@ the hand-off question should declare the enum in the same pass.
 adds only that answering it should produce a declaration.
 
 **Reversal cost:** none. Nothing was changed.
+
+## Milestone 1 implementation review
+
+### The in-memory tier stops at the five repositories the design names
+
+**Decided:** the running loop keeps its checkpoint materialized for one inline
+execution, records checkpoint and model-attempt evidence as events, and does not
+add checkpoint or model-call repositories before their Milestone 2 schema.
+Run state and event writes are sequential rather than cross-repository atomic in
+this tier.
+
+**Why:** bootstrap-and-composition.md names exactly five in-memory adapters and
+explicitly disclaims durability, recovery, and cross-repository transactions.
+Adding another store would make the demo look more durable while creating a
+persistence tier the plan never specifies.
+
+**Question for you:** confirm that event-backed attempt identity and an
+execution-lifetime checkpoint are the intended Milestone 1 interpretation.
+ADR-0037 records the exact boundary.
+
+**Reversal cost:** moderate before Milestone 2, expensive after its repository
+contracts and migration are committed.
+
+### The pre-policy pipeline permits only side-effect-free tools
+
+**Decided:** the authorization stage allows `SideEffectClass.NONE` and returns
+the fixed `policy.milestone1.non_pure` denial for every other classification.
+
+**Why:** the tool pipeline is Milestone 1 work and the policy engine is
+Milestone 4 work. Treating every registered tool as authorized would make the
+pipeline unsafe as soon as an effectful builtin appeared; implementing a small
+shadow policy engine would create behavior that Milestone 4 must later unwind.
+
+**Question for you:** confirm deny-by-default until the real policy port is
+wired.
+
+**Reversal cost:** cheap while the only Milestone 1 builtins are read-only.
+
+### Plan-shaped model fixtures translate into the canonical domain type
+
+**Decided:** the fixture loader accepts both the canonical `FakeModelScript`
+serialization and the evaluation-harness examples using
+`kind: tool_call | final | error`. The latter is translated at collection.
+
+**Why:** the prose says fixtures serialize `FakeModelScript`, but its worked
+YAML has a different, more concise shape than the domain declaration. Rejecting
+the worked form makes the documentation false; changing the domain type to the
+worked form weakens the provider-neutral model used by the runtime.
+
+**Question for you:** choose whether the concise YAML is a supported authoring
+format or whether the documentation should be rewritten to show canonical
+`ScriptedTurn` fields. The implementation currently supports both.
+
+**Reversal cost:** cheap; the eleven authored fixtures can be mechanically
+converted.
+
+### Eval loading is lazy and still uses the ordinary composition
+
+**Decided:** normal CLI startup does not import `agent_core.evals`. Invoking
+`agent eval run` loads the runner lazily; the runner asks the composition root
+for deterministic adapters and drives the same `RunService` as `agent run`.
+
+**Why:** the structural gate forbids production modules from reaching the eval
+package, while the harness requires the eval command to call normal application
+services and forbids a second loop. Lazy command loading satisfies both
+constraints without teaching the production composition about fixtures.
+
+**Question for you:** none unless you prefer a separate `agent-eval` executable,
+which would change the CLI spelling fixed by the plan.
+
+**Reversal cost:** cheap.
+
+### Cross-process reads remain unavailable until persistence exists
+
+**Decided:** `agent session create`, `agent run get`, and `agent run events`
+exist over application services, but the identifiers printed by one process are
+not visible to a later process in Milestone 1.
+
+**Why:** the CLI table schedules these commands for Milestone 1, while the
+in-memory tier explicitly loses all state on process exit. File or SQLite
+storage would be an undeclared persistence system and would undercut the
+PostgreSQL milestone.
+
+**Question for you:** confirm the command table means the service/command
+surface exists at Milestone 1, not that independent CLI invocations share state.
+
+**Reversal cost:** cheap before Milestone 2; that milestone resolves the
+limitation without changing the commands.

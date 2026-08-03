@@ -1,0 +1,5 @@
+Alembic migrations for the authoritative PostgreSQL schema.
+
+The graph is linear. Revision identifiers are generated hex values, structural
+and data changes use separate revisions, and every structural revision supplies
+a downgrade for verification.

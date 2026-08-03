@@ -1,0 +1,7 @@
+turns:
+  - kind: error
+    error_class: transient
+    after_bytes: 0
+  - kind: final
+    text: Recovered.
+    stop_reason: end_turn

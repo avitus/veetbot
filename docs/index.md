@@ -25,8 +25,10 @@ as an archival record.
 
 ## Current status
 
-Implementation has not started. The current milestone is **Milestone 0**; see the
-[current milestone](plan/current-milestone.md) page.
+Milestones 0 and 1 are complete. Milestone 1's in-memory vertical slice, all 28
+of its hard gates, full local suite, required CLI demonstration, and hosted
+CircleCI workflow passed. See the [current milestone](plan/current-milestone.md)
+and [project state](status/index.md) pages for recorded evidence.
 
 ## For coding agents
 
@@ -43,6 +45,8 @@ version of the full documentation is produced by `make docs` and written to
 ## How the documentation is organized
 
 - `docs/plan/` — the canonical engineering plan and the current-milestone pointer.
+- `docs/architecture.md` — the implemented module boundaries and their canonical sources.
+- `docs/events.md` — the implementation status of the event surface.
 - `docs/status/` — machine-readable project state.
 - `docs/adr/` — architecture decision records.
 - `archive/` — the original Word document (archival only).

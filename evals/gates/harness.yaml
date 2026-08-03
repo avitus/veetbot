@@ -1,0 +1,109 @@
+# Canonical gate registry entries for the harness area.
+- id: gate.harness.registry_complete
+  milestone: 0
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "Every hard gate declared in a spec's gate section appears in the registry with a resolvable `check`, asserted by the docs check."
+  check: tests/gates/test_gate_registry.py::test_registry_complete
+- id: gate.harness.no_stale_skip
+  milestone: 0
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "No registered gate at or past its milestone reports skipped."
+  check: tests/gates/test_gate_registry.py::test_no_stale_active_gate
+- id: gate.harness.contract_coverage
+  milestone: 0
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "Every port in `agent_core/ports/` has a contract module, and every registered implementation of that port runs it."
+  check: tests/gates/test_contract_coverage.py::test_contract_coverage
+- id: gate.harness.evals_isolation
+  milestone: 0
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "No module under `agent_core` outside `agent_core.evals` imports `agent_core.evals`, asserted by the import-graph walk."
+  check: tests/gates/test_import_boundaries.py::test_evals_isolation
+- id: gate.harness.no_eval_in_prod
+  milestone: 1
+  kind: case
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "No policy profile, principal, or tenant whose name begins with `eval.` or `tenant_eval` loads when the deployment mode is production, asserted by a test that runs the production loader against the eval configuration root."
+  check: tests/gates/test_harness_m1.py::test_no_eval_in_prod
+- id: gate.harness.case_schema
+  milestone: 1
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "Every case file validates against the case schema at collection, and every `model_fixture` resolves to a file that parses as the current `FakeModelScript` shape."
+  check: tests/gates/test_harness_m1.py::test_case_schema
+- id: gate.harness.no_egress
+  milestone: 1
+  kind: case
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "The deterministic suite completes with no network access, asserted by running job 3 with egress blocked rather than by inspection."
+  check: tests/gates/test_harness_m1.py::test_no_egress
+- id: gate.harness.corpus_minimum
+  milestone: 4
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "Every corpus gate has at least `minimum_members` members."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.harness.trajectory_source
+  milestone: 3
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "At least one case in the suite carries `source: trajectory`, from Milestone 3 onward."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.harness.reason_code_table
+  milestone: 1
+  kind: structural
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "Every `reason_code` produced by any case maps to exactly one message in the checked-in message table, and no message contains external text."
+  check: tests/gates/test_harness_m1.py::test_reason_code_table
+- id: gate.harness.mcp_no_socket
+  milestone: 8
+  kind: case
+  spec: docs/plan/evaluation-harness.md#hard-gates
+  statement: "Every case naming an MCP server fixture resolves it to a checked-in file, and no MCP case opens a socket or spawns a subprocess, asserted by running the MCP cases with egress blocked rather than by inspection."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.harness.token_present
+  milestone: 0
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**Every gate in every spec carries a milestone token.** The docs check parses each `## Hard gates` section and fails on a numbered item with no trailing `**M<number>.**`."
+  check: tests/gates/test_gate_registry.py::test_milestone_tokens_present
+- id: gate.harness.map_bijection
+  milestone: 0
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**Every gate identifier in this document appears exactly once in `evals/gates/*.yaml`, and every registry entry appears here**, compared as sets and not as counts."
+  check: tests/gates/test_gate_registry.py::test_map_bijection
+- id: gate.harness.alias_arithmetic
+  milestone: 0
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**Every alias is declared.** A spec's gate count minus its declared alias count equals the number of registry entries citing that spec's anchor."
+  check: tests/gates/test_gate_registry.py::test_alias_arithmetic
+- id: gate.harness.anchor_resolves
+  milestone: 0
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**Every `spec` field resolves.** Each registry entry's `docs/plan/<file>.md#hard-gates` anchor exists in the built site."
+  check: tests/gates/test_gate_registry.py::test_spec_anchors_resolve
+- id: gate.harness.id_grammar
+  milestone: 0
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**Every gate identifier matches the grammar** and its area is one of the fourteen."
+  check: tests/gates/test_gate_registry.py::test_identifier_grammar
+- id: gate.harness.census_derived
+  milestone: 0
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**The census is derived, not written.** A test computes the per-milestone counts from the registry and compares them against the table in this document, so the table cannot drift."
+  check: tests/gates/test_gate_registry.py::test_census_is_derived
+- id: gate.harness.milestone_order
+  milestone: 1
+  kind: structural
+  spec: docs/plan/milestone-map.md#hard-gates
+  statement: "**No gate is registered at a milestone later than the build step it observes**, for the specs whose build sequences carry step numbers, asserted against the build-sequence table above."
+  check: tests/gates/test_harness_m1.py::test_milestone_order

@@ -1,0 +1,12 @@
+turns:
+  - kind: tool_call
+    tool_name: math.calculate
+    arguments: {expression: "1 / 0"}
+    call_id: call_0001
+  - kind: tool_call
+    tool_name: math.calculate
+    arguments: {expression: "2 + 2"}
+    call_id: call_0002
+  - kind: final
+    text: "4"
+    stop_reason: end_turn

@@ -1,0 +1,61 @@
+# Canonical gate registry entries for the api area.
+- id: gate.api.code_vocabulary
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Every returned code is in the vocabulary.** A test walks the registered routes, exercises each error path, and asserts every `error.code` appears in the code table. A code not in the table fails the build."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.status_map_total
+  milestone: 5
+  kind: structural
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Every error maps to exactly one status.** The class-to-code-to- status table is a single mapping in code; a test asserts it is total over the error taxonomy and that no class appears twice. An unmapped class resolves to `internal_error` and 500, and the test asserts that fallback is reached only by classes deliberately absent from the table."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.no_request_tenant
+  milestone: 5
+  kind: structural
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**No handler reads a tenant from a request.** An AST walk over the API package asserts that no handler binds `tenant_id` from a path parameter, query parameter, header, or request body. The only source is the `Principal`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.cross_tenant_404
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Cross-tenant reads are not found.** For every tenant-scoped route, a request carrying a resource identifier belonging to another tenant returns 404. A 403 from any of them fails."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.scope_declared
+  milestone: 5
+  kind: structural
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Health is the only unauthenticated surface.** A walk over the route table asserts every route except `/health/live` and `/health/ready` declares a required scope, and that the two health routes declare none. A new route with no scope declaration fails the build rather than shipping open."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.transient_no_id
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Transient frames carry no id.** Every frame the SSE writer emits without a persisted sequence has no `id:` line. Asserted over a captured stream containing token deltas, heartbeats, and a `stream.overflow`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.replay_exact
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Replay is gapless and duplicate-free.** A stream disconnected mid-run and reconnected with `Last-Event-ID` yields each persisted sequence for that run exactly once across both connections, with none missing. Run under concurrent writes to the same session so the sequence gaps are real."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.cancel_observed
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Cancellation reaches a running worker.** A run cancelled through the endpoint while `RUNNING` in a separate process reaches `CANCELLED`, and it does so with the notification suppressed — proving the poller is sufficient and the notification is an optimization."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.submit_idempotent
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Submission is idempotent and a reused key is a conflict.** The same key with the same body returns the same `run_id` with 200 and creates exactly one run under concurrent submission; the same key with a different body returns 409."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.api.artifact_attachment
+  milestone: 5
+  kind: case
+  spec: docs/plan/http-api-and-streaming.md#hard-gates
+  statement: "**Artifact content is never inline.** Every response from the content route carries `Content-Disposition: attachment`, including for `text/html` and `image/svg+xml`."
+  check: tests/gates/pending.py::pending_gate

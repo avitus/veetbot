@@ -1,0 +1,11 @@
+name: permanent_tool_error
+milestone: 1
+tags: [tools, recovery]
+input: {text: Ask for a calculation outside the supported range.}
+model_fixture: permanent_tool_error
+expected:
+  terminal_status: COMPLETED
+  model_calls: 2
+  tool_started_count: 1
+  reason_codes: [tool.invalid_arguments.result_out_of_range]
+  event_order: [tool.call.failed, run.completed]
