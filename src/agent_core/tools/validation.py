@@ -80,10 +80,13 @@ def _canonical(value: object) -> object:
     if isinstance(value, list):
         return [_canonical(item) for item in value]
     if isinstance(value, dict):
-        return {
-            unicodedata.normalize("NFC", str(key)): _canonical(child)
-            for key, child in sorted(value.items(), key=lambda item: str(item[0]).encode())
-        }
+        normalized: dict[str, object] = {}
+        for key, child in sorted(value.items(), key=lambda item: str(item[0]).encode()):
+            normalized_key = unicodedata.normalize("NFC", str(key))
+            if normalized_key in normalized:
+                raise ToolValidationError("tool arguments contain colliding normalized keys")
+            normalized[normalized_key] = _canonical(child)
+        return normalized
     return value
 
 
@@ -94,13 +97,13 @@ def validate_and_normalize(
 
     candidate = deepcopy(arguments)
     _apply_defaults(candidate, schema)
-    try:
-        Draft202012Validator(schema).validate(candidate)
-    except ValidationError as exc:
-        raise ToolValidationError("tool arguments do not match the declared schema") from exc
     normalized = _canonical(candidate)
     if not isinstance(normalized, dict):
         raise ToolValidationError("tool arguments must normalize to an object")
+    try:
+        Draft202012Validator(schema).validate(normalized)
+    except ValidationError as exc:
+        raise ToolValidationError("tool arguments do not match the declared schema") from exc
     rendered = json.dumps(
         normalized,
         ensure_ascii=False,

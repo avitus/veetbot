@@ -69,3 +69,7 @@ class ArtifactSweepError(AgentCoreError):
         super().__init__(f"artifact sweep deleted {deleted} object(s); {failed} deletion(s) failed")
         self.deleted = deleted
         self.failed = failed
+
+
+class EvalExpectationError(AgentCoreError):
+    """A deterministic evaluation result did not match its authored expectation."""

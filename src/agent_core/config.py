@@ -229,6 +229,20 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return {str(key): value for key, value in loaded.items()}
 
 
+def _merge_mappings(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    """Recursively overlay mappings while retaining untouched shipped siblings."""
+
+    merged = {str(key): value for key, value in base.items()}
+    for key, value in overlay.items():
+        normalized_key = str(key)
+        current = merged.get(normalized_key)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[normalized_key] = _merge_mappings(current, value)
+        else:
+            merged[normalized_key] = value
+    return merged
+
+
 def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str]) -> None:
     overlay_files: dict[str, Path] = {}
     if config_dir is not None:
@@ -253,12 +267,24 @@ def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str
         overlay_path = overlay_files.get(relative)
         merged = shipped
         if overlay_path is not None:
-            merged = {**shipped, **_read_yaml(overlay_path)}
+            merged = _merge_mappings(shipped, _read_yaml(overlay_path))
         serialized = yaml.safe_dump(merged, sort_keys=True)
         missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
         if missing:
             names = ", ".join(missing)
             raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")
+
+
+def load_config_document(settings: Settings, relative: str) -> dict[str, Any]:
+    """Load one validated versioned document with its recursive operator overlay."""
+
+    if relative not in SHIPPED_CONFIGS:
+        raise ConfigurationError(f"unknown shipped configuration document: {relative}")
+    shipped = _read_yaml(PACKAGE_ROOT / relative)
+    if settings.config_dir is None or relative == FROZEN_CONFIG:
+        return shipped
+    overlay = settings.config_dir / relative
+    return _merge_mappings(shipped, _read_yaml(overlay)) if overlay.is_file() else shipped
 
 
 def validate_settings(settings: Settings) -> None:

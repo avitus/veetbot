@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -21,6 +23,7 @@ from agent_core.domain.runs import (
     FailureReason,
     OutcomeKind,
     Run,
+    RunCheckpoint,
     RunFailure,
     RunOutcome,
     RunStatus,
@@ -36,6 +39,17 @@ from agent_core.runtime.loop import RunContext, ToolDispatch, checkpoint, run_lo
 
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[RunCancellationToken], None]
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _FinalizationContext:
+    run: Run
+    checkpoint: RunCheckpoint
+    uow_factory: UnitOfWorkFactory
+    lease: WorkerLease | None
+    clock: Clock
+    token: RunCancellationToken
 
 
 class RunExecutor:
@@ -56,6 +70,8 @@ class RunExecutor:
         dispatch_tools: ToolDispatch,
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
+        max_internal_attempts: int = 3,
+        identical_call_threshold: int = 5,
     ) -> None:
         self._principal = principal
         self._principals = principals
@@ -71,6 +87,8 @@ class RunExecutor:
         self._dispatch_tools = dispatch_tools
         self._seed_checkpoint = seed_checkpoint
         self._on_token = on_token
+        self._max_internal_attempts = max_internal_attempts
+        self._identical_call_threshold = identical_call_threshold
 
     async def execute(self, run_id: UUID) -> None:
         """Execute an in-process queued run after its creating commit."""
@@ -106,68 +124,80 @@ class RunExecutor:
         lease: WorkerLease | None,
         on_token: TokenCallback | None = None,
     ) -> None:
-        principal = await self._principals.for_run(run)
+        token = RunCancellationToken(self._clock, run.deadline_at)
         async with self._uow_factory() as uow:
             checkpoint_state = await uow.checkpoints.latest(run.id)
             if checkpoint_state is None:
                 checkpoint_state = await self._seed_checkpoint(uow, run, None, lease)
-            agent = await uow.agents.get_version(run.agent_id, run.agent_version)
-        model_provider = self._model_provider
-        resolved_model = self._resolved_model
-        pin_created = False
-        if self._model_router is not None and agent.model_policy not in {
-            "deterministic",
-            "fake-balanced",
-        }:
-            if checkpoint_state.provider_pin is None and run.provider_pin is not None:
-                checkpoint_state.provider_pin = run.provider_pin.model_copy(deep=True)
-            if checkpoint_state.provider_pin is None:
-                resolved_model = await self._model_router.resolve(
-                    agent.model_policy,
-                    tenant_id=run.tenant_id,
-                )
-                checkpoint_state.provider_pin = self._model_router.pin(run.id, resolved_model)
-                run.provider_pin = checkpoint_state.provider_pin.model_copy(deep=True)
-                async with self._uow_factory() as uow:
-                    await uow.runs.set_provider_pin(run.id, run.provider_pin)
-                pin_created = True
-            else:
-                resolved_model = await self._model_router.resolve_pinned(
-                    checkpoint_state.provider_pin
-                )
-                resolved_model = resolved_model.model_copy(
-                    update={"policy_name": agent.model_policy}
-                )
-            if (
-                checkpoint_state.provider_continuation is not None
-                and checkpoint_state.provider_continuation.provider != resolved_model.provider
-            ):
-                raise ConflictError("provider continuation does not match the persisted pin")
-            selected = self._model_providers.get(resolved_model.provider)
-            if selected is None:
-                raise RuntimeError("the pinned model provider has no registered adapter")
-            model_provider = selected
-        token = RunCancellationToken(self._clock, run.deadline_at)
-        callback = on_token or self._on_token
-        if callback is not None:
-            callback(token)
-        context = RunContext(
+        finalization = _FinalizationContext(
             run=run,
             checkpoint=checkpoint_state,
-            agent=agent,
-            principal=principal,
-            context_builder=self._context_builder,
-            model_provider=model_provider,
-            resolved_model=resolved_model,
-            budgets=self._budget_factory(lease),
             uow_factory=self._uow_factory,
             lease=lease,
             clock=self._clock,
-            ids=self._ids,
             token=token,
-            dispatch_tools=self._dispatch_tools,
         )
+        context: RunContext | None = None
         try:
+            principal = await self._principals.for_run(run)
+            async with self._uow_factory() as uow:
+                agent = await uow.agents.get_version(run.agent_id, run.agent_version)
+            model_provider = self._model_provider
+            resolved_model = self._resolved_model
+            pin_created = False
+            if self._model_router is not None and agent.model_policy not in {
+                "deterministic",
+                "fake-balanced",
+            }:
+                if checkpoint_state.provider_pin is None and run.provider_pin is not None:
+                    checkpoint_state.provider_pin = run.provider_pin.model_copy(deep=True)
+                if checkpoint_state.provider_pin is None:
+                    resolved_model = await self._model_router.resolve(
+                        agent.model_policy,
+                        tenant_id=run.tenant_id,
+                    )
+                    checkpoint_state.provider_pin = self._model_router.pin(run.id, resolved_model)
+                    run.provider_pin = checkpoint_state.provider_pin.model_copy(deep=True)
+                    async with self._uow_factory() as uow:
+                        await uow.runs.set_provider_pin(run.id, run.provider_pin)
+                    pin_created = True
+                else:
+                    resolved_model = await self._model_router.resolve_pinned(
+                        checkpoint_state.provider_pin
+                    )
+                    resolved_model = resolved_model.model_copy(
+                        update={"policy_name": agent.model_policy}
+                    )
+                if (
+                    checkpoint_state.provider_continuation is not None
+                    and checkpoint_state.provider_continuation.provider != resolved_model.provider
+                ):
+                    raise ConflictError("provider continuation does not match the persisted pin")
+                selected = self._model_providers.get(resolved_model.provider)
+                if selected is None:
+                    raise RuntimeError("the pinned model provider has no registered adapter")
+                model_provider = selected
+            callback = on_token or self._on_token
+            if callback is not None:
+                callback(token)
+            context = RunContext(
+                run=run,
+                checkpoint=checkpoint_state,
+                agent=agent,
+                principal=principal,
+                context_builder=self._context_builder,
+                model_provider=model_provider,
+                resolved_model=resolved_model,
+                budgets=self._budget_factory(lease),
+                uow_factory=self._uow_factory,
+                lease=lease,
+                clock=self._clock,
+                ids=self._ids,
+                token=token,
+                dispatch_tools=self._dispatch_tools,
+                max_internal_attempts=self._max_internal_attempts,
+                identical_call_threshold=self._identical_call_threshold,
+            )
             if pin_created:
                 await checkpoint(context, "provider_pinned")
             await self._resume_pending_tools(context)
@@ -201,11 +231,19 @@ class RunExecutor:
         except WorkerFencedError:
             outcome = RunOutcome(kind=OutcomeKind.FENCED)
         except ConflictError as exc:
+            logger.exception(
+                "run_execution_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
             outcome = self._internal_failure(run, exc)
         except Exception as exc:
+            logger.exception(
+                "run_execution_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
             outcome = self._internal_failure(run, exc)
         try:
-            await finalize(context, outcome)
+            await finalize(context or finalization, outcome)
         except WorkerFencedError:
             if lease is None:
                 raise
@@ -267,7 +305,7 @@ def _message_text(message: AssistantMessage | None) -> str | None:
     return "\n".join(part.text for part in message.content if isinstance(part, TextPart))
 
 
-async def finalize(context: RunContext, outcome: RunOutcome) -> None:
+async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
     """Commit terminal checkpoint, state transition, event, and lease release once."""
 
     if outcome.kind is OutcomeKind.FENCED:

@@ -42,9 +42,12 @@ def _canonical_json(value: object) -> bytes:
 class MinimalContextBuilder:
     """Build the immutable A region and volatile B region in a total order."""
 
-    def __init__(self, registry: ToolRegistry, clock: Clock) -> None:
+    def __init__(self, registry: ToolRegistry, clock: Clock, *, maximum_tools: int = 30) -> None:
+        if maximum_tools <= 0:
+            raise ValueError("maximum_tools must be positive")
         self._registry = registry
         self._clock = clock
+        self._maximum_tools = maximum_tools
 
     async def build(
         self,
@@ -58,7 +61,7 @@ class MinimalContextBuilder:
             principal,
             profile="milestone1-identity-policy-filter",
             environment="in_process",
-        )[:30]
+        )[: self._maximum_tools]
         prefix = self._prefix(agent, tools)
         prefix_bytes = _canonical_json(
             {

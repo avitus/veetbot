@@ -13,7 +13,9 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     SandboxMechanism,
+    load_config_document,
     load_settings,
+    validate_runtime_identity,
 )
 
 
@@ -107,6 +109,9 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
     overlay.write_text("parallel:\n  maximum_calls: 4\n", encoding="utf-8")
     settings = load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
     assert settings.config_dir == tmp_path.resolve()
+    merged = load_config_document(settings, "tools/limits.yaml")
+    assert merged["parallel"]["maximum_calls"] == 4
+    assert merged["output"]["global_maximum_bytes"] == 4_194_304
 
 
 def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
@@ -128,6 +133,32 @@ def test_credentials_are_profile_keyed_and_repr_safe() -> None:
     )
     assert set(settings.credentials) == {"openai", "anthropic"}
     assert "synthetic-openai-credential" not in repr(settings)
+
+
+def test_production_refuses_evaluation_identity() -> None:
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TOKEN": "local-test-token-value",
+        "SANDBOX_MECHANISM": "microvm",
+    }
+    settings = load_settings(values)
+    with pytest.raises(ConfigurationError, match="evaluation identity"):
+        validate_runtime_identity(
+            settings,
+            tenant_id="tenant_eval",
+            principal_id="user",
+            policy_profile="default",
+        )
+
+    development = load_settings(base_environment())
+    validate_runtime_identity(
+        development,
+        tenant_id="tenant_eval",
+        principal_id="eval.user",
+        policy_profile="eval.default",
+    )
 
 
 def test_all_106_versioned_knobs_are_present_and_non_null() -> None:
