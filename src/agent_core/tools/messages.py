@@ -39,4 +39,6 @@ TOOL_MESSAGES: dict[str, str] = {
 def message_for(reason_code: str) -> str:
     """Return narration written by the platform, never by an external system."""
 
-    return TOOL_MESSAGES[reason_code]
+    return TOOL_MESSAGES.get(
+        reason_code, "The tool could not complete for a platform-defined reason."
+    )

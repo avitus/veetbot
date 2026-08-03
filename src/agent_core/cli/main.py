@@ -12,20 +12,33 @@ from typing import Annotated, Any, Protocol, cast
 from uuid import UUID
 
 import typer
+from typer.core import TyperGroup
 
 from agent_core import __version__
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import EvalExpectationError, NotFoundError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.runs import Run, RunStatus
+
+RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
+
+
+class ReservedRunGroup(TyperGroup):
+    """Route non-reserved first arguments to the plan's implicit run submission."""
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        if args and args[0] not in {*RUN_RESERVED_WORDS, "--help", "-h"}:
+            args = ["submit", *args]
+        return super().parse_args(ctx, args)
+
 
 app = typer.Typer(
     name="agent",
     help="Modular general-purpose agent platform.",
     no_args_is_help=True,
 )
-run_app = typer.Typer(name="run", invoke_without_command=True, no_args_is_help=True)
+run_app = typer.Typer(name="run", cls=ReservedRunGroup, no_args_is_help=True)
 session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
 app.add_typer(run_app)
@@ -106,10 +119,9 @@ async def _submit(prompt: str, session_id: UUID | None) -> tuple[Run, list[Event
             signal.signal(signal.SIGINT, previous_handler)
 
 
-@run_app.callback(invoke_without_command=True)
+@run_app.command("submit", hidden=True)
 def run_command(
-    ctx: typer.Context,
-    prompt: Annotated[str | None, typer.Argument(help="User request to execute.")] = None,
+    prompt: Annotated[str, typer.Argument(help="User request to execute.")],
     session_id: Annotated[UUID | None, typer.Option("--session", help="Reuse a session.")] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Print the run record as JSON.")
@@ -117,10 +129,6 @@ def run_command(
 ) -> None:
     """Execute one run through the shared RunService."""
 
-    if ctx.invoked_subcommand is not None:
-        return
-    if prompt is None:
-        raise typer.BadParameter("a prompt is required")
     try:
         run, events = asyncio.run(_submit(prompt, session_id))
     except ConfigurationError as exc:
@@ -199,7 +207,7 @@ def eval_run(
         results = module.run_selected_sync(
             Path.cwd(), current_milestone=1, tag=tag, case_name=case_name
         )
-    except (AssertionError, OSError, ValueError) as exc:
+    except (EvalExpectationError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)
         raise typer.Exit(1) from exc
     for result in results:

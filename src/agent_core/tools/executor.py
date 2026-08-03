@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from datetime import timedelta
 from typing import Any
 
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.errors import NotFoundError, ToolValidationError
+from agent_core.domain.errors import (
+    BudgetExceededError,
+    NotFoundError,
+    RunCancelledError,
+    ToolValidationError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import ContentPart, TextPart, ToolCallItem, ToolResultItem
 from agent_core.domain.policies import ExecutionTarget, SideEffectClass, TrustLevel
@@ -30,6 +36,8 @@ from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.messages import message_for
 from agent_core.tools.validation import validate_and_normalize, validate_output
+
+logger = logging.getLogger(__name__)
 
 
 class _UnavailableCollaborator:
@@ -316,7 +324,17 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        except Exception:
+        except (RunCancelledError, BudgetExceededError, NotFoundError):
+            raise
+        # Tool implementation failures are deliberately normalized at this boundary.
+        except Exception as exc:
+            logger.exception(
+                "tool_execution_failed",
+                extra={
+                    "tool_name": tool.spec.name,
+                    "error_class": type(exc).__name__,
+                },
+            )
             result = ToolResult(
                 ok=False,
                 content=[],

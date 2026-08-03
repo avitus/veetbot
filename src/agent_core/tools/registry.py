@@ -59,6 +59,12 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
         raise ToolValidationError("builtin tools may not use reserved domains")
     if spec.source is ToolSource.BUILTIN and domain not in BUILTIN_DOMAINS:
         raise ToolValidationError("unknown builtin tool domain")
+    if spec.source is not ToolSource.BUILTIN and domain in BUILTIN_DOMAINS:
+        raise ToolValidationError("external tools may not use builtin-owned domains")
+    if spec.source is ToolSource.MCP and domain != "mcp":
+        raise ToolValidationError("MCP tools must use the mcp namespace")
+    if spec.source is ToolSource.DEVICE and domain != "device":
+        raise ToolValidationError("device tools must use the device namespace")
     validate_schema(spec.input_schema)
     if spec.output_schema is not None:
         validate_schema(spec.output_schema)
@@ -95,6 +101,8 @@ class StaticToolRegistry:
         self._latest[spec.name] = spec.version
 
     def get(self, name: str, version: str | None = None) -> Tool:
+        """Return the selected tool or raise NotFoundError when it is unavailable."""
+
         selected_version = self._latest.get(name) if version is None else version
         if selected_version is None:
             raise NotFoundError("tool not found")

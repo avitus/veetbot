@@ -27,6 +27,7 @@ from agent_core.application.run_service import RunService
 from agent_core.application.session_service import SessionService
 from agent_core.config import (
     Settings,
+    load_config_document,
     load_settings,
     validate_runtime_identity,
     validate_settings,
@@ -119,6 +120,13 @@ async def build(
         principal_id=effective_principal.principal_id,
         policy_profile=policy_profile,
     )
+    runtime_config = load_config_document(effective_settings, "runtime/limits.yaml")
+    tool_config = load_config_document(effective_settings, "tools/limits.yaml")
+    context_config = load_config_document(effective_settings, "context/plan.yaml")
+    run_defaults = runtime_config["run_defaults"]
+    model_limits = runtime_config["model"]
+    circuit_breaker = tool_config["circuit_breaker"]
+    tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
     if clock is not None and fixed_clock_at is not None:
@@ -143,7 +151,12 @@ async def build(
             else ["math.calculate", "system.current_time"]
         ),
         policy_profile=policy_profile,
-        limits=limits or RunLimits(max_steps=32, max_model_calls=16, max_tool_calls=32),
+        limits=limits
+        or RunLimits(
+            max_steps=int(run_defaults["max_steps"]),
+            max_model_calls=int(run_defaults["max_model_calls"]),
+            max_tool_calls=int(run_defaults["max_tool_calls"]),
+        ),
     )
     agent_repository = InMemoryAgentRepository()
     session_repository = InMemorySessionRepository()
@@ -166,7 +179,11 @@ async def build(
     )
 
     # Phase 5: wire adapters behind ports and expose application services only.
-    context_builder = MinimalContextBuilder(registry, effective_clock)
+    context_builder = MinimalContextBuilder(
+        registry,
+        effective_clock,
+        maximum_tools=int(tool_definitions["max_items"]),
+    )
     budgets = InMemoryBudgetLedger(run_repository, effective_clock)
     pipeline = ToolPipeline(
         registry,
@@ -191,6 +208,8 @@ async def build(
         ids=effective_ids,
         dispatch_tools=pipeline.dispatch,
         on_token=token_slot.set,
+        max_internal_attempts=int(model_limits["max_internal_attempts"]),
+        identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
     )
     dispatcher = InlineRunDispatcher(executor.execute, unit_of_work_open=lambda: False)
     session_service = SessionService(

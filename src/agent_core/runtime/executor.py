@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -32,6 +34,18 @@ from agent_core.ports.repositories import (
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.loop import RunContext, ToolDispatch, checkpoint, run_loop
 
+logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _FinalizationContext:
+    run: Run
+    checkpoint: RunCheckpoint
+    runs: RunRepository
+    events: EventRepository
+    clock: Clock
+    token: RunCancellationToken
+
 
 class RunExecutor:
     def __init__(
@@ -50,6 +64,8 @@ class RunExecutor:
         ids: IdFactory,
         dispatch_tools: ToolDispatch,
         on_token: Callable[[RunCancellationToken], None] | None = None,
+        max_internal_attempts: int = 3,
+        identical_call_threshold: int = 5,
     ) -> None:
         self._principal = principal
         self._principals = principals
@@ -64,34 +80,52 @@ class RunExecutor:
         self._ids = ids
         self._dispatch_tools = dispatch_tools
         self._on_token = on_token
+        self._max_internal_attempts = max_internal_attempts
+        self._identical_call_threshold = identical_call_threshold
 
     async def execute(self, run_id: UUID) -> None:
         run = await self._runs.get(run_id, self._principal)
         principal = await self._principals.for_run(run)
         run = await self._runs.transition(run.id, RunStatus.QUEUED, RunStatus.RUNNING)
-        await self._append(run, "run.started")
-        checkpoint_state = await self._seed_checkpoint(run)
-        agent = await self._agents.get_version(run.agent_id, run.agent_version)
         token = RunCancellationToken(self._clock, run.deadline_at)
-        if self._on_token is not None:
-            self._on_token(token)
-        context = RunContext(
+        finalization = _FinalizationContext(
             run=run,
-            checkpoint=checkpoint_state,
-            agent=agent,
-            principal=principal,
-            context_builder=self._context_builder,
-            model_provider=self._model_provider,
-            resolved_model=self._resolved_model,
-            budgets=self._budgets,
             runs=self._runs,
             events=self._events,
             clock=self._clock,
-            ids=self._ids,
             token=token,
-            dispatch_tools=self._dispatch_tools,
+            checkpoint=RunCheckpoint(
+                run_id=run.id,
+                version=0,
+                status=RunStatus.RUNNING,
+                created_at=self._clock.now(),
+            ),
         )
+        context: RunContext | None = None
         try:
+            await self._append(run, "run.started")
+            finalization.checkpoint = await self._seed_checkpoint(run)
+            agent = await self._agents.get_version(run.agent_id, run.agent_version)
+            if self._on_token is not None:
+                self._on_token(token)
+            context = RunContext(
+                run=run,
+                checkpoint=finalization.checkpoint,
+                agent=agent,
+                principal=principal,
+                context_builder=self._context_builder,
+                model_provider=self._model_provider,
+                resolved_model=self._resolved_model,
+                budgets=self._budgets,
+                runs=self._runs,
+                events=self._events,
+                clock=self._clock,
+                ids=self._ids,
+                token=token,
+                dispatch_tools=self._dispatch_tools,
+                max_internal_attempts=self._max_internal_attempts,
+                identical_call_threshold=self._identical_call_threshold,
+            )
             outcome = await run_loop(context)
         except RunCancelledError:
             outcome = RunOutcome(kind=OutcomeKind.CANCELLED)
@@ -113,7 +147,12 @@ class RunExecutor:
                     occurred_at=self._clock.now(),
                 ),
             )
+        # This is the deliberate terminal boundary that prevents stranded RUNNING runs.
         except Exception as exc:
+            logger.exception(
+                "run_execution_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
             outcome = RunOutcome(
                 kind=OutcomeKind.FAILED,
                 failure=RunFailure(
@@ -124,7 +163,7 @@ class RunExecutor:
                     occurred_at=self._clock.now(),
                 ),
             )
-        await finalize(context, outcome)
+        await finalize(context or finalization, outcome)
 
     async def _seed_checkpoint(self, run: Run) -> RunCheckpoint:
         events = await self._events.list_after(run.session_id, 0, self._principal)
@@ -168,7 +207,7 @@ def _message_text(message: AssistantMessage | None) -> str | None:
     return "\n".join(part.text for part in message.content if isinstance(part, TextPart))
 
 
-async def finalize(context: RunContext, outcome: RunOutcome) -> None:
+async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
     """Perform the terminal checkpoint, transition, and event exactly once."""
 
     if outcome.kind is OutcomeKind.COMPLETED:

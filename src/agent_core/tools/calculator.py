@@ -167,11 +167,12 @@ class Parser:
         while self.current.value in {"*", "/", "//", "%"}:
             operator = self._take().value
             right = self._unary(depth)
-            if right == 0:
-                raise CalculatorError("division_by_zero", "zero divisor")
             if operator == "*":
                 value *= right
-            elif operator == "/":
+                continue
+            if right == 0:
+                raise CalculatorError("division_by_zero", "zero divisor")
+            if operator == "/":
                 value /= right
             else:
                 # Decimal // truncates. Adjust an inexact negative quotient to Python floor

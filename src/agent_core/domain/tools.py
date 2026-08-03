@@ -109,6 +109,8 @@ class ToolExecutionContext:
     workspace: object | None
     artifacts: object
     credentials: object
+    # Kept structural here to preserve the domain-to-ports dependency boundary;
+    # runtime construction supplies an object satisfying CancellationToken.
     cancellation: object
     mark_effect_sent: Callable[[], Awaitable[None]]
 
