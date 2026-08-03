@@ -17,7 +17,9 @@ class Tool(Protocol):
 
 
 class ToolRegistry(Protocol):
-    def get(self, name: str, version: str | None = None) -> Tool: ...
+    def get(self, name: str, version: str | None = None) -> Tool:
+        """Return the selected tool or raise NotFoundError when unavailable."""
+        ...
 
     def specs_for_session(
         self,

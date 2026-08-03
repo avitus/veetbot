@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.events import NewEvent
@@ -12,6 +13,7 @@ from agent_core.domain.messages import (
     AssistantMessage,
     ModelAttempt,
     ModelCompletedEvent,
+    ModelEvent,
     ModelFailedEvent,
     ModelRequest,
     ModelTransientError,
@@ -59,10 +61,20 @@ class RunContext:
     ids: IdFactory
     token: CancellationToken
     dispatch_tools: ToolDispatch
+    max_internal_attempts: int = 3
+    identical_call_threshold: int = 5
+
+
+class CheckpointContext(Protocol):
+    run: Run
+    checkpoint: RunCheckpoint
+    uow_factory: UnitOfWorkFactory
+    lease: WorkerLease | None
+    clock: Clock
 
 
 async def _append_event(
-    context: RunContext, event_type: str, payload: dict[str, Any] | None = None
+    context: CheckpointContext, event_type: str, payload: dict[str, Any] | None = None
 ) -> None:
     async with context.uow_factory() as uow:
         await uow.events.append(
@@ -77,7 +89,7 @@ async def _append_event(
         )
 
 
-async def checkpoint(context: RunContext, trigger: str) -> None:
+async def checkpoint(context: CheckpointContext, trigger: str) -> None:
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
     context.checkpoint.budget_state = {
@@ -153,7 +165,7 @@ def _has_final_text(message: AssistantMessage | None) -> bool:
 async def _invoke_model(
     context: RunContext, step: Step, request: ModelRequest
 ) -> ModelTurn | RunOutcome:
-    while step.attempt_count < 3:
+    while step.attempt_count < context.max_internal_attempts:
         context.budgets.check(context.run, BudgetScope.ATTEMPT)
         step.attempt_count += 1
         attempt = ModelAttempt(
@@ -176,26 +188,31 @@ async def _invoke_model(
         terminal: ModelCompletedEvent | ModelFailedEvent | None = None
         if context.uow_factory.is_open():
             raise RuntimeError("model I/O cannot begin while a unit of work is open")
-        async for event in context.model_provider.stream(request, context.resolved_model, attempt):
-            if event.sequence != expected_sequence:
-                return _failure(
-                    context,
-                    FailureReason.MODEL_PERMANENT_ERROR,
-                    "ModelProtocolError",
-                    "the normalized model stream had a sequence gap",
-                    step,
-                )
-            expected_sequence += 1
-            if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
-                if terminal is not None:
+        stream = cast(
+            AsyncGenerator[ModelEvent, None],
+            context.model_provider.stream(request, context.resolved_model, attempt),
+        )
+        async with aclosing(stream):
+            async for event in stream:
+                if event.sequence != expected_sequence:
                     return _failure(
                         context,
                         FailureReason.MODEL_PERMANENT_ERROR,
                         "ModelProtocolError",
-                        "the normalized model stream had multiple terminal events",
+                        "the normalized model stream had a sequence gap",
                         step,
                     )
-                terminal = event
+                expected_sequence += 1
+                if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
+                    if terminal is not None:
+                        return _failure(
+                            context,
+                            FailureReason.MODEL_PERMANENT_ERROR,
+                            "ModelProtocolError",
+                            "the normalized model stream had multiple terminal events",
+                            step,
+                        )
+                    terminal = event
         if terminal is None:
             return _failure(
                 context,
@@ -230,7 +247,7 @@ async def _invoke_model(
             if (
                 isinstance(terminal.error, ModelTransientError)
                 and not terminal.error.stream_had_output
-                and step.attempt_count < 3
+                and step.attempt_count < context.max_internal_attempts
             ):
                 continue
             reason = (
@@ -274,7 +291,7 @@ async def _invoke_model(
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
-            if step.attempt_count < 3:
+            if step.attempt_count < context.max_internal_attempts:
                 continue
             return _failure(
                 context,
@@ -353,12 +370,13 @@ async def run_loop(context: RunContext) -> RunOutcome:
             fingerprint = f"{call.name}:{call.raw_arguments}"
             count = int(call_counts.get(fingerprint, 0)) + 1
             call_counts[fingerprint] = count
-            if count >= 5:
+            if count >= context.identical_call_threshold:
                 return _failure(
                     context,
                     FailureReason.TOOL_LOOP_DETECTED,
                     "ToolLoopDetected",
-                    "the model repeated an identical tool call five times",
+                    "the model repeated an identical tool call "
+                    f"{context.identical_call_threshold} times",
                     step,
                 )
 

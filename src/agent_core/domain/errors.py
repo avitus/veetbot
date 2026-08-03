@@ -37,3 +37,7 @@ class ModelScriptExhaustedError(AgentCoreError):
 
 class RunCancelledError(AgentCoreError):
     """The run cancellation token was observed at a safe boundary."""
+
+
+class EvalExpectationError(AgentCoreError):
+    """A deterministic evaluation result did not match its authored expectation."""

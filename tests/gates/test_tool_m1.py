@@ -190,8 +190,40 @@ def test_normalization_stable(value: str) -> None:
     assert composed[1:] == decomposed[1:]
 
 
+def test_normalization_rejects_colliding_keys_and_validates_canonical_values() -> None:
+    with pytest.raises(ToolValidationError, match="colliding normalized keys"):
+        validate_and_normalize(
+            {"é": 1, "e\u0301": 2},
+            {"type": "object", "additionalProperties": True},
+        )
+
+    normalized, rendered, _digest = validate_and_normalize(
+        {"value": "e\u0301"},
+        {
+            "type": "object",
+            "properties": {"value": {"type": "string", "enum": ["é"]}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+    )
+    assert normalized == {"value": "é"}
+    assert rendered == '{"value":"é"}'
+
+
 def test_reserved_domains() -> None:
     with pytest.raises(ToolValidationError, match="reserved domains"):
         validate_registration(_spec(name="mcp.bad", source=ToolSource.BUILTIN))
     with pytest.raises(ToolValidationError, match="reserved domains"):
         validate_registration(_spec(name="device.bad", source=ToolSource.BUILTIN))
+    with pytest.raises(ToolValidationError, match="builtin-owned"):
+        validate_registration(_spec(name="workspace.read", source=ToolSource.MCP))
+    with pytest.raises(ToolValidationError, match="MCP tools"):
+        validate_registration(_spec(name="external.read", source=ToolSource.MCP))
+    with pytest.raises(ToolValidationError, match="device namespace"):
+        validate_registration(_spec(name="external.read", source=ToolSource.DEVICE))
+
+
+def test_unknown_reason_code_has_stable_fallback() -> None:
+    assert message_for("tool.future_reason") == (
+        "The tool could not complete for a platform-defined reason."
+    )

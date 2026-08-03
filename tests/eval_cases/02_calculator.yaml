@@ -10,6 +10,7 @@ expected:
   tool_started_count: 1
   event_order:
     - run.queued
+    - run.started
     - model.request.started
     - tool.call.proposed
     - tool.call.authorized

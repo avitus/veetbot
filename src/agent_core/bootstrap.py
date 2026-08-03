@@ -40,6 +40,7 @@ from agent_core.application.run_service import RunService
 from agent_core.application.session_service import SessionService
 from agent_core.config import (
     Settings,
+    load_config_document,
     load_settings,
     validate_runtime_identity,
     validate_settings,
@@ -121,6 +122,9 @@ async def _compose(
     clock: Clock,
     ids: IdFactory,
     script: FakeModelScript | None,
+    maximum_tools: int,
+    max_internal_attempts: int,
+    identical_call_threshold: int,
 ) -> tuple[Composition, FakeModelProvider]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
@@ -136,7 +140,7 @@ async def _compose(
             policy_name=agent.model_policy,
             resolved_at=clock.now(),
         )
-        context_builder = MinimalContextBuilder(registry, clock)
+        context_builder = MinimalContextBuilder(registry, clock, maximum_tools=maximum_tools)
         pipeline = ToolPipeline(registry, uow_factory, clock, ids)
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
@@ -154,6 +158,8 @@ async def _compose(
             dispatch_tools=pipeline.dispatch,
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
+            max_internal_attempts=max_internal_attempts,
+            identical_call_threshold=identical_call_threshold,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -229,6 +235,13 @@ async def build(
         principal_id=effective_principal.principal_id,
         policy_profile=policy_profile,
     )
+    runtime_config = load_config_document(effective_settings, "runtime/limits.yaml")
+    tool_config = load_config_document(effective_settings, "tools/limits.yaml")
+    context_config = load_config_document(effective_settings, "context/plan.yaml")
+    run_defaults = runtime_config["run_defaults"]
+    model_limits = runtime_config["model"]
+    circuit_breaker = tool_config["circuit_breaker"]
+    tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
     if clock is not None and fixed_clock_at is not None:
@@ -254,7 +267,12 @@ async def build(
             else ["math.calculate", "system.current_time"]
         ),
         policy_profile=policy_profile,
-        limits=limits or RunLimits(max_steps=32, max_model_calls=16, max_tool_calls=32),
+        limits=limits
+        or RunLimits(
+            max_steps=int(run_defaults["max_steps"]),
+            max_model_calls=int(run_defaults["max_model_calls"]),
+            max_tool_calls=int(run_defaults["max_tool_calls"]),
+        ),
     )
     engine = None
     model_provider = None
@@ -296,6 +314,9 @@ async def build(
             clock=effective_clock,
             ids=effective_ids,
             script=script,
+            maximum_tools=int(tool_definitions["max_items"]),
+            max_internal_attempts=int(model_limits["max_internal_attempts"]),
+            identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
         )
         yield composition
     finally:

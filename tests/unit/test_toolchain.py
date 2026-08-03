@@ -3,12 +3,19 @@
 import socket
 import tomllib
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 import yaml
+from alembic.config import Config
 from typer.testing import CliRunner
 
+import agent_core.cli.main as cli_main
 from agent_core.cli.main import app
+from agent_core.domain.events import EventEnvelope
+from agent_core.domain.runs import Run, RunStatus
+from tests.conftest import NETWORK_MODE
+from tests.contract.support import run
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -19,6 +26,33 @@ def test_static_suite_blocks_network_egress() -> None:
         pytest.raises(RuntimeError, match=r"blocked network.*203\.0\.113\.1"),
     ):
         client.connect(("203.0.113.1", 443))
+
+
+@pytest.mark.parametrize("entrypoint", ["connect_ex", "sendto", "sendmsg"])
+def test_static_suite_blocks_all_socket_egress_entrypoints(entrypoint: str) -> None:
+    with (
+        socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client,
+        pytest.raises(RuntimeError, match=r"blocked network.*203\.0\.113\.1"),
+    ):
+        if entrypoint == "connect_ex":
+            client.connect_ex(("203.0.113.1", 443))
+        elif entrypoint == "sendto":
+            client.sendto(b"probe", ("203.0.113.1", 443))
+        else:
+            client.sendmsg([b"probe"], [], 0, ("203.0.113.1", 443))
+
+
+def test_integration_mode_permits_loopback_socket_entrypoints() -> None:
+    token = NETWORK_MODE.set("integration")
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            client.connect_ex(("127.0.0.1", 9))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            assert client.sendto(b"probe", ("127.0.0.1", 9)) == 5
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            assert client.sendmsg([b"probe"], [], 0, ("127.0.0.1", 9)) == 5
+    finally:
+        NETWORK_MODE.reset(token)
 
 
 def test_required_make_targets_exist() -> None:
@@ -51,14 +85,17 @@ def test_compose_has_one_healthy_postgres_service() -> None:
     postgres = compose["services"]["postgres"]
     assert postgres["image"] == "postgres:16-alpine"
     assert postgres["environment"] == {
-        "POSTGRES_DB": "agent",
-        "POSTGRES_USER": "agent",
-        "POSTGRES_PASSWORD": "agent",
+        "POSTGRES_DB": "${POSTGRES_DB:-agent}",
+        "POSTGRES_USER": "${POSTGRES_USER:-agent}",
+        "POSTGRES_PASSWORD": "${POSTGRES_PASSWORD:-agent}",
     }
-    assert postgres["ports"] == ["5432:5432"]
+    assert postgres["ports"] == ["127.0.0.1:${POSTGRES_PORT:-5432}:5432"]
     assert postgres["volumes"] == ["agent-pgdata:/var/lib/postgresql/data"]
     assert postgres["healthcheck"] == {
-        "test": ["CMD-SHELL", "pg_isready -U agent -d agent"],
+        "test": [
+            "CMD-SHELL",
+            "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent}",
+        ],
         "interval": "2s",
         "timeout": "2s",
         "retries": 30,
@@ -147,3 +184,64 @@ def test_cli_entry_point_resolves() -> None:
     result = CliRunner().invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.stdout.strip() == "0.1.0.dev0"
+
+
+def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[tuple[str, object]] = []
+
+    async def fake_submit(
+        prompt: str,
+        session_id: UUID | None,
+        idempotency_key: str | None,
+    ) -> tuple[Run, list[EventEnvelope]]:
+        del idempotency_key
+        seen.append((prompt, session_id))
+        completed = run(status=RunStatus.COMPLETED).model_copy(
+            update={"final_message": "answer"}, deep=True
+        )
+        return completed, []
+
+    async def fake_read(run_id: UUID, *, events: bool) -> str:
+        seen.append(("events" if events else "get", run_id))
+        return "read-result"
+
+    monkeypatch.setattr(cli_main, "_submit", fake_submit)
+    monkeypatch.setattr(cli_main, "_ephemeral_read", fake_read)
+    runner = CliRunner()
+
+    submitted = runner.invoke(app, ["run", "hello"])
+    assert submitted.exit_code == 0
+    assert submitted.stdout.strip() == "answer"
+
+    literal_reserved = runner.invoke(app, ["run", "--", "get"])
+    assert literal_reserved.exit_code == 0
+    assert literal_reserved.stdout.strip() == "answer"
+
+    session_id = "00000000-0000-0000-0000-000000000020"
+    json_result = runner.invoke(
+        app,
+        ["run", "--session", session_id, "--json", "with options"],
+    )
+    assert json_result.exit_code == 0
+    assert '"status":"COMPLETED"' in json_result.stdout
+
+    run_id = "00000000-0000-0000-0000-000000000030"
+    fetched = runner.invoke(app, ["run", "get", run_id])
+    events = runner.invoke(app, ["run", "events", run_id])
+    assert fetched.exit_code == events.exit_code == 0
+    assert fetched.stdout.strip() == events.stdout.strip() == "read-result"
+    assert [entry[0] for entry in seen] == [
+        "hello",
+        "get",
+        "with options",
+        "get",
+        "events",
+    ]
+    assert seen[2][1] == UUID(session_id)
+
+
+def test_alembic_config_accepts_percent_encoded_database_url() -> None:
+    database_url = "postgresql+asyncpg://" + "agent:p%40ss@localhost/agent"
+    config = Config()
+    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+    assert config.get_main_option("sqlalchemy.url") == database_url

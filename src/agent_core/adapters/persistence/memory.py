@@ -62,7 +62,11 @@ class InMemoryAgentRepository:
 
     async def put(self, agent: AgentSpec) -> None:
         async with self._lock:
-            self._agents[(agent.id, agent.version)] = agent.model_copy(deep=True)
+            key = (agent.id, agent.version)
+            existing = self._agents.get(key)
+            if existing is not None and existing != agent:
+                raise ConflictError("agent version already exists with different content")
+            self._agents[key] = agent.model_copy(deep=True)
             self._latest[agent.id] = agent.version
 
     async def get_version(self, agent_id: UUID, agent_version: str) -> AgentSpec:

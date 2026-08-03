@@ -51,6 +51,7 @@ def test_demonstration() -> None:
     rendered, exact = calculate("17 * 23")
     assert rendered.encode("utf-8") == b"391"
     assert exact is True
+    assert calculate("2 * 0") == ("0", True)
 
 
 @st.composite
