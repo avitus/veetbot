@@ -8,12 +8,9 @@ The authoritative, machine-readable project state lives in
 [`project-state.yaml`](project-state.yaml). Update that file (not this page) when
 project status changes; **status changes require evidence**.
 
-At the time of writing: phase **`implementation`**, current milestone record
-**Milestone 1**, authorized milestones **0 and 1**. Milestone 0 is complete.
-Milestone 1 is also complete: its implementation, eleven deterministic cases,
-all 28 new hard gates, full local suite, required CLI demonstration, and hosted
-CircleCI workflow passed. The machine-readable record contains the exact
-evidence.
+That record is the sole status surface for the current milestone, authorization,
+completion state, remaining work, and verification evidence. This page does not
+duplicate those mutable values.
 
 The milestone titles in `project-state.yaml` mirror the canonical
 [engineering plan](../plan/engineering-plan.md); keep the two synchronized.

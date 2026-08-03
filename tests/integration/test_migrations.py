@@ -22,11 +22,23 @@ def _alembic(*arguments: str) -> str:
     return result.stdout + result.stderr
 
 
-def test_initial_migration_upgrades_and_round_trips() -> None:
-    assert EXPECTED_REVISION in _alembic("current")
-    _alembic("downgrade", "base")
+def test_migrations_upgrade_cleanly_and_match_metadata() -> None:
     try:
+        _alembic("downgrade", "base")
         _alembic("upgrade", "head")
+        assert "No new upgrade operations detected" in _alembic("check")
+        assert EXPECTED_REVISION in _alembic("current")
+    finally:
+        _alembic("upgrade", "head")
+
+
+def test_migrations_round_trip_each_step_from_its_predecessor() -> None:
+    _alembic("upgrade", "head")
+    assert EXPECTED_REVISION in _alembic("current")
+    _alembic("downgrade", "-1")
+    try:
+        _alembic("upgrade", "+1")
+        _alembic("downgrade", "-1")
     finally:
         _alembic("upgrade", "head")
     assert EXPECTED_REVISION in _alembic("current")

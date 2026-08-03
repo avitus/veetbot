@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import os
 import signal
+import socket
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
@@ -93,12 +95,20 @@ def _progress_lines(events: Sequence[EventEnvelope]) -> list[str]:
     return lines
 
 
-async def _submit(prompt: str, session_id: UUID | None) -> tuple[Run, list[EventEnvelope]]:
-    async with build() as composition:
+async def _submit(
+    prompt: str,
+    session_id: UUID | None,
+    idempotency_key: str | None,
+) -> tuple[Run, list[EventEnvelope]]:
+    async with build(storage="postgres") as composition:
         previous_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, lambda _signum, _frame: composition.runs.interrupt())
         try:
-            run_id = await composition.runs.submit(prompt, session_id=session_id)
+            run_id = await composition.runs.submit(
+                prompt,
+                session_id=session_id,
+                idempotency_key=idempotency_key,
+            )
             run = await composition.runs.wait_terminal(run_id)
             events = await composition.runs.events(run_id)
             return run, events
@@ -111,6 +121,10 @@ def run_command(
     ctx: typer.Context,
     prompt: Annotated[str | None, typer.Argument(help="User request to execute.")] = None,
     session_id: Annotated[UUID | None, typer.Option("--session", help="Reuse a session.")] = None,
+    idempotency_key: Annotated[
+        str | None,
+        typer.Option("--idempotency-key", help="Deduplicate a retried submission."),
+    ] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Print the run record as JSON.")
     ] = False,
@@ -122,7 +136,7 @@ def run_command(
     if prompt is None:
         raise typer.BadParameter("a prompt is required")
     try:
-        run, events = asyncio.run(_submit(prompt, session_id))
+        run, events = asyncio.run(_submit(prompt, session_id, idempotency_key))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -138,7 +152,7 @@ def run_command(
 
 
 async def _ephemeral_read(run_id: UUID, *, events: bool) -> str:
-    async with build() as composition:
+    async with build(storage="postgres") as composition:
         if events:
             rows = await composition.runs.events(run_id)
             return json.dumps([row.model_dump(mode="json") for row in rows], default=str)
@@ -169,8 +183,38 @@ def run_events(run_id: UUID) -> None:
 
 
 async def _create_session() -> UUID:
-    async with build() as composition:
+    async with build(storage="postgres") as composition:
         return await composition.sessions.create()
+
+
+async def _serve_worker(role: str) -> None:
+    async with build(storage="postgres") as composition:
+        loop = asyncio.get_running_loop()
+        worker_id = f"{socket.gethostname()}:{os.getpid()}"
+        if role == "worker":
+            service = composition.worker_factory(worker_id)
+        else:
+            service = composition.maintenance_factory()
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(signum, service.stop)
+        await service.run_forever()
+
+
+@app.command("worker")
+def worker_command(
+    role: Annotated[
+        str, typer.Option("--role", help="Process role: worker or maintenance.")
+    ] = "worker",
+) -> None:
+    """Execute the durable worker or maintenance queue role."""
+
+    if role not in {"worker", "maintenance"}:
+        raise typer.BadParameter("role must be worker or maintenance")
+    try:
+        asyncio.run(_serve_worker(role))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
 
 
 @session_app.command("create")

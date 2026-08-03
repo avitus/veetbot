@@ -1,0 +1,419 @@
+"""Declarative PostgreSQL rows confined to the persistence adapter."""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Identity,
+    Index,
+    Integer,
+    MetaData,
+    Numeric,
+    SmallInteger,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+
+class Base(DeclarativeBase):
+    """Shared metadata for Alembic autogenerate and row mappings."""
+
+    metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+
+class AgentRow(Base):
+    __tablename__ = "agents"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    version: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    instructions: Mapped[str] = mapped_column(Text)
+    model_policy: Mapped[str] = mapped_column(Text)
+    enabled_tools: Mapped[list[str]] = mapped_column(JSONB)
+    enabled_skills: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    policy_profile: Mapped[str] = mapped_column(Text)
+    limits: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SessionRow(Base):
+    __tablename__ = "sessions"
+    __table_args__ = (
+        Index("ix_sessions_tenant_principal_updated", "tenant_id", "principal_id", "updated_at"),
+        Index("ix_sessions_agent_created", "agent_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    agent_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    agent_version: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    title: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    next_event_sequence: Mapped[int] = mapped_column(BigInteger, server_default=text("1"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RunRow(Base):
+    __tablename__ = "runs"
+    __table_args__ = (
+        Index("ix_runs_status_created", "status", "created_at"),
+        Index("ix_runs_lease_expires", "lease_expires_at"),
+        Index("ix_runs_session_created", "session_id", "created_at"),
+        Index(
+            "ix_runs_queue_claim",
+            "status",
+            "priority",
+            "created_at",
+            postgresql_where=text("status = 'QUEUED'"),
+        ),
+        Index(
+            "uq_runs_one_active_per_session",
+            "session_id",
+            unique=True,
+            postgresql_where=text("status NOT IN ('COMPLETED','FAILED','CANCELLED')"),
+        ),
+        Index(
+            "ix_runs_active_deadline",
+            "deadline_at",
+            postgresql_where=text(
+                "deadline_at IS NOT NULL AND status IN "
+                "('RUNNING','WAITING_FOR_APPROVAL','WAITING_FOR_USER')"
+            ),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    parent_run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    agent_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    agent_version: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    step_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    model_call_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    tool_call_count: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    limits: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    usage: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    lease_owner: Mapped[str | None] = mapped_column(Text)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lease_epoch: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    priority: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    scheduled_for: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    final_message: Mapped[str | None] = mapped_column(Text)
+    export_consent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    seed_event_sequence: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EventRow(Base):
+    __tablename__ = "events"
+    __table_args__ = (
+        UniqueConstraint("session_id", "sequence", name="uq_events_session_sequence"),
+        Index("ix_events_run_id", "run_id", "id"),
+        Index("ix_events_event_type_created", "event_type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    event_type: Mapped[str] = mapped_column(Text)
+    payload_schema_version: Mapped[int] = mapped_column(SmallInteger)
+    actor_type: Mapped[str] = mapped_column(Text)
+    actor_id: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    trace_id: Mapped[str | None] = mapped_column(Text)
+    derivation_key: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CheckpointRow(Base):
+    __tablename__ = "checkpoints"
+    __table_args__ = (
+        UniqueConstraint("run_id", "version", name="uq_checkpoints_run_version"),
+        Index("ix_checkpoints_run_created", "run_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    version: Mapped[int] = mapped_column(Integer)
+    state: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    last_event_sequence: Mapped[int] = mapped_column(BigInteger)
+    full: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    base_version: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ToolInvocationRow(Base):
+    __tablename__ = "tool_invocations"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_tool_invocations_idempotency_key"),
+        Index("ix_tool_invocations_run_step", "run_id", "step_number"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    session_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    step_number: Mapped[int] = mapped_column(Integer)
+    provider_call_id: Mapped[str] = mapped_column(Text)
+    tool_name: Mapped[str] = mapped_column(Text)
+    tool_version: Mapped[str] = mapped_column(Text)
+    tool_source: Mapped[str] = mapped_column(Text, server_default=text("'builtin'"))
+    server_id: Mapped[str | None] = mapped_column(Text)
+    idempotency_class: Mapped[str] = mapped_column(Text)
+    attempt_number: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    raw_arguments: Mapped[str] = mapped_column(Text)
+    arguments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    normalized_arguments_hash: Mapped[str | None] = mapped_column(Text)
+    idempotency_key: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32))
+    effect_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    outcome: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    result_item: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    suspended_kind: Mapped[str | None] = mapped_column(Text)
+    suspended_ref: Mapped[str | None] = mapped_column(Text)
+    output_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    truncated: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    artifact_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    outcome_status: Mapped[str | None] = mapped_column(Text)
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    origin_trust: Mapped[str] = mapped_column(Text)
+    parallel_group: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ApprovalRow(Base):
+    __tablename__ = "approvals"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    tool_invocation_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("tool_invocations.id", ondelete="SET NULL")
+    )
+    status: Mapped[str] = mapped_column(String(32))
+    request: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    resolution: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by: Mapped[str | None] = mapped_column(Text)
+
+
+class ArtifactRow(Base):
+    __tablename__ = "artifacts"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    name: Mapped[str] = mapped_column(Text)
+    media_type: Mapped[str] = mapped_column(Text)
+    storage_uri: Mapped[str] = mapped_column(Text)
+    sha256: Mapped[str] = mapped_column(String(64))
+    size_bytes: Mapped[int] = mapped_column(BigInteger)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class IdempotencyKeyRow(Base):
+    __tablename__ = "idempotency_keys"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ProjectionWatermarkRow(Base):
+    __tablename__ = "projection_watermarks"
+
+    projection_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    scope: Mapped[str] = mapped_column(Text, primary_key=True, server_default=text("''"))
+    watermark_seq: Mapped[int] = mapped_column(BigInteger)
+    builder_version: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DerivedEventKeyRow(Base):
+    __tablename__ = "derived_event_keys"
+
+    derivation_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    event_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SessionHistoryItemRow(Base):
+    __tablename__ = "session_history_items"
+
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    item_index: Mapped[int] = mapped_column(SmallInteger, primary_key=True)
+    item: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    builder_version: Mapped[str] = mapped_column(Text)
+
+
+class TrajectoryProjectionRow(Base):
+    __tablename__ = "trajectory_projection"
+
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE"), primary_key=True
+    )
+    first_sequence: Mapped[int] = mapped_column(BigInteger)
+    last_sequence: Mapped[int] = mapped_column(BigInteger)
+    terminal: Mapped[bool] = mapped_column(Boolean)
+    builder_version: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ExportConsentRow(Base):
+    __tablename__ = "export_consent"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TrajectoryExportRow(Base):
+    __tablename__ = "trajectory_exports"
+    __table_args__ = (
+        UniqueConstraint("run_id", name="uq_trajectory_exports_run"),
+        Index("ix_trajectory_exports_tenant_principal", "tenant_id", "principal_id"),
+    )
+
+    export_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    artifact_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("artifacts.id", ondelete="CASCADE")
+    )
+    builder_version: Mapped[str] = mapped_column(Text)
+    ruleset_version: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ModelPriceRow(Base):
+    __tablename__ = "model_prices"
+    __table_args__ = (
+        UniqueConstraint("provider", "model", "effective_at", name="uq_model_prices_effective"),
+    )
+
+    price_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    provider: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    input_per_mtok: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    cached_input_per_mtok: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    cache_write_per_mtok: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
+    output_per_mtok: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    reasoning_per_mtok: Mapped[Decimal | None] = mapped_column(Numeric(20, 10))
+    reasoning_priced_separately: Mapped[bool] = mapped_column(Boolean)
+    source: Mapped[str] = mapped_column(Text)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ModelCallRow(Base):
+    __tablename__ = "model_calls"
+    __table_args__ = (
+        Index("ix_model_calls_run_step_attempt", "run_id", "step_number", "attempt_number"),
+        Index("ix_model_calls_tenant_started", "tenant_id", "started_at"),
+        Index("ix_model_calls_session", "session_id"),
+    )
+
+    attempt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[str] = mapped_column(Text)
+    step_number: Mapped[int] = mapped_column(Integer)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    model_policy: Mapped[str] = mapped_column(Text)
+    registry_version: Mapped[str] = mapped_column(Text)
+    prefix_sha256: Mapped[str] = mapped_column(String(64))
+    input_tokens: Mapped[int] = mapped_column(Integer)
+    cached_input_tokens: Mapped[int] = mapped_column(Integer)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer)
+    output_tokens: Mapped[int] = mapped_column(Integer)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer)
+    cost: Mapped[Decimal] = mapped_column(Numeric(20, 10))
+    cost_source: Mapped[str] = mapped_column(Text)
+    price_id: Mapped[str | None] = mapped_column(
+        Text, ForeignKey("model_prices.price_id", ondelete="SET NULL")
+    )
+    stop_reason: Mapped[str | None] = mapped_column(Text)
+    error_kind: Mapped[str | None] = mapped_column(Text)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

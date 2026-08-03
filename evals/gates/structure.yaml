@@ -28,4 +28,4 @@
   kind: structural
   spec: docs/plan/event-log-and-persistence.md#hard-gates
   statement: "**The ORM stays in the adapter.** No module outside `adapters/persistence/` imports `sqlalchemy`, and no name defined in `sqlalchemy_models.py` appears in a signature outside that package. This is dependency rule 7 in the form a static check can evaluate. Registered as `gate.structure.orm_confined`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_import_boundaries.py::test_orm_confined

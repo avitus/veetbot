@@ -3,14 +3,14 @@
 This repository is implementing the provider-neutral agent platform defined by
 the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
 strictly milestone-gated. Milestone 0 established the repository and engineering
-foundation. Milestone 1 adds the first complete, in-memory model/tool runtime.
+foundation. Milestone 1 added the first complete, in-memory model/tool runtime;
+Milestone 2 is replacing its process-local seams with PostgreSQL and workers.
 
 ## Current status
 
-Milestones 0 and 1 are complete. The in-memory runtime, fake provider,
-calculator and current-time tools, deterministic evaluation harness, eleven
-initial cases, and all 28 Milestone 1 gates passed locally and in hosted
-CircleCI.
+Milestones 0 and 1 are complete. Milestone 2, which adds PostgreSQL persistence,
+durable checkpoints, fenced run claiming, crash recovery, and the separate
+worker process, is in progress.
 
 ## Prerequisites
 
@@ -87,9 +87,16 @@ Static and contract tests deny network egress. Integration tests may use Unix
 sockets and loopback only. Live tests are the sole category that lifts the
 socket block.
 
-## Run the in-memory agent
+## Run the durable agent
 
-After copying `.env.example` to `.env`, run the required calculator flow:
+After copying `.env.example` to `.env` and applying migrations, start a worker
+in one terminal:
+
+```bash
+uv run agent worker --role worker
+```
+
+Then submit the calculator flow from another terminal:
 
 ```bash
 uv run agent run "What is 17 multiplied by 23?"
@@ -102,10 +109,10 @@ eleven checked-in deterministic cases with:
 uv run agent eval run
 ```
 
-Milestone 1 state lasts only for one process. `agent session create`,
-`agent run get`, and `agent run events` are wired to the shared application
-services, but a later CLI process cannot read an identifier created by an
-earlier process until Milestone 2 adds PostgreSQL persistence.
+`agent session create`, `agent run get`, and `agent run events` read the same
+PostgreSQL state across processes. Run periodic lease reclamation separately
+with `uv run agent worker --role maintenance` in deployments that do not use a
+process supervisor to start that role.
 
 Hosted checks use [CircleCI](https://circleci.com/) via
 `.circleci/config.yml`. Connect the repository as a CircleCI project for the
@@ -133,8 +140,9 @@ here so availability is not confused with implementation:
 
 | Workflow | Availability |
 | --- | --- |
-| Use the fake provider and run `agent run` | Milestone 1 |
-| Start the durable worker | Milestone 2 |
+| Use the fake provider in the deterministic in-memory composition | Milestone 1 |
+| Submit with `agent run` and complete it through the durable worker | Milestone 2 (implemented) |
+| Start the durable worker | Milestone 2 (implemented) |
 | Configure OpenAI, Anthropic, or an OpenAI-compatible endpoint | Milestone 3 |
 | Run optional live-provider tests | Milestone 3 |
 | Inspect model/tool traces and usage | Milestone 3 |
@@ -142,8 +150,8 @@ here so availability is not confused with implementation:
 | Start the HTTP API | Milestone 5 |
 | Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
 
-`agent run`, `agent session create`, and `agent eval run` are available now.
-Do not invoke `agent api`, `agent worker`, or `agent chat`; their owning
+`agent run`, `agent session create`, `agent worker`, and `agent eval run` are
+available now. Do not invoke `agent api` or `agent chat`; their owning
 milestones have not been implemented.
 
 ## Documentation and governance

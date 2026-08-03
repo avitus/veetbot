@@ -12,7 +12,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, model_validator
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.messages import ContentPart
+from agent_core.domain.messages import ContentPart, ToolResultItem
 from agent_core.domain.policies import (
     ExecutionTarget,
     IdempotencyClass,
@@ -149,12 +149,24 @@ class ToolInvocation(BaseModel):
     call_id: str
     tool_name: str
     tool_version: str
+    tool_source: ToolSource = ToolSource.BUILTIN
+    server_id: str | None = None
+    idempotency_class: IdempotencyClass = IdempotencyClass.READ_ONLY
+    attempt_number: int = 1
     status: ToolInvocationStatus
     raw_arguments: str
     normalized_arguments: dict[str, Any] | None = None
     normalized_arguments_hash: str | None = None
     idempotency_key: str
     effect_sent_at: datetime | None = None
+    suspended_kind: str | None = None
+    suspended_ref: str | None = None
+    output_bytes: int | None = None
+    truncated: bool = False
+    artifact_id: UUID | None = None
+    origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
+    parallel_group: UUID | None = None
     outcome: ToolOutcome | None = None
+    result_item: ToolResultItem | None = None
     created_at: datetime
     updated_at: datetime

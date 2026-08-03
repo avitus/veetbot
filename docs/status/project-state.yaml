@@ -3,12 +3,13 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_1_complete
+  status: milestone_2_in_progress
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 1
+  current_milestone: 2
   authorized_milestones:
     - 0
     - 1
+    - 2
 
 milestones:
   "0":
@@ -19,7 +20,7 @@ milestones:
     status: complete
   "2":
     title: PostgreSQL persistence and durable worker
-    status: not_started
+    status: in_progress
   "3":
     title: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
     status: not_started
@@ -139,6 +140,15 @@ verification:
           static partitions respectively; all three GitHub commit status
           contexts completed successfully.
     remaining: []
+  milestone_2:
+    recorded_at: 2026-08-03T18:42:10Z
+    status: in_progress
+    evidence: []
+    remaining:
+      - Implement the PostgreSQL schema, repositories, event log, checkpoints,
+        projections, run queue, worker supervision, and recovery path.
+      - Activate and pass all 16 Milestone 2 gates.
+      - Record local, migration, resilience, and hosted CircleCI evidence.
 
 documentation:
   canonical_format: markdown
@@ -428,5 +438,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-01T01:19:23Z
+last_updated: 2026-08-03T18:42:10Z
 last_reviewed_commit: 30664ed

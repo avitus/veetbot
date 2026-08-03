@@ -8,6 +8,8 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from agent_core.adapters.persistence.sqlalchemy_models import Base
+
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -16,7 +18,7 @@ database_url = environ.get("DATABASE_URL")
 if database_url:
     config.set_main_option("sqlalchemy.url", database_url)
 
-target_metadata = None
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
