@@ -126,8 +126,6 @@ class RunService:
                             expires_at=now + timedelta(hours=24),
                         )
                     )
-                    if record.request_hash != request_hash:
-                        raise ConflictError("idempotency key was reused for a different request")
                     if record.run_id != run.id:
                         raise _ExistingIdempotentRunError(record.run_id)
         except _ExistingIdempotentRunError as duplicate:

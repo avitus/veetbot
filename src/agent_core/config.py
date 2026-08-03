@@ -192,9 +192,12 @@ INTERPOLATION = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 MINIMUM_CONFIG_VALUES: Mapping[str, int] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
+        "runtime/limits.yaml:queue.max_attempts": 1,
         "runtime/limits.yaml:run_defaults.max_steps": 1,
         "runtime/limits.yaml:run_defaults.max_model_calls": 1,
         "runtime/limits.yaml:run_defaults.max_tool_calls": 1,
+        "runtime/limits.yaml:worker.heartbeat_divisor": 2,
+        "runtime/limits.yaml:worker.lease_seconds": 1,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
         "context/plan.yaml:classes.tool_definitions.max_items": 1,
     }

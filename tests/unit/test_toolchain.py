@@ -15,7 +15,7 @@ import agent_core.cli.main as cli_main
 from agent_core.cli.main import app
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.runs import Run, RunStatus
-from tests.conftest import NETWORK_MODE
+from tests.conftest import NETWORK_MODE, _integration_endpoints
 from tests.contract.support import run
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -43,7 +43,11 @@ def test_static_suite_blocks_all_socket_egress_entrypoints(entrypoint: str) -> N
             client.sendmsg([b"probe"], [], 0, ("203.0.113.1", 443))
 
 
-def test_integration_mode_permits_loopback_socket_entrypoints() -> None:
+def test_integration_mode_permits_only_configured_database_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://127.0.0.1:9/agent")
+    _integration_endpoints.cache_clear()
     token = NETWORK_MODE.set("integration")
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
@@ -54,6 +58,7 @@ def test_integration_mode_permits_loopback_socket_entrypoints() -> None:
             assert client.sendmsg([b"probe"], [], 0, ("127.0.0.1", 9)) == 5
     finally:
         NETWORK_MODE.reset(token)
+        _integration_endpoints.cache_clear()
 
 
 def test_required_make_targets_exist() -> None:
@@ -239,6 +244,24 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
         "events",
     ]
     assert seen[2][1] == UUID(session_id)
+
+
+def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    queued_id = UUID("00000000-0000-0000-0000-000000000040")
+
+    async def timeout_submit(
+        prompt: str,
+        session_id: UUID | None,
+        idempotency_key: str | None,
+    ) -> tuple[Run, list[EventEnvelope]]:
+        del prompt, session_id, idempotency_key
+        raise cli_main.QueuedRunTimeoutError(queued_id)
+
+    monkeypatch.setattr(cli_main, "_submit", timeout_submit)
+    result = CliRunner().invoke(app, ["run", "queued work"])
+
+    assert result.exit_code == 5
+    assert str(queued_id) in result.stderr
 
 
 def test_alembic_config_accepts_percent_encoded_database_url() -> None:

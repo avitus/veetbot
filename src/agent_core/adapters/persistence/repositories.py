@@ -53,7 +53,11 @@ from agent_core.domain.persistence import (
 )
 from agent_core.domain.runs import Run, RunCheckpoint, RunFailure, RunStatus, RunUsage
 from agent_core.domain.sessions import Session
-from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+from agent_core.domain.tools import (
+    ALLOWED_TOOL_TRANSITIONS,
+    ToolInvocation,
+    ToolInvocationStatus,
+)
 from agent_core.ports.determinism import Clock
 from agent_core.runtime.state_machine import require_transition
 
@@ -196,6 +200,22 @@ class PostgresRunRepository:
             raise NotFoundError("run not found")
         return run_to_domain(row)
 
+    async def _raise_guard_failure(
+        self,
+        run_id: UUID,
+        expected_status: RunStatus,
+        lease: WorkerLease | None,
+        operation: str,
+    ) -> None:
+        row = await self._session.get(RunRow, run_id)
+        if row is None:
+            raise NotFoundError("run not found")
+        if lease is not None and (
+            row.lease_owner != lease.worker_id or row.lease_epoch != lease.lease_epoch
+        ):
+            raise WorkerFencedError(f"{operation} guard failed; worker was fenced")
+        raise ConflictError(f"{operation} expected {expected_status.value}, found {row.status}")
+
     async def transition(
         self,
         run_id: UUID,
@@ -228,9 +248,8 @@ class PostgresRunRepository:
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
-            if lease is not None:
-                raise WorkerFencedError("run transition guard failed; worker was fenced")
-            raise ConflictError("run transition guard failed")
+            await self._raise_guard_failure(run_id, expected_status, lease, "run transition")
+            raise AssertionError("guard failure helper must raise")
         return run_to_domain(row)
 
     async def update_counters(self, run: Run, *, lease: WorkerLease | None = None) -> None:
@@ -250,9 +269,7 @@ class PostgresRunRepository:
             )
         )
         if not _rowcount(await self._session.execute(statement)):
-            if lease is not None:
-                raise WorkerFencedError("counter update guard failed; worker was fenced")
-            raise ConflictError("counter update guard failed")
+            await self._raise_guard_failure(run.id, run.status, lease, "counter update")
 
     async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None:
         statement = (
@@ -261,6 +278,8 @@ class PostgresRunRepository:
             .values(seed_event_sequence=sequence, updated_at=self._clock.now())
         )
         if not _rowcount(await self._session.execute(statement)):
+            if await self._session.get(RunRow, run_id) is None:
+                raise NotFoundError("run not found")
             raise ConflictError("run seed sequence was already assigned")
 
 
@@ -449,6 +468,8 @@ class PostgresCheckpointRepository:
             raise ConflictError("checkpoint conversation reference is malformed") from exc
         await self._history.catch_up(session_id)
         history = await self._history.read(session_id, through_sequence)
+        if history.through_sequence < through_sequence:
+            raise ConflictError("session-history projection did not reach the checkpoint sequence")
         state["conversation"] = [item.model_dump(mode="json") for item in history.items]
         return RunCheckpoint.model_validate(state)
 
@@ -485,7 +506,6 @@ class PostgresCheckpointRepository:
         run_row = await self._session.get(RunRow, run_id)
         if run_row is None:
             raise NotFoundError("run not found")
-        await self._history.catch_up(run_row.session_id)
         state["conversation"] = {
             "$session_history": {
                 "session_id": str(run_row.session_id),
@@ -531,9 +551,12 @@ class PostgresCheckpointRepository:
         latest_full = next((row.version for row in reversed(rows) if row.full), None)
         if latest_full is None:
             raise ConflictError("checkpoint chain has no full snapshot")
-        keep = {row.version for row in rows if row.version >= latest_full}
         if terminal:
-            keep.add(rows[-1].version)
+            if not rows[-1].full:
+                raise ConflictError("terminal checkpoint retention requires a final full snapshot")
+            keep = {rows[-1].version}
+        else:
+            keep = {row.version for row in rows if row.version >= latest_full}
         result = await self._session.execute(
             delete(CheckpointRow).where(
                 CheckpointRow.run_id == run_id, CheckpointRow.version.not_in(keep)
@@ -554,12 +577,8 @@ class PostgresCheckpointRepository:
             RunStatus.CANCELLED,
         }
         if terminal:
-            latest_full = next((row.version for row in reversed(rows) if row.full), None)
-            if latest_full is None:
-                raise ConflictError("checkpoint chain has no full snapshot")
-            removable = [row.version for row in rows if row.version < latest_full]
-        else:
-            removable = [row.version for row in rows]
+            raise ConflictError("delete_nonterminal refuses a terminal run")
+        removable = [row.version for row in rows]
         if not removable:
             return 0
         result = await self._session.execute(
@@ -568,29 +587,6 @@ class PostgresCheckpointRepository:
             )
         )
         return _rowcount(result)
-
-
-_ALLOWED_TOOL_TRANSITIONS: dict[ToolInvocationStatus, set[ToolInvocationStatus]] = {
-    ToolInvocationStatus.PROPOSED: {
-        ToolInvocationStatus.AUTHORIZED,
-        ToolInvocationStatus.DENIED,
-    },
-    ToolInvocationStatus.AUTHORIZED: {ToolInvocationStatus.RUNNING},
-    ToolInvocationStatus.WAITING_FOR_APPROVAL: {
-        ToolInvocationStatus.AUTHORIZED,
-        ToolInvocationStatus.DENIED,
-    },
-    ToolInvocationStatus.RUNNING: {
-        ToolInvocationStatus.RUNNING,
-        ToolInvocationStatus.SUCCEEDED,
-        ToolInvocationStatus.FAILED,
-        ToolInvocationStatus.UNCERTAIN,
-    },
-    ToolInvocationStatus.SUCCEEDED: set(),
-    ToolInvocationStatus.FAILED: set(),
-    ToolInvocationStatus.DENIED: set(),
-    ToolInvocationStatus.UNCERTAIN: set(),
-}
 
 
 class PostgresToolInvocationRepository:
@@ -665,7 +661,7 @@ class PostgresToolInvocationRepository:
             raise ConflictError(f"expected {expected_status.value}, found {current.status.value}")
         if invocation.id != invocation_id or invocation.run_id != current.run_id:
             raise ConflictError("tool invocation identity cannot change")
-        if invocation.status not in _ALLOWED_TOOL_TRANSITIONS[current.status]:
+        if invocation.status not in ALLOWED_TOOL_TRANSITIONS[current.status]:
             raise ConflictError(
                 f"invalid tool transition {current.status.value}->{invocation.status.value}"
             )
@@ -732,8 +728,9 @@ class PostgresToolInvocationRepository:
 
 
 class PostgresIdempotencyRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
+        self._clock = clock
 
     async def get(self, key: str, tenant_id: str, principal_id: str) -> IdempotencyRecord | None:
         await self._session.execute(
@@ -745,12 +742,22 @@ class PostgresIdempotencyRepository:
                     IdempotencyKeyRow.key == key,
                     IdempotencyKeyRow.tenant_id == tenant_id,
                     IdempotencyKeyRow.principal_id == principal_id,
+                    IdempotencyKeyRow.expires_at > self._clock.now(),
                 )
             )
         ).one_or_none()
         return None if row is None else idempotency_to_domain(row)
 
     async def create(self, record: IdempotencyRecord) -> IdempotencyRecord:
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(f"request:{record.key}", 0)))
+        )
+        await self._session.execute(
+            delete(IdempotencyKeyRow).where(
+                IdempotencyKeyRow.key == record.key,
+                IdempotencyKeyRow.expires_at <= self._clock.now(),
+            )
+        )
         statement = (
             pg_insert(IdempotencyKeyRow)
             .values(**idempotency_values(record))
@@ -773,15 +780,11 @@ class PostgresUsageRepository:
         self._session = session
 
     async def record_attempt(self, call: ModelCallRecord) -> None:
-        inserted = _rowcount(
-            await self._session.execute(
-                pg_insert(ModelCallRow)
-                .values(**model_call_values(call))
-                .on_conflict_do_nothing(index_elements=[ModelCallRow.attempt_id])
-            )
+        await self._session.execute(
+            pg_insert(ModelCallRow)
+            .values(**model_call_values(call))
+            .on_conflict_do_nothing(index_elements=[ModelCallRow.attempt_id])
         )
-        if not inserted:
-            return
 
     async def run_usage(self, run_id: UUID) -> RunUsage:
         row = await self._session.get(RunRow, run_id)

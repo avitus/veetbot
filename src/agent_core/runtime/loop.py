@@ -92,6 +92,7 @@ async def _append_event(
 async def checkpoint(context: CheckpointContext, trigger: str) -> None:
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
+    previous = context.checkpoint.model_copy(deep=True)
     context.checkpoint.budget_state = {
         "step_count": context.run.step_count,
         "model_call_count": context.run.model_call_count,
@@ -106,28 +107,32 @@ async def checkpoint(context: CheckpointContext, trigger: str) -> None:
         or context.checkpoint.version % 8 == 1
         or trigger in {"compaction", "suspended", "cancelled", "failed", "final"}
     )
-    async with context.uow_factory() as uow:
-        event = await uow.events.append(
-            NewEvent(
-                session_id=context.run.session_id,
-                run_id=context.run.id,
-                event_type="run.checkpointed",
-                actor_type="runtime",
-                payload={
-                    "version": context.checkpoint.version,
-                    "trigger": trigger,
-                    "full": full,
-                },
-            ),
-            lease=context.lease,
-        )
-        context.checkpoint.last_event_sequence = event.sequence
-        await uow.checkpoints.write(
-            context.run.id,
-            context.checkpoint,
-            full=full,
-            lease=context.lease,
-        )
+    try:
+        async with context.uow_factory() as uow:
+            event = await uow.events.append(
+                NewEvent(
+                    session_id=context.run.session_id,
+                    run_id=context.run.id,
+                    event_type="run.checkpointed",
+                    actor_type="runtime",
+                    payload={
+                        "version": context.checkpoint.version,
+                        "trigger": trigger,
+                        "full": full,
+                    },
+                ),
+                lease=context.lease,
+            )
+            context.checkpoint.last_event_sequence = event.sequence
+            await uow.checkpoints.write(
+                context.run.id,
+                context.checkpoint,
+                full=full,
+                lease=context.lease,
+            )
+    except BaseException:
+        context.checkpoint = previous
+        raise
 
 
 def _failure(
@@ -398,18 +403,6 @@ async def run_loop(context: RunContext) -> RunOutcome:
         )
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
-        recorded_steps = context.checkpoint.working_state.setdefault(
-            "tool_usage_recorded_steps", {}
-        )
-        if not isinstance(recorded_steps, dict):
-            return _failure(
-                context,
-                FailureReason.INTERNAL_ERROR,
-                "WorkingStateError",
-                "the tool-usage marker was malformed",
-                step,
-            )
-        recorded_steps[str(step.step_number)] = len(results)
         context.checkpoint.conversation.extend(results)
         context.checkpoint.pending_tool_calls = []
         await checkpoint(context, "tool_call")

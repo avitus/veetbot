@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -83,6 +85,13 @@ class Composition:
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
 
 
+def _content_addressed_agent_version(agent: AgentSpec) -> str:
+    payload = agent.model_dump(mode="json", exclude={"id", "version"})
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
+    return f"1.0.0+h{digest}"
+
+
 class _ActiveToken:
     def __init__(self) -> None:
         self._token: RunCancellationToken | None = None
@@ -125,6 +134,9 @@ async def _compose(
     maximum_tools: int,
     max_internal_attempts: int,
     identical_call_threshold: int,
+    lease_seconds: float,
+    heartbeat_divisor: int,
+    worker_poll_interval: float,
 ) -> tuple[Composition, FakeModelProvider]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
@@ -189,6 +201,9 @@ async def _compose(
                     executor=executor,
                     clock=clock,
                     worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                    heartbeat_divisor=heartbeat_divisor,
+                    poll_interval_seconds=worker_poll_interval,
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
@@ -240,6 +255,8 @@ async def build(
     context_config = load_config_document(effective_settings, "context/plan.yaml")
     run_defaults = runtime_config["run_defaults"]
     model_limits = runtime_config["model"]
+    queue_config = runtime_config["queue"]
+    worker_config = runtime_config["worker"]
     circuit_breaker = tool_config["circuit_breaker"]
     tool_definitions = context_config["classes"]["tool_definitions"]
 
@@ -274,6 +291,10 @@ async def build(
             max_tool_calls=int(run_defaults["max_tool_calls"]),
         ),
     )
+    if storage == "postgres":
+        agent = agent.model_copy(
+            update={"version": _content_addressed_agent_version(agent)}, deep=True
+        )
     engine = None
     model_provider = None
     try:
@@ -291,6 +312,7 @@ async def build(
                     runs=run_repository,
                     events=event_repository,
                     invocations=invocation_repository,
+                    clock=effective_clock,
                 ),
             )
         else:
@@ -302,8 +324,8 @@ async def build(
                     create_session_factory(engine),
                     effective_clock,
                     EventUpcasterRegistry(),
-                    lease_seconds=30,
-                    max_attempts=3,
+                    lease_seconds=float(worker_config["lease_seconds"]),
+                    max_attempts=int(queue_config["max_attempts"]),
                 ),
             )
         composition, model_provider = await _compose(
@@ -317,6 +339,9 @@ async def build(
             maximum_tools=int(tool_definitions["max_items"]),
             max_internal_attempts=int(model_limits["max_internal_attempts"]),
             identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
+            lease_seconds=float(worker_config["lease_seconds"]),
+            heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
+            worker_poll_interval=float(queue_config["poll_interval_seconds"]),
         )
         yield composition
     finally:

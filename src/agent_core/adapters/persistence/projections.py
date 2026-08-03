@@ -24,13 +24,14 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.persistence import ProjectionCursor, SessionHistory, TrajectoryProjection
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.ports.determinism import Clock
 
 SESSION_HISTORY_NAME = "session_history"
 SESSION_HISTORY_VERSION = "session-history@1"
 TRAJECTORY_NAME = "trajectory_export"
 TRAJECTORY_VERSION = "trajectory@1"
-TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.cancelled"})
+TERMINAL_EVENTS = frozenset(f"run.{status.value.lower()}" for status in TERMINAL_RUN_STATUSES)
 PROJECTION_BATCH_SIZE = 500
 
 

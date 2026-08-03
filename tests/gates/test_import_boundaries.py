@@ -40,6 +40,11 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
             "from sqlalchemy.ext.asyncio import create_async_engine as build_engine\n"
             "ENGINE = build_engine('sqlite+aiosqlite://')\n"
         ),
+        "runtime/orm_boundary.py": (
+            "from agent_core.adapters.persistence.sqlalchemy_models import RunRow\n"
+            "def leak(row: RunRow) -> None:\n"
+            "    del row\n"
+        ),
     }
     for relative, content in fixtures.items():
         path = package / relative
@@ -55,3 +60,4 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
     )
     assert any("ambient nondeterminism call uuid.uuid4" in error for error in errors)
     assert any("module-scope database resource" in error for error in errors)
+    assert any("ORM type crosses adapter signature" in error for error in errors)

@@ -13,10 +13,10 @@ from agent_core.adapters.persistence.sqlalchemy_models import Base
 async def isolate_postgres_case(request: pytest.FixtureRequest) -> None:
     """Give each non-migration integration case an empty application schema."""
 
-    if request.path.name == "test_migrations.py":
-        return
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
+        pytest.skip("DATABASE_URL is required for PostgreSQL integration tests")
+    if request.path.name == "test_migrations.py":
         return
     engine = create_engine(database_url)
     table_names = ", ".join(f'"{table.name}"' for table in Base.metadata.sorted_tables)

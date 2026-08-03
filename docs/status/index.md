@@ -8,9 +8,9 @@ The authoritative, machine-readable project state lives in
 [`project-state.yaml`](project-state.yaml). Update that file (not this page) when
 project status changes; **status changes require evidence**.
 
-That record is the sole status surface for the current milestone, authorization,
-completion state, remaining work, and verification evidence. This page does not
-duplicate those mutable values.
+That record is the sole authoritative, machine-readable status surface for the
+current milestone, authorization, completion state, remaining work, and
+verification evidence. This page does not duplicate those mutable values.
 
 The milestone titles in `project-state.yaml` mirror the canonical
 [engineering plan](../plan/engineering-plan.md); keep the two synchronized.

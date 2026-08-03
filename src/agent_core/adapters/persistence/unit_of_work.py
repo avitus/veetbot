@@ -115,6 +115,7 @@ class MemoryUnitOfWorkFactory:
         runs: InMemoryRunRepository,
         events: InMemoryEventRepository,
         invocations: InMemoryToolInvocationRepository,
+        clock: Clock,
     ) -> None:
         self._agents = agents
         self._sessions = sessions
@@ -122,7 +123,7 @@ class MemoryUnitOfWorkFactory:
         self._events = events
         self._invocations = invocations
         self._checkpoints = InMemoryCheckpointRepository()
-        self._idempotency = InMemoryIdempotencyRepository()
+        self._idempotency = InMemoryIdempotencyRepository(clock)
         self._usage = InMemoryUsageRepository(runs)
         self._history = InMemorySessionHistoryRepository(events)
         self._trajectory = InMemoryTrajectoryProjectionRepository(events)
@@ -178,7 +179,7 @@ class PostgresUnitOfWork:
         )
         self.checkpoints = PostgresCheckpointRepository(session, self._clock, self.history)
         self.invocations = PostgresToolInvocationRepository(session, self.runs)
-        self.idempotency = PostgresIdempotencyRepository(session)
+        self.idempotency = PostgresIdempotencyRepository(session, self._clock)
         self.usage = PostgresUsageRepository(session)
         self.maintenance = PostgresMaintenanceRepository(session)
         self.queue = PostgresRunQueue(

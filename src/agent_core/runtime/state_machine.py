@@ -11,6 +11,7 @@ ALLOWED_TRANSITIONS: dict[RunStatus, frozenset[RunStatus]] = {
         {
             RunStatus.WAITING_FOR_APPROVAL,
             RunStatus.WAITING_FOR_USER,
+            RunStatus.QUEUED,
             RunStatus.COMPLETED,
             RunStatus.FAILED,
             RunStatus.CANCELLED,
