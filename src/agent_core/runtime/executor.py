@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 from uuid import UUID
 
@@ -28,7 +28,7 @@ from agent_core.domain.runs import (
 )
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.models import ModelProvider
+from agent_core.ports.models import ModelProvider, ModelRouter
 from agent_core.ports.persistence import CheckpointSeeder, UnitOfWorkFactory
 from agent_core.ports.repositories import BudgetLedger, PrincipalResolver
 from agent_core.runtime.cancellation import RunCancellationToken
@@ -48,6 +48,8 @@ class RunExecutor:
         context_builder: ContextBuilder,
         model_provider: ModelProvider,
         resolved_model: ResolvedModel,
+        model_router: ModelRouter | None = None,
+        model_providers: Mapping[str, ModelProvider] | None = None,
         budget_factory: BudgetFactory,
         clock: Clock,
         ids: IdFactory,
@@ -61,6 +63,8 @@ class RunExecutor:
         self._context_builder = context_builder
         self._model_provider = model_provider
         self._resolved_model = resolved_model
+        self._model_router = model_router
+        self._model_providers = dict(model_providers or {})
         self._budget_factory = budget_factory
         self._clock = clock
         self._ids = ids
@@ -108,6 +112,41 @@ class RunExecutor:
             if checkpoint_state is None:
                 checkpoint_state = await self._seed_checkpoint(uow, run, None, lease)
             agent = await uow.agents.get_version(run.agent_id, run.agent_version)
+        model_provider = self._model_provider
+        resolved_model = self._resolved_model
+        pin_created = False
+        if self._model_router is not None and agent.model_policy not in {
+            "deterministic",
+            "fake-balanced",
+        }:
+            if checkpoint_state.provider_pin is None and run.provider_pin is not None:
+                checkpoint_state.provider_pin = run.provider_pin.model_copy(deep=True)
+            if checkpoint_state.provider_pin is None:
+                resolved_model = await self._model_router.resolve(
+                    agent.model_policy,
+                    tenant_id=run.tenant_id,
+                )
+                checkpoint_state.provider_pin = self._model_router.pin(run.id, resolved_model)
+                run.provider_pin = checkpoint_state.provider_pin.model_copy(deep=True)
+                async with self._uow_factory() as uow:
+                    await uow.runs.set_provider_pin(run.id, run.provider_pin)
+                pin_created = True
+            else:
+                resolved_model = await self._model_router.resolve_pinned(
+                    checkpoint_state.provider_pin
+                )
+                resolved_model = resolved_model.model_copy(
+                    update={"policy_name": agent.model_policy}
+                )
+            if (
+                checkpoint_state.provider_continuation is not None
+                and checkpoint_state.provider_continuation.provider != resolved_model.provider
+            ):
+                raise ConflictError("provider continuation does not match the persisted pin")
+            selected = self._model_providers.get(resolved_model.provider)
+            if selected is None:
+                raise RuntimeError("the pinned model provider has no registered adapter")
+            model_provider = selected
         token = RunCancellationToken(self._clock, run.deadline_at)
         callback = on_token or self._on_token
         if callback is not None:
@@ -118,8 +157,8 @@ class RunExecutor:
             agent=agent,
             principal=principal,
             context_builder=self._context_builder,
-            model_provider=self._model_provider,
-            resolved_model=self._resolved_model,
+            model_provider=model_provider,
+            resolved_model=resolved_model,
             budgets=self._budget_factory(lease),
             uow_factory=self._uow_factory,
             lease=lease,
@@ -129,6 +168,8 @@ class RunExecutor:
             dispatch_tools=self._dispatch_tools,
         )
         try:
+            if pin_created:
+                await checkpoint(context, "provider_pinned")
             await self._resume_pending_tools(context)
             outcome = await run_loop(context)
         except RunCancelledError:

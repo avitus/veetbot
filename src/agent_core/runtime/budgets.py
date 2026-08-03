@@ -6,6 +6,7 @@ from agent_core.domain.errors import BudgetExceededError
 from agent_core.domain.messages import (
     ModelAttempt,
     ModelRequest,
+    ModelTurn,
     ModelUsage,
     ResolvedModel,
     StopReason,
@@ -16,7 +17,7 @@ from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.repositories import RunRepository
 
-MILESTONE_2_MODEL_REGISTRY_VERSION = "fake-model-catalog@1"
+FAKE_MODEL_REGISTRY_VERSION = "fake-model-catalog@1"
 
 
 def _restore_run_accounting(run: Run, snapshot: Run) -> None:
@@ -97,10 +98,21 @@ class InMemoryBudgetLedger:
         attempt: ModelAttempt | None = None,
         request: ModelRequest | None = None,
         resolved_model: ResolvedModel | None = None,
+        model_turn: ModelTurn | None = None,
+        registry_version: str | None = None,
         stop_reason: StopReason | None = None,
         error_kind: ModelErrorKind | None = None,
     ) -> None:
-        del attempt, request, resolved_model, stop_reason, error_kind, step
+        del (
+            attempt,
+            request,
+            resolved_model,
+            model_turn,
+            registry_version,
+            stop_reason,
+            error_kind,
+            step,
+        )
         reasoning = run.usage.reasoning_tokens
         if usage.reasoning_tokens is not None:
             reasoning = (reasoning or 0) + usage.reasoning_tokens
@@ -167,6 +179,8 @@ class UnitOfWorkBudgetLedger:
         attempt: ModelAttempt | None = None,
         request: ModelRequest | None = None,
         resolved_model: ResolvedModel | None = None,
+        model_turn: ModelTurn | None = None,
+        registry_version: str | None = None,
         stop_reason: StopReason | None = None,
         error_kind: ModelErrorKind | None = None,
     ) -> None:
@@ -192,28 +206,31 @@ class UnitOfWorkBudgetLedger:
         run.updated_at = self._clock.now()
         try:
             async with self._uow_factory() as uow:
-                await uow.usage.record_attempt(
-                    ModelCallRecord(
-                        attempt_id=attempt.attempt_id,
-                        run_id=run.id,
-                        session_id=run.session_id,
-                        tenant_id=run.tenant_id,
-                        step_number=step.step_number,
-                        attempt_number=attempt.attempt_number,
-                        provider=resolved_model.provider,
-                        model=resolved_model.model,
-                        model_policy=resolved_model.policy_name,
-                        registry_version=MILESTONE_2_MODEL_REGISTRY_VERSION,
-                        prefix_sha256=_require_prefix_hash(request),
-                        usage=usage,
-                        cost=usage.cost,
-                        cost_source=usage.cost_source,
-                        stop_reason=stop_reason,
-                        error_kind=error_kind,
-                        started_at=attempt.started_at,
-                        finished_at=self._clock.now(),
-                    )
+                turn_values = {} if model_turn is None else model_turn.model_dump(mode="python")
+                call = ModelCallRecord.model_validate(
+                    {
+                        **turn_values,
+                        "attempt_id": attempt.attempt_id,
+                        "run_id": run.id,
+                        "session_id": run.session_id,
+                        "tenant_id": run.tenant_id,
+                        "step_number": step.step_number,
+                        "attempt_number": attempt.attempt_number,
+                        "provider": resolved_model.provider,
+                        "model": resolved_model.model,
+                        "model_policy": resolved_model.policy_name,
+                        "registry_version": (registry_version or FAKE_MODEL_REGISTRY_VERSION),
+                        "prefix_sha256": _require_prefix_hash(request),
+                        "usage": usage,
+                        "cost": usage.cost,
+                        "cost_source": usage.cost_source,
+                        "stop_reason": stop_reason,
+                        "error_kind": error_kind,
+                        "started_at": attempt.started_at,
+                        "finished_at": self._clock.now(),
+                    }
                 )
+                await uow.usage.record_attempt(call)
                 await uow.runs.update_counters(run, lease=self._lease)
         except BaseException:
             _restore_run_accounting(run, snapshot)

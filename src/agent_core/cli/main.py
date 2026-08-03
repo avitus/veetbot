@@ -18,7 +18,11 @@ import typer
 from agent_core import __version__
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import (
+    ExportConsentError,
+    ExportRedactionError,
+    NotFoundError,
+)
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.runs import Run, RunStatus
 
@@ -99,8 +103,9 @@ async def _submit(
     prompt: str,
     session_id: UUID | None,
     idempotency_key: str | None,
+    model_policy: str | None,
 ) -> tuple[Run, list[EventEnvelope]]:
-    async with build(storage="postgres") as composition:
+    async with build(storage="postgres", model_policy=model_policy) as composition:
         previous_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, lambda _signum, _frame: composition.runs.interrupt())
         try:
@@ -125,6 +130,13 @@ def run_command(
         str | None,
         typer.Option("--idempotency-key", help="Deduplicate a retried submission."),
     ] = None,
+    model_policy: Annotated[
+        str | None,
+        typer.Option(
+            "--model-policy",
+            help="Use a declared model policy for a new session (for example balanced or local).",
+        ),
+    ] = None,
     json_output: Annotated[
         bool, typer.Option("--json", help="Print the run record as JSON.")
     ] = False,
@@ -136,7 +148,7 @@ def run_command(
     if prompt is None:
         raise typer.BadParameter("a prompt is required")
     try:
-        run, events = asyncio.run(_submit(prompt, session_id, idempotency_key))
+        run, events = asyncio.run(_submit(prompt, session_id, idempotency_key, model_policy))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -180,6 +192,31 @@ def run_events(run_id: UUID) -> None:
     except (ConfigurationError, NotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
+
+
+async def _export_run(run_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.trajectories.export(run_id)
+
+
+@run_app.command("export")
+def run_export(
+    run_id: UUID,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Print the complete ArtifactRef as JSON.")
+    ] = False,
+) -> None:
+    """Materialize one consent-gated, redacted trajectory artifact."""
+
+    try:
+        artifact = asyncio.run(_export_run(run_id))
+    except NotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    except (ConfigurationError, ExportConsentError, ExportRedactionError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(artifact.model_dump_json() if json_output else str(artifact.id))
 
 
 async def _create_session() -> UUID:
@@ -228,6 +265,29 @@ def session_create() -> None:
         raise typer.Exit(4) from exc
 
 
+async def _change_export_consent(action: str) -> Any:
+    async with build(storage="postgres") as composition:
+        if action == "grant":
+            return await composition.trajectories.grant_consent()
+        return await composition.trajectories.withdraw_consent()
+
+
+@session_app.command("export-consent")
+def session_export_consent(
+    action: Annotated[str, typer.Argument(help="Consent action: grant or withdraw.")],
+) -> None:
+    """Grant prospective export consent or withdraw it globally."""
+
+    if action not in {"grant", "withdraw"}:
+        raise typer.BadParameter("action must be grant or withdraw")
+    try:
+        consent = asyncio.run(_change_export_consent(action))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(consent.model_dump_json())
+
+
 @eval_app.command("run")
 def eval_run(
     suite: Annotated[str, typer.Argument(help="Evaluation suite to run.")] = "deterministic",
@@ -237,11 +297,11 @@ def eval_run(
     """Run checked-in deterministic cases without loading evals in normal startup."""
 
     if suite != "deterministic":
-        raise typer.BadParameter("Milestone 1 provides only the deterministic suite")
+        raise typer.BadParameter("the current implementation provides only the deterministic suite")
     try:
         module = cast(_EvalRunnerModule, importlib.import_module("agent_core.evals.runner"))
         results = module.run_selected_sync(
-            Path.cwd(), current_milestone=1, tag=tag, case_name=case_name
+            Path.cwd(), current_milestone=3, tag=tag, case_name=case_name
         )
     except (AssertionError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)

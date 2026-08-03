@@ -58,10 +58,10 @@
   kind: case
   spec: docs/plan/event-log-and-persistence.md#hard-gates
   statement: "**The export is redacted, and refuses when it is not.** A run seeded with one instance of each of the scanner's five rule families, plus a tenant-declared pattern, exports with every one replaced by its placeholder and a clean verification scan over the finished document. A second case disables the replacement stage and asserts that the export raises `ExportRedactionError`, writes no artifact, and names the rule that fired without printing what it matched. Registered as `gate.event.export_redacted`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_trajectory_export_m3.py::test_export_replaces_all_rules_and_fails_closed
 - id: gate.event.export_consent
   milestone: 3
   kind: case
   spec: docs/plan/event-log-and-persistence.md#hard-gates
   statement: "**Consent is stamped forward and withdrawn backward.** Four states — tenant disabled, principal never granted, granted then withdrawn, both present — produce three refusals and one export. The withdrawal case additionally asserts that an export produced before the withdrawal has `expires_at` in the past and is gone after one sweeper pass, and that a grant made after a run does not make that run exportable. Registered as `gate.event.export_consent`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_trajectory_export_m3.py::test_consent_is_stamped_forward_and_withdrawn_backward

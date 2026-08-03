@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
 
+from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.determinism import (
     FixedClock,
     RandomIdFactory,
@@ -18,7 +20,12 @@ from agent_core.adapters.determinism import (
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
 from agent_core.adapters.identity import StaticPrincipalResolver
+from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
+from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
+from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
+from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
+from agent_core.adapters.models.unavailable import MissingCredentialProvider
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -38,7 +45,13 @@ from agent_core.adapters.persistence.unit_of_work import (
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.application.run_service import RunService
 from agent_core.application.session_service import SessionService
+from agent_core.application.trajectory_service import (
+    TrajectoryExportService,
+    TrajectoryRedactor,
+)
 from agent_core.config import (
+    PACKAGE_ROOT,
+    ConfigurationError,
     Settings,
     load_settings,
     validate_runtime_identity,
@@ -54,8 +67,10 @@ from agent_core.domain.messages import (
     StopReason,
 )
 from agent_core.domain.runs import CancelReason, RunLimits
+from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
+from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
@@ -72,6 +87,7 @@ from agent_core.tools.registry import StaticToolRegistry
 class Composition:
     runs: RunService
     sessions: SessionService
+    trajectories: TrajectoryExportService
     executor: RunExecutor
     uow_factory: UnitOfWorkFactory
     clock: Clock
@@ -121,13 +137,19 @@ async def _compose(
     clock: Clock,
     ids: IdFactory,
     script: FakeModelScript | None,
-) -> tuple[Composition, FakeModelProvider]:
+    model_router: StaticModelRouter,
+    model_providers: dict[str, ModelProvider],
+    trajectory_export_enabled: bool,
+    artifact_root: Path,
+    trajectory_redactor: TrajectoryRedactor | None,
+) -> tuple[Composition, list[ModelProvider]]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(CurrentTimeTool(clock))
     async with uow_factory() as uow:
         await uow.agents.put(agent)
     model_provider = FakeModelProvider(script or default_fake_script(), clock)
+    effective_providers = {"fake": model_provider, **model_providers}
     try:
         resolved_model = ResolvedModel(
             provider="fake",
@@ -148,6 +170,8 @@ async def _compose(
             context_builder=context_builder,
             model_provider=model_provider,
             resolved_model=resolved_model,
+            model_router=model_router,
+            model_providers=effective_providers,
             budget_factory=lambda lease: UnitOfWorkBudgetLedger(uow_factory, clock, lease),
             clock=clock,
             ids=ids,
@@ -161,6 +185,16 @@ async def _compose(
             else PostgresRunDispatcher()
         )
         session_service = SessionService(uow_factory, clock, ids, principal, agent)
+        trajectory_service = TrajectoryExportService(
+            uow_factory=uow_factory,
+            principal=principal,
+            clock=clock,
+            ids=ids,
+            tools=registry,
+            artifacts=LocalTrajectoryArtifactStore(artifact_root),
+            tenant_enabled=trajectory_export_enabled,
+            redactor=trajectory_redactor,
+        )
         run_service = RunService(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
@@ -170,11 +204,13 @@ async def _compose(
             ids=ids,
             cancel_active=token_slot.cancel,
             seed_checkpoint=checkpoint_seeder,
+            trajectory_export_enabled=trajectory_export_enabled,
         )
         return (
             Composition(
                 runs=run_service,
                 sessions=session_service,
+                trajectories=trajectory_service,
                 executor=executor,
                 uow_factory=uow_factory,
                 clock=clock,
@@ -187,13 +223,51 @@ async def _compose(
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
                     clock=clock,
+                    sweep_exports=trajectory_service.sweep_once,
                 ),
             ),
-            model_provider,
+            list(effective_providers.values()),
         )
     except BaseException:
-        await model_provider.close()
+        for provider in effective_providers.values():
+            await provider.close()
         raise
+
+
+def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[str, ModelProvider]:
+    providers: dict[str, ModelProvider] = {}
+    for profile_name, loaded in registry.profiles.items():
+        profile = loaded.document
+        credential = settings.credentials.get(profile_name)
+        api_key = None if credential is None else credential.get_secret_value()
+        if profile.adapter == "openai":
+            provider: ModelProvider = (
+                MissingCredentialProvider("openai")
+                if api_key is None
+                else OpenAIResponsesProvider(api_key=api_key, base_url=profile.base_url)
+            )
+        elif profile.adapter == "anthropic":
+            provider = (
+                MissingCredentialProvider("anthropic")
+                if api_key is None
+                else AnthropicMessagesProvider(api_key=api_key, base_url=profile.base_url)
+            )
+        elif profile.adapter == "chat_completions":
+            tags = profile.in_band_reasoning
+            provider = ChatCompletionsProvider(
+                base_url=profile.base_url,
+                api_key=api_key,
+                think_open="<think>" if tags is None else tags.open,
+                think_close="</think>" if tags is None else tags.close,
+            )
+        else:
+            raise ConfigurationError(f"adapter {profile.adapter!r} is not constructible")
+        if profile.adapter in providers:
+            raise ConfigurationError(
+                f"multiple enabled profiles select adapter {profile.adapter!r}"
+            )
+        providers[profile.adapter] = provider
+    return providers
 
 
 @asynccontextmanager
@@ -210,12 +284,20 @@ async def build(
     fixed_clock_at: datetime | None = None,
     sequential_ids: bool = False,
     storage: Literal["memory", "postgres"] = "memory",
+    model_policy: str | None = None,
+    model_provider_overrides: Mapping[str, ModelProvider] | None = None,
+    trajectory_redactor: TrajectoryRedactor | None = None,
 ) -> AsyncIterator[Composition]:
-    """Construct and own a Milestone 2 application graph for one process role."""
+    """Construct and own a Milestone 3 application graph for one process role."""
 
     # Phase 1: refusal. Loading Settings enforces production sandbox and auth rules.
     effective_settings = settings or load_settings()
     validate_settings(effective_settings)
+    provider_registry = ProviderRegistry.load(
+        PACKAGE_ROOT / "models",
+        adapters=ADAPTER_DEFINITIONS,
+        overlay_root=effective_settings.config_dir,
+    )
 
     effective_principal = principal or Principal(
         tenant_id="local",
@@ -239,15 +321,21 @@ async def build(
         FixedClock(fixed_clock_at) if fixed_clock_at is not None else SystemClock()
     )
     effective_ids = ids or (SequenceIdFactory() if sequential_ids else RandomIdFactory())
+    model_router = StaticModelRouter(provider_registry, effective_clock)
 
     # Phase 3: resources. PostgreSQL is selected explicitly by normal process roles;
     # deterministic evaluation keeps the contract-backed in-memory tier.
+    effective_model_policy = model_policy or "fake-balanced"
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
-        version="1.0.0",
-        name="Milestone 2 Agent",
+        version=(
+            "1.0.0"
+            if model_policy is None
+            else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
+        ),
+        name="Milestone 3 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
-        model_policy="fake-balanced",
+        model_policy=effective_model_policy,
         enabled_tools=(
             enabled_tools
             if enabled_tools is not None
@@ -257,7 +345,7 @@ async def build(
         limits=limits or RunLimits(max_steps=32, max_model_calls=16, max_tool_calls=32),
     )
     engine = None
-    model_provider = None
+    model_providers: list[ModelProvider] = []
     try:
         if storage == "memory":
             agent_repository = InMemoryAgentRepository()
@@ -288,7 +376,13 @@ async def build(
                     max_attempts=3,
                 ),
             )
-        composition, model_provider = await _compose(
+        provider_adapters = _provider_adapters(effective_settings, provider_registry)
+        for name, override in (model_provider_overrides or {}).items():
+            displaced = provider_adapters.get(name)
+            if displaced is not None:
+                await displaced.close()
+            provider_adapters[name] = override
+        composition, model_providers = await _compose(
             storage=storage,
             agent=agent,
             principal=effective_principal,
@@ -296,10 +390,15 @@ async def build(
             clock=effective_clock,
             ids=effective_ids,
             script=script,
+            model_router=model_router,
+            model_providers=provider_adapters,
+            trajectory_export_enabled=effective_settings.trajectory_export_enabled,
+            artifact_root=effective_settings.artifact_root,
+            trajectory_redactor=trajectory_redactor,
         )
         yield composition
     finally:
-        if model_provider is not None:
+        for model_provider in model_providers:
             await model_provider.close()
         if engine is not None:
             await engine.dispose()

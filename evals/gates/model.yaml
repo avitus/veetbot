@@ -4,71 +4,70 @@
   kind: structural
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "The import-boundary test passes: no provider SDK is reachable from the runtime, and neither vendor SDK is reachable from the other's adapter."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_model_m3.py::test_provider_sdks_are_isolated_to_their_own_adapter_modules
 - id: gate.model.contract_identical
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "The contract suite passes identically against fake, recorded, OpenAI, Anthropic and `chat_completions`. Identical means the assembled `ModelTurn` matches on content, tool calls, `call_id` values and `stop_reason`; usage and cost may differ."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/contract/test_model_gateway_contract.py::test_contract_is_identical_across_fake_recorded_and_three_api_modes
 - id: gate.model.call_id_roundtrip
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "Tool-call ids round-trip byte-for-byte through a two-step tool loop on every adapter."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/contract/test_model_gateway_contract.py::test_call_id_round_trips_through_provider_request
 - id: gate.model.stream_invariants
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "A stream that violates any of the six invariants is rejected by the validator, with a test per invariant."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_model_m3.py::test_all_six_stream_invariants
 - id: gate.model.no_secret_leak
   milestone: 3
   kind: structural
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "No API key, authorization header, or raw provider error body appears in any log line, event payload, span attribute or persisted row. Tested by a scanner over captured output, not by inspection."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_model_secret_m3.py::test_scanner_over_events_logs_spans_and_rows_finds_no_raw_secret
 - id: gate.model.malformed_args
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "Malformed tool arguments produce an error tool result and the loop continues, on every adapter."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_model_adapter_loops_m3.py::test_malformed_arguments_return_an_error_and_loop_continues
 - id: gate.model.pin_survives_resume
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "A killed and resumed run keeps its provider pin and its continuation payload, and does not switch providers."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_model_runtime_m3.py::test_pin_and_opaque_continuation_survive_worker_reconstruction
 - id: gate.model.cost_on_failure
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "Cost is recorded for failed attempts, and a run whose retries exhaust its budget stops with `BUDGET_EXCEEDED`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_model_cost_m3.py::test_failed_attempt_costs_accumulate_until_budget_exceeded
 - id: gate.model.ollama_scenario
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "The Ollama calculator scenario passes with no network cost."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_ollama_m3.py::test_ollama_wire_calculator_has_zero_network_cost
 - id: gate.model.live_smoke
   milestone: 3
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "A live one-call smoke test against each vendor passes when credentials are present and skips cleanly when they are not."
-  check: tests/gates/pending.py::pending_gate
-  optional: true
+  check: tests/live/test_model_providers_m3.py::test_vendor_one_call_smoke
 - id: gate.model.metadata_closed
   milestone: 3
   kind: structural
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "Every key any adapter writes into `provider_metadata` is a declared field of `ProviderMetadata`, and `provider_metadata` is read at exactly two call sites: the persistence adapter's flattening function and the span builder. An adapter that writes an undeclared key fails the check. Registered as `gate.model.metadata_closed`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_model_cost_m3.py::test_provider_metadata_is_closed_and_has_only_two_readers
 - id: gate.model.profile_valid
   milestone: 3
   kind: corpus
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "Every provider profile in the repository loads, and every member of a corpus of intentionally invalid profiles is rejected naming the rule it broke. The corpus carries one member per row of the loader's rule table. Registered as `gate.model.profile_valid`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_model_profiles_m3.py::test_every_invalid_profile_corpus_member_names_the_rule_it_broke

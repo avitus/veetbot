@@ -127,4 +127,5 @@ nav:
       - ADR-0036 The executable configuration inventory: adr/0036-configuration-default-inventory.md
       - ADR-0037 Milestone 1 in-memory seams: adr/0037-milestone-1-in-memory-seams.md
       - ADR-0038 Milestone 2 durable runtime seams: adr/0038-milestone-2-durable-runtime-seams.md
+      - ADR-0039 Milestone 3 provider and export seams: adr/0039-milestone-3-provider-and-export-seams.md
   - Changelog: changelog.md

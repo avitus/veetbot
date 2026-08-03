@@ -31,7 +31,7 @@ The system prompt never contains secrets. Tools obtain credentials from a
 server-side resolver after authorization; the model receives only references or
 capabilities.
 
-## Controls implemented through Milestone 1
+## Controls implemented through Milestone 3
 
 Milestone 0 establishes two executable controls before provider or tool code
 exists:
@@ -60,6 +60,36 @@ Milestone 1 adds executable controls at the first model/tool boundary:
   principals, and policy profiles.
 - Runtime limits, cancellation observation points, retry bounds, and the
   identical-call breaker stop unbounded execution.
+
+Milestone 2 makes those controls durable: tenant and principal predicates live
+in every repository query, state changes and their events commit atomically,
+lease epochs fence stale workers, checkpoints retain only provider-neutral
+conversation state, and raw external error details do not enter terminal run
+messages.
+
+Milestone 3 hardens the real provider and export boundaries:
+
+- Strict provider profiles refuse unknown keys, undeclared capabilities,
+  unsafe non-loopback HTTP endpoints, alias collisions, and incomplete pricing.
+  Provider and price snapshots are pinned durably before execution proceeds.
+- Provider SDK objects remain inside adapters. Provider errors are mapped to a
+  closed internal vocabulary, and normalized metadata is bounded to declared
+  scalar keys with exactly two consumers: persistence and span attributes.
+- Credentials remain server-side secret values. Structural tests scan the
+  request, normalized events, logs, spans, and persistence rows for synthetic
+  provider credentials without embedding a reusable secret in the test source.
+- Private reasoning is never emitted to the event log. Provider-only signed or
+  opaque reasoning state can live in a checkpoint for same-provider resume, but
+  it is excluded from events, model-call rows, logs, spans, and exports.
+- Trajectory export is disabled by default and requires both operator
+  enablement and prospective per-principal consent. Withdrawal expires existing
+  exports, and the maintenance sweeper deletes the corresponding bytes.
+- Export redaction structurally excludes sensitive execution fields, applies
+  every committed-secret and sensitive-key family plus tenant patterns, and
+  fails closed before writing if verification finds a remaining match.
+- Static and contract suites still deny network. The OpenAI-compatible local
+  path is exercised on loopback at zero cost; remote credentialed smoke tests
+  remain explicitly opt-in.
 
 Later controls remain requirements of their owning milestones and are not
 claimed as implemented here.

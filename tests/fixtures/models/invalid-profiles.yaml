@@ -1,0 +1,66 @@
+- rule: schema_version
+  mutation: schema_version
+  expected: schema_version
+- rule: profile_grammar
+  mutation: profile_grammar
+  expected: profile
+- rule: profile_file_stem
+  mutation: profile_file_stem
+  expected: file stem
+- rule: profile_unique
+  mutation: duplicate_enabled
+  expected: unique
+- rule: adapter_registered
+  mutation: adapter_unknown
+  expected: registered adapter
+- rule: api_closed
+  mutation: api_unknown
+  expected: responses, messages, or chat_completions
+- rule: api_permitted
+  mutation: api_wrong_adapter
+  expected: permitted
+- rule: base_url
+  mutation: base_url_remote_http
+  expected: loopback
+- rule: credential_ref
+  mutation: credential_missing
+  expected: present
+- rule: capabilities_closed
+  mutation: capability_missing
+  expected: all ten fields
+- rule: capability_ceiling
+  mutation: capability_widened
+  expected: capability ceiling
+- rule: limits_closed
+  mutation: limit_missing
+  expected: all three fields
+- rule: in_band_reasoning
+  mutation: in_band_unexpected
+  expected: if and only if
+- rule: models_cardinality
+  mutation: models_empty
+  expected: unknown or invalid
+- rule: model_id_unique
+  mutation: model_id_duplicate
+  expected: unique within a profile
+- rule: aliases_unique
+  mutation: alias_duplicate
+  expected: globally unique
+- rule: catalog_resolves
+  mutation: catalog_missing
+  expected: resolve in catalog
+- rule: pricing_xor_catalog
+  mutation: pricing_and_catalog
+  expected: pricing or catalog
+- rule: pricing_decimal_strings
+  mutation: pricing_float
+  expected: decimal strings
+- rule: pricing_required_amount
+  mutation: pricing_none
+  expected: input_per_mtok
+- rule: effective_at_offset
+  mutation: effective_without_offset
+  expected: explicit offset
+- rule: unknown_key
+  mutation: unknown_key
+  expected: unknown or invalid key

@@ -13,6 +13,7 @@ venv/
 .mypy_cache/
 .pytest_cache/
 .hypothesis/
+.agent/
 
 # uv
 # (uv.lock is intentionally allowed to be committed once generated.)

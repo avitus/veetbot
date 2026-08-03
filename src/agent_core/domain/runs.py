@@ -10,6 +10,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
+from agent_core.domain.messages import ConversationItem, ProviderPin
+
 
 class RunStatus(StrEnum):
     QUEUED = "QUEUED"
@@ -104,7 +106,7 @@ class RunCheckpoint(BaseModel):
     run_id: UUID
     version: int
     status: RunStatus
-    conversation: list[Any] = Field(default_factory=list)
+    conversation: list[ConversationItem] = Field(default_factory=list)
     pending_tool_calls: list[Any] = Field(default_factory=list)
     pending_approval_ids: list[UUID] = Field(default_factory=list)
     working_state: dict[str, Any] = Field(default_factory=dict)
@@ -112,6 +114,7 @@ class RunCheckpoint(BaseModel):
     budget_state: dict[str, Any] = Field(default_factory=dict)
     last_event_sequence: int = 0
     provider_continuation: ProviderContinuation | None = None
+    provider_pin: ProviderPin | None = None
     created_at: datetime
 
 
@@ -138,6 +141,8 @@ class Run(BaseModel):
     cancel_requested_at: datetime | None = None
     failure: RunFailure | None = None
     final_message: str | None = None
+    export_consent: bool = False
+    provider_pin: ProviderPin | None = None
     seed_event_sequence: int = 0
     created_at: datetime
     updated_at: datetime

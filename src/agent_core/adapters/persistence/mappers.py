@@ -6,22 +6,32 @@ from typing import Any, Literal, cast
 
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
+    ArtifactRow,
     EventRow,
     IdempotencyKeyRow,
     ModelCallRow,
     RunRow,
     SessionRow,
     ToolInvocationRow,
+    TrajectoryExportRow,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec
 from agent_core.domain.events import EventEnvelope, NewEvent
-from agent_core.domain.messages import CostSource, ModelUsage, StopReason, ToolResultItem
+from agent_core.domain.messages import (
+    CostSource,
+    ModelUsage,
+    ProviderMetadata,
+    ProviderPin,
+    StopReason,
+    ToolResultItem,
+)
 from agent_core.domain.persistence import IdempotencyRecord, ModelCallRecord
 from agent_core.domain.policies import IdempotencyClass, TrustLevel
 from agent_core.domain.runs import Run, RunFailure, RunLimits, RunStatus, RunUsage
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolOutcome, ToolSource
+from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 
 
 def agent_to_domain(row: AgentRow) -> AgentSpec:
@@ -109,6 +119,10 @@ def run_to_domain(row: RunRow) -> Run:
         cancel_requested_at=row.cancel_requested_at,
         failure=None if row.failure is None else RunFailure.model_validate(row.failure),
         final_message=row.final_message,
+        export_consent=row.export_consent,
+        provider_pin=(
+            None if row.provider_pin is None else ProviderPin.model_validate(row.provider_pin)
+        ),
         seed_event_sequence=row.seed_event_sequence,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -116,7 +130,7 @@ def run_to_domain(row: RunRow) -> Run:
 
 
 def run_values(run: Run) -> dict[str, Any]:
-    return {
+    values = {
         "id": run.id,
         "session_id": run.session_id,
         "parent_run_id": run.parent_run_id,
@@ -139,10 +153,17 @@ def run_values(run: Run) -> dict[str, Any]:
         "cancel_requested_at": run.cancel_requested_at,
         "failure": None if run.failure is None else run.failure.model_dump(mode="json"),
         "final_message": run.final_message,
+        "export_consent": run.export_consent,
+        "provider_pin": (
+            None if run.provider_pin is None else run.provider_pin.model_dump(mode="json")
+        ),
         "seed_event_sequence": run.seed_event_sequence,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
+    if run.provider_pin is None:
+        values.pop("provider_pin")
+    return values
 
 
 def event_to_domain(row: EventRow, upcasters: EventUpcasterRegistry) -> EventEnvelope:
@@ -303,13 +324,46 @@ def model_call_to_domain(row: ModelCallRow) -> ModelCallRecord:
             Literal["transient", "permanent", "protocol"] | None,
             row.error_kind,
         ),
+        metadata=ProviderMetadata(
+            provider_api=cast(
+                Literal["responses", "messages", "chat_completions"],
+                row.provider_api,
+            ),
+            response_id=row.response_id,
+            request_id=row.request_id,
+            resolved_model=row.resolved_model,
+            cache_breakpoints_sent=row.cache_breakpoints_sent,
+            cache_breakpoints_dropped=row.cache_breakpoints_dropped,
+        ),
         started_at=row.started_at,
         finished_at=row.finished_at,
     )
 
 
+def flatten_provider_metadata(
+    metadata: ProviderMetadata | None,
+    *,
+    provider: str,
+) -> dict[str, Any]:
+    """Flatten the closed metadata model into migration-controlled columns."""
+
+    if metadata is None:
+        provider_api = (
+            "responses"
+            if provider == "openai"
+            else "messages"
+            if provider == "anthropic"
+            else "chat_completions"
+        )
+        values: dict[str, Any] = {"provider_api": provider_api}
+    else:
+        values = metadata.model_dump(mode="python", exclude_none=False)
+    values.pop("previous_response_id", None)
+    return values
+
+
 def model_call_values(call: ModelCallRecord) -> dict[str, Any]:
-    return {
+    values = {
         "attempt_id": call.attempt_id,
         "run_id": call.run_id,
         "session_id": call.session_id,
@@ -333,4 +387,62 @@ def model_call_values(call: ModelCallRecord) -> dict[str, Any]:
         "error_kind": call.error_kind,
         "started_at": call.started_at,
         "finished_at": call.finished_at,
+    }
+    values.update(flatten_provider_metadata(call.metadata, provider=call.provider))
+    return values
+
+
+def artifact_to_domain(row: ArtifactRow) -> ArtifactRef:
+    if row.expires_at is None:
+        raise ValueError("trajectory export artifact has no expiry")
+    return ArtifactRef(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        session_id=row.session_id,
+        run_id=row.run_id,
+        name=row.name,
+        media_type=row.media_type,
+        storage_uri=row.storage_uri,
+        sha256=row.sha256,
+        size_bytes=row.size_bytes,
+        origin="trajectory_export",
+        trust=TrustLevel(row.trust),
+        expires_at=row.expires_at,
+        created_at=row.created_at,
+        metadata=dict(row.metadata_json),
+    )
+
+
+def artifact_values(artifact: ArtifactRef) -> dict[str, Any]:
+    values = artifact.model_dump(mode="python")
+    values["metadata_json"] = values.pop("metadata")
+    return values
+
+
+def trajectory_export_to_domain(
+    row: TrajectoryExportRow, artifact: ArtifactRow
+) -> TrajectoryExport:
+    return TrajectoryExport(
+        export_id=row.export_id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        run_id=row.run_id,
+        artifact=artifact_to_domain(artifact),
+        builder_version=row.builder_version,
+        ruleset_version=row.ruleset_version,
+        created_at=row.created_at,
+    )
+
+
+def trajectory_export_values(export: TrajectoryExport) -> dict[str, Any]:
+    return {
+        "export_id": export.export_id,
+        "tenant_id": export.tenant_id,
+        "principal_id": export.principal_id,
+        "run_id": export.run_id,
+        "artifact_id": export.artifact.id,
+        "builder_version": export.builder_version,
+        "ruleset_version": export.ruleset_version,
+        "created_at": export.created_at,
     }

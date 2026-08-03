@@ -49,6 +49,8 @@ class Settings:
     config_dir: Path | None
     credentials: Mapping[str, SecretStr]
     interpolation: Mapping[str, str]
+    trajectory_export_enabled: bool = False
+    artifact_root: Path = Path(".agent/artifacts")
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -57,6 +59,9 @@ SHIPPED_CONFIGS = (
     "policy/default.yaml",
     "models/policies.yaml",
     "models/catalog.yaml",
+    "models/providers/openai.yaml",
+    "models/providers/anthropic.yaml",
+    "models/providers/ollama.yaml",
     "context/plan.yaml",
     "tools/limits.yaml",
     "runtime/limits.yaml",
@@ -233,11 +238,15 @@ def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str
             if not path.is_file():
                 continue
             relative = path.relative_to(config_dir).as_posix()
-            if relative not in SHIPPED_CONFIGS:
+            is_provider_profile = relative.startswith("models/providers/") and relative.endswith(
+                ".yaml"
+            )
+            if relative not in SHIPPED_CONFIGS and not is_provider_profile:
                 raise ConfigurationError(f"overlay has no shipped counterpart: {relative}")
             if relative == FROZEN_CONFIG:
                 raise ConfigurationError("policy/hardline.yaml cannot be overlaid")
-            overlay_files[relative] = path
+            if relative in SHIPPED_CONFIGS:
+                overlay_files[relative] = path
 
     for relative in SHIPPED_CONFIGS:
         shipped = _read_yaml(PACKAGE_ROOT / relative)
@@ -318,6 +327,11 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         if name.endswith("_API_KEY") and value.strip()
     }
     interpolation = {"OPENAI_MODEL": values.get("OPENAI_MODEL", "")}
+    raw_export_enabled = values.get("AGENT_TRAJECTORY_EXPORT_ENABLED", "0").strip()
+    if raw_export_enabled not in {"0", "1"}:
+        raise ConfigurationError("AGENT_TRAJECTORY_EXPORT_ENABLED must be 0 or 1")
+    trajectory_export_enabled = raw_export_enabled == "1"
+    artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     _validate_documents(config_dir, interpolation)
 
     settings = Settings(
@@ -329,6 +343,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         config_dir=config_dir,
         credentials=MappingProxyType(credentials),
         interpolation=MappingProxyType(interpolation),
+        trajectory_export_enabled=trajectory_export_enabled,
+        artifact_root=artifact_root,
     )
     validate_settings(settings)
     return settings

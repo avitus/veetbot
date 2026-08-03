@@ -308,6 +308,7 @@ def architecture_errors(root: Path) -> list[str]:
                     (
                         "agent_core.domain",
                         "agent_core.ports",
+                        "agent_core.model",
                         module.split(".", 2)[0] + "." + module.split(".", 2)[1],
                     )
                 ):
@@ -352,9 +353,7 @@ def architecture_errors(root: Path) -> list[str]:
             for provider_sdk in sorted(imported_roots & PROVIDER_SDK_ROOTS):
                 errors.append(f"{relative}: provider SDK {provider_sdk} crosses adapter boundary")
 
-        if module != "agent_core.bootstrap" and not module.startswith(
-            "agent_core.adapters.persistence"
-        ):
+        if module != "agent_core.bootstrap" and not module.startswith("agent_core.adapters"):
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue

@@ -138,6 +138,7 @@ class RunRow(Base):
     failure: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     final_message: Mapped[str | None] = mapped_column(Text)
     export_consent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    provider_pin: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     seed_event_sequence: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
@@ -252,6 +253,7 @@ class ApprovalRow(Base):
 
 class ArtifactRow(Base):
     __tablename__ = "artifacts"
+    __table_args__ = (Index("ix_artifacts_expires_at", "expires_at"),)
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(Text)
@@ -267,6 +269,9 @@ class ArtifactRow(Base):
     storage_uri: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64))
     size_bytes: Mapped[int] = mapped_column(BigInteger)
+    origin: Mapped[str] = mapped_column(Text, server_default=text("'trajectory_export'"))
+    trust: Mapped[str] = mapped_column(Text, server_default=text("'external_untrusted'"))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_json: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSONB, server_default=text("'{}'::jsonb")
     )
@@ -386,6 +391,7 @@ class ModelCallRow(Base):
         Index("ix_model_calls_run_step_attempt", "run_id", "step_number", "attempt_number"),
         Index("ix_model_calls_tenant_started", "tenant_id", "started_at"),
         Index("ix_model_calls_session", "session_id"),
+        Index("ix_model_calls_tenant_response", "tenant_id", "response_id"),
     )
 
     attempt_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -415,5 +421,11 @@ class ModelCallRow(Base):
     )
     stop_reason: Mapped[str | None] = mapped_column(Text)
     error_kind: Mapped[str | None] = mapped_column(Text)
+    provider_api: Mapped[str] = mapped_column(Text, server_default=text("'chat_completions'"))
+    response_id: Mapped[str | None] = mapped_column(Text)
+    request_id: Mapped[str | None] = mapped_column(Text)
+    resolved_model: Mapped[str | None] = mapped_column(Text)
+    cache_breakpoints_sent: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
+    cache_breakpoints_dropped: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

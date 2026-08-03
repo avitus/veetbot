@@ -10,6 +10,7 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.messages import (
     ModelAttempt,
     ModelRequest,
+    ModelTurn,
     ModelUsage,
     ResolvedModel,
     StopReason,
@@ -26,6 +27,7 @@ from agent_core.domain.persistence import (
 from agent_core.domain.runs import BudgetScope, Run, RunCheckpoint, RunStatus, RunUsage, Step
 from agent_core.domain.sessions import Session
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 
 
 class AgentRepository(Protocol):
@@ -61,6 +63,8 @@ class RunRepository(Protocol):
     async def update_counters(self, run: Run, *, lease: WorkerLease | None = None) -> None: ...
 
     async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None: ...
+
+    async def set_provider_pin(self, run_id: UUID, pin: object) -> None: ...
 
 
 class ToolInvocationRepository(Protocol):
@@ -100,6 +104,8 @@ class BudgetLedger(Protocol):
         attempt: ModelAttempt | None = None,
         request: ModelRequest | None = None,
         resolved_model: ResolvedModel | None = None,
+        model_turn: ModelTurn | None = None,
+        registry_version: str | None = None,
         stop_reason: StopReason | None = None,
         error_kind: ModelErrorKind | None = None,
     ) -> None: ...
@@ -160,6 +166,32 @@ class TrajectoryProjectionRepository(Protocol):
     async def rebuild(self, run_id: UUID) -> TrajectoryProjection | None: ...
 
     async def read(self, run_id: UUID) -> TrajectoryProjection | None: ...
+
+
+class ExportConsentRepository(Protocol):
+    async def get(self, tenant_id: str, principal_id: str) -> ExportConsent | None: ...
+
+    async def get_for_update(self, tenant_id: str, principal_id: str) -> ExportConsent | None: ...
+
+    async def grant(self, consent: ExportConsent) -> ExportConsent: ...
+
+    async def withdraw(
+        self, tenant_id: str, principal_id: str, withdrawn_at: datetime
+    ) -> ExportConsent: ...
+
+
+class TrajectoryExportRepository(Protocol):
+    async def get_for_run(self, run_id: UUID) -> TrajectoryExport | None: ...
+
+    async def create(self, export: TrajectoryExport) -> TrajectoryExport: ...
+
+    async def expire_for_principal(
+        self, tenant_id: str, principal_id: str, expired_at: datetime
+    ) -> int: ...
+
+    async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]: ...
+
+    async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool: ...
 
 
 class MaintenanceRepository(Protocol):

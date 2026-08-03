@@ -1,12 +1,15 @@
 schema_version: 1
-enabled_profiles: [fake, openai]
+enabled_profiles: [openai, anthropic, ollama]
 model_policies:
   balanced:
     provider: openai
-    model: ${OPENAI_MODEL}
-  deterministic:
-    provider: fake
-    model: deterministic
+    model: default
+  flagship:
+    provider: anthropic
+    model: anthropic-default
+  local:
+    provider: ollama
+    model: local-small
 request_defaults:
   timeout_seconds: 600
   stream_idle_seconds: 60

@@ -16,6 +16,8 @@ from sqlalchemy.sql import cast as sql_cast
 from agent_core.adapters.persistence.mappers import (
     agent_to_domain,
     agent_values,
+    artifact_to_domain,
+    artifact_values,
     event_to_domain,
     event_values,
     idempotency_to_domain,
@@ -27,23 +29,29 @@ from agent_core.adapters.persistence.mappers import (
     run_values,
     session_to_domain,
     session_values,
+    trajectory_export_to_domain,
+    trajectory_export_values,
 )
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
+    ArtifactRow,
     CheckpointRow,
     DerivedEventKeyRow,
     EventRow,
+    ExportConsentRow,
     IdempotencyKeyRow,
     ModelCallRow,
     ProjectionWatermarkRow,
     RunRow,
     SessionRow,
     ToolInvocationRow,
+    TrajectoryExportRow,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import ConflictError, NotFoundError, WorkerFencedError
 from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -54,6 +62,7 @@ from agent_core.domain.persistence import (
 from agent_core.domain.runs import Run, RunCheckpoint, RunFailure, RunStatus, RunUsage
 from agent_core.domain.sessions import Session
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 from agent_core.ports.determinism import Clock
 from agent_core.runtime.state_machine import require_transition
 
@@ -262,6 +271,26 @@ class PostgresRunRepository:
         )
         if not _rowcount(await self._session.execute(statement)):
             raise ConflictError("run seed sequence was already assigned")
+
+    async def set_provider_pin(self, run_id: UUID, pin: object) -> None:
+        typed = ProviderPin.model_validate(pin)
+        serialized = typed.model_dump(mode="json")
+        statement = (
+            update(RunRow)
+            .where(RunRow.id == run_id, RunRow.provider_pin.is_(None))
+            .values(provider_pin=serialized, updated_at=self._clock.now())
+        )
+        if _rowcount(await self._session.execute(statement)):
+            return
+        existing = (
+            await self._session.execute(
+                select(RunRow.id, RunRow.provider_pin).where(RunRow.id == run_id)
+            )
+        ).one_or_none()
+        if existing is None:
+            raise NotFoundError("run not found")
+        if existing.provider_pin != serialized:
+            raise ConflictError("run provider pin is immutable")
 
 
 class PostgresEventRepository:
@@ -813,6 +842,155 @@ class PostgresUsageRepository:
             reasoning_tokens=values[4],
             cost=values[5],
         )
+
+
+class PostgresExportConsentRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(self, tenant_id: str, principal_id: str) -> ExportConsent | None:
+        row = await self._session.get(ExportConsentRow, (tenant_id, principal_id))
+        if row is None:
+            return None
+        return ExportConsent(
+            tenant_id=row.tenant_id,
+            principal_id=row.principal_id,
+            granted_at=row.granted_at,
+            withdrawn_at=row.withdrawn_at,
+        )
+
+    async def get_for_update(self, tenant_id: str, principal_id: str) -> ExportConsent | None:
+        row = (
+            await self._session.scalars(
+                select(ExportConsentRow)
+                .where(
+                    ExportConsentRow.tenant_id == tenant_id,
+                    ExportConsentRow.principal_id == principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return ExportConsent(
+            tenant_id=row.tenant_id,
+            principal_id=row.principal_id,
+            granted_at=row.granted_at,
+            withdrawn_at=row.withdrawn_at,
+        )
+
+    async def grant(self, consent: ExportConsent) -> ExportConsent:
+        statement = (
+            pg_insert(ExportConsentRow)
+            .values(**consent.model_dump())
+            .on_conflict_do_update(
+                index_elements=[ExportConsentRow.tenant_id, ExportConsentRow.principal_id],
+                set_={"granted_at": consent.granted_at, "withdrawn_at": None},
+            )
+            .returning(ExportConsentRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            raise NotFoundError("export consent not found after grant")
+        return ExportConsent(
+            tenant_id=row.tenant_id,
+            principal_id=row.principal_id,
+            granted_at=row.granted_at,
+            withdrawn_at=row.withdrawn_at,
+        )
+
+    async def withdraw(
+        self, tenant_id: str, principal_id: str, withdrawn_at: datetime
+    ) -> ExportConsent:
+        statement = (
+            update(ExportConsentRow)
+            .where(
+                ExportConsentRow.tenant_id == tenant_id,
+                ExportConsentRow.principal_id == principal_id,
+            )
+            .values(withdrawn_at=withdrawn_at)
+            .returning(ExportConsentRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            raise NotFoundError("export consent not found")
+        return ExportConsent(
+            tenant_id=row.tenant_id,
+            principal_id=row.principal_id,
+            granted_at=row.granted_at,
+            withdrawn_at=row.withdrawn_at,
+        )
+
+
+class PostgresTrajectoryExportRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get_for_run(self, run_id: UUID) -> TrajectoryExport | None:
+        row = (
+            await self._session.execute(
+                select(TrajectoryExportRow, ArtifactRow)
+                .join(ArtifactRow, ArtifactRow.id == TrajectoryExportRow.artifact_id)
+                .where(TrajectoryExportRow.run_id == run_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return trajectory_export_to_domain(row[0], row[1])
+
+    async def create(self, export: TrajectoryExport) -> TrajectoryExport:
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(func.hashtextextended(f"export:{export.run_id}", 0)))
+        )
+        existing = await self.get_for_run(export.run_id)
+        if existing is not None:
+            return existing
+        await self._session.execute(
+            pg_insert(ArtifactRow).values(**artifact_values(export.artifact))
+        )
+        await self._session.execute(
+            pg_insert(TrajectoryExportRow).values(**trajectory_export_values(export))
+        )
+        return export.model_copy(deep=True)
+
+    async def expire_for_principal(
+        self, tenant_id: str, principal_id: str, expired_at: datetime
+    ) -> int:
+        artifact_ids = select(TrajectoryExportRow.artifact_id).where(
+            TrajectoryExportRow.tenant_id == tenant_id,
+            TrajectoryExportRow.principal_id == principal_id,
+        )
+        result = await self._session.execute(
+            update(ArtifactRow)
+            .where(
+                ArtifactRow.id.in_(artifact_ids),
+                ArtifactRow.expires_at > expired_at,
+            )
+            .values(expires_at=expired_at)
+        )
+        return _rowcount(result)
+
+    async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(ArtifactRow)
+                    .where(ArtifactRow.expires_at <= now)
+                    .order_by(ArtifactRow.expires_at, ArtifactRow.id)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return [artifact_to_domain(row) for row in rows]
+
+    async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
+        result = await self._session.execute(
+            delete(ArtifactRow).where(
+                ArtifactRow.id == artifact_id,
+                ArtifactRow.expires_at <= now,
+            )
+        )
+        return bool(_rowcount(result))
 
 
 class PostgresMaintenanceRepository:

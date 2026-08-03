@@ -11,12 +11,14 @@ from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
+    InMemoryExportConsentRepository,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
     InMemoryRunRepository,
     InMemorySessionHistoryRepository,
     InMemorySessionRepository,
     InMemoryToolInvocationRepository,
+    InMemoryTrajectoryExportRepository,
     InMemoryTrajectoryProjectionRepository,
     InMemoryUsageRepository,
 )
@@ -29,11 +31,13 @@ from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
+    PostgresExportConsentRepository,
     PostgresIdempotencyRepository,
     PostgresMaintenanceRepository,
     PostgresRunRepository,
     PostgresSessionRepository,
     PostgresToolInvocationRepository,
+    PostgresTrajectoryExportRepository,
     PostgresUsageRepository,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
@@ -75,6 +79,8 @@ class MemoryUnitOfWork:
         usage: InMemoryUsageRepository,
         history: InMemorySessionHistoryRepository,
         trajectory: InMemoryTrajectoryProjectionRepository,
+        export_consent: InMemoryExportConsentRepository,
+        trajectory_exports: InMemoryTrajectoryExportRepository,
         maintenance: InMemoryMaintenanceRepository,
     ) -> None:
         self.agents = agents
@@ -87,6 +93,8 @@ class MemoryUnitOfWork:
         self.usage = usage
         self.history = history
         self.trajectory = trajectory
+        self.export_consent = export_consent
+        self.trajectory_exports = trajectory_exports
         self.maintenance = maintenance
         self.queue = None
         self._depth_token: Token[int] | None = None
@@ -126,6 +134,8 @@ class MemoryUnitOfWorkFactory:
         self._usage = InMemoryUsageRepository(runs)
         self._history = InMemorySessionHistoryRepository(events)
         self._trajectory = InMemoryTrajectoryProjectionRepository(events)
+        self._export_consent = InMemoryExportConsentRepository()
+        self._trajectory_exports = InMemoryTrajectoryExportRepository()
         self._maintenance = InMemoryMaintenanceRepository()
 
     def __call__(self) -> MemoryUnitOfWork:
@@ -140,6 +150,8 @@ class MemoryUnitOfWorkFactory:
             usage=self._usage,
             history=self._history,
             trajectory=self._trajectory,
+            export_consent=self._export_consent,
+            trajectory_exports=self._trajectory_exports,
             maintenance=self._maintenance,
         )
 
@@ -180,6 +192,8 @@ class PostgresUnitOfWork:
         self.invocations = PostgresToolInvocationRepository(session, self.runs)
         self.idempotency = PostgresIdempotencyRepository(session)
         self.usage = PostgresUsageRepository(session)
+        self.export_consent = PostgresExportConsentRepository(session)
+        self.trajectory_exports = PostgresTrajectoryExportRepository(session)
         self.maintenance = PostgresMaintenanceRepository(session)
         self.queue = PostgresRunQueue(
             session,

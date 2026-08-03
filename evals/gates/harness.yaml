@@ -52,7 +52,7 @@
   kind: structural
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "At least one case in the suite carries `source: trajectory`, from Milestone 3 onward."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_trajectory_conversion_m3.py::test_suite_has_a_trajectory_source_from_milestone_3
 - id: gate.harness.reason_code_table
   milestone: 1
   kind: structural

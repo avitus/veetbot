@@ -36,6 +36,26 @@ def test_loads_frozen_settings() -> None:
         settings.interpolation["OPENAI_MODEL"] = "changed"  # type: ignore[index]
     with pytest.raises(AttributeError):
         settings.auth_mode = AuthMode.TOKEN  # type: ignore[misc]
+    assert settings.trajectory_export_enabled is False
+    assert settings.artifact_root == Path(".agent/artifacts")
+
+
+def test_trajectory_export_requires_explicit_operator_enablement() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_TRAJECTORY_EXPORT_ENABLED": "1",
+            "AGENT_ARTIFACT_ROOT": "/var/lib/agent/trajectory-artifacts",
+        }
+    )
+    assert settings.trajectory_export_enabled is True
+    assert settings.artifact_root == Path("/var/lib/agent/trajectory-artifacts")
+
+
+def test_trajectory_export_enablement_is_strictly_boolean() -> None:
+    values = {**base_environment(), "AGENT_TRAJECTORY_EXPORT_ENABLED": "true"}
+    with pytest.raises(ConfigurationError, match="must be 0 or 1"):
+        load_settings(values)
 
 
 def test_required_database_url_fails_before_construction() -> None:

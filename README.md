@@ -5,12 +5,16 @@ the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
 strictly milestone-gated. Milestone 0 established the repository and engineering
 foundation. Milestone 1 added the first complete, in-memory model/tool runtime;
 Milestone 2 replaced its process-local seams with PostgreSQL and workers.
+Milestone 3 adds real model providers, normalized streaming, pinned accounting,
+and governed trajectory export.
 
 ## Current status
 
 Milestones 0, 1, and 2 are complete. PostgreSQL persistence, durable
 checkpoints, fenced run claiming, crash recovery, and separate worker and
-maintenance processes are implemented. No later milestone is authorized.
+maintenance processes are implemented. Milestone 3 is implemented locally and
+awaits its final review and hosted-CI evidence before completion is recorded;
+no later milestone is authorized.
 
 ## Prerequisites
 
@@ -103,11 +107,26 @@ uv run agent run "What is 17 multiplied by 23?"
 ```
 
 Progress is written to stderr and the final answer (`391`) to stdout. Run the
-eleven checked-in deterministic cases with:
+twelve checked-in deterministic cases with:
 
 ```bash
 uv run agent eval run
 ```
+
+Choose a declared model policy when creating a new session:
+
+```bash
+uv run agent run --model-policy balanced "Summarize this request"
+uv run agent run --model-policy flagship "Solve this difficult problem"
+uv run agent run --model-policy local "Answer without a hosted provider"
+```
+
+`balanced` uses the OpenAI Responses adapter, `flagship` uses Anthropic
+Messages, and `local` uses the OpenAI-compatible endpoint declared by the
+Ollama profile. The corresponding worker resolves and durably pins the provider,
+model, capability set, profile hash, and pricing snapshot before its first
+model call. Remote policies fail closed at use when their credential is absent;
+fake and local workflows remain available without remote credentials.
 
 `agent session create`, `agent run get`, and `agent run events` read the same
 PostgreSQL state across processes. Run periodic lease reclamation separately
@@ -133,6 +152,25 @@ Production validation refuses development authentication and the `docker` or
 secret values and structured-log processors redact sensitive keys, provider-key
 prefixes, prompts, messages, reasoning, tool results, and large content.
 
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` only for the remote profiles you
+intend to use. Governed trajectory export is disabled by default. To opt a local
+deployment in, set `AGENT_TRAJECTORY_EXPORT_ENABLED=1` and choose an
+`AGENT_ARTIFACT_ROOT` outside the source tree. A principal grant is still
+required and is prospective:
+
+```bash
+uv run agent session export-consent grant
+uv run agent run "A run that may later be exported"
+uv run agent run export <run-id> --json
+uv run agent session export-consent withdraw
+```
+
+Withdrawal expires all prior exports for that principal. Run the maintenance
+worker to remove expired metadata and bytes. Exported JSON excludes reasoning,
+provider metadata, usage, prices, precise timestamps, and internal execution
+identifiers; mandatory secret rules are applied and then verified before any
+artifact is committed.
+
 ## Operating roadmap
 
 The engineering plan reserves the following workflows. They are documented
@@ -143,16 +181,18 @@ here so availability is not confused with implementation:
 | Use the fake provider in the deterministic in-memory composition | Milestone 1 |
 | Submit with `agent run` and complete it through the durable worker | Milestone 2 (implemented) |
 | Start the durable worker | Milestone 2 (implemented) |
-| Configure OpenAI, Anthropic, or an OpenAI-compatible endpoint | Milestone 3 |
-| Run optional live-provider tests | Milestone 3 |
-| Inspect model/tool traces and usage | Milestone 3 |
+| Configure OpenAI, Anthropic, or an OpenAI-compatible endpoint | Milestone 3 (implemented) |
+| Run optional live-provider tests | Milestone 3 (implemented) |
+| Inspect normalized model usage and bounded provider metadata in persistence | Milestone 3 (implemented) |
+| Export a consent-gated redacted trajectory | Milestone 3 (implemented) |
 | Resolve an approval through the CLI | Milestone 4 |
 | Start the HTTP API | Milestone 5 |
 | Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
 
-`agent run`, `agent session create`, `agent worker`, and `agent eval run` are
-available now. Do not invoke `agent api` or `agent chat`; their owning
-milestones have not been implemented.
+`agent run`, `agent run export`, `agent session create`, `agent session
+export-consent`, `agent worker`, and `agent eval run` are available now. Do not
+invoke `agent api` or `agent chat`; their owning milestones have not been
+implemented.
 
 ## Documentation and governance
 

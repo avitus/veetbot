@@ -51,7 +51,7 @@ def test_no_eval_in_prod() -> None:
 
 def test_case_schema() -> None:
     cases = load_cases(ROOT / "tests" / "eval_cases")
-    assert len(cases) == 11
+    assert len(cases) == 12
     assert len({case.name for case in cases}) == len(cases)
     for case in cases:
         script = resolve_model_fixture(ROOT / "evals" / "fixtures" / "models", case.model_fixture)

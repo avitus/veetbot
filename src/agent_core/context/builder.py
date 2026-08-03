@@ -11,8 +11,11 @@ from agent_core.domain.messages import (
     CacheHints,
     ConversationItem,
     ModelRequest,
+    ProviderReasoningItem,
     SystemMessage,
     TextPart,
+    ToolCallItem,
+    ToolResultItem,
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
@@ -85,6 +88,30 @@ class MinimalContextBuilder:
             or getattr(item, "kind", None)
             in {"assistant", "tool_call", "tool_result", "provider_reasoning"}
         ]
+        if checkpoint.provider_continuation is not None:
+            opaque_items = [
+                ProviderReasoningItem.model_validate(item)
+                for item in checkpoint.provider_continuation.opaque_items
+            ]
+            if any(
+                item.provider != checkpoint.provider_continuation.provider for item in opaque_items
+            ):
+                raise ValueError("checkpoint continuation contains a mismatched provider")
+            trailing_result_ids: set[str] = set()
+            for item in reversed(checkpoint_items):
+                if not isinstance(item, ToolResultItem):
+                    break
+                trailing_result_ids.add(item.call_id)
+            insertion = len(checkpoint_items)
+            if trailing_result_ids:
+                matching = [
+                    index
+                    for index, item in enumerate(checkpoint_items)
+                    if isinstance(item, ToolCallItem) and item.call_id in trailing_result_ids
+                ]
+                if matching:
+                    insertion = min(matching)
+            checkpoint_items[insertion:insertion] = opaque_items
         if checkpoint_items and checkpoint_items[-1].kind == "user":
             body = [*checkpoint_items[:-1], runtime_item, checkpoint_items[-1]]
         else:

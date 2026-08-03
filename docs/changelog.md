@@ -4,6 +4,37 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-03 — Milestone 3 started
+
+- Authorized Milestone 3 and began implementation of the normalized model
+  gateway, OpenAI Responses, Anthropic Messages, and OpenAI-compatible
+  chat-completions adapters.
+- Activated the work order for 15 new hard gates covering SDK isolation,
+  identical provider contracts, stream invariants, tool-call identity, secret
+  exclusion, malformed arguments, pinned resume, cost failure, Ollama,
+  provider metadata, profile validation, redacted export, consent, and
+  trajectory-sourced evaluations.
+- Installed the official OpenAI developer-documentation MCP server for future
+  sessions; this session uses the documented official-source fallback.
+- Added strict declarative provider profiles, collision-free aliases,
+  capability ceilings, immutable registry hashes, durable model pins, normalized
+  streams, exact Decimal price snapshots, failed-call accounting, and bounded
+  provider metadata with persistence and span mappings as its only readers.
+- Added OpenAI Responses, Anthropic Messages, OpenAI-compatible chat
+  completions/Ollama, recorded-stream, unavailable-credential, and upgraded fake
+  adapters behind one contract suite. Provider SDK imports remain adapter-only,
+  malformed tool arguments fail identically through every runtime path, and
+  provider-only reasoning continuation stays in checkpoints.
+- Added consent records, prospective run stamps, a fail-closed redaction and
+  verification pipeline, a narrow content-addressed trajectory artifact store,
+  30-day expiry and withdrawal sweeps, CLI grant/withdraw/export commands, and
+  conversion of already-redacted artifacts into trajectory-sourced eval cases.
+- Added the twelfth deterministic evaluation case and activated all 15
+  Milestone 3 hard gates, bringing the cumulative active gate count to 72.
+- Proposed ADR-0039 for the reversible provider, configuration, pinning,
+  metadata, fixture, and narrow artifact-store choices forced by the first
+  Milestone 3 implementation.
+
 ## 2026-08-03 — Milestone 2 completed
 
 - Authorized Milestone 2 and advanced the current milestone to PostgreSQL
