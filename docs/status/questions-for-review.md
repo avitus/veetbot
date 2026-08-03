@@ -19,6 +19,42 @@ schema that has not been written yet, so they are cheap now and expensive after
 Milestone 2 ships. Items marked **expensive** would require rewriting a
 committed spec and its dependents.
 
+## Milestone 3 implementation decisions
+
+ADR-0039 records the provider and trajectory-export choices made while the
+owner was away. The highest-value review points are:
+
+- **Two-field settings extension (moderate):** Milestone 0 fixes an eight-field
+  environment object, while Milestone 3 requires operator-controlled tenant
+  export enablement and defines no tenant settings store. Export stays off by
+  default through two additional composition fields until that store exists.
+- **Narrow trajectory byte store before the general artifact milestone
+  (moderate):** export needs expiring content-addressed bytes now. The local
+  adapter implements only that port and must be replaced or adapted when
+  Milestone 6 adds streaming general artifacts.
+- **One enabled profile per adapter (moderate):** the normative resolved and
+  pinned types identify the adapter, while the registry version identifies the
+  profile. Supporting simultaneous endpoints behind one adapter needs a new
+  selection key rather than an implicit map collision.
+- **Remote credentials fail at selection (cheap):** startup installs an
+  unavailable provider when a remote key is absent, allowing fake/local work
+  while ensuring a selected remote policy fails closed.
+- **Single-tier prices restrict advertised windows (cheap):** the first profile
+  schema cannot express a long-context surcharge, so a profile declares only
+  the context range its immutable price covers.
+- **Tenant redaction regexes use a safe subset (cheap):** length, quantified
+  groups, wildcard repetition, lookaround, backreferences, and conditionals are
+  refused at construction to keep arbitrary exported text from causing
+  catastrophic backtracking.
+- **Provider metadata has two readers (moderate):** persistence flattening and
+  bounded span attributes are the only readers. Runtime continuation travels in
+  checkpoint-only provider-opaque items rather than creating a metadata
+  dependency.
+
+The complete rationale, local-review resolutions, consequences, and rejected
+alternatives are in
+[ADR-0039](../adr/0039-milestone-3-provider-and-export-seams.md).
+
 ## Milestone 2 implementation decisions
 
 ADR-0038 records the implementation decisions made while the owner was away.

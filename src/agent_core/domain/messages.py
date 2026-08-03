@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.policies import TrustLevel
 
@@ -108,12 +108,34 @@ class CostSource(StrEnum):
     CONFIG_OVERRIDE = "config_override"
 
 
+class ReasoningSupport(StrEnum):
+    NONE = "none"
+    NATIVE = "native"
+    IN_BAND = "in_band"
+
+
+class Capability(StrEnum):
+    NATIVE_TOOL_CALLING = "native_tool_calling"
+    PARALLEL_TOOL_CALLS = "parallel_tool_calls"
+    IMAGES = "images"
+    AUDIO = "audio"
+    FILES = "files"
+    REASONING = "reasoning"
+    PROVIDER_MANAGED_STATE = "provider_managed_state"
+    EXPLICIT_CACHE_CONTROL = "explicit_cache_control"
+    STRUCTURED_OUTPUT = "structured_output"
+    STREAMING = "streaming"
+
+
+type CapabilitySet = frozenset[Capability]
+
+
 class ModelUsage(BaseModel):
-    input_tokens: int = 0
-    cached_input_tokens: int = 0
-    cache_write_input_tokens: int = 0
-    output_tokens: int = 0
-    reasoning_tokens: int | None = None
+    input_tokens: int = Field(default=0, ge=0)
+    cached_input_tokens: int = Field(default=0, ge=0)
+    cache_write_input_tokens: int = Field(default=0, ge=0)
+    output_tokens: int = Field(default=0, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
     cost: Decimal = Decimal("0")
     cost_source: CostSource = CostSource.CONFIG_OVERRIDE
     provider: str = "fake"
@@ -130,12 +152,27 @@ class StopReason(StrEnum):
     CANCELLED = "cancelled"
 
 
+class ProviderMetadata(BaseModel):
+    """The closed, content-free metadata vocabulary shared by all adapters."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    provider_api: Literal["responses", "messages", "chat_completions"]
+    response_id: str | None = None
+    request_id: str | None = None
+    resolved_model: str | None = None
+    previous_response_id: str | None = None
+    cache_breakpoints_sent: int = Field(default=0, ge=0)
+    cache_breakpoints_dropped: int = Field(default=0, ge=0)
+
+
 class ModelTurn(BaseModel):
     assistant_messages: list[AssistantMessage] = Field(default_factory=list)
     tool_calls: list[ToolCallItem] = Field(default_factory=list)
+    provider_reasoning_items: list[ProviderReasoningItem] = Field(default_factory=list)
     usage: ModelUsage = Field(default_factory=ModelUsage)
     stop_reason: StopReason
-    provider_metadata: dict[str, Any] = Field(default_factory=dict)
+    provider_metadata: ProviderMetadata | None = None
 
 
 class ModelError(BaseModel):
@@ -195,24 +232,71 @@ class ModelRequest(BaseModel):
 
 
 class ModelCapabilities(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     native_tool_calling: bool = True
     parallel_tool_calls: bool = True
     images: bool = False
     audio: bool = False
     files: bool = False
+    reasoning: ReasoningSupport = ReasoningSupport.NONE
     provider_managed_state: bool = False
     explicit_cache_control: bool = False
     structured_output: bool = True
     streaming: bool = True
+
+    def enabled(self) -> CapabilitySet:
+        values: set[Capability] = set()
+        for capability in Capability:
+            if capability is Capability.REASONING:
+                if self.reasoning is not ReasoningSupport.NONE:
+                    values.add(capability)
+                continue
+            if bool(getattr(self, capability.value)):
+                values.add(capability)
+        return frozenset(values)
+
+
+class ModelLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context_window_tokens: int = Field(default=32768, gt=0)
+    max_output_tokens: int = Field(default=4096, gt=0)
+    default_output_reserve: int = Field(default=4096, gt=0)
+    max_cache_breakpoints: int = Field(default=0, ge=0)
+    max_tool_count: int | None = Field(default=None, ge=1)
+
+
+class ModelPricing(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    input_per_mtok: Decimal = Field(default=Decimal("0"), ge=0)
+    cached_input_per_mtok: Decimal = Field(default=Decimal("0"), ge=0)
+    cache_write_per_mtok: Decimal | None = Field(default=None, ge=0)
+    output_per_mtok: Decimal = Field(default=Decimal("0"), ge=0)
+    reasoning_per_mtok: Decimal | None = Field(default=None, ge=0)
+    reasoning_priced_separately: bool = False
+    source: CostSource = CostSource.MODEL_CATALOG
+    effective_at: datetime | None = None
 
 
 class ResolvedModel(BaseModel):
     provider: str
     model: str
     capabilities: ModelCapabilities = Field(default_factory=ModelCapabilities)
+    limits: ModelLimits = Field(default_factory=ModelLimits)
+    pricing: ModelPricing = Field(default_factory=ModelPricing)
     credential_ref: str = "fake"
     policy_name: str = "balanced"
     resolved_at: datetime
+
+
+class ProviderPin(BaseModel):
+    run_id: UUID
+    provider: str
+    model: str
+    registry_version: str
+    pinned_at: datetime
 
 
 class ModelEventBase(BaseModel):

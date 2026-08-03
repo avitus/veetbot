@@ -1,0 +1,11 @@
+name: converted_trajectory_response
+milestone: 3
+source: trajectory
+source_export_id: 00000000-0000-0000-0000-000000000120
+tags: [trajectory, regression]
+input: {text: "Say hello from a converted trajectory."}
+model_fixture: trajectory_direct_response
+expected:
+  terminal_status: COMPLETED
+  final_text: Hello from the converted trajectory.
+  model_calls: 1

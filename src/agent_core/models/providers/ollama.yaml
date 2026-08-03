@@ -1,0 +1,29 @@
+schema_version: 1
+profile: ollama
+adapter: chat_completions
+api: chat_completions
+base_url: http://127.0.0.1:11434/v1
+credential_ref: null
+enabled: true
+in_band_reasoning:
+  open: "<think>"
+  close: "</think>"
+capabilities:
+  native_tool_calling: false
+  parallel_tool_calls: false
+  images: false
+  audio: false
+  files: false
+  reasoning: in_band
+  provider_managed_state: false
+  explicit_cache_control: false
+  structured_output: false
+  streaming: true
+limits:
+  max_cache_breakpoints: 0
+  default_output_reserve: 2048
+  max_tool_count: 32
+models:
+  - id: qwen3:8b
+    aliases: [local-small]
+    catalog: open-local-8b

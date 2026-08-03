@@ -27,12 +27,14 @@ from agent_core.domain.runs import (
     BudgetScope,
     FailureReason,
     OutcomeKind,
+    ProviderContinuation,
     Run,
     RunCheckpoint,
     RunFailure,
     RunOutcome,
     Step,
 )
+from agent_core.model.streaming import ModelStreamError, validated_stream
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
@@ -176,26 +178,36 @@ async def _invoke_model(
         terminal: ModelCompletedEvent | ModelFailedEvent | None = None
         if context.uow_factory.is_open():
             raise RuntimeError("model I/O cannot begin while a unit of work is open")
-        async for event in context.model_provider.stream(request, context.resolved_model, attempt):
-            if event.sequence != expected_sequence:
-                return _failure(
-                    context,
-                    FailureReason.MODEL_PERMANENT_ERROR,
-                    "ModelProtocolError",
-                    "the normalized model stream had a sequence gap",
-                    step,
-                )
-            expected_sequence += 1
-            if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
-                if terminal is not None:
+        try:
+            source = context.model_provider.stream(request, context.resolved_model, attempt)
+            async for event in validated_stream(source):
+                if event.sequence != expected_sequence:
                     return _failure(
                         context,
                         FailureReason.MODEL_PERMANENT_ERROR,
                         "ModelProtocolError",
-                        "the normalized model stream had multiple terminal events",
+                        "the normalized model stream had a sequence gap",
                         step,
                     )
-                terminal = event
+                expected_sequence += 1
+                if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
+                    if terminal is not None:
+                        return _failure(
+                            context,
+                            FailureReason.MODEL_PERMANENT_ERROR,
+                            "ModelProtocolError",
+                            "the normalized model stream had multiple terminal events",
+                            step,
+                        )
+                    terminal = event
+        except ModelStreamError:
+            return _failure(
+                context,
+                FailureReason.MODEL_PERMANENT_ERROR,
+                "ModelProtocolError",
+                "the normalized model stream violated its contract",
+                step,
+            )
         if terminal is None:
             return _failure(
                 context,
@@ -223,6 +235,12 @@ async def _invoke_model(
                 attempt=attempt,
                 request=request,
                 resolved_model=context.resolved_model,
+                model_turn=terminal.partial_turn,
+                registry_version=(
+                    None
+                    if context.checkpoint.provider_pin is None
+                    else context.checkpoint.provider_pin.registry_version
+                ),
                 error_kind=(
                     "transient" if isinstance(terminal.error, ModelTransientError) else "permanent"
                 ),
@@ -269,6 +287,12 @@ async def _invoke_model(
             attempt=attempt,
             request=request,
             resolved_model=context.resolved_model,
+            model_turn=terminal.turn,
+            registry_version=(
+                None
+                if context.checkpoint.provider_pin is None
+                else context.checkpoint.provider_pin.registry_version
+            ),
             stop_reason=terminal.stop_reason,
         )
         if not terminal.turn.tool_calls and not _has_final_text(
@@ -318,6 +342,18 @@ async def run_loop(context: RunContext) -> RunOutcome:
         if turn.stop_reason is StopReason.CANCELLED:
             return RunOutcome(kind=OutcomeKind.CANCELLED)
         context.token.raise_if_cancelled()
+        if turn.tool_calls and turn.provider_reasoning_items:
+            context.checkpoint.provider_continuation = ProviderContinuation(
+                provider=context.resolved_model.provider,
+                # The continuation is the provider-signed opaque reasoning block.
+                # Provider response identifiers remain telemetry, not runtime input.
+                previous_response_id=None,
+                opaque_items=[
+                    item.model_dump(mode="json") for item in turn.provider_reasoning_items
+                ],
+            )
+        elif not turn.tool_calls:
+            context.checkpoint.provider_continuation = None
         context.checkpoint.conversation.extend(turn.assistant_messages)
         context.checkpoint.conversation.extend(turn.tool_calls)
         await checkpoint(context, "model_response")

@@ -27,7 +27,7 @@ substitute.
 - [Milestone 0 — Repository and engineering foundation](engineering-plan.md#milestone-0-repository-and-engineering-foundation)
 - [Milestone 1 — In-memory vertical slice](engineering-plan.md#milestone-1-in-memory-vertical-slice)
 - [Milestone 2 — PostgreSQL persistence and durable worker](engineering-plan.md#milestone-2-postgresql-persistence-and-durable-worker)
-- [Milestone 3 — model adapters and normalized streaming](engineering-plan.md#milestone-3-model-adapters-and-normalized-streaming)
+- [Milestone 3 — model adapters and normalized streaming](engineering-plan.md#milestone-3-model-adapters-openai-anthropic-openai-compatible-and-normalized-streaming)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
 No milestone later than Milestone 3 is authorized. Do not begin Milestone 4 or

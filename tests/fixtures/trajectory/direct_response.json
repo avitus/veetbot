@@ -1,0 +1,41 @@
+{
+  "agent_id": "general",
+  "agent_version": "1.0.0",
+  "builder_version": "trajectory@3",
+  "export_id": "00000000-0000-0000-0000-000000000120",
+  "failure": null,
+  "messages": [
+    {
+      "content": [
+        {
+          "kind": "text",
+          "text": "Say hello from a converted trajectory."
+        }
+      ],
+      "kind": "user",
+      "principal_id": "principal-a",
+      "trust": "user"
+    },
+    {
+      "content": [
+        {
+          "kind": "text",
+          "text": "Hello from the converted trajectory."
+        }
+      ],
+      "item_index": 0,
+      "kind": "assistant",
+      "trust": "external_untrusted"
+    }
+  ],
+  "outcome": "COMPLETED",
+  "recorded_on": "2026-08-03",
+  "redaction": {
+    "replacements": {},
+    "ruleset_version": "secrets@1"
+  },
+  "run_id": "00000000-0000-0000-0000-000000000121",
+  "schema_version": 1,
+  "tenant_id": "tenant-a",
+  "tools": []
+}

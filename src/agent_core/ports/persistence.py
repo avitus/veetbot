@@ -13,12 +13,14 @@ from agent_core.ports.events import EventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
     CheckpointRepository,
+    ExportConsentRepository,
     IdempotencyRepository,
     MaintenanceRepository,
     RunRepository,
     SessionHistoryRepository,
     SessionRepository,
     ToolInvocationRepository,
+    TrajectoryExportRepository,
     TrajectoryProjectionRepository,
     UsageRepository,
 )
@@ -35,6 +37,8 @@ class RepositoryUnitOfWork(Protocol):
     usage: UsageRepository
     history: SessionHistoryRepository
     trajectory: TrajectoryProjectionRepository
+    export_consent: ExportConsentRepository
+    trajectory_exports: TrajectoryExportRepository
     maintenance: MaintenanceRepository
     queue: RunQueue | None
 

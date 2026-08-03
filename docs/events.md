@@ -32,3 +32,18 @@ snapshots occur at version 1 and every eight versions thereafter, with deltas
 between them and explicit removal records for disappearing state keys. Crash,
 checkpoint-deletion, projection-rebuild, stale-fence, and two-worker race cases
 exercise these properties against PostgreSQL 16.
+
+Milestone 3 completes the trajectory projection's governed output path. A
+terminal run can be materialized once as a versioned messages-shaped JSON
+artifact after both operator enablement and prospective per-principal consent.
+The builder carries the terminal outcome and tool schema hashes, excludes
+reasoning, provider metadata, usage, prices, timestamps, and internal execution
+identifiers structurally, replaces all mandatory secret-pattern and
+sensitive-key families, then verifies the finished messages and writes nothing
+on a remaining match. Failed runs retain their failure class but never external
+error text.
+
+Consent withdrawal expires every prior export for that principal. The ordinary
+maintenance role removes expired metadata and content-addressed bytes, while a
+30-day expiry bounds exports that are not promoted into reviewed eval cases.
+The eval converter reads only these artifact bytes; it has no event-log port.

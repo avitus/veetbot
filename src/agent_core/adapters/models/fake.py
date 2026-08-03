@@ -8,7 +8,6 @@ from typing import Any
 
 from agent_core.domain.errors import ModelScriptExhaustedError
 from agent_core.domain.messages import (
-    AssistantMessage,
     FakeModelScript,
     ModelAttempt,
     ModelCompletedEvent,
@@ -18,15 +17,17 @@ from agent_core.domain.messages import (
     ModelRequest,
     ModelTurn,
     ModelUsage,
+    ProviderMetadata,
     ReasoningDeltaEvent,
     ResolvedModel,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
     TextDeltaEvent,
-    TextPart,
+    ToolCallDeltaEvent,
     ToolCallItem,
 )
+from agent_core.model.streaming import ModelStreamAccumulator
 from agent_core.ports.determinism import Clock
 
 
@@ -90,6 +91,10 @@ class FakeModelProvider:
                     ModelTurn(
                         usage=turn.usage,
                         stop_reason=StopReason.INCOMPLETE,
+                        provider_metadata=ProviderMetadata(
+                            provider_api="chat_completions",
+                            resolved_model=resolved.model,
+                        ),
                     )
                     if turn.usage is not None
                     else None
@@ -98,43 +103,59 @@ class FakeModelProvider:
             return
 
         sequence = 0
+        item_index = 0
+        accumulator = ModelStreamAccumulator()
         if turn.reasoning:
-            yield ReasoningDeltaEvent(
+            reasoning_event = ReasoningDeltaEvent(
                 attempt_id=attempt.attempt_id,
                 run_id=attempt.run_id,
                 step_number=attempt.step_number,
                 sequence=sequence,
-                item_index=0,
+                item_index=item_index,
                 text=turn.reasoning,
                 is_summary=False,
             )
+            yield reasoning_event
             sequence += 1
-        assistant_messages: list[AssistantMessage] = []
+            item_index += 1
         if turn.text:
-            yield TextDeltaEvent(
+            text_event = TextDeltaEvent(
                 attempt_id=attempt.attempt_id,
                 run_id=attempt.run_id,
                 step_number=attempt.step_number,
                 sequence=sequence,
-                item_index=0,
+                item_index=item_index,
                 text=turn.text,
             )
+            accumulator.add(text_event)
+            yield text_event
             sequence += 1
-            assistant_messages.append(
-                AssistantMessage(content=[TextPart(text=turn.text)], item_index=0)
+            item_index += 1
+        for scripted in turn.tool_calls:
+            call = self._tool_call(scripted, attempt, item_index)
+            tool_event = ToolCallDeltaEvent(
+                attempt_id=attempt.attempt_id,
+                run_id=attempt.run_id,
+                step_number=attempt.step_number,
+                sequence=sequence,
+                item_index=item_index,
+                call_id=call.call_id,
+                name=call.name,
+                arguments_delta=call.raw_arguments,
             )
-        tool_calls = [
-            self._tool_call(scripted, attempt, index + len(assistant_messages))
-            for index, scripted in enumerate(turn.tool_calls)
-        ]
-        stop_reason = StopReason.TOOL_USE if tool_calls else turn.stop_reason
+            accumulator.add(tool_event)
+            yield tool_event
+            sequence += 1
+            item_index += 1
+        stop_reason = StopReason.TOOL_USE if turn.tool_calls else turn.stop_reason
         usage = turn.usage or self._usage(request, turn, resolved)
-        model_turn = ModelTurn(
-            assistant_messages=assistant_messages,
-            tool_calls=tool_calls,
+        model_turn = accumulator.turn(
             usage=usage,
             stop_reason=stop_reason,
-            provider_metadata={"script_turn": self._index},
+            metadata=ProviderMetadata(
+                provider_api="chat_completions",
+                resolved_model=resolved.model,
+            ),
         )
         yield ModelCompletedEvent(
             attempt_id=attempt.attempt_id,

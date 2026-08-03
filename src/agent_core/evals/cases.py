@@ -6,6 +6,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -60,6 +61,7 @@ class EvalCase(StrictModel):
     name: str
     milestone: int = Field(ge=1, le=10)
     source: Literal["authored", "trajectory"] = "authored"
+    source_export_id: UUID | None = None
     tags: list[str] = Field(default_factory=list)
     agent_id: str = "general"
     principal: str = "eval.standard"
@@ -76,6 +78,10 @@ class EvalCase(StrictModel):
             raise ValueError("case name must use lower snake case")
         if FIXTURE_NAME.fullmatch(self.model_fixture) is None:
             raise ValueError("model_fixture must be a lower snake case stem")
+        if self.source == "trajectory" and self.source_export_id is None:
+            raise ValueError("trajectory cases must carry their source export id")
+        if self.source == "authored" and self.source_export_id is not None:
+            raise ValueError("authored cases cannot carry a trajectory export id")
         return self
 
 

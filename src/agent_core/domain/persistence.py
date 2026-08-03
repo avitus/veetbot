@@ -7,9 +7,15 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from agent_core.domain.messages import ConversationItem, CostSource, ModelUsage, StopReason
+from agent_core.domain.messages import (
+    ConversationItem,
+    CostSource,
+    ModelUsage,
+    ProviderMetadata,
+    StopReason,
+)
 from agent_core.domain.runs import Run, RunStatus
 
 type ModelErrorKind = Literal["transient", "permanent", "protocol"]
@@ -61,6 +67,8 @@ class TrajectoryProjection(BaseModel):
 
 
 class ModelCallRecord(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     attempt_id: UUID
     run_id: UUID
     session_id: UUID
@@ -78,6 +86,10 @@ class ModelCallRecord(BaseModel):
     price_id: str | None = None
     stop_reason: StopReason | None = None
     error_kind: ModelErrorKind | None = None
+    metadata: ProviderMetadata | None = Field(
+        default=None,
+        validation_alias="provider_metadata",
+    )
     started_at: datetime
     finished_at: datetime | None = None
 

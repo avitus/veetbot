@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 
 from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import ClaimedRun
@@ -150,11 +150,13 @@ class MaintenanceWorker:
         clock: Clock,
         poll_interval_seconds: float = 5,
         reclaim_limit: int = 100,
+        sweep_exports: Callable[[], Awaitable[int]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._poll_interval = poll_interval_seconds
         self._reclaim_limit = reclaim_limit
+        self._sweep_exports = sweep_exports
         self._stopping = False
 
     def stop(self) -> None:
@@ -171,7 +173,9 @@ class MaintenanceWorker:
                 await uow.trajectory.catch_up(run_id)
             for run_id, terminal in await uow.maintenance.checkpoint_runs(self._reclaim_limit):
                 await uow.checkpoints.prune(run_id, terminal=terminal)
-            return reclaimed
+        if self._sweep_exports is not None:
+            await self._sweep_exports()
+        return reclaimed
 
     async def run_forever(self) -> None:
         while not self._stopping:

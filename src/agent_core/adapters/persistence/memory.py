@@ -30,6 +30,7 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.sessions import Session
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
+from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 from agent_core.ports.determinism import Clock
 from agent_core.ports.repositories import RunRepository, SessionRepository
 from agent_core.runtime.state_machine import require_transition
@@ -195,6 +196,22 @@ class InMemoryRunRepository:
                 raise NotFoundError("run not found") from exc
             self._runs[run_id] = current.model_copy(
                 update={"seed_event_sequence": sequence, "updated_at": self._clock.now()},
+                deep=True,
+            )
+
+    async def set_provider_pin(self, run_id: UUID, pin: object) -> None:
+        from agent_core.domain.messages import ProviderPin
+
+        typed = ProviderPin.model_validate(pin)
+        async with self._lock:
+            try:
+                current = self._runs[run_id]
+            except KeyError as exc:
+                raise NotFoundError("run not found") from exc
+            if current.provider_pin is not None and current.provider_pin != typed:
+                raise ConflictError("run provider pin is immutable")
+            self._runs[run_id] = current.model_copy(
+                update={"provider_pin": typed, "updated_at": self._clock.now()},
                 deep=True,
             )
 
@@ -553,6 +570,93 @@ class InMemoryTrajectoryProjectionRepository:
 
     async def read(self, run_id: UUID) -> TrajectoryProjection | None:
         return await self.catch_up(run_id)
+
+
+class InMemoryExportConsentRepository:
+    def __init__(self) -> None:
+        self._rows: dict[tuple[str, str], ExportConsent] = {}
+        self._lock = asyncio.Lock()
+
+    async def get(self, tenant_id: str, principal_id: str) -> ExportConsent | None:
+        async with self._lock:
+            row = self._rows.get((tenant_id, principal_id))
+            return None if row is None else row.model_copy(deep=True)
+
+    async def get_for_update(self, tenant_id: str, principal_id: str) -> ExportConsent | None:
+        return await self.get(tenant_id, principal_id)
+
+    async def grant(self, consent: ExportConsent) -> ExportConsent:
+        async with self._lock:
+            key = (consent.tenant_id, consent.principal_id)
+            existing = self._rows.get(key)
+            if existing is not None and existing.active:
+                return existing.model_copy(deep=True)
+            self._rows[key] = consent.model_copy(deep=True)
+            return consent.model_copy(deep=True)
+
+    async def withdraw(
+        self, tenant_id: str, principal_id: str, withdrawn_at: datetime
+    ) -> ExportConsent:
+        async with self._lock:
+            key = (tenant_id, principal_id)
+            existing = self._rows.get(key)
+            if existing is None:
+                raise NotFoundError("export consent not found")
+            updated = existing.model_copy(update={"withdrawn_at": withdrawn_at})
+            self._rows[key] = updated
+            return updated.model_copy(deep=True)
+
+
+class InMemoryTrajectoryExportRepository:
+    def __init__(self) -> None:
+        self._rows: dict[UUID, TrajectoryExport] = {}
+        self._lock = asyncio.Lock()
+
+    async def get_for_run(self, run_id: UUID) -> TrajectoryExport | None:
+        async with self._lock:
+            row = self._rows.get(run_id)
+            return None if row is None else row.model_copy(deep=True)
+
+    async def create(self, export: TrajectoryExport) -> TrajectoryExport:
+        async with self._lock:
+            existing = self._rows.get(export.run_id)
+            if existing is not None:
+                return existing.model_copy(deep=True)
+            self._rows[export.run_id] = export.model_copy(deep=True)
+            return export.model_copy(deep=True)
+
+    async def expire_for_principal(
+        self, tenant_id: str, principal_id: str, expired_at: datetime
+    ) -> int:
+        changed = 0
+        async with self._lock:
+            for run_id, row in list(self._rows.items()):
+                if row.tenant_id != tenant_id or row.principal_id != principal_id:
+                    continue
+                if row.artifact.expires_at <= expired_at:
+                    continue
+                artifact = row.artifact.model_copy(update={"expires_at": expired_at})
+                self._rows[run_id] = row.model_copy(update={"artifact": artifact})
+                changed += 1
+        return changed
+
+    async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
+        expired: list[ArtifactRef] = []
+        async with self._lock:
+            for row in self._rows.values():
+                if len(expired) >= limit:
+                    break
+                if row.artifact.expires_at <= now:
+                    expired.append(row.artifact.model_copy(deep=True))
+        return expired
+
+    async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
+        async with self._lock:
+            for run_id, row in list(self._rows.items()):
+                if row.artifact.id == artifact_id and row.artifact.expires_at <= now:
+                    del self._rows[run_id]
+                    return True
+        return False
 
 
 class InMemoryMaintenanceRepository:

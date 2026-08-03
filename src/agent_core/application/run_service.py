@@ -35,6 +35,7 @@ class RunService:
         ids: IdFactory,
         cancel_active: Callable[[], None],
         seed_checkpoint: CheckpointSeeder,
+        trajectory_export_enabled: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
@@ -44,6 +45,7 @@ class RunService:
         self._ids = ids
         self._cancel_active = cancel_active
         self._seed_checkpoint = seed_checkpoint
+        self._trajectory_export_enabled = trajectory_export_enabled
 
     async def submit(
         self,
@@ -75,6 +77,10 @@ class RunService:
                     session_id = await self._sessions.create_in(uow)
                 session = await uow.sessions.get(session_id, self._principal)
                 agent = await uow.agents.get_version(session.agent_id, session.agent_version)
+                consent = await uow.export_consent.get(
+                    self._principal.tenant_id,
+                    self._principal.principal_id,
+                )
                 run = Run(
                     id=self._ids.new_id(),
                     session_id=session.id,
@@ -86,6 +92,9 @@ class RunService:
                     priority=0,
                     scheduled_for=now,
                     deadline_at=agent.limits.deadline_at,
+                    export_consent=(
+                        self._trajectory_export_enabled and consent is not None and consent.active
+                    ),
                     created_at=now,
                     updated_at=now,
                 )
