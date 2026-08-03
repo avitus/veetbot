@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-03 — Milestone 3 started
+
+- Authorized Milestone 3 and began implementation of the normalized model
+  gateway, OpenAI Responses, Anthropic Messages, and OpenAI-compatible
+  chat-completions adapters.
+- Activated the work order for 15 new hard gates covering SDK isolation,
+  identical provider contracts, stream invariants, tool-call identity, secret
+  exclusion, malformed arguments, pinned resume, cost failure, Ollama,
+  provider metadata, profile validation, redacted export, consent, and
+  trajectory-sourced evaluations.
+- Installed the official OpenAI developer-documentation MCP server for future
+  sessions; this session uses the documented official-source fallback.
+
 ## 2026-08-03 — Milestone 2 completed
 
 - Authorized Milestone 2 and advanced the current milestone to PostgreSQL

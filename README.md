@@ -5,12 +5,14 @@ the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
 strictly milestone-gated. Milestone 0 established the repository and engineering
 foundation. Milestone 1 added the first complete, in-memory model/tool runtime;
 Milestone 2 replaced its process-local seams with PostgreSQL and workers.
+Milestone 3 is adding real model providers behind the normalized gateway.
 
 ## Current status
 
 Milestones 0, 1, and 2 are complete. PostgreSQL persistence, durable
 checkpoints, fenced run claiming, crash recovery, and separate worker and
-maintenance processes are implemented. No later milestone is authorized.
+maintenance processes are implemented. Milestone 3 is in progress; no later
+milestone is authorized.
 
 ## Prerequisites
 

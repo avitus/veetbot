@@ -27,7 +27,8 @@ as an archival record.
 
 Milestones 0, 1, and 2 are complete. Milestone 2's PostgreSQL persistence and
 durable-worker implementation passed its local and hosted acceptance evidence.
-No later milestone is authorized. See the
+Milestone 3's normalized model gateway and real provider adapters are in
+progress. No later milestone is authorized. See the
 [current milestone](plan/current-milestone.md) and
 [project state](status/index.md) pages for recorded evidence.
 
