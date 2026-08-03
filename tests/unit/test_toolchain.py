@@ -1,5 +1,6 @@
 """Repository-foundation smoke tests."""
 
+import importlib
 import socket
 import tomllib
 from pathlib import Path
@@ -245,3 +246,13 @@ def test_alembic_config_accepts_percent_encoded_database_url() -> None:
     config = Config()
     config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
     assert config.get_main_option("sqlalchemy.url") == database_url
+
+
+def test_eval_command_normalizes_lazy_import_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_import(_name: str) -> object:
+        raise ImportError("eval dependency unavailable")
+
+    monkeypatch.setattr(importlib, "import_module", fail_import)
+    result = CliRunner().invoke(app, ["eval", "run"])
+    assert result.exit_code == 1
+    assert "evaluation failed: eval dependency unavailable" in result.stderr

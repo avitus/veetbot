@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import AsyncIterator
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+import agent_core.runtime.executor as executor_module
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.identity import StaticPrincipalResolver
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.config import (
     AuthMode,
@@ -20,13 +23,18 @@ from agent_core.config import (
 )
 from agent_core.domain.messages import (
     FakeModelScript,
+    ModelAttempt,
+    ModelEvent,
+    ModelRequest,
     ModelTransientError,
     ModelUsage,
+    ResolvedModel,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
+    TextDeltaEvent,
 )
-from agent_core.domain.runs import FailureReason, RunLimits, RunStatus
+from agent_core.domain.runs import FailureReason, OutcomeKind, RunLimits, RunOutcome, RunStatus
 from agent_core.evals.cases import load_cases
 from agent_core.evals.runner import run_case
 from scripts.architecture_checks import architecture_errors
@@ -176,6 +184,45 @@ async def test_empty_model_turn_retries_within_one_step() -> None:
 
 
 @pytest.mark.asyncio
+async def test_event_after_terminal_is_a_model_protocol_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_stream = FakeModelProvider.stream
+
+    async def post_terminal_stream(
+        provider: FakeModelProvider,
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attempt: ModelAttempt,
+    ) -> AsyncIterator[ModelEvent]:
+        sequence = 0
+        async for event in original_stream(provider, request, resolved, attempt):
+            sequence = event.sequence + 1
+            yield event
+        yield TextDeltaEvent(
+            attempt_id=attempt.attempt_id,
+            run_id=attempt.run_id,
+            step_number=attempt.step_number,
+            sequence=sequence,
+            item_index=0,
+            text="late",
+        )
+
+    monkeypatch.setattr(FakeModelProvider, "stream", post_terminal_stream)
+
+    async with build(
+        settings=_development_settings(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        run_id = await composition.runs.submit("reject post-terminal output")
+        failed = await composition.runs.wait_terminal(run_id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.failure is not None
+    assert failed.failure.reason is FailureReason.MODEL_PERMANENT_ERROR
+
+
+@pytest.mark.asyncio
 async def test_post_transition_prologue_failure_reaches_terminal_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -189,6 +236,28 @@ async def test_post_transition_prologue_failure_reaches_terminal_state(
         ids=SequenceIdFactory(),
     ) as composition:
         run_id = await composition.runs.submit("exercise prologue failure")
+        failed = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+    assert failed.status is RunStatus.FAILED
+    assert failed.failure is not None
+    assert failed.failure.reason is FailureReason.INTERNAL_ERROR
+    assert "run.failed" in [event.event_type for event in events]
+
+
+@pytest.mark.asyncio
+async def test_final_message_validation_failure_reaches_terminal_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def invalid_completion(_context: object) -> RunOutcome:
+        return RunOutcome(kind=OutcomeKind.COMPLETED, final_message={"invalid": True})
+
+    monkeypatch.setattr(executor_module, "run_loop", invalid_completion)
+    async with build(
+        settings=_development_settings(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        run_id = await composition.runs.submit("exercise finalization failure")
         failed = await composition.runs.wait_terminal(run_id)
         events = await composition.runs.events(run_id)
     assert failed.status is RunStatus.FAILED

@@ -265,7 +265,34 @@ def _message_text(message: AssistantMessage | None) -> str | None:
 
 
 async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
-    """Commit terminal checkpoint, state transition, event, and lease release once."""
+    """Commit one terminal transaction, falling back to FAILED on local errors."""
+
+    original_checkpoint = context.checkpoint.model_copy(deep=True)
+    try:
+        await _finalize_once(context, outcome)
+    except WorkerFencedError:
+        raise
+    except Exception as exc:
+        context.checkpoint = original_checkpoint
+        logger.exception(
+            "run_finalization_failed",
+            extra={"run_id": str(context.run.id), "error_class": type(exc).__name__},
+        )
+        failure = RunFailure(
+            reason=FailureReason.INTERNAL_ERROR,
+            error_class=type(exc).__name__,
+            message="an unexpected finalization error ended the run",
+            step_number=context.run.step_count or None,
+            occurred_at=context.clock.now(),
+        )
+        await _finalize_once(
+            context,
+            RunOutcome(kind=OutcomeKind.FAILED, failure=failure),
+        )
+
+
+async def _finalize_once(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
+    """Apply one terminal outcome without retrying its persistence operations."""
 
     if outcome.kind is OutcomeKind.FENCED:
         return

@@ -251,7 +251,7 @@ def eval_run(
         results = module.run_selected_sync(
             Path.cwd(), current_milestone=1, tag=tag, case_name=case_name
         )
-    except (EvalExpectationError, OSError, ValueError) as exc:
+    except (EvalExpectationError, ImportError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)
         raise typer.Exit(1) from exc
     for result in results:
