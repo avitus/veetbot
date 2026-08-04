@@ -97,8 +97,11 @@ def load_registry(root: Path) -> tuple[list[GateEntry], list[str]]:
             except (TypeError, ValueError) as exc:
                 errors.append(f"{where} has invalid field types: {exc}")
                 continue
-            if entry.id.split(".")[1] != path.stem:
-                errors.append(f"{where} belongs in {entry.id.split('.')[1]}.yaml")
+            parts = entry.id.split(".")
+            if len(parts) < 3:
+                errors.append(f"{where} has a malformed identifier: {entry.id}")
+            elif parts[1] != path.stem:
+                errors.append(f"{where} belongs in {parts[1]}.yaml")
             entries.append(entry)
     if not entries:
         errors.append("evals/gates/*.yaml contains no gate entries")
@@ -108,7 +111,10 @@ def load_registry(root: Path) -> tuple[list[GateEntry], list[str]]:
 def map_entries(root: Path) -> dict[str, tuple[str, int]]:
     """Read the identifier, kind, and milestone columns from the milestone map."""
 
-    text = (root / "docs" / "plan" / "milestone-map.md").read_text(encoding="utf-8")
+    path = root / "docs" / "plan" / "milestone-map.md"
+    if not path.is_file():
+        return {}
+    text = path.read_text(encoding="utf-8")
     return {gate_id: (kind, int(milestone)) for gate_id, kind, milestone in MAP_ROW.findall(text)}
 
 
@@ -159,7 +165,14 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
     if duplicate_ids:
         errors.append(f"duplicate gate identifiers: {', '.join(duplicate_ids)}")
 
-    expected = map_entries(root)
+    map_path = root / "docs" / "plan" / "milestone-map.md"
+    if not map_path.is_file():
+        errors.append("docs/plan/milestone-map.md is missing")
+        return errors
+    map_text = map_path.read_text(encoding="utf-8")
+    expected = {
+        gate_id: (kind, int(milestone)) for gate_id, kind, milestone in MAP_ROW.findall(map_text)
+    }
     if set(by_id) != set(expected):
         missing = sorted(set(expected) - set(by_id))
         extra = sorted(set(by_id) - set(expected))
@@ -227,8 +240,11 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
         if anchor not in headings:
             errors.append(f"{entry.id} spec anchor does not resolve: {entry.spec}")
 
-    map_text = (root / "docs" / "plan" / "milestone-map.md").read_text(encoding="utf-8")
-    census_section = map_text.split("## The census", 1)[1].split("## ", 1)[0]
+    _before, separator, after = map_text.partition("## The census")
+    if not separator:
+        errors.append("docs/plan/milestone-map.md has no 'The census' section")
+        return errors
+    census_section = after.partition("## ")[0]
     written = {
         int(milestone): (int(new), int(cumulative))
         for milestone, new, cumulative in re.findall(

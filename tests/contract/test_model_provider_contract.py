@@ -4,7 +4,9 @@ from agent_core.domain.messages import (
     FakeModelScript,
     ModelAttempt,
     ModelCompletedEvent,
+    ModelFailedEvent,
     ModelRequest,
+    ModelTransientError,
     ResolvedModel,
     ScriptedTurn,
     UserMessage,
@@ -30,3 +32,22 @@ async def test_model_provider_stream_has_contiguous_sequence_and_one_terminal() 
     assert sum(isinstance(event, ModelCompletedEvent) for event in events) == 1
     assert provider.attempts == [attempt]
     await provider.close()
+
+
+def test_failed_event_round_trip_preserves_error_subtype_fields() -> None:
+    event = ModelFailedEvent(
+        attempt_id=RUN_ID,
+        run_id=RUN_ID,
+        step_number=1,
+        sequence=0,
+        error=ModelTransientError(
+            provider="fake",
+            model="scripted",
+            attempt_id=RUN_ID,
+            message="retry",
+            stream_had_output=True,
+        ),
+    )
+    restored = ModelFailedEvent.model_validate(event.model_dump(mode="json"))
+    assert isinstance(restored.error, ModelTransientError)
+    assert restored.error.stream_had_output is True

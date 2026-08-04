@@ -109,6 +109,8 @@ class ToolExecutionContext:
     workspace: object | None
     artifacts: object
     credentials: object
+    # Kept structural here to preserve the domain-to-ports dependency boundary;
+    # runtime construction supplies an object satisfying CancellationToken.
     cancellation: object
     mark_effect_sent: Callable[[], Awaitable[None]]
 
@@ -139,6 +141,29 @@ class ToolInvocationStatus(StrEnum):
     FAILED = "FAILED"
     DENIED = "DENIED"
     UNCERTAIN = "UNCERTAIN"
+
+
+ALLOWED_TOOL_TRANSITIONS: dict[ToolInvocationStatus, frozenset[ToolInvocationStatus]] = {
+    ToolInvocationStatus.PROPOSED: frozenset(
+        {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
+    ),
+    ToolInvocationStatus.AUTHORIZED: frozenset({ToolInvocationStatus.RUNNING}),
+    ToolInvocationStatus.WAITING_FOR_APPROVAL: frozenset(
+        {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
+    ),
+    ToolInvocationStatus.RUNNING: frozenset(
+        {
+            ToolInvocationStatus.RUNNING,
+            ToolInvocationStatus.SUCCEEDED,
+            ToolInvocationStatus.FAILED,
+            ToolInvocationStatus.UNCERTAIN,
+        }
+    ),
+    ToolInvocationStatus.SUCCEEDED: frozenset(),
+    ToolInvocationStatus.FAILED: frozenset(),
+    ToolInvocationStatus.DENIED: frozenset(),
+    ToolInvocationStatus.UNCERTAIN: frozenset(),
+}
 
 
 class ToolInvocation(BaseModel):

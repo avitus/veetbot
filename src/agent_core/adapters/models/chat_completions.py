@@ -142,13 +142,15 @@ class ChatCompletionsProvider:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._event_source = event_source
-        self._client = client or httpx.AsyncClient(timeout=None)
+        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(600, read=60))
         self._owns_client = client is None
         self._think_open = think_open
         self._think_close = think_close
         self._max_internal_attempts = max_internal_attempts
 
-    async def _http_events(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    async def _http_events(
+        self, payload: dict[str, Any], timeout: httpx.Timeout
+    ) -> AsyncIterator[dict[str, Any]]:
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
@@ -157,7 +159,7 @@ class ChatCompletionsProvider:
             f"{self._base_url}/chat/completions",
             headers=headers,
             json=payload,
-            timeout=payload.pop("_timeout"),
+            timeout=timeout,
         ) as response:
             response.raise_for_status()
             async for line in response.aiter_lines():
@@ -175,10 +177,12 @@ class ChatCompletionsProvider:
                 if isinstance(parsed, dict):
                     yield {str(key): value for key, value in parsed.items()}
 
-    def _source(self, payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+    def _source(
+        self, payload: dict[str, Any], timeout: httpx.Timeout
+    ) -> AsyncIterator[dict[str, Any]]:
         if self._event_source is not None:
             return self._event_source(payload)
-        return self._http_events(payload)
+        return self._http_events(payload, timeout)
 
     async def stream(
         self,
@@ -187,7 +191,7 @@ class ChatCompletionsProvider:
         attempt: ModelAttempt,
     ) -> AsyncIterator[ModelEvent]:
         try:
-            payload = self._request_payload(request, resolved)
+            payload, timeout = self._request_payload(request, resolved)
         except (TypeError, ValueError, ModelStreamError):
             yield failed_event(
                 attempt=attempt,
@@ -201,7 +205,9 @@ class ChatCompletionsProvider:
         for internal_attempt in range(1, self._max_internal_attempts + 1):
             emitted_count = 0
             try:
-                async for event in self._translate(self._source(dict(payload)), resolved, attempt):
+                async for event in self._translate(
+                    self._source(dict(payload), timeout), resolved, attempt
+                ):
                     emitted_count = event.sequence + 1
                     yield event
                 return
@@ -524,10 +530,15 @@ class ChatCompletionsProvider:
         prompt_details = raw.get("prompt_tokens_details")
         if not isinstance(prompt_details, dict):
             prompt_details = {}
+        input_tokens = max(0, int(raw.get("prompt_tokens", 0)))
+        cached_input_tokens = min(
+            input_tokens,
+            max(0, int(prompt_details.get("cached_tokens", 0))),
+        )
         normalized = ModelUsage(
-            input_tokens=int(raw.get("prompt_tokens", 0)),
-            cached_input_tokens=int(prompt_details.get("cached_tokens", 0)),
-            output_tokens=int(raw.get("completion_tokens", 0)),
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            output_tokens=max(0, int(raw.get("completion_tokens", 0))),
             reasoning_tokens=None,
             provider="chat_completions",
             model=resolved.model,
@@ -535,7 +546,9 @@ class ChatCompletionsProvider:
         return price_usage(normalized, resolved.pricing)
 
     @staticmethod
-    def _request_payload(request: ModelRequest, resolved: ResolvedModel) -> dict[str, Any]:
+    def _request_payload(
+        request: ModelRequest, resolved: ResolvedModel
+    ) -> tuple[dict[str, Any], httpx.Timeout]:
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)
@@ -597,10 +610,6 @@ class ChatCompletionsProvider:
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "_timeout": httpx.Timeout(
-                request.timeout_seconds,
-                read=request.stream_idle_seconds,
-            ),
         }
         if resolved.capabilities.native_tool_calling:
             payload["tools"] = tools
@@ -610,7 +619,10 @@ class ChatCompletionsProvider:
             )
         if request.temperature is not None:
             payload["temperature"] = request.temperature
-        return payload
+        return payload, httpx.Timeout(
+            request.timeout_seconds,
+            read=request.stream_idle_seconds,
+        )
 
     async def close(self) -> None:
         if self._owns_client:

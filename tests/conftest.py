@@ -4,50 +4,91 @@ from __future__ import annotations
 
 import os
 import socket
-from collections.abc import Generator
+from collections.abc import Buffer, Generator
 from contextvars import ContextVar
 from functools import cache
-from typing import Literal
+from typing import Any, Literal, cast, overload
 from urllib.parse import urlparse
 
 import pytest
 
 NetworkMode = Literal["blocked", "integration", "live"]
+type SocketAddress = tuple[Any, ...] | str | Buffer
 NETWORK_MODE: ContextVar[NetworkMode] = ContextVar("test_network_mode", default="blocked")
 
 
 @cache
-def _integration_hosts() -> set[str]:
-    configured = urlparse(os.environ.get("DATABASE_URL", "")).hostname
-    hosts = {"127.0.0.1", "::1", "localhost"}
-    if configured is None:
-        return hosts
-    hosts.add(configured)
+def _integration_endpoints() -> set[tuple[str, int]]:
+    configured = urlparse(os.environ.get("DATABASE_URL", ""))
+    if configured.hostname is None:
+        return set()
+    port = configured.port or 5432
+    hosts = {configured.hostname}
     try:
         for _family, _type, _protocol, _canonical, address in socket.getaddrinfo(
-            configured, None, type=socket.SOCK_STREAM
+            configured.hostname, None, type=socket.SOCK_STREAM
         ):
             resolved = address[0]
             if isinstance(resolved, str):
                 hosts.add(resolved)
     except socket.gaierror:
         pass
-    return hosts
+    return {(host, port) for host in hosts}
 
 
 class GuardedSocket(socket.socket):
     """Socket that applies the marker-selected network policy for the current test."""
 
-    def connect(self, address: object) -> None:
+    def _guard_address(self, address: object) -> None:
         mode = NETWORK_MODE.get()
         if mode == "live" or self.family == socket.AF_UNIX:
-            super().connect(address)  # type: ignore[arg-type]
             return
         host = address[0] if isinstance(address, tuple) and address else None
-        if mode == "integration" and host in _integration_hosts():
-            super().connect(address)  # type: ignore[arg-type]
+        port = address[1] if isinstance(address, tuple) and len(address) > 1 else None
+        if mode == "integration" and (host, port) in _integration_endpoints():
             return
-        raise RuntimeError(f"test attempted blocked network connection to host {host!r}")
+        raise RuntimeError(
+            f"test attempted blocked network connection to host {host!r} (destination {address!r})"
+        )
+
+    def connect(self, address: object) -> None:
+        self._guard_address(address)
+        super().connect(address)  # type: ignore[arg-type]
+
+    def connect_ex(self, address: object) -> int:
+        self._guard_address(address)
+        return super().connect_ex(address)  # type: ignore[arg-type]
+
+    @overload
+    def sendto(self, data: Buffer, address: SocketAddress, /) -> int: ...
+
+    @overload
+    def sendto(self, data: Buffer, flags: int, address: SocketAddress, /) -> int: ...
+
+    def sendto(
+        self,
+        data: Buffer,
+        address_or_flags: int | SocketAddress,
+        address: SocketAddress | None = None,
+        /,
+    ) -> int:
+        destination = address_or_flags if address is None else address
+        self._guard_address(destination)
+        if address is None:
+            return super().sendto(data, cast(SocketAddress, address_or_flags))
+        return super().sendto(data, cast(int, address_or_flags), address)
+
+    def sendmsg(
+        self,
+        buffers: object,
+        ancdata: object = (),
+        flags: int = 0,
+        address: object | None = None,
+    ) -> int:
+        if address is not None:
+            self._guard_address(address)
+            return super().sendmsg(buffers, ancdata, flags, address)  # type: ignore[arg-type]
+        return super().sendmsg(buffers, ancdata, flags)  # type: ignore[arg-type]
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

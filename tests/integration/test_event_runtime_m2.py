@@ -18,7 +18,7 @@ from agent_core.bootstrap import build
 from agent_core.domain.errors import ConflictError, WorkerFencedError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
-from agent_core.domain.runs import Run, RunCheckpoint, RunStatus, Step
+from agent_core.domain.runs import Run, RunCheckpoint, RunLimits, RunStatus, Step
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from tests.contract.support import NOW
@@ -204,6 +204,44 @@ async def test_concurrent_idempotent_submissions_share_one_existing_session() ->
     assert [event.event_type for event in events].count("run.queued") == 1
 
 
+async def test_expired_idempotency_key_creates_a_new_run() -> None:
+    clock = FixedClock(NOW)
+    async with build(settings=database_settings(), storage="postgres", clock=clock) as composition:
+        first = await composition.runs.submit(
+            "submit after expiry", idempotency_key="m2-expired-request"
+        )
+        clock.advance(timedelta(hours=25))
+        second = await composition.runs.submit(
+            "submit after expiry", idempotency_key="m2-expired-request"
+        )
+    assert second != first
+
+
+async def test_distinct_agent_specs_receive_distinct_stable_versions() -> None:
+    async with build(settings=database_settings(), storage="postgres") as first_composition:
+        first_session_id = await first_composition.sessions.create()
+        async with first_composition.uow_factory() as uow:
+            first_session = await uow.sessions.get(first_session_id, PRINCIPAL)
+
+    custom_limits = RunLimits(max_steps=31, max_model_calls=16, max_tool_calls=32)
+    async with build(
+        settings=database_settings(), storage="postgres", limits=custom_limits
+    ) as second_composition:
+        second_session_id = await second_composition.sessions.create()
+        async with second_composition.uow_factory() as uow:
+            second_session = await uow.sessions.get(second_session_id, PRINCIPAL)
+
+    async with build(
+        settings=database_settings(), storage="postgres", limits=custom_limits
+    ) as repeated_composition:
+        repeated_session_id = await repeated_composition.sessions.create()
+        async with repeated_composition.uow_factory() as uow:
+            repeated_session = await uow.sessions.get(repeated_session_id, PRINCIPAL)
+
+    assert first_session.agent_version != second_session.agent_version
+    assert second_session.agent_version == repeated_session.agent_version
+
+
 async def test_active_run_and_idempotency_hash_conflicts_are_typed() -> None:
     async with build(settings=database_settings(), storage="postgres") as composition:
         session_id = await composition.sessions.create()
@@ -237,7 +275,7 @@ async def test_terminal_prune_preserves_the_latest_delta_chain() -> None:
                 (2, False),
                 (3, True),
                 (4, False),
-                (5, False),
+                (5, True),
             ):
                 event = await uow.events.append(
                     NewEvent(
@@ -254,7 +292,7 @@ async def test_terminal_prune_preserves_the_latest_delta_chain() -> None:
                     RunCheckpoint(
                         run_id=run_id,
                         version=version,
-                        status=RunStatus.RUNNING,
+                        status=(RunStatus.COMPLETED if version == 5 else RunStatus.RUNNING),
                         conversation=[item.model_copy(deep=True) for item in history.items],
                         working_state={"checkpoint": version},
                         last_event_sequence=event.sequence,
@@ -265,7 +303,7 @@ async def test_terminal_prune_preserves_the_latest_delta_chain() -> None:
                 )
             expected = await uow.checkpoints.latest(run_id)
             assert expected is not None
-            assert await uow.checkpoints.prune(run_id, terminal=True) == 2
+            assert await uow.checkpoints.prune(run_id, terminal=True) == 4
             assert await uow.checkpoints.latest(run_id) == expected
 
 

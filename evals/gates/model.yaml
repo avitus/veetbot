@@ -58,7 +58,7 @@
   kind: case
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "A live one-call smoke test against each vendor passes when credentials are present and skips cleanly when they are not."
-  check: tests/live/test_model_providers_m3.py::test_vendor_one_call_smoke
+  check: tests/gates/test_model_m3.py::test_live_provider_smokes_execute_as_clean_credential_skips
 - id: gate.model.metadata_closed
   milestone: 3
   kind: structural

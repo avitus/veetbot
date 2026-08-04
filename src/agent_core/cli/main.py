@@ -9,29 +9,57 @@ import os
 import signal
 import socket
 from collections.abc import Sequence
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
 from uuid import UUID
 
 import typer
+from typer.core import TyperGroup
 
 from agent_core import __version__
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError
 from agent_core.domain.errors import (
+    EvalExpectationError,
     ExportConsentError,
     ExportRedactionError,
+    ExportStateError,
     NotFoundError,
 )
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.runs import Run, RunStatus
+
+RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
+RUN_WAIT_TIMEOUT_SECONDS = 30.0
+
+
+class WorkerRole(StrEnum):
+    WORKER = "worker"
+    MAINTENANCE = "maintenance"
+
+
+class QueuedRunTimeoutError(TimeoutError):
+    def __init__(self, run_id: UUID) -> None:
+        super().__init__(f"run remains queued: {run_id}")
+        self.run_id = run_id
+
+
+class ReservedRunGroup(TyperGroup):
+    """Route non-reserved first arguments to the plan's implicit run submission."""
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        if args and args[0] not in {*RUN_RESERVED_WORDS, "--help", "-h"}:
+            args = ["submit", *args]
+        return super().parse_args(ctx, args)
+
 
 app = typer.Typer(
     name="agent",
     help="Modular general-purpose agent platform.",
     no_args_is_help=True,
 )
-run_app = typer.Typer(name="run", invoke_without_command=True, no_args_is_help=True)
+run_app = typer.Typer(name="run", cls=ReservedRunGroup, no_args_is_help=True)
 session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
 app.add_typer(run_app)
@@ -114,17 +142,20 @@ async def _submit(
                 session_id=session_id,
                 idempotency_key=idempotency_key,
             )
-            run = await composition.runs.wait_terminal(run_id)
+            try:
+                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS):
+                    run = await composition.runs.wait_terminal(run_id)
+            except TimeoutError as exc:
+                raise QueuedRunTimeoutError(run_id) from exc
             events = await composition.runs.events(run_id)
             return run, events
         finally:
             signal.signal(signal.SIGINT, previous_handler)
 
 
-@run_app.callback(invoke_without_command=True)
+@run_app.command("submit", hidden=True)
 def run_command(
-    ctx: typer.Context,
-    prompt: Annotated[str | None, typer.Argument(help="User request to execute.")] = None,
+    prompt: Annotated[str, typer.Argument(help="User request to execute.")],
     session_id: Annotated[UUID | None, typer.Option("--session", help="Reuse a session.")] = None,
     idempotency_key: Annotated[
         str | None,
@@ -143,12 +174,13 @@ def run_command(
 ) -> None:
     """Execute one run through the shared RunService."""
 
-    if ctx.invoked_subcommand is not None:
-        return
-    if prompt is None:
-        raise typer.BadParameter("a prompt is required")
+    if session_id is not None and model_policy is not None:
+        raise typer.BadParameter("--model-policy can only be used for a new session")
     try:
         run, events = asyncio.run(_submit(prompt, session_id, idempotency_key, model_policy))
+    except QueuedRunTimeoutError as exc:
+        typer.echo(f"run did not reach a terminal state: {exc.run_id}", err=True)
+        raise typer.Exit(5) from exc
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -213,7 +245,12 @@ def run_export(
     except NotFoundError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
-    except (ConfigurationError, ExportConsentError, ExportRedactionError) as exc:
+    except (
+        ConfigurationError,
+        ExportConsentError,
+        ExportRedactionError,
+        ExportStateError,
+    ) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(artifact.model_dump_json() if json_output else str(artifact.id))
@@ -224,11 +261,11 @@ async def _create_session() -> UUID:
         return await composition.sessions.create()
 
 
-async def _serve_worker(role: str) -> None:
+async def _serve_worker(role: WorkerRole) -> None:
     async with build(storage="postgres") as composition:
         loop = asyncio.get_running_loop()
         worker_id = f"{socket.gethostname()}:{os.getpid()}"
-        if role == "worker":
+        if role is WorkerRole.WORKER:
             service = composition.worker_factory(worker_id)
         else:
             service = composition.maintenance_factory()
@@ -240,13 +277,11 @@ async def _serve_worker(role: str) -> None:
 @app.command("worker")
 def worker_command(
     role: Annotated[
-        str, typer.Option("--role", help="Process role: worker or maintenance.")
-    ] = "worker",
+        WorkerRole, typer.Option("--role", help="Process role: worker or maintenance.")
+    ] = WorkerRole.WORKER,
 ) -> None:
     """Execute the durable worker or maintenance queue role."""
 
-    if role not in {"worker", "maintenance"}:
-        raise typer.BadParameter("role must be worker or maintenance")
     try:
         asyncio.run(_serve_worker(role))
     except ConfigurationError as exc:
@@ -303,7 +338,7 @@ def eval_run(
         results = module.run_selected_sync(
             Path.cwd(), current_milestone=3, tag=tag, case_name=case_name
         )
-    except (AssertionError, OSError, ValueError) as exc:
+    except (EvalExpectationError, ImportError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)
         raise typer.Exit(1) from exc
     for result in results:

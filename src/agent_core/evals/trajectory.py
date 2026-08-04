@@ -52,23 +52,38 @@ def convert_trajectory(
     turns: list[ScriptedTurn] = []
     tool_results: dict[str, dict[str, Any]] = {}
     pending_calls: list[ScriptedToolCall] = []
+    pending_text: str | None = None
+
+    def flush_pending() -> None:
+        nonlocal pending_calls, pending_text
+        if pending_calls:
+            turns.append(
+                ScriptedTurn(
+                    text=pending_text or "",
+                    tool_calls=pending_calls,
+                    stop_reason=StopReason.TOOL_USE,
+                )
+            )
+        elif pending_text:
+            turns.append(ScriptedTurn(text=pending_text, stop_reason=StopReason.END_TURN))
+        pending_calls = []
+        pending_text = None
+
     for message in messages:
         if not isinstance(message, dict):
             raise ValueError("trajectory message is not a mapping")
         kind = message.get("kind")
         if kind == "user":
+            flush_pending()
             value = _text(message.get("content"))
             if value:
                 user_inputs.append(value)
         elif kind == "assistant":
             if pending_calls:
-                turns.append(
-                    ScriptedTurn(tool_calls=pending_calls, stop_reason=StopReason.TOOL_USE)
-                )
-                pending_calls = []
+                flush_pending()
             value = _text(message.get("content"))
             if value:
-                turns.append(ScriptedTurn(text=value, stop_reason=StopReason.END_TURN))
+                pending_text = value if pending_text is None else f"{pending_text}\n{value}"
         elif kind == "tool_call":
             arguments = message.get("arguments")
             pending_calls.append(
@@ -79,11 +94,7 @@ def convert_trajectory(
                 )
             )
         elif kind == "tool_result":
-            if pending_calls:
-                turns.append(
-                    ScriptedTurn(tool_calls=pending_calls, stop_reason=StopReason.TOOL_USE)
-                )
-                pending_calls = []
+            flush_pending()
             call_id = str(message.get("call_id", ""))
             tool_results[call_id] = {
                 "content": _text(message.get("content")),
@@ -91,11 +102,19 @@ def convert_trajectory(
             }
         elif kind == "provider_reasoning":
             raise ValueError("redacted trajectory unexpectedly contains provider reasoning")
-    if pending_calls:
-        turns.append(ScriptedTurn(tool_calls=pending_calls, stop_reason=StopReason.TOOL_USE))
+    flush_pending()
     if not user_inputs or not turns:
         raise ValueError("trajectory cannot produce a deterministic input and model script")
-    outcome = RunStatus(str(raw.get("outcome")))
+    raw_outcome = raw.get("outcome")
+    if not isinstance(raw_outcome, str) or not raw_outcome:
+        raise ValueError("trajectory artifact has no outcome")
+    try:
+        outcome = RunStatus(raw_outcome)
+    except ValueError as exc:
+        raise ValueError("trajectory artifact has an invalid outcome") from exc
+    export_id = raw.get("export_id")
+    if not isinstance(export_id, str) or not export_id:
+        raise ValueError("trajectory artifact has no export id")
     failure = raw.get("failure")
     failure_reason = None
     if isinstance(failure, dict) and failure.get("kind") is not None:
@@ -106,7 +125,7 @@ def convert_trajectory(
             "name": case_name,
             "milestone": 3,
             "source": "trajectory",
-            "source_export_id": raw.get("export_id"),
+            "source_export_id": export_id,
             "tags": ["trajectory", "regression"],
             "input": {"text": user_inputs[0]},
             "model_fixture": model_fixture,

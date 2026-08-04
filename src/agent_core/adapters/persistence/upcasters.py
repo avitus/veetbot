@@ -26,7 +26,10 @@ class EventUpcasterRegistry:
     def __init__(self) -> None:
         authored = [SessionCreatedV1ToV2()]
         self._upcasters = {(item.event_type, item.from_version): item for item in authored}
-        self._current_versions = {"session.created": 2}
+        self._current_versions = {
+            event_type: max(item.to_version for item in authored if item.event_type == event_type)
+            for event_type in {item.event_type for item in authored}
+        }
 
     def current_version(self, event_type: str) -> int:
         return self._current_versions.get(event_type, 1)

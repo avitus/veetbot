@@ -24,10 +24,14 @@ does not authorize Milestone 3 provider behavior or weaken a Milestone 2 gate.
    deterministic evaluation explicitly retains the in-memory composition. Both
    use one `UnitOfWorkFactory` port, so application and runtime code own short
    transaction boundaries without importing SQLAlchemy.
-2. The built-in agent has a fixed UUID and immutable `1.0.0` record in the
-   PostgreSQL tier. Randomly creating the agent identity in each process would
-   make sessions submitted by the CLI unreadable by a separately composed
-   worker. The memory tier retains injected identifiers for deterministic tests.
+2. The built-in agent has a fixed UUID and a content-addressed version in the
+   PostgreSQL tier. The version is `1.0.0+h<sha12>`, where the digest covers the
+   complete behavioral specification except identity and version. Randomly
+   creating the agent identity in each process would make sessions submitted by
+   the CLI unreadable by a separately composed worker; reusing one literal
+   version for different limits, tools, or policy profiles would make valid
+   configurations conflict. The memory tier retains injected identifiers for
+   deterministic tests.
 3. Tenant and principal identifiers remain text in SQL. The current domain,
    evaluation identities, and production-validation rules all define them as
    strings; converting only the persistence pseudocode to UUID would create a
@@ -86,11 +90,19 @@ does not authorize Milestone 3 provider behavior or weaken a Milestone 2 gate.
     bounded batches, deterministic rebuilds, and monotonic conflict guards.
     A known event with malformed current-schema content remains a hard
     projection error as specified; it is not silently skipped or quarantined.
+15. The synchronous `agent run` CLI waits up to 30 seconds for a worker. If the
+    run is still non-terminal, it prints the durable run identifier to stderr
+    and exits with the documented platform-unavailable code rather than polling
+    forever. The queued run remains available to `agent run get` and a later
+    worker; ordinary runs that finish in the interval still print only their
+    final message to stdout.
 
 ## Consequences
 
 - CLI submission and worker execution can run in different processes while
   sharing immutable agent/session identities and durable events.
+- Different built-in agent configurations coexist as immutable versions under
+  one stable agent identity, and identical configurations resolve identically.
 - No transaction remains open during model streaming or tool execution.
 - Checkpoint deletion, worker termination, duplicate submission, and lease
   handover are executable integration cases rather than inferred properties.

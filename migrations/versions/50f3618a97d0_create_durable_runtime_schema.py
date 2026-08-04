@@ -133,7 +133,9 @@ def upgrade() -> None:
         sa.Column("failure", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.Column("final_message", sa.Text(), nullable=True),
         sa.Column("export_consent", sa.Boolean(), server_default=sa.text("false"), nullable=False),
-        sa.Column("seed_event_sequence", sa.BigInteger(), server_default="0", nullable=False),
+        sa.Column(
+            "seed_event_sequence", sa.BigInteger(), server_default=sa.text("0"), nullable=False
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(

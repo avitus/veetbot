@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -12,7 +13,13 @@ from enum import StrEnum
 from typing import Any
 
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
+from agent_core.domain.errors import (
+    BudgetExceededError,
+    ConflictError,
+    NotFoundError,
+    RunCancelledError,
+    ToolValidationError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import ContentPart, TextPart, ToolCallItem, ToolResultItem
 from agent_core.domain.persistence import WorkerLease
@@ -40,6 +47,8 @@ from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.messages import message_for
 from agent_core.tools.validation import validate_and_normalize, validate_output
+
+logger = logging.getLogger(__name__)
 
 
 class _UnavailableCollaborator:
@@ -328,6 +337,8 @@ class ToolPipeline:
                 call.call_id, invocation.outcome, tool.spec.output_trust
             )
         recovery = tool_recovery_action(invocation)
+        if recovery is ToolRecoveryAction.RETURN_OUTCOME:
+            raise ConflictError("terminal tool invocation has no persisted outcome")
         if recovery is ToolRecoveryAction.MARK_UNCERTAIN:
             outcome = ToolOutcome(
                 status=ToolOutcomeStatus.UNCERTAIN,
@@ -369,6 +380,12 @@ class ToolPipeline:
             return result_item
         if recovery is ToolRecoveryAction.RESUME_APPROVAL:
             raise ConflictError("approval recovery is not authorized before Milestone 4")
+        if recovery not in {
+            ToolRecoveryAction.RESUME_AUTHORIZATION,
+            ToolRecoveryAction.REEXECUTE,
+            ToolRecoveryAction.REPLAY_IDEMPOTENCY_KEY,
+        }:
+            raise AssertionError(f"unhandled tool recovery action {recovery.value}")
 
         if tool.spec.side_effect is not SideEffectClass.NONE:
             denied = ToolOutcome(
@@ -538,7 +555,17 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        except Exception:
+        except (RunCancelledError, BudgetExceededError, NotFoundError):
+            raise
+        # Tool implementation failures are deliberately normalized at this boundary.
+        except Exception as exc:
+            logger.exception(
+                "tool_execution_failed",
+                extra={
+                    "tool_name": tool.spec.name,
+                    "error_class": type(exc).__name__,
+                },
+            )
             result = ToolResult(
                 ok=False,
                 content=[],

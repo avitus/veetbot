@@ -50,10 +50,18 @@ class SequenceIdFactory:
     def __init__(self, values: Iterable[UUID] = ()) -> None:
         self._values = iter(values)
         self._counter = 0
+        self._issued: set[UUID] = set()
 
     def new_id(self) -> UUID:
         try:
-            return next(self._values)
+            value = next(self._values)
         except StopIteration:
-            self._counter += 1
-            return UUID(int=self._counter)
+            while True:
+                self._counter += 1
+                value = UUID(int=self._counter)
+                if value not in self._issued:
+                    break
+        if value in self._issued:
+            raise ValueError("SequenceIdFactory authored values must be unique")
+        self._issued.add(value)
+        return value

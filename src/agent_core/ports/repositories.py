@@ -12,6 +12,7 @@ from agent_core.domain.messages import (
     ModelRequest,
     ModelTurn,
     ModelUsage,
+    ProviderPin,
     ResolvedModel,
     StopReason,
 )
@@ -64,7 +65,7 @@ class RunRepository(Protocol):
 
     async def set_seed_event_sequence(self, run_id: UUID, sequence: int) -> None: ...
 
-    async def set_provider_pin(self, run_id: UUID, pin: object) -> None: ...
+    async def set_provider_pin(self, run_id: UUID, pin: ProviderPin) -> None: ...
 
 
 class ToolInvocationRepository(Protocol):

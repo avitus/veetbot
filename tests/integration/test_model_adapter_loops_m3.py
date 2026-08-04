@@ -9,7 +9,11 @@ import pytest
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
-from agent_core.adapters.models.recorded import RecordedFixture, RecordedModelProvider
+from agent_core.adapters.models.recorded import (
+    RecordedEventSource,
+    RecordedFixture,
+    RecordedModelProvider,
+)
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
@@ -40,16 +44,17 @@ SETTINGS = Settings(
 
 def real_cases() -> list[tuple[str, str, ModelProvider]]:
     openai_streams = [openai_tool_events('{"expression":'), openai_text_events("recovered")]
+    recorded_fixture = RecordedFixture(
+        schema_version=1,
+        provider_api="responses",
+        streams=openai_streams,
+    )
     return [
         (
             "recorded",
             "balanced",
             RecordedModelProvider(
-                RecordedFixture(
-                    schema_version=1,
-                    provider_api="responses",
-                    streams=openai_streams,
-                )
+                OpenAIResponsesProvider(event_source=RecordedEventSource(recorded_fixture))
             ),
         ),
         (

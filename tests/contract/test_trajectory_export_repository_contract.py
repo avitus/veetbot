@@ -41,7 +41,15 @@ async def test_trajectory_export_is_idempotent_and_swept_after_expiry() -> None:
     repository = InMemoryTrajectoryExportRepository()
     row = exported()
     assert await repository.create(row) == row
-    assert await repository.create(row) == row
+    competing = row.model_copy(
+        update={
+            "export_id": UUID(int=104),
+            "artifact": row.artifact.model_copy(update={"id": UUID(int=105)}),
+        },
+        deep=True,
+    )
+    assert await repository.create(competing) == row
+    assert await repository.get_for_run(RUN_ID) == row
     assert await repository.expire_for_principal(TENANT, PRINCIPAL_ID, NOW) == 1
     assert await repository.expire_for_principal(TENANT, PRINCIPAL_ID, NOW + timedelta(days=1)) == 0
     expired = await repository.list_expired(NOW, limit=10)

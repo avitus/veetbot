@@ -5,10 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.domain.policies import TrustLevel
 
@@ -200,6 +200,12 @@ class ModelProtocolError(ModelError):
     detail: str
 
 
+type ModelFailure = Annotated[
+    ModelTransientError | ModelPermanentError | ModelProtocolError,
+    Field(discriminator="kind"),
+]
+
+
 class ModelAttempt(BaseModel):
     attempt_id: UUID
     run_id: UUID
@@ -265,6 +271,14 @@ class ModelLimits(BaseModel):
     default_output_reserve: int = Field(default=4096, gt=0)
     max_cache_breakpoints: int = Field(default=0, ge=0)
     max_tool_count: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_composed_limits(self) -> ModelLimits:
+        if self.default_output_reserve > self.max_output_tokens:
+            raise ValueError("default output reserve exceeds maximum output tokens")
+        if self.max_output_tokens > self.context_window_tokens:
+            raise ValueError("maximum output tokens exceed context window")
+        return self
 
 
 class ModelPricing(BaseModel):
@@ -342,7 +356,7 @@ class ModelCompletedEvent(ModelEventBase):
 
 class ModelFailedEvent(ModelEventBase):
     kind: Literal["failed"] = "failed"
-    error: ModelError
+    error: ModelFailure
     partial_turn: ModelTurn | None = None
 
 
@@ -368,7 +382,7 @@ class ScriptedTurn(BaseModel):
     tool_calls: list[ScriptedToolCall] = Field(default_factory=list)
     stop_reason: StopReason = StopReason.END_TURN
     usage: ModelUsage | None = None
-    fail_with: ModelError | None = None
+    fail_with: ModelFailure | None = None
     delay_ms: int = 0
 
 

@@ -165,13 +165,11 @@ def test_provider_metadata_is_closed_and_has_only_two_readers() -> None:
         )
 
     readers: list[tuple[str, str]] = []
-    for relative in (
-        "src/agent_core/adapters/persistence/mappers.py",
-        "src/agent_core/observability/models.py",
-    ):
-        tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"))
+    for path in sorted((ROOT / "src/agent_core").rglob("*.py")):
+        relative = path.relative_to(ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.FunctionDef):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if any(
                 isinstance(nested, ast.Call)
@@ -182,7 +180,7 @@ def test_provider_metadata_is_closed_and_has_only_two_readers() -> None:
                 for nested in ast.walk(node)
             ):
                 readers.append((relative, node.name))
-    assert readers == [
+    assert sorted(readers) == [
         (
             "src/agent_core/adapters/persistence/mappers.py",
             "flatten_provider_metadata",

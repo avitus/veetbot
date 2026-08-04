@@ -42,9 +42,12 @@ def _canonical_json(value: object) -> bytes:
 class MinimalContextBuilder:
     """Build the immutable A region and volatile B region in a total order."""
 
-    def __init__(self, registry: ToolRegistry, clock: Clock) -> None:
+    def __init__(self, registry: ToolRegistry, clock: Clock, *, maximum_tools: int = 30) -> None:
+        if maximum_tools <= 0:
+            raise ValueError("maximum_tools must be positive")
         self._registry = registry
         self._clock = clock
+        self._maximum_tools = maximum_tools
 
     async def build(
         self,
@@ -58,7 +61,7 @@ class MinimalContextBuilder:
             principal,
             profile="milestone1-identity-policy-filter",
             environment="in_process",
-        )[:30]
+        )[: self._maximum_tools]
         prefix = self._prefix(agent, tools)
         prefix_bytes = _canonical_json(
             {
@@ -102,15 +105,16 @@ class MinimalContextBuilder:
                 if not isinstance(item, ToolResultItem):
                     break
                 trailing_result_ids.add(item.call_id)
-            insertion = len(checkpoint_items)
-            if trailing_result_ids:
-                matching = [
-                    index
-                    for index, item in enumerate(checkpoint_items)
-                    if isinstance(item, ToolCallItem) and item.call_id in trailing_result_ids
-                ]
-                if matching:
-                    insertion = min(matching)
+            if not trailing_result_ids:
+                raise ValueError("checkpoint continuation has no trailing tool-result anchor")
+            matching = [
+                index
+                for index, item in enumerate(checkpoint_items)
+                if isinstance(item, ToolCallItem) and item.call_id in trailing_result_ids
+            ]
+            if not matching:
+                raise ValueError("checkpoint continuation has no matching tool-call anchor")
+            insertion = min(matching)
             checkpoint_items[insertion:insertion] = opaque_items
         if checkpoint_items and checkpoint_items[-1].kind == "user":
             body = [*checkpoint_items[:-1], runtime_item, checkpoint_items[-1]]

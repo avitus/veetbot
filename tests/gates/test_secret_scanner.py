@@ -1,11 +1,18 @@
 """Committed-file secret scanner gate."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
 from scripts.architecture_checks import secret_findings
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _git_executable() -> str:
+    git = shutil.which("git")
+    assert git is not None
+    return git
 
 
 def test_no_committed_secrets() -> None:
@@ -15,7 +22,7 @@ def test_no_committed_secrets() -> None:
 
 
 def test_scanner_reports_rule_without_echoing_secret_and_requires_reason(tmp_path: Path) -> None:
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run([_git_executable(), "init", "-q"], cwd=tmp_path, check=True)
     source = tmp_path / "src" / "leak.py"
     source.parent.mkdir()
     synthetic_value = "sk-" + ("x" * 24)
@@ -32,3 +39,34 @@ def test_scanner_reports_rule_without_echoing_secret_and_requires_reason(tmp_pat
     assert any("provider_key" in finding for finding in rendered)
     assert all(synthetic_value not in finding for finding in rendered)
     assert any("requires a prose reason" in error for error in errors)
+
+
+def test_secret_allowlist_suppresses_exact_match_and_reports_stale_entry(tmp_path: Path) -> None:
+    subprocess.run([_git_executable(), "init", "-q"], cwd=tmp_path, check=True)
+    source = tmp_path / "src" / "leak.py"
+    source.parent.mkdir()
+    source.write_text("consume('sk-" + ("x" * 24) + "')\n", encoding="utf-8")
+    allowlist = tmp_path / "security" / "secret-allowlist.yaml"
+    allowlist.parent.mkdir()
+    allowlist.write_text(
+        "allow:\n"
+        "  - path: src/leak.py\n"
+        "    line: 1\n"
+        "    rule: provider_key\n"
+        "    reason: synthetic scanner fixture\n",
+        encoding="utf-8",
+    )
+    findings, errors = secret_findings(tmp_path)
+    assert findings == []
+    assert errors == []
+
+    allowlist.write_text(
+        "allow:\n"
+        "  - path: src/leak.py\n"
+        "    line: 2\n"
+        "    rule: provider_key\n"
+        "    reason: intentionally stale fixture\n",
+        encoding="utf-8",
+    )
+    _findings, errors = secret_findings(tmp_path)
+    assert errors == ["stale secret allowlist entry: src/leak.py:2:provider_key"]

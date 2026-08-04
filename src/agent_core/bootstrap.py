@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -9,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.determinism import (
@@ -33,14 +37,42 @@ from agent_core.adapters.persistence.database import (
 )
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
+    InMemoryCheckpointRepository,
     InMemoryEventRepository,
+    InMemoryExportConsentRepository,
+    InMemoryIdempotencyRepository,
+    InMemoryMaintenanceRepository,
     InMemoryRunRepository,
+    InMemorySessionHistoryRepository,
     InMemorySessionRepository,
     InMemoryToolInvocationRepository,
+    InMemoryTrajectoryExportRepository,
+    InMemoryTrajectoryProjectionRepository,
+    InMemoryUsageRepository,
+)
+from agent_core.adapters.persistence.projections import (
+    PostgresSessionHistoryRepository,
+    PostgresTrajectoryProjectionRepository,
+)
+from agent_core.adapters.persistence.queue import PostgresRunQueue
+from agent_core.adapters.persistence.repositories import (
+    PostgresAgentRepository,
+    PostgresCheckpointRepository,
+    PostgresEventRepository,
+    PostgresExportConsentRepository,
+    PostgresIdempotencyRepository,
+    PostgresMaintenanceRepository,
+    PostgresRunRepository,
+    PostgresSessionRepository,
+    PostgresToolInvocationRepository,
+    PostgresTrajectoryExportRepository,
+    PostgresUsageRepository,
 )
 from agent_core.adapters.persistence.unit_of_work import (
     MemoryUnitOfWorkFactory,
+    PostgresRepositoryFactory,
     PostgresUnitOfWorkFactory,
+    UnitOfWorkRepositories,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.application.run_service import RunService
@@ -53,6 +85,7 @@ from agent_core.config import (
     PACKAGE_ROOT,
     ConfigurationError,
     Settings,
+    load_config_document,
     load_settings,
     validate_runtime_identity,
     validate_settings,
@@ -98,6 +131,13 @@ class Composition:
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
 
 
+def _content_addressed_agent_version(agent: AgentSpec) -> str:
+    payload = agent.model_dump(mode="json", exclude={"id", "version"})
+    encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:12]
+    return f"1.0.0+h{digest}"
+
+
 class _ActiveToken:
     def __init__(self) -> None:
         self._token: RunCancellationToken | None = None
@@ -128,6 +168,75 @@ def default_fake_script() -> FakeModelScript:
     )
 
 
+def _memory_uow_repositories(
+    *,
+    agents: InMemoryAgentRepository,
+    sessions: InMemorySessionRepository,
+    runs: InMemoryRunRepository,
+    events: InMemoryEventRepository,
+    invocations: InMemoryToolInvocationRepository,
+    clock: Clock,
+) -> UnitOfWorkRepositories:
+    return UnitOfWorkRepositories(
+        agents=agents,
+        sessions=sessions,
+        runs=runs,
+        events=events,
+        invocations=invocations,
+        checkpoints=InMemoryCheckpointRepository(),
+        idempotency=InMemoryIdempotencyRepository(clock),
+        usage=InMemoryUsageRepository(runs),
+        history=InMemorySessionHistoryRepository(events),
+        trajectory=InMemoryTrajectoryProjectionRepository(events),
+        export_consent=InMemoryExportConsentRepository(),
+        trajectory_exports=InMemoryTrajectoryExportRepository(),
+        maintenance=InMemoryMaintenanceRepository(),
+        queue=None,
+    )
+
+
+def _postgres_repository_factory(
+    clock: Clock,
+    upcasters: EventUpcasterRegistry,
+    *,
+    lease_seconds: float,
+    max_attempts: int,
+) -> PostgresRepositoryFactory:
+    def repositories(session: AsyncSession) -> UnitOfWorkRepositories:
+        agents = PostgresAgentRepository(session, clock)
+        sessions = PostgresSessionRepository(session)
+        runs = PostgresRunRepository(session, clock)
+        events = PostgresEventRepository(session, clock, upcasters)
+        history = PostgresSessionHistoryRepository(session, clock, upcasters)
+        trajectory = PostgresTrajectoryProjectionRepository(session, clock, upcasters)
+        checkpoints = PostgresCheckpointRepository(session, clock, history)
+        invocations = PostgresToolInvocationRepository(session, runs)
+        return UnitOfWorkRepositories(
+            agents=agents,
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=invocations,
+            checkpoints=checkpoints,
+            idempotency=PostgresIdempotencyRepository(session, clock),
+            usage=PostgresUsageRepository(session),
+            history=history,
+            trajectory=trajectory,
+            export_consent=PostgresExportConsentRepository(session),
+            trajectory_exports=PostgresTrajectoryExportRepository(session),
+            maintenance=PostgresMaintenanceRepository(session),
+            queue=PostgresRunQueue(
+                session,
+                clock,
+                events,
+                lease_seconds=lease_seconds,
+                max_attempts=max_attempts,
+            ),
+        )
+
+    return repositories
+
+
 async def _compose(
     *,
     storage: Literal["memory", "postgres"],
@@ -142,6 +251,12 @@ async def _compose(
     trajectory_export_enabled: bool,
     artifact_root: Path,
     trajectory_redactor: TrajectoryRedactor | None,
+    maximum_tools: int,
+    max_internal_attempts: int,
+    identical_call_threshold: int,
+    lease_seconds: float,
+    heartbeat_divisor: int,
+    worker_poll_interval: float,
 ) -> tuple[Composition, list[ModelProvider]]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
@@ -158,7 +273,7 @@ async def _compose(
             policy_name=agent.model_policy,
             resolved_at=clock.now(),
         )
-        context_builder = MinimalContextBuilder(registry, clock)
+        context_builder = MinimalContextBuilder(registry, clock, maximum_tools=maximum_tools)
         pipeline = ToolPipeline(registry, uow_factory, clock, ids)
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
@@ -178,6 +293,8 @@ async def _compose(
             dispatch_tools=pipeline.dispatch,
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
+            max_internal_attempts=max_internal_attempts,
+            identical_call_threshold=identical_call_threshold,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -219,6 +336,9 @@ async def _compose(
                     executor=executor,
                     clock=clock,
                     worker_id=worker_id,
+                    lease_seconds=lease_seconds,
+                    heartbeat_divisor=heartbeat_divisor,
+                    poll_interval_seconds=worker_poll_interval,
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
@@ -311,6 +431,15 @@ async def build(
         principal_id=effective_principal.principal_id,
         policy_profile=policy_profile,
     )
+    runtime_config = load_config_document(effective_settings, "runtime/limits.yaml")
+    tool_config = load_config_document(effective_settings, "tools/limits.yaml")
+    context_config = load_config_document(effective_settings, "context/plan.yaml")
+    run_defaults = runtime_config["run_defaults"]
+    model_limits = runtime_config["model"]
+    queue_config = runtime_config["queue"]
+    worker_config = runtime_config["worker"]
+    circuit_breaker = tool_config["circuit_breaker"]
+    tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
     if clock is not None and fixed_clock_at is not None:
@@ -342,8 +471,17 @@ async def build(
             else ["math.calculate", "system.current_time"]
         ),
         policy_profile=policy_profile,
-        limits=limits or RunLimits(max_steps=32, max_model_calls=16, max_tool_calls=32),
+        limits=limits
+        or RunLimits(
+            max_steps=int(run_defaults["max_steps"]),
+            max_model_calls=int(run_defaults["max_model_calls"]),
+            max_tool_calls=int(run_defaults["max_tool_calls"]),
+        ),
     )
+    if storage == "postgres":
+        agent = agent.model_copy(
+            update={"version": _content_addressed_agent_version(agent)}, deep=True
+        )
     engine = None
     model_providers: list[ModelProvider] = []
     try:
@@ -356,11 +494,14 @@ async def build(
             uow_factory: UnitOfWorkFactory = cast(
                 UnitOfWorkFactory,
                 MemoryUnitOfWorkFactory(
-                    agents=agent_repository,
-                    sessions=session_repository,
-                    runs=run_repository,
-                    events=event_repository,
-                    invocations=invocation_repository,
+                    _memory_uow_repositories(
+                        agents=agent_repository,
+                        sessions=session_repository,
+                        runs=run_repository,
+                        events=event_repository,
+                        invocations=invocation_repository,
+                        clock=effective_clock,
+                    )
                 ),
             )
         else:
@@ -370,10 +511,12 @@ async def build(
                 UnitOfWorkFactory,
                 PostgresUnitOfWorkFactory(
                     create_session_factory(engine),
-                    effective_clock,
-                    EventUpcasterRegistry(),
-                    lease_seconds=30,
-                    max_attempts=3,
+                    _postgres_repository_factory(
+                        effective_clock,
+                        EventUpcasterRegistry(),
+                        lease_seconds=float(worker_config["lease_seconds"]),
+                        max_attempts=int(queue_config["max_attempts"]),
+                    ),
                 ),
             )
         provider_adapters = _provider_adapters(effective_settings, provider_registry)
@@ -395,6 +538,12 @@ async def build(
             trajectory_export_enabled=effective_settings.trajectory_export_enabled,
             artifact_root=effective_settings.artifact_root,
             trajectory_redactor=trajectory_redactor,
+            maximum_tools=int(tool_definitions["max_items"]),
+            max_internal_attempts=int(model_limits["max_internal_attempts"]),
+            identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
+            lease_seconds=float(worker_config["lease_seconds"]),
+            heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
+            worker_poll_interval=float(queue_config["poll_interval_seconds"]),
         )
         yield composition
     finally:

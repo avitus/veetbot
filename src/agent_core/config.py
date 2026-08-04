@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -194,6 +195,19 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 FROZEN_CONFIG = "policy/hardline.yaml"
 INTERPOLATION = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
+MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
+    {
+        "runtime/limits.yaml:model.max_internal_attempts": 1,
+        "runtime/limits.yaml:queue.max_attempts": 1,
+        "runtime/limits.yaml:run_defaults.max_steps": 1,
+        "runtime/limits.yaml:run_defaults.max_model_calls": 1,
+        "runtime/limits.yaml:run_defaults.max_tool_calls": 1,
+        "runtime/limits.yaml:worker.heartbeat_divisor": 2,
+        "runtime/limits.yaml:worker.lease_seconds": 1,
+        "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
+        "context/plan.yaml:classes.tool_definitions.max_items": 1,
+    }
+)
 
 
 def _environment(environ: Mapping[str, str] | None) -> dict[str, str]:
@@ -229,6 +243,87 @@ def _read_yaml(path: Path) -> dict[str, Any]:
     return {str(key): value for key, value in loaded.items()}
 
 
+def _merge_mappings(base: Mapping[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:
+    """Recursively overlay mappings while retaining untouched shipped siblings."""
+
+    merged = {str(key): value for key, value in base.items()}
+    for key, value in overlay.items():
+        normalized_key = str(key)
+        current = merged.get(normalized_key)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            merged[normalized_key] = _merge_mappings(current, value)
+        else:
+            merged[normalized_key] = value
+    return merged
+
+
+def _validate_document_value(
+    relative: str,
+    path: str,
+    value: object,
+    shipped: object,
+) -> None:
+    location = f"{relative}:{path}"
+    if isinstance(shipped, Mapping):
+        if not isinstance(value, Mapping):
+            raise ConfigurationError(f"{location} must be a mapping")
+        for key, shipped_value in shipped.items():
+            normalized_key = str(key)
+            if normalized_key not in value:
+                raise ConfigurationError(f"{location}.{normalized_key} is required")
+            child_path = f"{path}.{normalized_key}" if path else normalized_key
+            _validate_document_value(
+                relative,
+                child_path,
+                value[normalized_key],
+                shipped_value,
+            )
+        return
+    if isinstance(shipped, bool):
+        valid_type = isinstance(value, bool)
+        expected = "a boolean"
+    elif isinstance(shipped, int):
+        valid_type = isinstance(value, int) and not isinstance(value, bool)
+        expected = "an integer"
+    elif isinstance(shipped, float):
+        valid_type = isinstance(value, (int, float)) and not isinstance(value, bool)
+        expected = "a number"
+    else:
+        valid_type = isinstance(value, type(shipped))
+        expected = f"a {type(shipped).__name__}"
+    if not valid_type:
+        raise ConfigurationError(f"{location} must be {expected}")
+    minimum = MINIMUM_CONFIG_VALUES.get(location)
+    if (
+        minimum is not None
+        and isinstance(value, (int, float))
+        and ((isinstance(value, float) and not isfinite(value)) or value < minimum)
+    ):
+        raise ConfigurationError(f"{location} must be at least {minimum}")
+
+
+def _validate_config_document(
+    relative: str,
+    merged: Mapping[str, Any],
+    shipped: Mapping[str, Any],
+    interpolation: Mapping[str, str],
+) -> None:
+    _validate_document_value(relative, "", merged, shipped)
+    _validate_interpolation(relative, merged, interpolation)
+
+
+def _validate_interpolation(
+    relative: str,
+    document: Mapping[str, Any],
+    interpolation: Mapping[str, str],
+) -> None:
+    serialized = yaml.safe_dump(dict(document), sort_keys=True)
+    missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
+    if missing:
+        names = ", ".join(missing)
+        raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")
+
+
 def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str]) -> None:
     overlay_files: dict[str, Path] = {}
     if config_dir is not None:
@@ -247,18 +342,31 @@ def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str
                 raise ConfigurationError("policy/hardline.yaml cannot be overlaid")
             if relative in SHIPPED_CONFIGS:
                 overlay_files[relative] = path
+            elif is_provider_profile:
+                _validate_interpolation(relative, _read_yaml(path), interpolation)
 
     for relative in SHIPPED_CONFIGS:
         shipped = _read_yaml(PACKAGE_ROOT / relative)
         overlay_path = overlay_files.get(relative)
         merged = shipped
         if overlay_path is not None:
-            merged = {**shipped, **_read_yaml(overlay_path)}
-        serialized = yaml.safe_dump(merged, sort_keys=True)
-        missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
-        if missing:
-            names = ", ".join(missing)
-            raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")
+            merged = _merge_mappings(shipped, _read_yaml(overlay_path))
+        _validate_config_document(relative, merged, shipped, interpolation)
+
+
+def load_config_document(settings: Settings, relative: str) -> dict[str, Any]:
+    """Load one validated versioned document with its recursive operator overlay."""
+
+    if relative not in SHIPPED_CONFIGS:
+        raise ConfigurationError(f"unknown shipped configuration document: {relative}")
+    shipped = _read_yaml(PACKAGE_ROOT / relative)
+    merged = shipped
+    if settings.config_dir is not None and relative != FROZEN_CONFIG:
+        overlay = settings.config_dir / relative
+        if overlay.is_file():
+            merged = _merge_mappings(shipped, _read_yaml(overlay))
+    _validate_config_document(relative, merged, shipped, settings.interpolation)
+    return merged
 
 
 def validate_settings(settings: Settings) -> None:

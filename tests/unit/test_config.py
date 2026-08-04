@@ -13,7 +13,9 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     SandboxMechanism,
+    load_config_document,
     load_settings,
+    validate_runtime_identity,
 )
 
 
@@ -107,6 +109,57 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
     overlay.write_text("parallel:\n  maximum_calls: 4\n", encoding="utf-8")
     settings = load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
     assert settings.config_dir == tmp_path.resolve()
+    merged = load_config_document(settings, "tools/limits.yaml")
+    assert merged["parallel"]["maximum_calls"] == 4
+    assert merged["output"]["global_maximum_bytes"] == 4_194_304
+
+
+@pytest.mark.parametrize(
+    ("relative", "document", "message"),
+    [
+        (
+            "runtime/limits.yaml",
+            "model:\n  max_internal_attempts: 0\n",
+            r"model\.max_internal_attempts must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "worker:\n  lease_seconds: 0.5\n",
+            r"worker\.lease_seconds must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "model:\n  max_internal_attempts: -" + "9" * 400 + "\n",
+            r"model\.max_internal_attempts must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
+            "run_defaults: disabled\n",
+            r"run_defaults must be a mapping",
+        ),
+        (
+            "tools/limits.yaml",
+            "circuit_breaker:\n  identical_call_threshold: 1\n",
+            r"identical_call_threshold must be at least 2",
+        ),
+        (
+            "context/plan.yaml",
+            "classes:\n  tool_definitions:\n    max_items: many\n",
+            r"tool_definitions\.max_items must be an integer",
+        ),
+    ],
+)
+def test_operator_overlay_values_are_validated(
+    tmp_path: Path,
+    relative: str,
+    document: str,
+    message: str,
+) -> None:
+    overlay = tmp_path / relative
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text(document, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match=message):
+        load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
 def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
@@ -115,6 +168,15 @@ def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
     overlay.write_text("unexpected: ${UNDECLARED_VALUE}\n", encoding="utf-8")
     values = {**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)}
     with pytest.raises(ConfigurationError, match="UNDECLARED_VALUE"):
+        load_settings(values)
+
+
+def test_undeclared_interpolation_in_new_provider_profile_is_refused(tmp_path: Path) -> None:
+    overlay = tmp_path / "models" / "providers" / "custom.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("model: ${UNDECLARED_PROVIDER_MODEL}\n", encoding="utf-8")
+    values = {**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)}
+    with pytest.raises(ConfigurationError, match="UNDECLARED_PROVIDER_MODEL"):
         load_settings(values)
 
 
@@ -128,6 +190,32 @@ def test_credentials_are_profile_keyed_and_repr_safe() -> None:
     )
     assert set(settings.credentials) == {"openai", "anthropic"}
     assert "synthetic-openai-credential" not in repr(settings)
+
+
+def test_production_refuses_evaluation_identity() -> None:
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TOKEN": "local-test-token-value",
+        "SANDBOX_MECHANISM": "microvm",
+    }
+    settings = load_settings(values)
+    with pytest.raises(ConfigurationError, match="evaluation identity"):
+        validate_runtime_identity(
+            settings,
+            tenant_id="tenant_eval",
+            principal_id="user",
+            policy_profile="default",
+        )
+
+    development = load_settings(base_environment())
+    validate_runtime_identity(
+        development,
+        tenant_id="tenant_eval",
+        principal_id="eval.user",
+        policy_profile="eval.default",
+    )
 
 
 def test_all_106_versioned_knobs_are_present_and_non_null() -> None:

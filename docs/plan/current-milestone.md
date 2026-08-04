@@ -5,13 +5,12 @@ title: Current Milestone
 # Current milestone
 
 - **Current milestone:** Milestone 3 — model adapters and normalized streaming
-  (in progress)
+  (complete)
 - **Authorized milestones:** Milestones 0, 1, 2, and 3
-- **Project status:** Milestones 0, 1, and 2 are complete. Milestone 3 is in
-  progress against 15 new hard gates and 72 cumulative gates. No later
-  milestone is authorized.
+- **Project status:** Milestones 0 through 3 are complete. Milestone 4 is not
+  authorized, and no later milestone may begin speculatively.
 
-Milestone 3 adds the OpenAI Responses, Anthropic Messages, and OpenAI-compatible
+Milestone 3 delivered the OpenAI Responses, Anthropic Messages, and OpenAI-compatible
 chat-completions adapters behind one normalized streaming contract. It also owns
 declarative provider profiles and routing, model-call usage and cost accounting,
 reasoning-state handling, redacted consent-gated trajectory export, and optional
@@ -35,8 +34,8 @@ any later milestone speculatively.
 
 ## Completion rule
 
-Milestone 3 completes only when every canonical acceptance criterion, all 15
-Milestone 3 gates and all 72 cumulative gates pass; the non-live suite passes
-without provider credentials; optional credentialed live smoke tests are
-reported accurately; and the hosted CircleCI workflow passes. Exact evidence
-will be recorded in project state before the milestone is marked complete.
+Milestone 3 completed after every canonical acceptance criterion, all 15
+Milestone 3 gates and all 72 cumulative gates passed; the 255-test non-live
+suite passed without provider credentials; both credentialed live smoke tests
+passed; and the hosted CircleCI static, contract, and integration jobs passed.
+The exact evidence is recorded in project state.

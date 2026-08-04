@@ -11,6 +11,7 @@ from typing import Any
 
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
+from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.runs import Run, RunLimits
 from agent_core.evals.cases import EvalCase, load_cases
@@ -43,7 +44,7 @@ def _assert_subsequence(actual: list[str], expected: list[str]) -> None:
         try:
             position = actual.index(wanted, position) + 1
         except ValueError as exc:
-            raise AssertionError(
+            raise EvalExpectationError(
                 f"event {wanted!r} does not occur in order after index {position}: {actual}"
             ) from exc
 
@@ -52,26 +53,47 @@ def assert_expected(result: EvalResult) -> None:
     case = result.case
     run = result.run
     expected = case.expected
-    assert run.status == expected.terminal_status
-    if expected.final_text is not None:
-        assert run.final_message == expected.final_text
-    if expected.failure_reason is not None:
-        assert run.failure is not None
-        assert run.failure.reason == expected.failure_reason
-    if expected.model_calls is not None:
-        assert run.model_call_count == expected.model_calls
-    if expected.maximum_steps is not None:
-        assert run.step_count <= expected.maximum_steps
+    if run.status != expected.terminal_status:
+        raise EvalExpectationError(
+            f"expected terminal status {expected.terminal_status}, got {run.status}"
+        )
+    if expected.final_text is not None and run.final_message != expected.final_text:
+        raise EvalExpectationError(
+            f"expected final text {expected.final_text!r}, got {run.final_message!r}"
+        )
+    if expected.failure_reason is not None and (
+        run.failure is None or run.failure.reason != expected.failure_reason
+    ):
+        observed_reason = None if run.failure is None else run.failure.reason
+        raise EvalExpectationError(
+            f"expected failure reason {expected.failure_reason}, got {observed_reason}"
+        )
+    if expected.model_calls is not None and run.model_call_count != expected.model_calls:
+        raise EvalExpectationError(
+            f"expected {expected.model_calls} model calls, got {run.model_call_count}"
+        )
+    if expected.maximum_steps is not None and run.step_count > expected.maximum_steps:
+        raise EvalExpectationError(
+            f"expected at most {expected.maximum_steps} steps, got {run.step_count}"
+        )
     event_types = [event.event_type for event in result.events]
     _assert_subsequence(event_types, expected.event_order)
     if expected.tool_started_count is not None:
-        assert event_types.count("tool.call.started") == expected.tool_started_count
+        observed_tool_count = event_types.count("tool.call.started")
+        if observed_tool_count != expected.tool_started_count:
+            raise EvalExpectationError(
+                f"expected {expected.tool_started_count} started tools, got {observed_tool_count}"
+            )
     observed_reason_codes = {
         reason
         for event in result.events
         if isinstance((reason := event.payload.get("reason_code")), str)
     }
-    assert set(expected.reason_codes).issubset(observed_reason_codes)
+    missing_reason_codes = set(expected.reason_codes) - observed_reason_codes
+    if missing_reason_codes:
+        raise EvalExpectationError(
+            f"expected reason codes were not observed: {sorted(missing_reason_codes)}"
+        )
 
 
 async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:

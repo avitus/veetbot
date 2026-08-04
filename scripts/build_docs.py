@@ -65,8 +65,11 @@ def strip_front_matter(text: str) -> str:
 
 def git_commit() -> str:
     try:
+        git = shutil.which("git")
+        if git is None:
+            return "unknown"
         out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
+            [git, "rev-parse", "--short", "HEAD"],
             cwd=ROOT,
             capture_output=True,
             text=True,

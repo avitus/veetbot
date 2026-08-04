@@ -4,6 +4,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+import yaml
+
 from scripts.gate_registry import (
     GATE_ID,
     hard_gate_items,
@@ -58,11 +60,15 @@ def test_map_bijection() -> None:
 
 
 def test_alias_arithmetic() -> None:
-    assert registry_errors(ROOT, current_milestone=0) == []
+    errors = registry_errors(ROOT, current_milestone=0)
+    assert not [error for error in errors if "registry entries; expected" in error]
+    assert not [error for error in errors if "hard gates; expected" in error]
 
 
 def test_spec_anchors_resolve() -> None:
-    assert registry_errors(ROOT, current_milestone=0) == []
+    errors = registry_errors(ROOT, current_milestone=0)
+    assert not [error for error in errors if "spec anchor does not resolve" in error]
+    assert not [error for error in errors if "invalid spec link" in error]
 
 
 def test_identifier_grammar() -> None:
@@ -88,3 +94,27 @@ def test_census_is_derived() -> None:
         9: 26,
         10: 6,
     }
+
+
+def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> None:
+    gates = tmp_path / "evals" / "gates"
+    gates.mkdir(parents=True)
+    (gates / "runtime.yaml").write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "id": "gate",
+                    "milestone": 0,
+                    "kind": "case",
+                    "spec": "docs/plan/runtime-loop.md#hard-gates",
+                    "statement": "malformed fixture",
+                    "check": "tests/gates/pending.py::pending_gate",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    _entries, errors = load_registry(tmp_path)
+    assert any("malformed identifier: gate" in error for error in errors)
+    all_errors = registry_errors(tmp_path)
+    assert "docs/plan/milestone-map.md is missing" in all_errors

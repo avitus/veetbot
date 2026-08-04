@@ -43,6 +43,10 @@ class ExportConsentError(AgentCoreError):
     """Trajectory export was not authorized for this run."""
 
 
+class ExportStateError(AgentCoreError):
+    """Trajectory export state is not ready or is no longer exportable."""
+
+
 class ExportRedactionError(AgentCoreError):
     """A finished export still contained sensitive-shaped content."""
 
@@ -69,3 +73,7 @@ class ArtifactSweepError(AgentCoreError):
         super().__init__(f"artifact sweep deleted {deleted} object(s); {failed} deletion(s) failed")
         self.deleted = deleted
         self.failed = failed
+
+
+class EvalExpectationError(AgentCoreError):
+    """A deterministic evaluation result did not match its authored expectation."""
