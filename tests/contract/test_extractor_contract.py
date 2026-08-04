@@ -17,3 +17,5 @@ async def test_extractor_accepts_only_declared_utf8_text() -> None:
     assert await extractor.extract(_source(b"hello"), "text/plain") == "hello"
     with pytest.raises(ToolValidationError):
         await extractor.extract(_source(b"hello"), "application/pdf")
+    with pytest.raises(ToolValidationError, match="UTF-8"):
+        await extractor.extract(_source(b"\xff"), "text/plain")

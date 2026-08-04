@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
+from collections import OrderedDict
+from uuid import UUID
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.history import select_history, validate_tool_pairs
@@ -14,8 +18,9 @@ from agent_core.context.rendering import (
 )
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure
+from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
+from agent_core.domain.memory import RecallResult
 from agent_core.domain.messages import (
     CacheBreakpoint,
     CacheHints,
@@ -38,6 +43,9 @@ from agent_core.ports.memory import MemoryRetriever, QueryFormer
 from agent_core.ports.tools import ToolRegistry
 
 MAX_LOADED_SKILL_BODIES = 2
+RECALL_CACHE_CAPACITY = 1_024
+
+logger = logging.getLogger(__name__)
 
 
 def _current_user_text(items: list[ConversationItem]) -> str | None:
@@ -207,6 +215,9 @@ class BudgetedContextBuilder:
         self._working_state = working_state
         self._memory_retriever = memory_retriever
         self._query_former = query_former
+        self._recall_tasks: OrderedDict[
+            tuple[UUID, int, str], asyncio.Task[RecallResult | None]
+        ] = OrderedDict()
 
     async def measure(
         self,
@@ -320,24 +331,15 @@ class BudgetedContextBuilder:
             principal_id=None,
         )
         recall_items: list[ConversationItem] = []
-        if self._memory_retriever is not None and self._query_former is not None:
-            queries = self._query_former.form(run, state, _current_user_text(active))
-            if queries:
-                recalled = await self._memory_retriever.recall(
-                    queries[0],
-                    session_id=run.session_id,
-                    run_id=run.id,
-                    turn_id=run.id,
-                    moment="in_turn",
+        recalled = await self._recall_once(run, checkpoint, state, active)
+        if recalled is not None and recalled.items:
+            recall_items = [
+                UserMessage(
+                    content=[TextPart(text=recalled.rendered)],
+                    trust=TrustLevel.MEMORY,
+                    principal_id=None,
                 )
-                if recalled.items:
-                    recall_items = [
-                        UserMessage(
-                            content=[TextPart(text=recalled.rendered)],
-                            trust=TrustLevel.MEMORY,
-                            principal_id=None,
-                        )
-                    ]
+            ]
         active_with_recall = _insert_before_current_user(active, recall_items)
         fixed_body = [
             *summary_items,
@@ -486,6 +488,74 @@ class BudgetedContextBuilder:
             ),
         )
         return ContextAssembly(request=request, pressure=pressure)
+
+    async def _recall_once(
+        self,
+        run: Run,
+        checkpoint: RunCheckpoint,
+        state: WorkingState,
+        active: list[ConversationItem],
+    ) -> RecallResult | None:
+        if self._memory_retriever is None or self._query_former is None:
+            return None
+        message = _current_user_text(active)
+        if message is None:
+            return None
+        checkpoint_identity = hashlib.sha256(
+            _canonical_json(
+                {
+                    "version": checkpoint.version,
+                    "last_event_sequence": checkpoint.last_event_sequence,
+                    "conversation": [item.model_dump(mode="json") for item in active],
+                    "working_state": state.model_dump(mode="json"),
+                }
+            )
+        ).hexdigest()
+        key = (run.id, run.step_count, checkpoint_identity)
+        task = self._recall_tasks.get(key)
+        if task is None:
+            task = asyncio.create_task(
+                self._compute_recall(
+                    run.model_copy(deep=True),
+                    state.model_copy(deep=True),
+                    message,
+                )
+            )
+            self._recall_tasks[key] = task
+        self._recall_tasks.move_to_end(key)
+        result = await asyncio.shield(task)
+        while len(self._recall_tasks) > RECALL_CACHE_CAPACITY:
+            oldest_key, oldest = next(iter(self._recall_tasks.items()))
+            if not oldest.done():
+                break
+            self._recall_tasks.pop(oldest_key)
+        return result
+
+    async def _compute_recall(
+        self,
+        run: Run,
+        state: WorkingState,
+        message: str,
+    ) -> RecallResult | None:
+        assert self._memory_retriever is not None
+        assert self._query_former is not None
+        try:
+            queries = self._query_former.form(run, state, message)
+            if not queries:
+                return None
+            return await self._memory_retriever.recall(
+                queries[0],
+                session_id=run.session_id,
+                run_id=run.id,
+                turn_id=run.id,
+                moment="in_turn",
+            )
+        except Exception as exc:
+            logger.warning(
+                "context_memory_recall_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
+            return None
 
     def _truncate_tool_results(
         self,

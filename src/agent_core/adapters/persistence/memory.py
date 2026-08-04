@@ -315,15 +315,27 @@ class InMemoryEventRepository:
             return envelope.model_copy(deep=True)
 
     async def list_after(
-        self, session_id: UUID, sequence: int, principal: Principal
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        created_at_or_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int | None = None,
     ) -> list[EventEnvelope]:
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be nonnegative")
         await self._sessions.get(session_id, principal)
         async with self._lock:
-            return [
+            matching = [
                 event.model_copy(deep=True)
                 for event in self._events[session_id]
                 if event.sequence > sequence
+                and (created_at_or_after is None or event.created_at >= created_at_or_after)
+                and (created_before is None or event.created_at < created_before)
             ]
+            return matching if limit is None else matching[:limit]
 
     async def latest_before(
         self,
@@ -1065,18 +1077,19 @@ class InMemoryArtifactRepository:
 
     async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
         async with self._lock:
-            return [
-                artifact.model_copy(deep=True)
-                for artifact in sorted(
-                    self._rows.values(),
-                    key=lambda item: (
-                        item.expires_at or datetime.max.replace(tzinfo=now.tzinfo),
-                        item.id,
-                    ),
-                )
+            expired = [
+                artifact
+                for artifact in self._rows.values()
                 if artifact.origin != "trajectory_export"
                 and artifact.expires_at is not None
                 and artifact.expires_at <= now
+            ]
+            return [
+                artifact.model_copy(deep=True)
+                for artifact in sorted(
+                    expired,
+                    key=lambda item: (item.expires_at, item.id),
+                )
             ][:limit]
 
     async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:

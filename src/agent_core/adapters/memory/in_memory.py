@@ -338,9 +338,11 @@ class InMemoryTraceStore:
             as_of=as_of,
         )
 
-    async def mark_document_deleted(self, document_id: UUID) -> None:
+    async def mark_document_deleted(self, tenant_id: str, document_id: UUID) -> None:
         async with self._lock:
             for trace_id, trace in list(self._traces.items()):
+                if trace.tenant_id != tenant_id:
+                    continue
                 passages = [
                     passage.model_copy(update={"text": None, "deleted": True})
                     if passage.document_id == document_id
@@ -361,6 +363,19 @@ class InMemoryKnowledgeStore:
     async def ingest(self, prepared: KnowledgeIngestPrepared) -> None:
         async with self._lock:
             document = prepared.document
+            if document.row_id in self._documents:
+                raise ConflictError("knowledge document row already exists")
+            if any(
+                row.tenant_id == document.tenant_id
+                and row.document_id == document.document_id
+                and row.version == document.version
+                for row in self._documents.values()
+            ):
+                raise ConflictError("knowledge document version already exists")
+            for chunk in prepared.chunks:
+                prior = self._chunks.get(chunk.chunk_id)
+                if prior is not None and prior != chunk:
+                    raise ConflictError("knowledge chunk id identifies different text")
             existing = [
                 row
                 for row in self._documents.values()
@@ -372,13 +387,8 @@ class InMemoryKnowledgeStore:
                 self._documents[row.row_id] = row.model_copy(
                     update={"superseded_by": document.row_id, "valid_to": document.valid_from}
                 )
-            if document.row_id in self._documents:
-                raise ConflictError("knowledge document row already exists")
             self._documents[document.row_id] = document.model_copy(deep=True)
             for chunk in prepared.chunks:
-                prior = self._chunks.get(chunk.chunk_id)
-                if prior is not None and prior != chunk:
-                    raise ConflictError("knowledge chunk id identifies different text")
                 self._chunks[chunk.chunk_id] = chunk.model_copy(deep=True)
 
     async def latest(self, tenant_id: str, document_id: UUID) -> KnowledgeDocument | None:
@@ -479,14 +489,23 @@ class InMemoryKnowledgeStore:
             return refs
 
 
+_PUNCTUATION = ".,:;!?()[]{}\"'"
+
+
+def _tokens(text: str) -> list[str]:
+    return "".join(
+        " " if character in _PUNCTUATION else character for character in text.casefold()
+    ).split()
+
+
 def _terms(text: str) -> Counter[str]:
-    return Counter(part for part in text.casefold().split() if part)
+    return Counter(_tokens(text))
 
 
 def _lexical_score(terms: Counter[str], text: str) -> float:
     if not terms:
         return 0
-    words = Counter(part.strip(".,:;!?()[]{}\"'") for part in text.casefold().split())
+    words = Counter(_tokens(text))
     hits = sum(min(count, words[term]) for term, count in terms.items())
     return hits / sum(terms.values())
 

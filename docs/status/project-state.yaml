@@ -516,7 +516,7 @@ verification:
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 323 source and test
-          files, 298 static tests, 127 port contracts, strict documentation
+          files, 307 static tests, 131 port contracts, strict documentation
           builds, 123 citation checks, and all 166 hard gates active through
           Milestone 9 passed.
       - check: 166 cumulative hard gates
@@ -536,9 +536,9 @@ verification:
       - check: complete non-live suite against PostgreSQL 16 and Docker
         outcome: passed
         detail: >-
-          All 512 non-live tests passed across the verified partitions with
+          All 525 non-live tests passed across the verified partitions with
           only the two credentialed provider smoke tests deselected. This
-          included 425 static and contract tests, 77 PostgreSQL integration and
+          included 438 static and contract tests, 77 PostgreSQL integration and
           resilience tests, and ten real-Docker sandbox security tests.
       - check: Alembic revision and metadata
         outcome: passed
@@ -556,10 +556,18 @@ verification:
       - check: CodeRabbit local review remediation
         outcome: passed_locally
         detail: >-
-          All three initial major findings were fixed: unsupported skill carry
-          is rejected, memory context trust is carried durably into tool-write
-          provenance, and memory approval records retain their MEMORY_WRITE
-          action kind. The full follow-up review completed with zero findings.
+          The original three local findings and all hosted-review remediation
+          were re-reviewed locally. Follow-up findings covering explicit tenant
+          trace redaction, document replacement ownership, event limits,
+          tokenizer symmetry, and the no-read oversized-source gate were fixed;
+          the final full review completed with zero findings.
+      - check: pull request 10 against dev
+        outcome: opened
+        detail: >-
+          The Milestone 9 implementation is published as the dedicated
+          codex-milestone-9 pull request against dev. Its first hosted CircleCI
+          run passed all four lanes and GitGuardian; a follow-up run is required
+          for the review-remediation commit.
       - check: proposed ADR-0045
         outcome: owner_review_requested
         detail: >-
@@ -567,9 +575,8 @@ verification:
           PostgreSQL FTS, evaluation carry, tool classification, retained
           source, and context-snapshot choices are recorded for owner review.
     remaining:
-      - Open the Milestone 9 pull request against dev.
-      - Pass all hosted CircleCI lanes.
-      - Address and resolve every hosted CodeRabbit review finding.
+      - Push the hosted-review remediation and pass all hosted CircleCI lanes.
+      - Obtain a clean hosted CodeRabbit follow-up and resolve every review thread.
       - Merge the reviewed pull request into dev.
 
 documentation:

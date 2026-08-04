@@ -1,6 +1,7 @@
 """Shared deterministic values for memory and knowledge port contracts."""
 
-from datetime import timedelta
+import hashlib
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.domain.knowledge import (
@@ -59,16 +60,36 @@ def memory(
     )
 
 
-def recall_query(**updates: object) -> RecallQuery:
+def recall_query(
+    *,
+    tenant_id: str = TENANT,
+    principal_id: str = PRINCIPAL_ID,
+    current_scope: str = "project-a",
+    text: str | None = "concise answers",
+    subjects: list[str] | None = None,
+    belief_types: list[BeliefType] | None = None,
+    as_of: datetime | None = None,
+    include_superseded: bool = False,
+    profile: RecallProfile = RecallProfile.TASK,
+    budget_tokens: int = 500,
+    max_items: int = 10,
+    min_score: float = 0.1,
+    sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED,
+) -> RecallQuery:
     return RecallQuery(
-        tenant_id=str(updates.get("tenant_id", TENANT)),
-        principal_id=str(updates.get("principal_id", PRINCIPAL_ID)),
-        current_scope="project-a",
-        text="concise answers",
-        profile=RecallProfile.TASK,
-        budget_tokens=500,
-        max_items=10,
-        min_score=0.1,
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        current_scope=current_scope,
+        text=text,
+        subjects=[] if subjects is None else subjects,
+        belief_types=[] if belief_types is None else belief_types,
+        as_of=as_of,
+        include_superseded=include_superseded,
+        profile=profile,
+        budget_tokens=budget_tokens,
+        max_items=max_items,
+        min_score=min_score,
+        sensitivity_ceiling=sensitivity_ceiling,
     )
 
 
@@ -85,7 +106,7 @@ def trace() -> RecallTrace:
         surface_id="private",
         sensitivity_ceiling=Sensitivity.RESTRICTED,
         rendered="<memory></memory>",
-        rendered_sha256="0" * 64,
+        rendered_sha256=hashlib.sha256(b"<memory></memory>").hexdigest(),
         candidates=0,
         retrieval_policy_version="retrieval@1",
         created_at=NOW,

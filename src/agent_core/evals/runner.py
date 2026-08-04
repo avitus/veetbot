@@ -386,6 +386,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         runs=after.runs,
         arm_name=after.arm_name,
         arm_results=arm_results,
+        memories=after.memories,
     )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -17,7 +18,14 @@ class EventRepository(Protocol):
     ) -> EventEnvelope: ...
 
     async def list_after(
-        self, session_id: UUID, sequence: int, principal: Principal
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        created_at_or_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int | None = None,
     ) -> list[EventEnvelope]: ...
 
     async def latest_before(

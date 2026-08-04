@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
@@ -23,8 +24,9 @@ from agent_core.adapters.persistence.memory import (
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.bootstrap import _memory_uow_repositories
+from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import ArtifactOrigin, StoredArtifactRef
-from agent_core.domain.errors import ToolValidationError
+from agent_core.domain.errors import NotFoundError, ToolValidationError
 from agent_core.domain.knowledge import (
     KnowledgeDocument,
     KnowledgeIngestRequest,
@@ -33,10 +35,15 @@ from agent_core.domain.knowledge import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
-from agent_core.knowledge.chunking import DeterministicChunker
+from agent_core.knowledge.chunking import (
+    MAX_KNOWLEDGE_SOURCE_BYTES,
+    DeterministicChunker,
+    PlainTextExtractor,
+)
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.memory.formation import GovernedMemoryService
-from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal
+from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
+from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal, tool_context
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -68,10 +75,12 @@ class _KnowledgeStack:
         *,
         name: str = "document.md",
         trust: TrustLevel = TrustLevel.USER,
+        owner: Principal | None = None,
     ) -> ArtifactRef:
+        effective_owner = owner or principal()
         bound = self.writer.for_run(
-            tenant_id=principal().tenant_id,
-            principal_id=principal().principal_id,
+            tenant_id=effective_owner.tenant_id,
+            principal_id=effective_owner.principal_id,
             session_id=SESSION_ID,
             run_id=RUN_ID,
             origin=ArtifactOrigin.UPLOAD,
@@ -83,7 +92,7 @@ class _KnowledgeStack:
             trust,
         )
         async with self.factory() as uow:
-            return await uow.artifacts.get(stored.artifact_id, principal())
+            return await uow.artifacts.get(stored.artifact_id, effective_owner)
 
 
 async def _stack(tmp_path: Path) -> _KnowledgeStack:
@@ -159,17 +168,53 @@ def _query(
 async def test_ingest_trust(tmp_path: Path) -> None:
     stack = await _stack(tmp_path)
     source = await stack.artifact("Safe source text")
+    rejected_document_id = UUID(int=99)
     with pytest.raises(ToolValidationError, match="USER"):
         await stack.service.ingest(
             KnowledgeIngestRequest(
                 source=source,
                 title="Blocked",
                 visibility=KnowledgeVisibility.PRINCIPAL,
+                document_id=rejected_document_id,
             ),
             origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
         )
     async with stack.factory() as uow:
-        assert await uow.knowledge.latest(source.tenant_id, UUID(int=99)) is None
+        assert await uow.knowledge.latest(source.tenant_id, rejected_document_id) is None
+
+
+async def test_extractor_rejects_malformed_or_oversized_content() -> None:
+    with pytest.raises(ToolValidationError, match="UTF-8"):
+        await PlainTextExtractor().extract(_bytes(b"\xff"), "text/plain")
+    with pytest.raises(ToolValidationError, match="byte ceiling"):
+        await PlainTextExtractor(maximum_bytes=3).extract(_bytes(b"four"), "text/plain")
+
+
+async def test_ingest_rejects_oversized_metadata_before_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stack = await _stack(tmp_path)
+    opened = False
+
+    async def unexpected_open(*_args: object, **_kwargs: object) -> AsyncIterator[bytes]:
+        nonlocal opened
+        opened = True
+        raise AssertionError("oversized source was opened")
+
+    monkeypatch.setattr(stack.store, "open_verified", unexpected_open)
+    source = (await stack.artifact("small")).model_copy(
+        update={"size_bytes": MAX_KNOWLEDGE_SOURCE_BYTES + 1}
+    )
+    with pytest.raises(ToolValidationError, match="byte ceiling"):
+        await stack.service.ingest(
+            KnowledgeIngestRequest(
+                source=source,
+                title="Oversized",
+                visibility=KnowledgeVisibility.PRINCIPAL,
+            ),
+            origin_trust=TrustLevel.USER,
+        )
+    assert opened is False
 
 
 async def test_no_secrets(tmp_path: Path) -> None:
@@ -200,6 +245,7 @@ def test_chunk_stable(text: str) -> None:
         document_id=UUID(int=2),
         version=1,
     )
+    assert first
     assert first == chunker.chunk(
         text,
         "Corpus",
@@ -228,6 +274,9 @@ async def test_visibility(tmp_path: Path) -> None:
     assert allowed.passages
     assert other_principal.passages == []
     assert other_tenant.passages == []
+    async with stack.factory() as uow:
+        isolated_trace = await uow.traces.get(other_principal.trace_id, principal())
+    assert isolated_trace.principal_id == principal().principal_id
 
 
 async def test_verbatim(tmp_path: Path) -> None:
@@ -246,6 +295,7 @@ async def test_cite_resolves(tmp_path: Path) -> None:
     stack = await _stack(tmp_path)
     await _ingest(stack, "The Orion deployment uses a blue-green handoff.")
     result = await stack.service.search(_query("Orion blue-green"), session_id=SESSION_ID)
+    assert result.passages
     for passage in result.passages:
         async with stack.factory() as uow:
             chunk = await uow.knowledge.get_chunk(passage.chunk_id)
@@ -282,6 +332,69 @@ async def test_supersession(tmp_path: Path) -> None:
     )
     assert [item.text for item in current.passages] == ["Atlas uses the new rolling sequence."]
     assert [item.text for item in old.passages] == ["Atlas uses the old restart sequence."]
+
+
+async def test_ingest_tool_retry_converges_on_one_version(tmp_path: Path) -> None:
+    stack = await _stack(tmp_path)
+    source = await stack.artifact("Idempotent Vega operating instructions.")
+    tool = KnowledgeIngestTool(stack.service, stack.factory)
+    arguments = {
+        "artifact_id": str(source.id),
+        "title": "Vega guide",
+        "visibility": KnowledgeVisibility.PRINCIPAL.value,
+    }
+
+    first = await tool.execute(arguments, tool_context())
+    second = await tool.execute(arguments, tool_context())
+
+    assert first.structured is not None
+    assert second.structured is not None
+    assert first.structured == second.structured
+    assert first.structured["version"] == 1
+
+
+async def test_ingest_tool_cannot_replace_another_principals_document(tmp_path: Path) -> None:
+    stack = await _stack(tmp_path)
+    document_id = UUID(int=8_001)
+    owner_source = await stack.artifact("Owner-controlled Vega instructions.")
+    owner_tool = KnowledgeIngestTool(stack.service, stack.factory)
+    await owner_tool.execute(
+        {
+            "artifact_id": str(owner_source.id),
+            "title": "Owner guide",
+            "visibility": KnowledgeVisibility.TENANT.value,
+            "document_id": str(document_id),
+        },
+        tool_context(),
+    )
+
+    other = principal().model_copy(update={"principal_id": "other-principal"})
+    other_source = await stack.artifact("Unauthorized replacement.", owner=other)
+    other_service = KnowledgeService(
+        stack.factory,
+        stack.store,
+        stack.clock,
+        stack.ids,
+        other,
+    )
+    other_tool = KnowledgeIngestTool(other_service, stack.factory)
+    other_context = replace(tool_context(), principal=other)
+
+    with pytest.raises(NotFoundError, match="knowledge document not found"):
+        await other_tool.execute(
+            {
+                "artifact_id": str(other_source.id),
+                "title": "Owner guide",
+                "visibility": KnowledgeVisibility.TENANT.value,
+                "document_id": str(document_id),
+            },
+            other_context,
+        )
+    async with stack.factory() as uow:
+        latest = await uow.knowledge.latest(principal().tenant_id, document_id)
+    assert latest is not None
+    assert latest.version == 1
+    assert latest.ingested_by_principal_id == principal().principal_id
 
 
 async def test_delete_cascades(tmp_path: Path) -> None:
@@ -324,10 +437,12 @@ async def test_trace_complete(tmp_path: Path) -> None:
         turn_id=UUID(int=89),
     )
     async with stack.factory() as uow:
-        trace = await uow.traces.get(result.trace_id, principal())  # type: ignore[arg-type]
+        trace = await uow.traces.get(result.trace_id, principal())
     assert hashlib.sha256(trace.rendered.encode()).hexdigest() == trace.rendered_sha256
     assert [item.chunk_id for item in trace.passages] == [item.chunk_id for item in result.passages]
-    assert all(html.escape(item.text or "") in trace.rendered for item in trace.passages)
+    assert trace.passages
+    assert all(item.text is not None for item in trace.passages)
+    assert all(html.escape(item.text) in trace.rendered for item in trace.passages if item.text)
 
 
 async def test_no_belief_write(tmp_path: Path) -> None:
@@ -353,11 +468,14 @@ async def test_corpus_recall(tmp_path: Path) -> None:
         expected[member["question"]] = member["answer"]
     hits = 0
     returned = 0
+    noise = 0
     for question, answer in expected.items():
         result = await stack.service.search(_query(question), session_id=SESSION_ID)
-        returned += len(result.passages)
-        hits += int(any(answer in item.text for item in result.passages[:3]))
+        top = result.passages[:3]
+        returned += len(top)
+        hits += int(any(answer in item.text for item in top))
+        noise += sum(1 for item in top if answer not in item.text)
     recall_at_3 = hits / len(expected)
-    noise_ratio = (returned - hits) / max(1, returned)
+    noise_ratio = noise / max(1, returned)
     assert recall_at_3 >= 0.9
     assert noise_ratio <= 0.34

@@ -330,7 +330,10 @@ class PostgresMemoryStore:
         await self._session.execute(
             pg_insert(MemoryRejectionRow)
             .values(**_rejection_values(rejection))
-            .on_conflict_do_nothing(index_elements=[MemoryRejectionRow.id])
+            .on_conflict_do_update(
+                index_elements=[MemoryRejectionRow.id],
+                set_={"replacement_id": rejection.replacement_id},
+            )
         )
         return await self.reinforce(updated)
 
@@ -520,8 +523,19 @@ class PostgresTraceStore:
             as_of=as_of,
         )
 
-    async def mark_document_deleted(self, document_id: UUID) -> None:
-        rows = list((await self._session.scalars(select(RecallTraceRow))).all())
+    async def mark_document_deleted(self, tenant_id: str, document_id: UUID) -> None:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(RecallTraceRow).where(
+                        RecallTraceRow.tenant_id == tenant_id,
+                        RecallTraceRow.trace.contains(
+                            {"passages": [{"document_id": str(document_id)}]}
+                        ),
+                    )
+                )
+            ).all()
+        )
         for row in rows:
             trace = RecallTrace.model_validate(row.trace)
             passages = [
@@ -610,6 +624,7 @@ class PostgresKnowledgeStore:
                 )
                 .order_by(KnowledgeDocumentRow.version.desc())
                 .limit(1)
+                .with_for_update()
             )
         ).one_or_none()
         return None if result is None else _knowledge_document(result[0], result[1])

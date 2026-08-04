@@ -143,6 +143,7 @@ async def test_postgres_knowledge_round_trip_and_visibility(tmp_path: Path) -> N
 
     async with build(settings=settings, storage="postgres") as second:
         search_session = await second.sessions.create()
+        turn_id = uuid4()
         query = KnowledgeQuery(
             tenant_id=second.principal.tenant_id,
             principal_id=second.principal.principal_id,
@@ -152,10 +153,23 @@ async def test_postgres_knowledge_round_trip_and_visibility(tmp_path: Path) -> N
             max_passages=3,
             min_score=0.1,
         )
-        result = await second.knowledge.search(query, session_id=search_session)
+        result = await second.knowledge.search(
+            query,
+            session_id=search_session,
+            turn_id=turn_id,
+        )
         assert result.passages[0].document_id == document.document_id
         isolated = await second.knowledge.search(
             query.model_copy(update={"principal_id": "another-principal"}),
             session_id=search_session,
         )
         assert isolated.passages == []
+        await second.knowledge.delete(document.document_id)
+        async with second.uow_factory() as uow:
+            view = await uow.traces.user_view(
+                turn_id,
+                viewing_surface_id="private",
+                viewing_ceiling="restricted",
+            )
+        assert view.passages[0].deleted is True
+        assert view.passages[0].text is None

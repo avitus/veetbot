@@ -208,12 +208,13 @@ class EventContextPlanner:
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
         memory_config = classes.get("memory_snapshot")
-        if not isinstance(memory_config, dict):
+        if self._memory_retriever is not None and not isinstance(memory_config, dict):
             raise ValueError("memory-snapshot context configuration must be a mapping")
-        snapshot = (
-            None
-            if self._memory_retriever is None
-            else await self._memory_retriever.recall(
+        if self._memory_retriever is None:
+            snapshot = None
+        else:
+            assert isinstance(memory_config, dict)
+            snapshot = await self._memory_retriever.recall(
                 RecallQuery(
                     tenant_id=principal.tenant_id,
                     principal_id=principal.principal_id,
@@ -227,7 +228,6 @@ class EventContextPlanner:
                 session_id=session.id,
                 moment=RecallMoment.SNAPSHOT.value,
             )
-        )
         memory_snapshot = "" if snapshot is None or not snapshot.items else snapshot.rendered
         prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot)
         base_prefix = build_prefix(agent, tools)
@@ -253,7 +253,7 @@ class EventContextPlanner:
             raise ValueError("skill-catalog context configuration must be a mapping")
         if skill_catalog_tokens > int(skill_config["max_tokens"]):
             raise ContextOverflow("context prefix class skill_catalog exceeds its cap")
-        if memory_tokens > int(memory_config["max_tokens"]):
+        if isinstance(memory_config, dict) and memory_tokens > int(memory_config["max_tokens"]):
             raise ContextOverflow("context prefix class memory_snapshot exceeds its cap")
         encoded_prefix = prefix_bytes(prefix, tools)
         prefix_tokens = (

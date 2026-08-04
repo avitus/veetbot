@@ -24,6 +24,7 @@ async def test_memory_changes_outcome() -> None:
     assert before.memories
     assert after.run.status is RunStatus.COMPLETED
     assert after.run.final_message == "ORBIT-7"
+    assert result.memories == after.memories
 
 
 def test_unsupported_carry_subject_is_rejected() -> None:

@@ -115,17 +115,30 @@ class HybridMemoryRetriever:
         moment: str = "in_turn",
         surface_id: str = "private",
     ) -> RecallResult:
-        if query.tenant_id != self._principal.tenant_id or (
-            query.principal_id != self._principal.principal_id
-        ):
+        authorized = query.tenant_id == self._principal.tenant_id and (
+            query.principal_id == self._principal.principal_id
+        )
+        effective_query = (
+            query
+            if authorized
+            else query.model_copy(
+                update={
+                    "tenant_id": self._principal.tenant_id,
+                    "principal_id": self._principal.principal_id,
+                }
+            )
+        )
+        if not authorized:
             # Isolation is fail-closed before reaching an adapter query.
             records: list[MemoryRecord] = []
         else:
             async with self._uow_factory() as uow:
                 records = await uow.memories.query(query)
-        recalled = [candidate for record in records if (candidate := _score(record, query))]
+        recalled = [
+            candidate for record in records if (candidate := _score(record, effective_query))
+        ]
         recalled = _rrf_fuse(recalled)
-        ranked = self._ranker.rank(recalled, query)
+        ranked = self._ranker.rank(recalled, effective_query)
         collapsed: list[RecalledBelief] = []
         subjects: defaultdict[str, int] = defaultdict(int)
         seen: set[tuple[str, str, str]] = set()
@@ -141,25 +154,28 @@ class HybridMemoryRetriever:
         used_tokens = 0
         for item in collapsed:
             estimate = _token_estimate(_line(item))
-            if len(selected) >= query.max_items or used_tokens + estimate > query.budget_tokens:
+            if (
+                len(selected) >= effective_query.max_items
+                or used_tokens + estimate > effective_query.budget_tokens
+            ):
                 dropped.append(item.belief_id)
                 continue
             selected.append(item)
             used_tokens += estimate
-        rendered = render_memory(selected, as_of=query.as_of or self._clock.now())
+        rendered = render_memory(selected, as_of=effective_query.as_of or self._clock.now())
         rendered_bytes = rendered.encode("utf-8")
         trace_id = self._ids.new_id()
         trace = RecallTrace(
             id=trace_id,
-            tenant_id=query.tenant_id,
-            principal_id=query.principal_id,
+            tenant_id=self._principal.tenant_id,
+            principal_id=self._principal.principal_id,
             session_id=session_id,
             run_id=run_id,
             turn_id=turn_id,
             moment=RecallMoment(moment),
-            query=query,
+            query=effective_query,
             surface_id=surface_id,
-            sensitivity_ceiling=query.sensitivity_ceiling,
+            sensitivity_ceiling=effective_query.sensitivity_ceiling,
             rendered=rendered,
             rendered_sha256=hashlib.sha256(rendered_bytes).hexdigest(),
             arm_latencies_ms={"structured": 0, "lexical": 0},
@@ -204,6 +220,8 @@ class HybridMemoryRetriever:
         current_scope: str,
         max_items: int = 40,
         budget_tokens: int = 1_500,
+        sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED,
+        surface_id: str = "private",
     ) -> RecallResult:
         return await self.recall(
             RecallQuery(
@@ -214,10 +232,11 @@ class HybridMemoryRetriever:
                 budget_tokens=budget_tokens,
                 max_items=max_items,
                 min_score=0.1,
-                sensitivity_ceiling=Sensitivity.RESTRICTED,
+                sensitivity_ceiling=sensitivity_ceiling,
             ),
             session_id=session_id,
             moment=RecallMoment.SNAPSHOT.value,
+            surface_id=surface_id,
         )
 
 
@@ -232,20 +251,40 @@ class EventEpisodeSearch:
         ):
             return []
         async with self._uow_factory() as uow:
-            events = await uow.events.list_after(query.session_id, 0, self._principal)
+            events = await uow.events.list_after(
+                query.session_id,
+                0,
+                self._principal,
+                created_at_or_after=query.since,
+                created_before=query.until,
+                # A text predicate is applied to explicit payload fields below;
+                # limiting first could hide later matches.
+                limit=query.limit if not query.text else None,
+            )
         result = []
         needle = (query.text or "").casefold()
         for event in events:
-            if query.since is not None and event.created_at < query.since:
-                continue
-            if query.until is not None and event.created_at >= query.until:
-                continue
-            if needle and needle not in str(event.payload).casefold():
+            if needle and not _payload_contains(event.payload, needle):
                 continue
             result.append(event)
             if len(result) >= query.limit:
                 break
         return result
+
+
+_EPISODE_TEXT_FIELDS = frozenset({"content", "question", "statement", "summary", "text", "title"})
+
+
+def _payload_contains(payload: object, needle: str, *, field: str | None = None) -> bool:
+    if isinstance(payload, dict):
+        return any(
+            _payload_contains(value, needle, field=str(key)) for key, value in payload.items()
+        )
+    if isinstance(payload, list):
+        return any(_payload_contains(value, needle, field=field) for value in payload)
+    return (
+        field in _EPISODE_TEXT_FIELDS and isinstance(payload, str) and needle in payload.casefold()
+    )
 
 
 def _score(record: MemoryRecord, query: RecallQuery) -> RecalledBelief | None:

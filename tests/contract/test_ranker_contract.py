@@ -33,3 +33,10 @@ def test_ranker_is_score_then_identity_deterministic() -> None:
         for score in (0.2, 0.8)
     ]
     assert HandWeightedRanker().rank(items, recall_query())[0].score == 0.8
+
+    tied = [
+        items[0].model_copy(update={"belief_id": base.id}),
+        items[0].model_copy(update={"belief_id": base.id.__class__(int=base.id.int - 1)}),
+    ]
+    ranked = HandWeightedRanker().rank(list(reversed(tied)), recall_query())
+    assert [item.belief_id for item in ranked] == sorted(item.belief_id for item in tied)

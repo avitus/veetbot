@@ -457,8 +457,17 @@ class PostgresEventRepository:
         return event_to_domain(row, self._upcasters)
 
     async def list_after(
-        self, session_id: UUID, sequence: int, principal: Principal
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        created_at_or_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int | None = None,
     ) -> list[EventEnvelope]:
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be nonnegative")
         allowed = await self._session.scalar(
             select(SessionRow.id).where(
                 SessionRow.id == session_id,
@@ -468,13 +477,17 @@ class PostgresEventRepository:
         )
         if allowed is None:
             raise NotFoundError("session not found")
-        rows = (
-            await self._session.scalars(
-                select(EventRow)
-                .where(EventRow.session_id == session_id, EventRow.sequence > sequence)
-                .order_by(EventRow.sequence, EventRow.id)
-            )
-        ).all()
+        statement = select(EventRow).where(
+            EventRow.session_id == session_id, EventRow.sequence > sequence
+        )
+        if created_at_or_after is not None:
+            statement = statement.where(EventRow.created_at >= created_at_or_after)
+        if created_before is not None:
+            statement = statement.where(EventRow.created_at < created_before)
+        statement = statement.order_by(EventRow.sequence, EventRow.id)
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
         return [event_to_domain(row, self._upcasters) for row in rows]
 
     async def latest_before(

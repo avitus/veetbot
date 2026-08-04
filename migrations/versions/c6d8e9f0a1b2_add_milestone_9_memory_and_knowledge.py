@@ -153,6 +153,12 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id", name=op.f("pk_recall_traces")),
     )
     op.create_index("ix_recall_traces_turn", "recall_traces", ["turn_id", "created_at"])
+    op.create_index(
+        "ix_recall_traces_trace_gin",
+        "recall_traces",
+        ["trace"],
+        postgresql_using="gin",
+    )
     op.create_table(
         "knowledge_documents",
         sa.Column("row_id", sa.Uuid(), nullable=False),

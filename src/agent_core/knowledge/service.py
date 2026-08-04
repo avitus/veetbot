@@ -10,7 +10,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import StoredArtifactRef
-from agent_core.domain.errors import ArtifactIntegrityError, ToolValidationError
+from agent_core.domain.errors import ArtifactIntegrityError, NotFoundError, ToolValidationError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.knowledge import (
     KnowledgeDocument,
@@ -29,6 +29,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.knowledge.chunking import (
+    MAX_KNOWLEDGE_SOURCE_BYTES,
     DeterministicChunker,
     PlainTextExtractor,
     normalize_text,
@@ -77,6 +78,8 @@ class KnowledgeService:
             raise ToolValidationError("knowledge source is outside the caller scope")
         if source.media_type not in self._extractor.media_types():
             raise ToolValidationError(f"unsupported knowledge media type {source.media_type!r}")
+        if source.size_bytes > MAX_KNOWLEDGE_SOURCE_BYTES:
+            raise ToolValidationError("knowledge source exceeds the byte ceiling")
         stored = StoredArtifactRef(
             artifact_id=source.id,
             sha256=source.sha256,
@@ -93,40 +96,46 @@ class KnowledgeService:
         document_id = request.document_id or self._ids.new_id()
         async with self._uow_factory() as uow:
             latest = await uow.knowledge.latest(source.tenant_id, document_id)
-        version = 1 if latest is None else latest.version + 1
-        row_id = self._ids.new_id()
-        retained_source = source.model_copy(
-            update={"origin": "knowledge_source", "expires_at": None}, deep=True
-        )
-        now = self._clock.now()
-        document = KnowledgeDocument(
-            row_id=row_id,
-            document_id=document_id,
-            tenant_id=source.tenant_id,
-            ingested_by_principal_id=self._principal.principal_id,
-            visibility=request.visibility,
-            project_scope=request.project_scope,
-            title=request.title,
-            source_ref=retained_source,
-            media_type=source.media_type,
-            doc_date=request.doc_date,
-            authority=request.authority,
-            version=version,
-            chunker_version=self._chunker.version,
-            valid_from=now,
-            ingested_at=now,
-            sensitivity=request.sensitivity,
-        )
-        chunks = self._chunker.chunk(
-            normalized,
-            request.title,
-            document_row_id=row_id,
-            document_id=document_id,
-            version=version,
-        )
-        if not chunks:
-            raise ToolValidationError("knowledge source produced no chunks")
-        async with self._uow_factory() as uow:
+            if (
+                latest is not None
+                and latest.ingested_by_principal_id != self._principal.principal_id
+            ):
+                raise NotFoundError("knowledge document not found")
+            if latest is not None and _same_ingest(latest, request):
+                return latest
+            version = 1 if latest is None else latest.version + 1
+            row_id = self._ids.new_id()
+            retained_source = source.model_copy(
+                update={"origin": "knowledge_source", "expires_at": None}, deep=True
+            )
+            now = self._clock.now()
+            document = KnowledgeDocument(
+                row_id=row_id,
+                document_id=document_id,
+                tenant_id=source.tenant_id,
+                ingested_by_principal_id=self._principal.principal_id,
+                visibility=request.visibility,
+                project_scope=request.project_scope,
+                title=request.title,
+                source_ref=retained_source,
+                media_type=source.media_type,
+                doc_date=request.doc_date,
+                authority=request.authority,
+                version=version,
+                chunker_version=self._chunker.version,
+                valid_from=now,
+                ingested_at=now,
+                sensitivity=request.sensitivity,
+            )
+            chunks = self._chunker.chunk(
+                normalized,
+                request.title,
+                document_row_id=row_id,
+                document_id=document_id,
+                version=version,
+            )
+            if not chunks:
+                raise ToolValidationError("knowledge source produced no chunks")
             retained = await uow.artifacts.retain_for_knowledge(source.id, self._principal)
             if retained.sha256 != source.sha256:
                 raise ArtifactIntegrityError("knowledge artifact metadata changed during ingest")
@@ -156,7 +165,10 @@ class KnowledgeService:
         turn_id: UUID | None = None,
         surface_id: str = "private",
     ) -> KnowledgeResult:
-        if query.tenant_id != self._principal.tenant_id:
+        authorized = query.tenant_id == self._principal.tenant_id and (
+            query.principal_id == self._principal.principal_id
+        )
+        if not authorized:
             passages: list[RetrievedPassage] = []
         else:
             async with self._uow_factory() as uow:
@@ -172,8 +184,8 @@ class KnowledgeService:
         rendered = render_knowledge(selected, as_of=query.as_of or self._clock.now())
         trace_id = self._ids.new_id()
         recall_query = RecallQuery(
-            tenant_id=query.tenant_id,
-            principal_id=query.principal_id,
+            tenant_id=self._principal.tenant_id,
+            principal_id=self._principal.principal_id,
             current_scope=query.current_scope or "general",
             text=query.text,
             profile=RecallProfile.TASK,
@@ -184,8 +196,8 @@ class KnowledgeService:
         )
         trace = RecallTrace(
             id=trace_id,
-            tenant_id=query.tenant_id,
-            principal_id=query.principal_id,
+            tenant_id=self._principal.tenant_id,
+            principal_id=self._principal.principal_id,
             session_id=session_id,
             run_id=run_id,
             turn_id=turn_id,
@@ -236,7 +248,7 @@ class KnowledgeService:
     async def delete(self, document_id: UUID) -> None:
         async with self._uow_factory() as uow:
             sources = await uow.knowledge.delete(document_id, self._principal)
-            await uow.traces.mark_document_deleted(document_id)
+            await uow.traces.mark_document_deleted(self._principal.tenant_id, document_id)
             for source in sources:
                 await uow.artifacts.expire(source.id, self._principal, self._clock.now())
             if sources:
@@ -268,4 +280,17 @@ def _passage_xml(passage: RetrievedPassage) -> str:
         f'path="{html.escape(path, quote=True)}" chunk="{passage.chunk_id}" '
         f'doc_date="{date_value}" instruction_like="{str(passage.instruction_like).lower()}">'
         f"{html.escape(passage.text)}</passage>"
+    )
+
+
+def _same_ingest(document: KnowledgeDocument, request: KnowledgeIngestRequest) -> bool:
+    return (
+        document.source_ref.id == request.source.id
+        and document.source_ref.sha256 == request.source.sha256
+        and document.title == request.title
+        and document.visibility is request.visibility
+        and document.project_scope == request.project_scope
+        and document.doc_date == request.doc_date
+        and document.authority is request.authority
+        and document.sensitivity is request.sensitivity
     )

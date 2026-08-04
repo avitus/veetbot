@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_core.domain.memory import BeliefType, RecallProfile, RecallQuery, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    RecallMoment,
+    RecallProfile,
+    RecallQuery,
+    Sensitivity,
+)
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
@@ -79,7 +85,7 @@ class MemorySearchTool:
             query,
             session_id=context.session_id,
             run_id=context.run_id,
-            moment="in_turn",
+            moment=RecallMoment.IN_TURN.value,
         )
         structured = {
             "trace_id": str(result.trace_id),

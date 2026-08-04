@@ -442,7 +442,7 @@ class GovernedMemoryService:
             stored = await uow.memories.reject(rejection, updated)
             await self._append_event(uow, _source_session(current), None, "memory.rejected", stored)
         if kind is RejectionKind.CHANGED and replacement_statement is not None:
-            return await self.remember(
+            replacement = await self.remember(
                 session_id=_source_session(current),
                 run_id=None,
                 statement=replacement_statement,
@@ -455,6 +455,14 @@ class GovernedMemoryService:
                 origin_trust=TrustLevel.USER,
                 explicit=True,
             )
+            linked = stored.model_copy(
+                update={"superseded_by": replacement.id, "updated_at": self._clock.now()},
+                deep=True,
+            )
+            linked_rejection = rejection.model_copy(update={"replacement_id": replacement.id})
+            async with self._uow_factory() as uow:
+                await uow.memories.reject(linked_rejection, linked)
+            return replacement
         return stored
 
     async def expire(self) -> list[MemoryRecord]:

@@ -12,6 +12,7 @@ from agent_core.domain.errors import ToolValidationError
 from agent_core.domain.knowledge import KnowledgeChunk
 
 CHUNKER_VERSION = "knowledge-chunker@1"
+MAX_KNOWLEDGE_SOURCE_BYTES = 32 * 1024 * 1024
 TARGET_TOKENS = 600
 CEILING_TOKENS = 1_000
 FLOOR_TOKENS = 100
@@ -24,6 +25,11 @@ _INSTRUCTION = re.compile(
 
 
 class PlainTextExtractor:
+    def __init__(self, *, maximum_bytes: int = MAX_KNOWLEDGE_SOURCE_BYTES) -> None:
+        if maximum_bytes <= 0:
+            raise ValueError("knowledge source byte ceiling must be positive")
+        self._maximum_bytes = maximum_bytes
+
     def media_types(self) -> set[str]:
         return {"text/plain", "text/markdown"}
 
@@ -32,6 +38,8 @@ class PlainTextExtractor:
             raise ToolValidationError(f"unsupported knowledge media type {media_type!r}")
         content = bytearray()
         async for chunk in source:
+            if len(content) + len(chunk) > self._maximum_bytes:
+                raise ToolValidationError("knowledge source exceeds the byte ceiling")
             content.extend(chunk)
         try:
             return bytes(content).decode("utf-8")
@@ -82,7 +90,7 @@ class DeterministicChunker:
             drafts = [([], piece) for piece in _split_ceiling(text)]
         merged: list[tuple[list[str], str]] = []
         for heading_path, body in drafts:
-            if merged and token_estimate(body) < FLOOR_TOKENS:
+            if merged and merged[-1][0] == heading_path and token_estimate(body) < FLOOR_TOKENS:
                 previous_path, previous = merged[-1]
                 combined = f"{previous}\n\n{body}"
                 if token_estimate(combined) <= CEILING_TOKENS:
@@ -92,9 +100,18 @@ class DeterministicChunker:
         result: list[KnowledgeChunk] = []
         for ordinal, (heading_path, body) in enumerate(merged):
             digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
-            identity = "\0".join((self.version, title, *heading_path, str(ordinal), digest)).encode(
-                "utf-8"
-            )
+            identity = "\0".join(
+                (
+                    self.version,
+                    str(document_row_id),
+                    str(document_id),
+                    str(version),
+                    title,
+                    *heading_path,
+                    str(ordinal),
+                    digest,
+                )
+            ).encode("utf-8")
             chunk_id = f"kc_{hashlib.sha256(identity).hexdigest()[:16]}"
             result.append(
                 KnowledgeChunk(

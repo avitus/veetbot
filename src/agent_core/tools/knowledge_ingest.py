@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from agent_core.domain.knowledge import (
     DocumentAuthority,
@@ -75,7 +75,7 @@ class KnowledgeIngestTool:
             visibility=KnowledgeVisibility(str(arguments["visibility"])),
             project_scope=arguments.get("project_scope"),
             document_id=(
-                None
+                uuid5(NAMESPACE_URL, f"agent-core:knowledge:{context.invocation_id}")
                 if arguments.get("document_id") is None
                 else UUID(str(arguments["document_id"]))
             ),

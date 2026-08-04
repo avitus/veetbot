@@ -206,6 +206,34 @@ class _StaticMemoryRetriever:
         )
 
 
+class _CountingMemoryRetriever(_StaticMemoryRetriever):
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls = 0
+        self._fail = fail
+
+    async def recall(
+        self,
+        query: RecallQuery,
+        *,
+        session_id: UUID,
+        run_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        moment: str = "in_turn",
+        surface_id: str = "private",
+    ) -> RecallResult:
+        self.calls += 1
+        if self._fail:
+            raise RuntimeError("recall unavailable")
+        return await super().recall(
+            query,
+            session_id=session_id,
+            run_id=run_id,
+            turn_id=turn_id,
+            moment=moment,
+            surface_id=surface_id,
+        )
+
+
 @st.composite
 def _histories(draw: st.DrawFn) -> list[ConversationItem]:
     blocks = draw(
@@ -397,14 +425,67 @@ async def test_memory_context_marks_snapshot_and_recall_provenance() -> None:
         memory_retriever=_StaticMemoryRetriever(),
         query_former=_StaticQueryFormer(),
     )
-    recall_request = await recall_only.build(active_run, checkpoint, agent(), principal())
+    recall_checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="How should you answer?")])],
+        created_at=NOW,
+    )
+    recall_request = await recall_only.build(active_run, recall_checkpoint, agent(), principal())
     assert recall_request.metadata["context_origin_trust"] == TrustLevel.MEMORY.value
-    _apply_context_origin_trust(checkpoint, recall_request)
-    assert checkpoint.context_origin_trust is TrustLevel.MEMORY
+    _apply_context_origin_trust(recall_checkpoint, recall_request)
+    assert recall_checkpoint.context_origin_trust is TrustLevel.MEMORY
     assert any(
         isinstance(item, UserMessage) and item.trust is TrustLevel.MEMORY
         for item in recall_request.conversation
     )
+
+
+async def test_measure_and_build_share_one_recall_trace() -> None:
+    retriever = _CountingMemoryRetriever()
+    builder = _builder(memory_retriever=retriever, query_former=_StaticQueryFormer())
+    active_run = run(status=RunStatus.RUNNING)
+    checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="How should you answer?")])],
+        created_at=NOW,
+    )
+
+    await builder.measure(active_run, checkpoint, agent(), principal())
+    request = await builder.build(active_run, checkpoint, agent(), principal())
+
+    assert retriever.calls == 1
+    assert request.metadata["context_origin_trust"] == TrustLevel.MEMORY.value
+
+
+async def test_recall_failure_degrades_and_no_user_turn_skips_recall() -> None:
+    failing = _CountingMemoryRetriever(fail=True)
+    builder = _builder(memory_retriever=failing, query_former=_StaticQueryFormer())
+    active_run = run(status=RunStatus.RUNNING)
+    user_checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="Continue")])],
+        created_at=NOW,
+    )
+    request = await builder.build(active_run, user_checkpoint, agent(), principal())
+    assert failing.calls == 1
+    assert request.metadata["context_origin_trust"] == TrustLevel.USER.value
+
+    no_user = RunCheckpoint(
+        run_id=active_run.id,
+        version=2,
+        status=RunStatus.RUNNING,
+        conversation=[AssistantMessage(content=[TextPart(text="No new user turn")])],
+        created_at=NOW,
+    )
+    request = await builder.build(active_run, no_user, agent(), principal())
+    assert failing.calls == 1
+    assert request.metadata["context_origin_trust"] == TrustLevel.USER.value
 
 
 async def test_loaded_skill_overflow_is_reported_as_context_pressure() -> None:

@@ -57,7 +57,14 @@ milestone was implemented unattended.
    and knowledge reads are low-risk read-only operations. `memory.remember` and
    `knowledge.ingest` are medium-risk, idempotent application writes; ingestion
    requires `knowledge.write`. Tool output is labeled `MEMORY` or `KNOWLEDGE`,
-   and untrusted tool output cannot be promoted by `memory.remember`.
+   and untrusted tool output cannot be promoted by `memory.remember`. The closed
+   side-effect vocabulary has no internal-application-write value, and
+   `EXTERNAL_WRITE` specifically means modifying data outside the platform, so
+   these governed internal writes retain `SideEffectClass.NONE`; their risk,
+   write scope, origin-trust check, and memory action kind supply the applicable
+   controls. `knowledge.ingest` derives a stable document id from the invocation
+   when the caller omits one, and an identical retry returns the existing
+   version, which makes its `IDEMPOTENT` declaration true under crash replay.
 8. **Retained knowledge sources have no ordinary artifact expiry.** Successful
    ingestion atomically promotes the verified source artifact into the knowledge
    corpus and clears its transient expiry. Document deletion removes versions,
@@ -69,6 +76,20 @@ milestone was implemented unattended.
    stable prefix or its hash. Request assembly records whether a non-empty
    snapshot or in-turn recall actually contributed, and the runtime persists
    that trust marker before dispatching any model-proposed tool call.
+10. **Plain-text knowledge ingestion is capped at 32 MiB.** The service rejects
+    declared sources above that ceiling before opening them, and the extractor
+    independently enforces the same bound while streaming so incorrect artifact
+    metadata cannot create an unbounded buffer. This is a reversible operational
+    ceiling for the first in-process UTF-8 extractor, not a format limit on the
+    retained source artifact.
+11. **Sensitivity is a surface ceiling, not a new read scope.** The Milestone 9
+    runtime surface is private and therefore requests the `RESTRICTED` ceiling.
+    Snapshot callers can now pass both a lower ceiling and a surface id. The two
+    search tools keep empty `required_scopes`, as the knowledge design requires;
+    adding an undocumented read scope would expand the closed vocabulary and
+    make the implementation diverge from the plan. A later shared-surface caller
+    must supply its lower ceiling rather than infer sensitivity from principal
+    write scopes.
 
 ## Consequences
 
@@ -84,6 +105,8 @@ milestone was implemented unattended.
   local users use the CLI.
 - Historical knowledge traces remain honest about deleted sources without
   retaining deleted passage content as a user-visible citation.
+- Oversized text sources fail before extraction, while retained artifacts remain
+  available for a future streaming or format-specific extractor.
 
 ## Alternatives considered
 

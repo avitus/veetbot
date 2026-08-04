@@ -290,6 +290,7 @@ class PublicSessionService:
 
     async def close(self, principal: Principal, session_id: UUID) -> SessionView:
         require_scope(principal, "session.write")
+        closed_now = False
         async with self._uow_factory() as uow:
             session = await uow.sessions.get(session_id, principal)
             active = await uow.runs.active_for_session(session_id, principal)
@@ -301,10 +302,20 @@ class PublicSessionService:
                 )
             if session.status is SessionStatus.ACTIVE:
                 session = await uow.sessions.close(session_id, principal, self._clock.now())
+                closed_now = True
         if self._close_session is not None:
             await self._close_session(session_id)
-        if self._on_session_closed is not None:
-            await self._on_session_closed(session_id)
+        if closed_now and self._on_session_closed is not None:
+            try:
+                await self._on_session_closed(session_id)
+            except Exception as exc:
+                logger.warning(
+                    "session_close_callback_failed",
+                    extra={
+                        "session_id": str(session_id),
+                        "error_class": type(exc).__name__,
+                    },
+                )
         return _session_view(session, None)
 
     async def ready(self) -> bool:

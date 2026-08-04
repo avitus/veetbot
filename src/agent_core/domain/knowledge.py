@@ -52,6 +52,8 @@ class KnowledgeDocument(BaseModel):
             raise ValueError("project-visible knowledge requires project_scope")
         if self.visibility is not KnowledgeVisibility.PROJECT and self.project_scope is not None:
             raise ValueError("only project-visible knowledge may carry project_scope")
+        if self.valid_to is not None and self.valid_to < self.valid_from:
+            raise ValueError("knowledge valid_to precedes valid_from")
         return self
 
 
@@ -108,7 +110,7 @@ class KnowledgeResult(BaseModel):
     rendered: str
     tokens: int = Field(ge=0)
     truncated: bool
-    trace_id: UUID | None = None
+    trace_id: UUID
 
 
 class KnowledgeIngestRequest(BaseModel):
