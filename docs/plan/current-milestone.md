@@ -5,11 +5,11 @@ title: Current Milestone
 # Current milestone
 
 - **Current milestone:** Milestone 9 — long-term memory and knowledge retrieval
-  (in progress)
+  (complete)
 - **Next milestone:** None authorized. Milestone 10 remains an open direction.
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 8 are complete. Milestone 9 is in
-  progress on its dedicated development branch.
+- **Project status:** Milestones 0 through 9 are complete. Milestone 10 remains
+  unauthorized and has no acceptance criteria of its own.
 
 Milestone 9 adds governed, provenance-linked belief formation; deterministic
 hybrid retrieval with frozen session snapshots and faithful recall traces; a
@@ -42,7 +42,7 @@ review records that it has no complete acceptance criteria.
 
 ## Completion rule
 
-Milestone 9 remains in progress until all 26 new gates and all 166 cumulative
-gates pass; combined local verification passes; all hosted CircleCI lanes pass;
-and every CodeRabbit review finding is addressed and resolved. Its pull request
-must merge into `dev` before the milestone is complete.
+Milestone 9 is complete. All 26 new gates and all 166 cumulative gates, 526
+non-live tests, all hosted CircleCI lanes, and the final finding-free CodeRabbit
+review passed. Every review thread is resolved. Its reviewed pull request must
+merge into `dev` before any later milestone may begin.

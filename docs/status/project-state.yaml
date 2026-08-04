@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_9_in_progress
+  status: milestone_9_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 9
   authorized_milestones:
@@ -48,7 +48,7 @@ milestones:
     status: complete
   "9":
     title: Long-term memory and knowledge retrieval
-    status: in_progress
+    status: complete
   "10":
     title: Scheduling, model routing, and subagents
     status: not_started
@@ -509,14 +509,14 @@ verification:
           egress proxy.
     remaining: []
   milestone_9:
-    recorded_at: 2026-08-04T23:30:00Z
-    status: in_progress
+    recorded_at: 2026-08-04T21:22:54Z
+    status: complete
     evidence:
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 323 source and test
-          files, 307 static tests, 131 port contracts, strict documentation
+          files, 307 static tests, 132 port contracts, strict documentation
           builds, 123 citation checks, and all 166 hard gates active through
           Milestone 9 passed.
       - check: 166 cumulative hard gates
@@ -536,9 +536,9 @@ verification:
       - check: complete non-live suite against PostgreSQL 16 and Docker
         outcome: passed
         detail: >-
-          All 525 non-live tests passed across the verified partitions with
+          All 526 non-live tests passed across the verified partitions with
           only the two credentialed provider smoke tests deselected. This
-          included 438 static and contract tests, 77 PostgreSQL integration and
+          included 439 static and contract tests, 77 PostgreSQL integration and
           resilience tests, and ten real-Docker sandbox security tests.
       - check: Alembic revision and metadata
         outcome: passed
@@ -561,23 +561,20 @@ verification:
           trace redaction, document replacement ownership, event limits,
           tokenizer symmetry, and the no-read oversized-source gate were fixed;
           the final full review completed with zero findings.
-      - check: pull request 10 against dev
-        outcome: opened
+      - check: hosted CircleCI and CodeRabbit for pull request 10
+        outcome: passed
         detail: >-
-          The Milestone 9 implementation is published as the dedicated
-          codex-milestone-9 pull request against dev. Its first hosted CircleCI
-          run passed all four lanes and GitGuardian; a follow-up run is required
-          for the review-remediation commit.
+          The static, contract, PostgreSQL integration, and real-Docker sandbox
+          lanes plus GitGuardian passed on final review-remediation commit
+          e5c2140. Every CodeRabbit review thread was answered and resolved, and
+          the final incremental review completed without a new finding.
       - check: proposed ADR-0045
         outcome: owner_review_requested
         detail: >-
           The reversible CLI, deterministic extraction, conflict, audit,
           PostgreSQL FTS, evaluation carry, tool classification, retained
           source, and context-snapshot choices are recorded for owner review.
-    remaining:
-      - Push the hosted-review remediation and pass all hosted CircleCI lanes.
-      - Obtain a clean hosted CodeRabbit follow-up and resolve every review thread.
-      - Merge the reviewed pull request into dev.
+    remaining: []
 
 documentation:
   canonical_format: markdown

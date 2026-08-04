@@ -4,7 +4,7 @@ title: Changelog
 
 # Changelog
 
-## 2026-08-04 — Milestone 9 implementation in progress
+## 2026-08-04 — Milestone 9 long-term memory and knowledge retrieval completed
 
 - Merged the reviewed Milestone 8 pull request after all hosted CircleCI lanes
   passed and every CodeRabbit thread was resolved.
@@ -27,13 +27,14 @@ title: Changelog
   port-contract suites, four adversarial/retrieval corpora, and deterministic
   `carry: [memory]` evaluation with fresh source provenance in its isolated
   second arm.
-- Proposed ADR-0045 for the reversible implementation seams. Passed all 512
+- Proposed ADR-0045 for the reversible implementation seams. Passed all 526
   non-live tests across the static, contract, PostgreSQL, resilience, and real
   Docker partitions, all 166 cumulative gates, the strict documentation build,
   and the clean Alembic metadata check.
-- Fixed all three findings from the local CodeRabbit review. The full follow-up
-  review completed with zero findings; hosted CI and review remain before
-  Milestone 9 can be marked complete.
+- Addressed all hosted CodeRabbit findings, including atomic session-close
+  consolidation, and resolved every review thread. The final incremental review
+  completed without a new finding. All four CircleCI lanes and GitGuardian
+  passed on pull request 10 commit `e5c2140`.
 
 ## 2026-08-04 — Milestone 8 skills and MCP integration completed
 
