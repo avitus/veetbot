@@ -131,6 +131,7 @@ class SandboxManager:
         self._passthrough_names = passthrough_names
         self._handles: dict[tuple[str, UUID, int], EnvironmentHandle] = {}
         self._locks: dict[tuple[str, UUID, int], asyncio.Lock] = {}
+        self._lock_users: dict[tuple[str, UUID, int], int] = {}
         self._guard = asyncio.Lock()
         self._condition = asyncio.Condition(self._guard)
         self._active: dict[tuple[str, UUID, int], int] = {}
@@ -149,29 +150,41 @@ class SandboxManager:
         key = (tenant_id, run_id, lease_epoch)
         async with self._guard:
             lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            current = self._handles.get(key)
-            if current is not None:
-                return current
-            if self._image_digest is None:
-                if self._resolve_image_digest is None:
-                    raise RuntimeError("sandbox image digest has no resolver")
-                self._image_digest = await self._resolve_image_digest()
-            spec = EnvironmentSpec(
-                tenant_id=tenant_id,
-                run_id=run_id,
-                lease_epoch=lease_epoch,
-                image_digest=self._image_digest,
-                limits=self._limits,
-                egress=self._egress,
-                environment=build_sandbox_environment(
-                    self._parent_environment, self._passthrough_names
-                ),
-            )
-            handle = await self._environment.provision(spec)
-            async with self._guard:
+            self._lock_users[key] = self._lock_users.get(key, 0) + 1
+        try:
+            async with lock:
+                current = self._handles.get(key)
+                if current is not None:
+                    return current
+                if self._image_digest is None:
+                    if self._resolve_image_digest is None:
+                        raise RuntimeError("sandbox image digest has no resolver")
+                    self._image_digest = await self._resolve_image_digest()
+                spec = EnvironmentSpec(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    lease_epoch=lease_epoch,
+                    image_digest=self._image_digest,
+                    limits=self._limits,
+                    egress=self._egress,
+                    environment=build_sandbox_environment(
+                        self._parent_environment, self._passthrough_names
+                    ),
+                )
+                handle = await self._environment.provision(spec)
+                # No await may separate a live provisioned handle from manager
+                # ownership; release and close rely on this handoff being atomic
+                # with respect to asyncio task cancellation.
                 self._handles[key] = handle
-            return handle
+                return handle
+        finally:
+            remaining = self._lock_users[key] - 1
+            if remaining:
+                self._lock_users[key] = remaining
+            else:
+                self._lock_users.pop(key, None)
+                if key not in self._handles:
+                    self._locks.pop(key, None)
 
     @asynccontextmanager
     async def _operation(
@@ -241,22 +254,59 @@ class SandboxManager:
                     if self._handles.get(key) == handle:
                         self._handles.pop(key, None)
                         self._locks.pop(key, None)
+                        self._lock_users.pop(key, None)
         if cancelled is not None:
             raise cancelled
         if errors:
             raise ExceptionGroup("one or more sandbox teardowns failed", errors)
 
-    async def release_run(self, run_id: UUID) -> None:
+    async def _discard_unused_locks(self, run_id: UUID | None = None) -> None:
+        async with self._guard:
+            for key in tuple(self._locks):
+                if key not in self._handles and (run_id is None or key[1] == run_id):
+                    self._locks.pop(key, None)
+                    self._lock_users.pop(key, None)
+
+    @staticmethod
+    async def _await_teardown(task: asyncio.Task[None]) -> None:
+        caller_cancellation: asyncio.CancelledError | None = None
+        teardown_failure: BaseException | None = None
+        while True:
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError as exc:
+                if task.done():
+                    teardown_failure = exc
+                    break
+                caller_cancellation = caller_cancellation or exc
+            except BaseException as exc:
+                teardown_failure = exc
+                break
+            else:
+                break
+        if caller_cancellation is not None:
+            raise caller_cancellation
+        if teardown_failure is not None:
+            raise teardown_failure
+
+    async def _release_run(self, run_id: UUID) -> None:
+        async with self._condition:
+            self._released_runs.add(run_id)
         async with self._teardown_lock:
             async with self._condition:
-                self._released_runs.add(run_id)
                 await self._condition.wait_for(
                     lambda: not any(key[1] == run_id for key in self._active)
                 )
                 matches = tuple(
                     (key, handle) for key, handle in self._handles.items() if key[1] == run_id
                 )
-            await self._destroy_matches(matches)
+            try:
+                await self._destroy_matches(matches)
+            finally:
+                await self._discard_unused_locks(run_id)
+
+    async def release_run(self, run_id: UUID) -> None:
+        await self._await_teardown(asyncio.create_task(self._release_run(run_id)))
 
     async def reap(self, live_leases: frozenset[tuple[UUID, int]]) -> int:
         reaper = getattr(self._environment, "reap", None)
@@ -264,12 +314,18 @@ class SandboxManager:
             return 0
         return int(await reaper(frozenset(live_leases)))
 
-    async def close(self) -> None:
+    async def _close(self) -> None:
         async with self._condition:
             self._closing = True
             await self._condition.wait_for(lambda: not self._active)
         async with self._teardown_lock:
-            await self._destroy_matches(tuple(self._handles.items()))
+            try:
+                await self._destroy_matches(tuple(self._handles.items()))
+            finally:
+                await self._discard_unused_locks()
+
+    async def close(self) -> None:
+        await self._await_teardown(asyncio.create_task(self._close()))
 
     @property
     def adapter(self) -> ExecutionEnvironment:

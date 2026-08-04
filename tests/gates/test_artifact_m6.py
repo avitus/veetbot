@@ -15,6 +15,7 @@ import pytest
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.determinism import SequenceIdFactory
+from agent_core.adapters.execution.local_workspace import LocalWorkspaceHandle
 from agent_core.api import create_app
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.bootstrap import build
@@ -151,7 +152,7 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
         assert not list(composition.settings.artifact_root.rglob(str(mismatch.artifact_id)))
 
 
-async def test_artifact_export_normalizes_an_unavailable_writer() -> None:
+async def test_artifact_export_normalizes_an_unavailable_workspace() -> None:
     result = await ArtifactExportTool().execute(
         {
             "path": "result.bin",
@@ -161,6 +162,26 @@ async def test_artifact_export_normalizes_an_unavailable_writer() -> None:
         replace(
             tool_context(),
             workspace=_UnavailableCollaborator(),
+            artifacts=object(),
+        ),
+    )
+    assert result.ok is False
+    assert result.failure is not None
+    assert result.failure.reason_code == "tool.internal_error"
+
+
+async def test_artifact_export_normalizes_an_unavailable_writer(tmp_path: Path) -> None:
+    workspace = LocalWorkspaceHandle(tmp_path / "workspace")
+    await workspace.write("result.bin", b"result")
+    result = await ArtifactExportTool().execute(
+        {
+            "path": "result.bin",
+            "filename": "result.bin",
+            "media_type": "application/octet-stream",
+        },
+        replace(
+            tool_context(),
+            workspace=workspace,
             artifacts=_UnavailableCollaborator(),
         ),
     )

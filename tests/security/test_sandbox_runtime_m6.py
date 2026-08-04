@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
@@ -226,7 +227,7 @@ for ordinal,call in enumerate(('demo.large','demo.small')):
 """
     session = ProgrammaticBridgeSession(
         script_hash=hashlib.sha256(source.encode()).hexdigest(),
-        token="test",
+        token=secrets.token_urlsafe(32),
         dispatch=dispatch,
     )
     endpoint = BridgeEndpoint(PurePosixPath("/workspace/.agent/large-bridge.sock"), session.token)
