@@ -129,6 +129,11 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
         ),
         (
             "runtime/limits.yaml",
+            "model:\n  max_internal_attempts: -" + "9" * 400 + "\n",
+            r"model\.max_internal_attempts must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
             "run_defaults: disabled\n",
             r"run_defaults must be a mapping",
         ),
