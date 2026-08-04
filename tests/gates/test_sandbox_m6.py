@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import inspect
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import get_args, get_type_hints
@@ -17,6 +17,7 @@ from agent_core.adapters.artifacts.filesystem import artifact_storage_key
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.execution import docker as docker_adapter
 from agent_core.adapters.execution.docker import DockerExecutionEnvironment
+from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
 from agent_core.domain.errors import ExecutionUnavailable
 from agent_core.domain.execution import (
     EgressPolicy,
@@ -28,7 +29,10 @@ from agent_core.domain.execution import (
 )
 from agent_core.execution.egress_core import address_is_public
 from agent_core.execution.environment import build_sandbox_environment
+from agent_core.execution.manager import SandboxManager
 from agent_core.ports.execution import WorkspaceHandle
+from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
+from tests.contract.support import tool_context
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -112,6 +116,26 @@ def test_no_runtime_in_worker() -> None:
                     if any(target.startswith(forbidden_call_prefixes) for target in targets):
                         findings.append(f"{path}:{candidate.lineno}: runtime process spawn")
     assert findings == []
+
+
+async def test_sandbox_command_uses_the_configured_hard_output_ceiling() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
+    limits = ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30)
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=limits)
+    context = replace(
+        tool_context(),
+        maximum_output_bytes=1024,
+        workspace=manager.for_run("tenant-a", UUID(int=94), 1),
+    )
+
+    result = await SandboxRunCommandTool(manager, hard_ceiling_multiplier=3).execute(
+        {"command": ["true"]}, context
+    )
+
+    assert result.ok is True
+    assert adapter.commands[-1][1].maximum_output_bytes == 3 * 1024
+    await manager.close()
 
 
 def test_spec_has_no_host_path() -> None:

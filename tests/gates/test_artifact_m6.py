@@ -23,16 +23,18 @@ from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settin
 from agent_core.domain.agents import Principal
 from agent_core.domain.artifacts import ArtifactMetadata, ArtifactOrigin
 from agent_core.domain.errors import ArtifactIntegrityError, NotFoundError
-from agent_core.domain.messages import FileReferencePart, TextPart
+from agent_core.domain.messages import FileReferencePart, TextPart, ToolCallItem
 from agent_core.domain.policies import (
     IdempotencyClass,
     RiskLevel,
     SideEffectClass,
     TrustLevel,
 )
-from agent_core.domain.runs import Run, RunLimits, RunStatus
+from agent_core.domain.runs import Step
 from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
+from agent_core.domain.trajectory import ArtifactRef
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.registry import StaticToolRegistry
@@ -47,6 +49,11 @@ async def _chunks(content: bytes) -> AsyncIterator[bytes]:
 class _UnavailableCollaborator:
     def __getattr__(self, name: str) -> object:
         raise RuntimeError(f"collaborator {name!r} unavailable")
+
+
+class _OversizeWriter:
+    async def create(self, *_args: object, **_kwargs: object) -> object:
+        raise ArtifactIntegrityError("artifact exceeds the configured size cap")
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -193,6 +200,26 @@ async def test_artifact_export_normalizes_an_unavailable_writer(tmp_path: Path) 
     assert result.failure.reason_code == "tool.internal_error"
 
 
+async def test_artifact_export_maps_writer_size_failures(tmp_path: Path) -> None:
+    workspace = LocalWorkspaceHandle(tmp_path / "workspace")
+    await workspace.write("result.bin", b"result")
+    result = await ArtifactExportTool().execute(
+        {
+            "path": "result.bin",
+            "filename": "result.bin",
+            "media_type": "application/octet-stream",
+        },
+        replace(
+            tool_context(),
+            workspace=workspace,
+            artifacts=_OversizeWriter(),
+        ),
+    )
+    assert result.ok is False
+    assert result.failure is not None
+    assert result.failure.reason_code == "tool.output_invalid"
+
+
 async def test_generated_workspace_file_exports_as_authorized_artifact(tmp_path: Path) -> None:
     content = b"generated in the sandbox\n"
     run_id = UUID(int=15_001)
@@ -238,7 +265,96 @@ async def test_generated_workspace_file_exports_as_authorized_artifact(tmp_path:
         fetched = await composition.services.artifacts.open_content(
             composition.principal, artifact_id
         )
-        assert b"".join([chunk async for chunk in fetched.open()]) == content
+        assert b"".join([chunk async for chunk in await fetched.open()]) == content
+
+
+async def test_general_artifact_expiry_sweep_removes_metadata_and_bytes(tmp_path: Path) -> None:
+    async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:
+        store = FilesystemArtifactStore(composition.settings.artifact_root)
+        factory = ArtifactWriterFactory(
+            composition.uow_factory,
+            store,
+            composition.clock,
+            SequenceIdFactory([UUID(int=16_000)]),
+            retention_days=0,
+        )
+        writer = factory.for_run(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            session_id=UUID(int=16_001),
+            run_id=UUID(int=16_002),
+            origin=ArtifactOrigin.TOOL_OUTPUT,
+        )
+        ref = await writer.create(
+            _chunks(b"expired"),
+            "expired.bin",
+            "application/octet-stream",
+            TrustLevel.INTERNAL_TOOL,
+        )
+        stored_path = next(composition.settings.artifact_root.rglob(str(ref.artifact_id)))
+
+        assert await factory.sweep_expired() == 1
+        assert await factory.sweep_expired() == 0
+        assert stored_path.exists() is False
+        with pytest.raises(NotFoundError):
+            await composition.services.artifacts.get(composition.principal, ref.artifact_id)
+
+
+async def test_download_routes_by_trajectory_membership_and_opens_eagerly(
+    tmp_path: Path,
+) -> None:
+    content = b"general bytes with a misleading origin"
+    async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:
+        store = FilesystemArtifactStore(composition.settings.artifact_root)
+        now = composition.clock.now()
+        expires_at = now + timedelta(days=30)
+        metadata = ArtifactMetadata(
+            artifact_id=UUID(int=17_000),
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            session_id=UUID(int=17_001),
+            run_id=UUID(int=17_002),
+            origin=ArtifactOrigin.TRAJECTORY_EXPORT,
+            filename="misleading.bin",
+            media_type="application/octet-stream",
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            trust=TrustLevel.INTERNAL_TOOL,
+            created_at=now,
+            expires_at=expires_at,
+        )
+        ref = await store.put(_chunks(content), metadata)
+        async with composition.uow_factory() as uow:
+            await uow.artifacts.create(
+                ArtifactRef(
+                    id=metadata.artifact_id,
+                    tenant_id=metadata.tenant_id,
+                    principal_id=metadata.principal_id,
+                    session_id=metadata.session_id,
+                    run_id=metadata.run_id,
+                    name=metadata.filename,
+                    media_type=metadata.media_type,
+                    storage_uri="",
+                    sha256=metadata.sha256,
+                    size_bytes=metadata.size_bytes,
+                    origin=metadata.origin.value,
+                    trust=metadata.trust,
+                    expires_at=expires_at,
+                    created_at=metadata.created_at,
+                )
+            )
+        opened = await composition.services.artifacts.open_content(
+            composition.principal, ref.artifact_id
+        )
+        stream = await opened.open()
+        assert b"".join([chunk async for chunk in stream]) == content
+
+        await store.delete(ref, tenant_id=metadata.tenant_id)
+        missing = await composition.services.artifacts.open_content(
+            composition.principal, ref.artifact_id
+        )
+        with pytest.raises(NotFoundError):
+            await missing.open()
 
 
 class _LargeOutputTool:
@@ -271,7 +387,7 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
             composition.uow_factory,
             store,
             composition.clock,
-            SequenceIdFactory([UUID(int=20_000)]),
+            SequenceIdFactory([UUID(int=30_000)]),
         )
         registry = StaticToolRegistry()
         tool = _LargeOutputTool()
@@ -280,38 +396,50 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
             registry,
             composition.uow_factory,
             composition.clock,
-            SequenceIdFactory(),
+            SequenceIdFactory([UUID(int=31_000)]),
             artifact_writers=writers,
         )
-        now = composition.clock.now()
-        run = Run(
-            id=UUID(int=20_001),
-            session_id=UUID(int=20_002),
-            tenant_id=composition.principal.tenant_id,
-            agent_id=UUID(int=20_003),
-            agent_version="1.0.0",
-            status=RunStatus.RUNNING,
-            limits=RunLimits(max_steps=1, max_model_calls=1, max_tool_calls=1),
-            created_at=now,
-            updated_at=now,
-        )
-        original = await tool.execute({}, object())  # type: ignore[arg-type]
-        result = await pipeline._artifactize_large_output(
-            result=original,
-            tool=tool,
+        run_id = await composition.runs.submit("prepare an artifactization test")
+        run = await composition.runs.get(run_id)
+        async with composition.uow_factory() as uow:
+            checkpoint = await uow.checkpoints.latest(run_id)
+            agent = await uow.agents.get_version(run.agent_id, run.agent_version)
+        assert checkpoint is not None
+        agent = agent.model_copy(update={"enabled_tools": [tool.spec.name]}, deep=True)
+        results = await pipeline.dispatch(
             run=run,
+            checkpoint=checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="large-output",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={},
+                    raw_arguments="{}",
+                )
+            ],
             principal=composition.principal,
+            step=Step(run_id=run_id, step_number=2, started_at=composition.clock.now()),
+            agent=agent,
+            token=RunCancellationToken(composition.clock, None),
         )
-        assert result.metrics["output_bytes"] == 5027
-        assert result.metrics["captured_bytes"] == 4000
-        assert result.metrics["discarded_bytes"] == 1027
-        assert result.metrics["truncated"] == 1
-        reference = next(part for part in result.content if isinstance(part, FileReferencePart))
-        assert "bytes elided" in result.content[0].text  # type: ignore[union-attr]
+        async with composition.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, composition.principal))[-1]
+        reference = next(part for part in results[0].content if isinstance(part, FileReferencePart))
+        assert invocation.output_bytes is not None
+        assert invocation.output_bytes > tool.spec.maximum_output_bytes
+        assert invocation.truncated is True
+        assert invocation.artifact_id == reference.artifact_id
+        assert "bytes elided" in results[0].content[0].text  # type: ignore[union-attr]
         fetched = await composition.services.artifacts.open_content(
             composition.principal, reference.artifact_id
         )
-        stored = b"".join([chunk async for chunk in fetched.open()])
-        assert len(stored) == result.metrics["captured_bytes"]
-        assert "captured first" in result.content[0].text  # type: ignore[union-attr]
-        assert "TAIL-END" in result.content[0].text  # type: ignore[union-attr]
+        async with composition.uow_factory() as uow:
+            artifact = await uow.artifacts.get(reference.artifact_id, composition.principal)
+        assert artifact.origin == ArtifactOrigin.TOOL_OUTPUT.value
+        stored = b"".join([chunk async for chunk in await fetched.open()])
+        captured_bytes = tool.spec.maximum_output_bytes * 4
+        assert len(stored) == captured_bytes
+        assert invocation.output_bytes - captured_bytes > 0
+        assert "captured first" in results[0].content[0].text  # type: ignore[union-attr]
+        assert "TAIL-END" in results[0].content[0].text  # type: ignore[union-attr]

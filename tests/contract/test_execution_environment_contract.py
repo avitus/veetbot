@@ -1,6 +1,7 @@
 """Shared execution-environment semantics exercised against the deterministic adapter."""
 
 import asyncio
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from uuid import UUID
@@ -23,6 +24,14 @@ from agent_core.execution.manager import SandboxManager
 
 def _limits() -> ResourceLimits:
     return ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30)
+
+
+async def _await_condition(predicate: Callable[[], bool], timeout: float = 0.2) -> None:
+    async def wait() -> None:
+        while not predicate():
+            await asyncio.sleep(0)
+
+    await asyncio.wait_for(wait(), timeout=timeout)
 
 
 class _FailingDestroyEnvironment(FakeExecutionEnvironment):
@@ -228,8 +237,7 @@ async def test_sandbox_release_waits_for_active_operations_and_blocks_new_ones()
     )
     await adapter.started.wait()
     release = asyncio.create_task(manager.release_run(run_id))
-    while run_id not in manager._released_runs:
-        await asyncio.sleep(0)
+    await _await_condition(lambda: run_id in manager._released_runs)
     assert release.done() is False
     with pytest.raises(ExecutionRejected, match="released"):
         await manager.for_run("tenant-a", run_id, 1).read("new")
@@ -253,8 +261,7 @@ async def test_sandbox_close_waits_for_active_operations_and_blocks_provisioning
     )
     await adapter.started.wait()
     closing = asyncio.create_task(manager.close())
-    while not manager._closing:
-        await asyncio.sleep(0)
+    await _await_condition(lambda: manager._closing)
     with pytest.raises(ExecutionRejected, match="closing"):
         await manager.for_run("tenant-a", UUID(int=17), 1).read("new")
     adapter.proceed.set()
@@ -278,8 +285,7 @@ async def test_sandbox_release_defers_caller_cancellation_until_teardown() -> No
     )
     await adapter.started.wait()
     release = asyncio.create_task(manager.release_run(run_id))
-    while run_id not in manager._released_runs:
-        await asyncio.sleep(0)
+    await _await_condition(lambda: run_id in manager._released_runs)
     release.cancel()
     await asyncio.sleep(0)
     assert release.done() is False
@@ -304,8 +310,7 @@ async def test_sandbox_close_defers_caller_cancellation_until_teardown() -> None
     )
     await adapter.started.wait()
     closing = asyncio.create_task(manager.close())
-    while not manager._closing:
-        await asyncio.sleep(0)
+    await _await_condition(lambda: manager._closing)
     closing.cancel()
     await asyncio.sleep(0)
     assert closing.done() is False
@@ -327,8 +332,7 @@ async def test_sandbox_release_marks_a_run_before_unrelated_teardown() -> None:
     first_release = asyncio.create_task(manager.release_run(first_run))
     await adapter.destroy_started.wait()
     second_release = asyncio.create_task(manager.release_run(second_run))
-    while second_run not in manager._released_runs:
-        await asyncio.sleep(0)
+    await _await_condition(lambda: second_run in manager._released_runs)
     with pytest.raises(ExecutionRejected, match="released"):
         await manager.for_run("tenant-a", second_run, 1).read("second")
     adapter.proceed.set()
@@ -414,3 +418,40 @@ async def test_sandbox_close_reconciles_provisioning_after_drain_timeout() -> No
     assert adapter.live_environment_ids() == frozenset()
     assert manager._locks == {}
     assert manager._lock_users == {}
+
+
+async def test_sandbox_release_is_fenced_to_the_completed_lease() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    run_id = UUID(int=26)
+    stale = manager.for_run("tenant-a", run_id, 1)
+    current = manager.for_run("tenant-a", run_id, 2)
+    await stale.write("lease.txt", b"stale")
+    await current.write("lease.txt", b"current")
+
+    await manager.release_run(run_id, 1)
+
+    with pytest.raises(ExecutionRejected, match="released"):
+        await stale.read("lease.txt")
+    assert await current.read("lease.txt") == b"current"
+    assert len(adapter.live_environment_ids()) == 1
+    await manager.release_run(run_id, 2)
+
+
+async def test_sandbox_reaper_revalidates_a_lease_claimed_after_snapshot() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    run_id = UUID(int=27)
+    await manager.for_run("tenant-a", run_id, 1).write("claimed.txt", b"live")
+    checked: list[tuple[UUID, int]] = []
+
+    async def claimed_after_snapshot(candidate: UUID, lease_epoch: int) -> bool:
+        checked.append((candidate, lease_epoch))
+        return True
+
+    assert await manager.reap(frozenset(), claimed_after_snapshot) == 0
+    assert checked == [(run_id, 1)]
+    assert len(adapter.live_environment_ids()) == 1
+    await manager.close()

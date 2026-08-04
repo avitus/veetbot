@@ -196,6 +196,21 @@ def _outcome_item(
     )
 
 
+def _effective_output_trust(result: ToolResult, tool: Tool) -> TrustLevel:
+    trust = result.output_trust or tool.spec.output_trust
+    if tool.spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED:
+        return TrustLevel.EXTERNAL_UNTRUSTED
+    return trust
+
+
+def _writer_origin(tool: Tool) -> ArtifactOrigin:
+    # artifact.export is intentionally an in-process capability over a sandbox
+    # workspace; its persisted object is nevertheless a sandbox export.
+    if tool.spec.name == "artifact.export":
+        return ArtifactOrigin.SANDBOX_EXPORT
+    return ArtifactOrigin.TOOL_OUTPUT
+
+
 async def authorize_tool_invocation(
     repository: ToolInvocationRepository,
     invocation: ToolInvocation,
@@ -231,6 +246,7 @@ class ToolPipeline:
         credentials: CredentialResolver | None = None,
         current_principal: Principal | None = None,
         max_parallel_calls: int = 8,
+        hard_ceiling_multiplier: int = 4,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
     ) -> None:
         self._registry = registry
@@ -248,6 +264,9 @@ class ToolPipeline:
         self._credentials = credentials or UnavailableCredentialResolver()
         self._current_principal = current_principal
         self._max_parallel_calls = max_parallel_calls
+        if hard_ceiling_multiplier < 1:
+            raise ValueError("hard ceiling multiplier must be positive")
+        self._hard_ceiling_multiplier = hard_ceiling_multiplier
         self._approval_expiry_seconds = dict(
             approval_expiry_seconds
             or {
@@ -759,7 +778,7 @@ class ToolPipeline:
                     principal_id=principal.principal_id,
                     session_id=run.session_id,
                     run_id=run.id,
-                    origin=ArtifactOrigin.SANDBOX_EXPORT,
+                    origin=_writer_origin(tool),
                 )
             ),
             credentials=(
@@ -789,6 +808,8 @@ class ToolPipeline:
                     run=run,
                     principal=principal,
                 )
+            if result.ok:
+                validate_output(result.structured, tool.spec.output_schema)
         except TimeoutError:
             result = ToolResult(
                 ok=False,
@@ -872,16 +893,27 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        hard_ceiling = tool.spec.maximum_output_bytes * 4
+        hard_ceiling = tool.spec.maximum_output_bytes * self._hard_ceiling_multiplier
         artifact_bytes = rendered[:hard_ceiling]
         partial_capture = len(artifact_bytes) < len(rendered)
+        budget = tool.spec.maximum_output_bytes
+        structured = None if result.structured is None else dict(result.structured)
+        if structured is not None:
+            for key in ("stdout", "stderr"):
+                value = structured.get(key)
+                if isinstance(value, str) and len(value.encode("utf-8")) > budget // 2:
+                    structured[key] = (
+                        value.encode("utf-8")[: budget // 4].decode("utf-8", errors="ignore")
+                        + "\n[TRUNCATED]"
+                    )
+        # Validate the bounded structured candidate before creating a durable
+        # artifact, so a schema failure cannot leave an unreferenced object.
+        validate_output(structured, tool.spec.output_schema)
 
         async def stream() -> AsyncIterator[bytes]:
             yield artifact_bytes
 
-        trust = result.output_trust or tool.spec.output_trust
-        if tool.spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED:
-            trust = TrustLevel.EXTERNAL_UNTRUSTED
+        trust = _effective_output_trust(result, tool)
         writer = self._artifact_writers.for_run(
             tenant_id=run.tenant_id,
             principal_id=principal.principal_id,
@@ -893,7 +925,6 @@ class ToolPipeline:
         filename += ".partial.json" if partial_capture else ".json"
         media_type = "application/octet-stream" if partial_capture else "application/json"
         ref = await writer.create(stream(), filename, media_type, trust)
-        budget = tool.spec.maximum_output_bytes
         capture_label = (
             f"captured first {len(artifact_bytes):,} of {len(rendered):,} bytes"
             if partial_capture
@@ -919,15 +950,6 @@ class ToolPipeline:
             excerpt = (
                 rendered[:head_bytes] + marker + (rendered[-tail_bytes:] if tail_bytes else b"")
             )
-        structured = None if result.structured is None else dict(result.structured)
-        if structured is not None:
-            for key in ("stdout", "stderr"):
-                value = structured.get(key)
-                if isinstance(value, str) and len(value.encode("utf-8")) > budget // 2:
-                    structured[key] = (
-                        value.encode("utf-8")[: budget // 4].decode("utf-8", errors="ignore")
-                        + "\n[TRUNCATED]"
-                    )
         return result.model_copy(
             update={
                 "content": [
@@ -1274,9 +1296,7 @@ class ToolPipeline:
             status = ToolInvocationStatus.FAILED
             event_type = "tool.call.failed"
         if result.ok:
-            trust = result.output_trust or tool.spec.output_trust
-            if tool.spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED:
-                trust = TrustLevel.EXTERNAL_UNTRUSTED
+            trust = _effective_output_trust(result, tool)
             result_item = ToolResultItem(call_id=call.call_id, content=result.content, trust=trust)
         else:
             result_item = _outcome_item(

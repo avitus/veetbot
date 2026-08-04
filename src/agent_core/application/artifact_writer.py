@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import tempfile
 from collections.abc import AsyncIterator
@@ -25,7 +26,7 @@ class _ReadableBytes(Protocol):
 async def _file_stream(
     source: _ReadableBytes, chunk_bytes: int = 64 * 1024
 ) -> AsyncIterator[bytes]:
-    while chunk := source.read(chunk_bytes):
+    while chunk := await asyncio.to_thread(source.read, chunk_bytes):
         yield chunk
 
 
@@ -72,8 +73,8 @@ class BoundArtifactWriter:
                 size += len(chunk)
                 if size > self._maximum_bytes:
                     raise ArtifactIntegrityError("artifact exceeds the configured size cap")
-                spool.write(chunk)
-            spool.seek(0)
+                await asyncio.to_thread(spool.write, chunk)
+            await asyncio.to_thread(spool.seek, 0)
             artifact_id = self._ids.new_id()
             now = self._clock.now()
             expires_at = now + timedelta(days=self._retention_days)
@@ -158,3 +159,28 @@ class ArtifactWriterFactory:
             retention_days=self._retention_days,
             maximum_bytes=self._maximum_bytes,
         )
+
+    async def sweep_expired(self, *, limit: int = 100) -> int:
+        """Delete expired general-artifact bytes before their metadata rows."""
+
+        now = self._clock.now()
+        async with self._uow_factory() as uow:
+            expired = await uow.artifacts.list_expired(now, limit=limit)
+        removed = 0
+        failures: list[Exception] = []
+        for artifact in expired:
+            ref = StoredArtifactRef(
+                artifact_id=artifact.id,
+                sha256=artifact.sha256,
+                size_bytes=artifact.size_bytes,
+                media_type=artifact.media_type,
+            )
+            try:
+                await self._store.delete(ref, tenant_id=artifact.tenant_id)
+                async with self._uow_factory() as uow:
+                    removed += int(await uow.artifacts.delete_expired(artifact.id, now=now))
+            except Exception as exc:
+                failures.append(exc)
+        if failures:
+            raise ExceptionGroup("one or more expired artifact deletions failed", failures)
+        return removed

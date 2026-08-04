@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import sys
+from contextlib import suppress
 from urllib.parse import urlsplit
 
 from agent_core.execution.egress_core import evaluate_core, validate_host_and_ports
@@ -58,6 +59,18 @@ async def _relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> 
         writer.close()
 
 
+async def _relay_exact(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter, remaining: int
+) -> None:
+    while remaining:
+        chunk = await reader.read(min(64 * 1024, remaining))
+        if not chunk:
+            raise asyncio.IncompleteReadError(partial=b"", expected=remaining)
+        remaining -= len(chunk)
+        writer.write(chunk)
+        await writer.drain()
+
+
 async def _handle(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
@@ -71,11 +84,12 @@ async def _handle(
         first, *rest = header.split(b"\r\n")
         method, raw_target, version = first.decode("ascii").split(" ", 2)
         if method.upper() == "CONNECT":
-            raw_host, separator, raw_port = raw_target.rpartition(":")
-            if not separator:
+            raw_host, host_separator, raw_port = raw_target.rpartition(":")
+            if not host_separator:
                 raise ValueError("CONNECT target requires an explicit port")
             host, port = raw_host.strip("[]"), int(raw_port)
             upstream_header = None
+            content_length = 0
         else:
             target = urlsplit(raw_target)
             if not target.hostname or target.port is None:
@@ -84,7 +98,35 @@ async def _handle(
             path = target.path or "/"
             if target.query:
                 path += "?" + target.query
-            header_lines = [line for line in rest if line]
+            header_lines: list[bytes] = []
+            content_length = 0
+            host_header: tuple[str, int] | None = None
+            for line in rest:
+                if not line:
+                    continue
+                header_name, header_separator, value = line.partition(b":")
+                if not header_separator:
+                    raise ValueError("malformed proxy header")
+                lowered = header_name.strip().lower()
+                if lowered == b"transfer-encoding":
+                    raise ValueError("transfer-encoded proxy requests are unsupported")
+                if lowered == b"content-length":
+                    content_length = int(value.strip())
+                    if content_length < 0:
+                        raise ValueError("negative proxy content length")
+                if lowered == b"host":
+                    if host_header is not None:
+                        raise ValueError("multiple proxy host headers")
+                    parsed_host = urlsplit("//" + value.strip().decode("ascii"))
+                    if parsed_host.hostname is None:
+                        raise ValueError("invalid proxy host header")
+                    default_port = 443 if target.scheme.lower() == "https" else 80
+                    host_header = (parsed_host.hostname, parsed_host.port or default_port)
+                if lowered not in {b"connection", b"proxy-connection"}:
+                    header_lines.append(line)
+            if host_header != (host, port):
+                raise ValueError("proxy host header does not match the request target")
+            header_lines.append(b"Connection: close")
             upstream_header = b" ".join((method.encode(), path.encode(), version.encode()))
             upstream_header += b"\r\n" + b"".join(line + b"\r\n" for line in header_lines)
             upstream_header += b"\r\n"
@@ -103,10 +145,14 @@ async def _handle(
             upstream_writer.write(upstream_header)
         await writer.drain()
         await upstream_writer.drain()
-        await asyncio.gather(
-            _relay(reader, upstream_writer),
-            _relay(upstream_reader, writer),
-        )
+        if method.upper() == "CONNECT":
+            await asyncio.gather(
+                _relay(reader, upstream_writer),
+                _relay(upstream_reader, writer),
+            )
+        else:
+            await _relay_exact(reader, upstream_writer, content_length)
+            await _relay(upstream_reader, writer)
     except (
         ValueError,
         UnicodeError,
@@ -121,7 +167,7 @@ async def _handle(
         )
         if not writer.is_closing():
             writer.write(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
-            with __import__("contextlib").suppress(OSError):
+            with suppress(OSError):
                 await writer.drain()
     finally:
         writer.close()

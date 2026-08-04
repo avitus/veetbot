@@ -836,37 +836,42 @@ class PublicArtifactService:
         self._general_artifacts = general_artifacts
         self._clock = clock
 
-    async def _get_ref(self, principal: Principal, artifact_id: UUID) -> ArtifactRef:
+    async def _get_ref(self, principal: Principal, artifact_id: UUID) -> tuple[ArtifactRef, bool]:
         async with self._uow_factory() as uow:
             try:
-                artifact = await uow.artifacts.get(artifact_id, principal)
-            except NotFoundError:
                 artifact = await uow.trajectory_exports.get_artifact(artifact_id, principal)
+                is_trajectory = True
+            except NotFoundError:
+                artifact = await uow.artifacts.get(artifact_id, principal)
+                is_trajectory = False
         # ArtifactRef requires an expiry, and persistence mapping rejects legacy null rows.
         if artifact.expires_at <= self._clock.now():
             raise NotFoundError("artifact not found")
-        return artifact
+        return artifact, is_trajectory
 
     async def get(self, principal: Principal, artifact_id: UUID) -> ArtifactView:
         require_scope(principal, "artifact.read")
-        return _artifact_view(await self._get_ref(principal, artifact_id))
+        artifact, _is_trajectory = await self._get_ref(principal, artifact_id)
+        return _artifact_view(artifact)
 
     async def open_content(self, principal: Principal, artifact_id: UUID) -> ArtifactContent:
         require_scope(principal, "artifact.read")
-        artifact = await self._get_ref(principal, artifact_id)
+        artifact, is_trajectory = await self._get_ref(principal, artifact_id)
 
         async def open_stream() -> AsyncIterator[bytes]:
-            if artifact.origin == "trajectory_export":
-                async for chunk in self._artifacts.stream(artifact):
-                    yield chunk
-                return
-            ref = StoredArtifactRef(
-                artifact_id=artifact.id,
-                sha256=artifact.sha256,
-                size_bytes=artifact.size_bytes,
-                media_type=artifact.media_type,
-            )
-            async for chunk in self._general_artifacts.open(ref, tenant_id=artifact.tenant_id):
-                yield chunk
+            try:
+                if is_trajectory:
+                    return await self._artifacts.open_verified(artifact)
+                ref = StoredArtifactRef(
+                    artifact_id=artifact.id,
+                    sha256=artifact.sha256,
+                    size_bytes=artifact.size_bytes,
+                    media_type=artifact.media_type,
+                )
+                return await self._general_artifacts.open_verified(
+                    ref, tenant_id=artifact.tenant_id
+                )
+            except FileNotFoundError as exc:
+                raise NotFoundError("artifact not found") from exc
 
         return ArtifactContent(artifact=_artifact_view(artifact), open=open_stream)

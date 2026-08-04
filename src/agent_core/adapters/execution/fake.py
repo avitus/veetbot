@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import timedelta
 from pathlib import PurePosixPath
+from uuid import UUID
 
 from agent_core.adapters.execution.local_workspace import validated_workspace_components
 from agent_core.domain.errors import (
@@ -48,6 +49,8 @@ class _FakeWorkspaceHandle:
             raise FileNotFoundError(path) from exc
 
     async def read_bounded(self, path: str, maximum_bytes: int) -> bytes:
+        if maximum_bytes < 0:
+            raise ValueError("maximum_bytes must not be negative")
         data = await self.read(path)
         if len(data) > maximum_bytes:
             raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
@@ -162,12 +165,19 @@ class FakeExecutionEnvironment:
         self._live.pop(environment.environment_id, None)
         self._workspaces.pop(environment.environment_id, None)
 
-    async def reap(self, live_leases: frozenset[tuple[object, int]]) -> int:
-        stale = [
-            environment_id
-            for environment_id, specification in self._live.items()
-            if (specification.run_id, specification.lease_epoch) not in live_leases
-        ]
+    async def reap(
+        self,
+        live_leases: frozenset[tuple[object, int]],
+        is_live: Callable[[UUID, int], Awaitable[bool]] | None = None,
+    ) -> int:
+        stale: list[str] = []
+        for environment_id, specification in tuple(self._live.items()):
+            lease = (specification.run_id, specification.lease_epoch)
+            if lease in live_leases:
+                continue
+            if is_live is not None and await is_live(*lease):
+                continue
+            stale.append(environment_id)
         for environment_id in stale:
             self._live.pop(environment_id, None)
             self._workspaces.pop(environment_id, None)

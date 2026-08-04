@@ -211,16 +211,15 @@ class LocalWorkspaceHandle:
 class LocalWorkspaceFactory:
     def __init__(self, base_directory: Path) -> None:
         self._base_directory = base_directory
-        self._handles: dict[tuple[str, UUID], LocalWorkspaceHandle] = {}
+        self._handles: dict[tuple[str, UUID, int], LocalWorkspaceHandle] = {}
 
     def for_run(self, tenant_id: str, run_id: object, lease_epoch: int = 0) -> WorkspaceHandle:
-        del lease_epoch
         if not isinstance(run_id, UUID):
             raise TypeError("run_id must be a UUID")
         tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()
-        key = (tenant_id, run_id)
+        key = (tenant_id, run_id, lease_epoch)
         if key not in self._handles:
             self._handles[key] = LocalWorkspaceHandle(
-                self._base_directory / tenant_key / str(run_id)
+                self._base_directory / tenant_key / str(run_id) / f"lease-{lease_epoch}"
             )
         return self._handles[key]

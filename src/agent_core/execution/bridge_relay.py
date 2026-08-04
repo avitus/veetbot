@@ -8,6 +8,7 @@ import os
 import sys
 from contextlib import suppress
 from pathlib import Path
+from typing import Any, cast
 
 _MAX_REQUEST_BYTES = 64 * 1024
 
@@ -20,6 +21,12 @@ async def _run() -> None:
     responses = asyncio.StreamReader(limit=_MAX_REQUEST_BYTES + 1)
     protocol = asyncio.StreamReaderProtocol(responses)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+    stdout_transport, stdout_protocol = await loop.connect_write_pipe(
+        lambda: asyncio.streams.FlowControlMixin(loop=loop), sys.stdout.buffer
+    )
+    response_requests = asyncio.StreamWriter(
+        stdout_transport, cast(Any, stdout_protocol), None, loop
+    )
     try:
         raw_token = await responses.readline()
     except ValueError as exc:
@@ -58,14 +65,15 @@ async def _run() -> None:
                             response = _denied("bridge.request_too_large")
                         else:
                             async with response_lock:
-                                sys.stdout.buffer.write(encoded + b"\n")
-                                sys.stdout.buffer.flush()
+                                response_requests.write(encoded + b"\n")
+                                await response_requests.drain()
                                 try:
                                     response = await responses.readline()
                                 except ValueError:
                                     response = _denied("bridge.response_too_large")
                                     fatal_response = True
                                 if not response:
+                                    response_overrun.set()
                                     return
                 writer.write(response.rstrip(b"\n") + b"\n")
                 await writer.drain()
@@ -80,7 +88,10 @@ async def _run() -> None:
     server = await asyncio.start_unix_server(handle, path=socket_path, limit=_MAX_REQUEST_BYTES + 1)
     os.chmod(socket_path, 0o600)
     async with server:
-        await response_overrun.wait()
+        try:
+            await response_overrun.wait()
+        finally:
+            response_requests.close()
 
 
 def _denied(reason_code: str) -> bytes:

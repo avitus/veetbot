@@ -45,3 +45,10 @@ async def test_artifact_repository_is_idempotent_and_tenant_scoped() -> None:
     )
     with pytest.raises(NotFoundError):
         await repository.get(artifact.id, Principal(tenant_id="tenant-b", principal_id="user-a"))
+    with pytest.raises(NotFoundError):
+        await repository.get(artifact.id, Principal(tenant_id="tenant-a", principal_id="user-b"))
+
+    expired_at = artifact.expires_at + timedelta(seconds=1)
+    assert await repository.list_expired(expired_at, limit=10) == [artifact]
+    assert await repository.delete_expired(artifact.id, now=expired_at) is True
+    assert await repository.delete_expired(artifact.id, now=expired_at) is False

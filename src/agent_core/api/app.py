@@ -439,8 +439,9 @@ def create_app(
         artifact = content.artifact
         if _matches_etag(if_none_match, artifact.sha256):
             return Response(status_code=304, headers={"ETag": f'"{artifact.sha256}"'})
+        stream = await content.open()
         return StreamingResponse(
-            content.open(),
+            stream,
             media_type=artifact.media_type,
             headers={
                 "Content-Length": str(artifact.size_bytes),

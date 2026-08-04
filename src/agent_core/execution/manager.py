@@ -47,6 +47,9 @@ class _BridgeExecutionEnvironment(_WorkspaceEnvironment, Protocol):
     ) -> ExecutionResult: ...
 
 
+type LeaseLiveCheck = Callable[[UUID, int], Awaitable[bool]]
+
+
 class LeaseWorkspaceHandle:
     def __init__(
         self,
@@ -140,6 +143,7 @@ class SandboxManager:
         self._condition = asyncio.Condition(self._guard)
         self._active: dict[tuple[str, UUID, int], int] = {}
         self._released_runs: set[UUID] = set()
+        self._released_leases: set[tuple[UUID, int]] = set()
         self._closing = False
         self._teardown_lock = asyncio.Lock()
 
@@ -159,7 +163,7 @@ class SandboxManager:
             async with lock:
                 if self._closing:
                     raise ExecutionRejected("sandbox manager is closing")
-                if run_id in self._released_runs:
+                if run_id in self._released_runs or (run_id, lease_epoch) in self._released_leases:
                     raise ExecutionRejected("sandbox run has been released")
                 current = self._handles.get(key)
                 if current is not None:
@@ -184,7 +188,10 @@ class SandboxManager:
                 # ownership; release and close rely on this handoff being atomic
                 # with respect to asyncio task cancellation.
                 self._handles[key] = handle
-                if self._closing or run_id in self._released_runs:
+                released = (
+                    run_id in self._released_runs or (run_id, lease_epoch) in self._released_leases
+                )
+                if self._closing or released:
                     reason = "closing" if self._closing else "released"
                     # The teardown flow snapshots and retries retained handles.
                     with suppress(Exception):
@@ -210,7 +217,7 @@ class SandboxManager:
         async with self._condition:
             if self._closing:
                 raise ExecutionRejected("sandbox manager is closing")
-            if run_id in self._released_runs:
+            if run_id in self._released_runs or (run_id, lease_epoch) in self._released_leases:
                 raise ExecutionRejected("sandbox run has been released")
             self._active[key] = self._active.get(key, 0) + 1
         try:
@@ -241,6 +248,9 @@ class SandboxManager:
     ) -> ExecutionResult:
         async with self._operation(tenant_id, run_id, lease_epoch) as handle:
             if bridge is not None:
+                execute_with_bridge = getattr(self._environment, "execute_with_bridge", None)
+                if not callable(execute_with_bridge):
+                    raise ExecutionRejected("execution environment does not support tool bridges")
                 bridge_environment = cast(_BridgeExecutionEnvironment, self._environment)
                 endpoint = BridgeEndpoint(
                     socket_path=PurePosixPath(
@@ -276,13 +286,16 @@ class SandboxManager:
         if errors:
             raise ExceptionGroup("one or more sandbox teardowns failed", errors)
 
-    async def _discard_unused_locks(self, run_id: UUID | None = None) -> None:
+    async def _discard_unused_locks(
+        self, run_id: UUID | None = None, lease_epoch: int | None = None
+    ) -> None:
         async with self._guard:
             for key in tuple(self._locks):
                 if (
                     key not in self._handles
                     and self._lock_users.get(key, 0) == 0
                     and (run_id is None or key[1] == run_id)
+                    and (lease_epoch is None or key[2] == lease_epoch)
                 ):
                     self._locks.pop(key, None)
                     self._lock_users.pop(key, None)
@@ -309,35 +322,45 @@ class SandboxManager:
         if teardown_failure is not None:
             raise teardown_failure
 
-    async def _release_run(self, run_id: UUID) -> None:
+    async def _release_run(self, run_id: UUID, lease_epoch: int | None) -> None:
+        def is_target(key: tuple[str, UUID, int]) -> bool:
+            return key[1] == run_id and (lease_epoch is None or key[2] == lease_epoch)
+
         async with self._condition:
-            self._released_runs.add(run_id)
+            if lease_epoch is None:
+                self._released_runs.add(run_id)
+            else:
+                self._released_leases.add((run_id, lease_epoch))
         async with self._teardown_lock:
             async with self._condition:
                 with suppress(TimeoutError):
                     async with asyncio.timeout(self._drain_timeout_seconds):
                         await self._condition.wait_for(
-                            lambda: not any(key[1] == run_id for key in self._active)
+                            lambda: not any(is_target(key) for key in self._active)
                         )
                 await self._condition.wait_for(
-                    lambda: not any(key[1] == run_id for key in self._lock_users)
+                    lambda: not any(is_target(key) for key in self._lock_users)
                 )
-                matches = tuple(
-                    (key, handle) for key, handle in self._handles.items() if key[1] == run_id
+                targets = tuple(
+                    (key, handle) for key, handle in self._handles.items() if is_target(key)
                 )
             try:
-                await self._destroy_matches(matches)
+                await self._destroy_matches(targets)
             finally:
-                await self._discard_unused_locks(run_id)
+                await self._discard_unused_locks(run_id, lease_epoch)
 
-    async def release_run(self, run_id: UUID) -> None:
-        await self._await_teardown(asyncio.create_task(self._release_run(run_id)))
+    async def release_run(self, run_id: UUID, lease_epoch: int | None = None) -> None:
+        await self._await_teardown(asyncio.create_task(self._release_run(run_id, lease_epoch)))
 
-    async def reap(self, live_leases: frozenset[tuple[UUID, int]]) -> int:
+    async def reap(
+        self,
+        live_leases: frozenset[tuple[UUID, int]],
+        is_live: LeaseLiveCheck | None = None,
+    ) -> int:
         reaper = getattr(self._environment, "reap", None)
         if reaper is None:
             return 0
-        return int(await reaper(frozenset(live_leases)))
+        return int(await reaper(frozenset(live_leases), is_live))
 
     async def _close(self) -> None:
         async with self._condition:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from uuid import UUID
@@ -329,7 +329,11 @@ async def test_modification_rekeys_before_persistence(tmp_path: Path) -> None:
     tool = _RecordingTool()
     registry = StaticToolRegistry()
     registry.register(tool)
-    async with build(settings=_settings(tmp_path), script=script) as app:
+    async with build(
+        settings=_settings(tmp_path),
+        script=script,
+        fixed_clock_at=datetime(2026, 1, 1, tzinfo=UTC),
+    ) as app:
         run_id = await app.runs.submit("prepare a modification test")
         active_run = await app.runs.get(run_id)
         active_run = active_run.model_copy(

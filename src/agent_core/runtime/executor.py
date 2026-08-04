@@ -61,7 +61,7 @@ from agent_core.runtime.loop import (
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
 type TokenCompleteCallback = Callable[[UUID], None]
-type RunCompleteCallback = Callable[[UUID], Awaitable[None]]
+type RunCompleteCallback = Callable[[UUID, int | None], Awaitable[None]]
 logger = logging.getLogger(__name__)
 
 
@@ -222,7 +222,7 @@ class RunExecutor:
         try:
             await self._execute_running(run, lease=None)
         finally:
-            await self._complete_run(run.id)
+            await self._complete_run(run.id, None)
 
     async def execute_claimed(
         self,
@@ -235,12 +235,12 @@ class RunExecutor:
         try:
             await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
         finally:
-            await self._complete_run(claimed.run.id)
+            await self._complete_run(claimed.run.id, claimed.lease.lease_epoch)
 
-    async def _complete_run(self, run_id: UUID) -> None:
+    async def _complete_run(self, run_id: UUID, lease_epoch: int | None) -> None:
         try:
             if self._on_run_complete is not None:
-                await self._on_run_complete(run_id)
+                await self._on_run_complete(run_id, lease_epoch)
         except Exception:
             logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
         finally:

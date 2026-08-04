@@ -42,16 +42,25 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    path; the reaper destroys anything whose lease epoch is no longer live. A
    newly created, unexpired environment receives a 60-second grace window
    before a missing lease snapshot can reap it, closing the race between lease
-   acquisition and the maintenance worker's database read. Release and process
-   shutdown first prevent new lease operations, wait for active execution and
-   workspace operations, and then attempt every teardown. Cancellation is
-   re-raised only after those bounded attempts finish, while failed handles
-   remain available to a later cleanup retry.
+   acquisition and the maintenance worker's database read. The reaper also
+   revalidates each candidate against the repository immediately before
+   deletion, so a lease acquired after the snapshot fences teardown. Claimed
+   run completion releases only its `(run_id, lease_epoch)` resources; inline
+   completion retains the whole-run cleanup path. Local fallback workspace
+   handles and directories use the same lease epoch boundary. Release and
+   process shutdown first prevent new matching lease operations, wait for
+   active execution and workspace operations, and then attempt every teardown.
+   Cancellation is re-raised only after those bounded attempts finish, while
+   failed handles remain available to a later cleanup retry.
 5. **Portable workspace quotas use an active service-side monitor.** Docker's
    local volume driver has no portable per-volume byte or inode quota. The
    adapter measures both while a command runs, kills on the first violation,
-   and repeats the measurement after exit to close short-command races. CPU,
-   memory, and process bounds remain runtime-enforced cgroup limits.
+   and repeats the measurement after exit to close short-command races. The
+   safety-net poll backs off from 250 milliseconds to one second, uses one
+   metadata read per file, and reuses the prior command's snapshot. Snapshot
+   hashing is repeated only when size, mtime, or unforgeable ctime changes, so
+   untrusted code cannot hide a content change by restoring mtime. CPU, memory,
+   and process bounds remain runtime-enforced cgroup limits.
 6. **Allowlisted egress uses an internal-only network and a disposable proxy.**
    The proxy performs the shared policy evaluation, resolves once, rejects
    private addresses before matching the allowlist, dials the resolved numeric
@@ -59,6 +68,12 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    internal-network address and separately joins Docker's external bridge for
    outbound dialing; it does not expose the listener on that bridge. The
    sandbox has no direct route to the external bridge network.
+   CONNECT remains a byte tunnel after one authorization. Plaintext HTTP is
+   deliberately one request per proxy connection: the proxy rejects transfer
+   encoding, forwards a bounded content-length body, forces upstream
+   `Connection: close`, and closes the client connection after the response.
+   Pipelined requests therefore cannot inherit the first request's host
+   authorization or evade its audit record.
 7. **The programmatic bridge crosses the boundary through `docker exec`
    standard I/O.** A tiny relay in the execution image owns the mode-0600 Unix
    socket inside the workspace. The worker never mounts that socket. The
@@ -69,21 +84,35 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    unexpected response-stream overrun terminates the relay instead of allowing
    leftover bytes to be interpreted as a later response. The host socket is
    created with a restrictive process umask so it is mode 0600 from the instant
-   it is bound rather than being tightened in a later check/use window.
+   it is bound rather than being tightened in a later check/use window. Relay
+   writes use an asynchronous pipe with backpressure, and host response EOF
+   terminates the relay. An approval-hold timeout consumes its ordinal and is
+   therefore explicitly non-retryable; replaying it cannot produce a second
+   invocation under a different bridge call ID.
 8. **General artifacts use store-then-metadata commit order.** The application
    writer spools a bounded stream, computes its digest and size, writes bytes
    under a key derived only from tenant and artifact IDs, and then commits
    metadata. A metadata failure deletes the just-written bytes. A process crash
    between those operations can still leave bytes without metadata, so the
    maintenance worker reconciles objects older than a one-hour safety margin
-   against the artifact repository and deletes unmatched objects. Reads
-   recompute and verify the digest before exposing content. Artifact metadata
-   always has an expiry; adapters reject a database row that violates that
-   invariant rather than carrying an optional expiry through the application.
+   against the artifact repository and deletes unmatched objects. That
+   store-wide orphan pass has an independent one-hour cadence, while the
+   frequent maintenance loop idempotently deletes expired general-artifact
+   bytes and then their metadata. Reads resolve explicit trajectory-export
+   membership rather than trusting the artifact origin string, open and verify
+   the selected backing object before the HTTP streaming response is created,
+   and translate a missing object into the public not-found boundary. Artifact
+   metadata always has an expiry; adapters reject a database row that violates
+   that invariant rather than carrying an optional expiry through the
+   application.
 9. **Large tool output is an artifact plus a bounded model view.** The pipeline
-   stores at most four times the declared output bound, returns a head and tail
-   excerpt with an explicit elision marker and file reference, and persists the
-   byte count, truncation flag, and artifact ID on the invocation.
+   stores at most the configured hard-ceiling multiplier times the declared
+   output bound, returns a head and tail excerpt with an explicit elision marker
+   and file reference, revalidates any structured result changed during
+   artifactization, and persists the byte count, truncation flag, and artifact
+   ID on the invocation. `artifact.export` remains `SANDBOX_EXPORT` even though
+   the plan intentionally classifies it as an in-process capability; other
+   tool-created output uses `TOOL_OUTPUT`.
 10. **The sandbox security profile exposes a documentation conflict for owner
     review.** `sandbox-isolation.md` requires six operator-set resource limits
     plus an egress policy, while `bootstrap-and-composition.md` freezes an

@@ -13,6 +13,8 @@ import pytest
 
 from agent_core.tools.bridge import ProgrammaticBridgeSession, UnixToolBridgeServer, bridge_call_id
 
+_TURN_TOKEN = secrets.token_urlsafe(16)
+
 
 async def test_bridge_counts_ordinals_and_synthesizes_replay_stable_ids() -> None:
     observed: list[str] = []
@@ -25,7 +27,7 @@ async def test_bridge_counts_ordinals_and_synthesizes_replay_stable_ids() -> Non
     script_hash = hashlib.sha256(b"orchestration source").hexdigest()
     bridge = ProgrammaticBridgeSession(
         script_hash=script_hash,
-        token="turn-token",
+        token=_TURN_TOKEN,
         dispatch=dispatch,
         maximum_calls=2,
     )
@@ -38,7 +40,7 @@ async def test_bridge_counts_ordinals_and_synthesizes_replay_stable_ids() -> Non
     first = await bridge.handle(
         json.dumps(
             {
-                "token": "turn-token",
+                "token": _TURN_TOKEN,
                 "call": "workspace.read_text",
                 "arguments": {"path": "notes.md"},
                 "ordinal": 0,
@@ -49,7 +51,7 @@ async def test_bridge_counts_ordinals_and_synthesizes_replay_stable_ids() -> Non
     second = await bridge.handle(
         json.dumps(
             {
-                "token": "turn-token",
+                "token": _TURN_TOKEN,
                 "call": "workspace.read_text",
                 "arguments": {"path": "other.md"},
                 "ordinal": 1,
@@ -59,7 +61,7 @@ async def test_bridge_counts_ordinals_and_synthesizes_replay_stable_ids() -> Non
     assert json.loads(second)["status"] == "succeeded"
     capped = await bridge.handle(
         json.dumps(
-            {"token": "turn-token", "call": "workspace.read_text", "arguments": {}, "ordinal": 2}
+            {"token": _TURN_TOKEN, "call": "workspace.read_text", "arguments": {}, "ordinal": 2}
         ).encode()
     )
     assert json.loads(capped)["reason_code"] == "bridge.call_limit"
@@ -74,14 +76,14 @@ async def test_bridge_counts_ordinals_and_synthesizes_replay_stable_ids() -> Non
 
     replay = ProgrammaticBridgeSession(
         script_hash=script_hash,
-        token="turn-token",
+        token=_TURN_TOKEN,
         dispatch=replay_dispatch,
         maximum_calls=2,
     )
     await replay.handle(
         json.dumps(
             {
-                "token": "turn-token",
+                "token": _TURN_TOKEN,
                 "call": "workspace.read_text",
                 "arguments": {"path": "notes.md"},
                 "ordinal": 0,
@@ -100,16 +102,18 @@ async def test_bridge_bounds_an_approval_hold() -> None:
 
     bridge = ProgrammaticBridgeSession(
         script_hash=hashlib.sha256(b"script").hexdigest(),
-        token="turn-token",
+        token=_TURN_TOKEN,
         dispatch=blocked,
         approval_hold_seconds=0.01,
     )
     response = await bridge.handle(
         json.dumps(
-            {"token": "turn-token", "call": "demo.external_write", "arguments": {}, "ordinal": 0}
+            {"token": _TURN_TOKEN, "call": "demo.external_write", "arguments": {}, "ordinal": 0}
         ).encode()
     )
-    assert json.loads(response)["reason_code"] == "bridge.approval_hold_expired"
+    payload = json.loads(response)
+    assert payload["reason_code"] == "bridge.approval_hold_expired"
+    assert payload["retryable"] is False
 
 
 async def test_unix_bridge_rejects_a_symlinked_socket_directory(tmp_path: Path) -> None:
@@ -122,7 +126,7 @@ async def test_unix_bridge_rejects_a_symlinked_socket_directory(tmp_path: Path) 
     (tmp_path / ".agent").symlink_to(target, target_is_directory=True)
     session = ProgrammaticBridgeSession(
         script_hash=hashlib.sha256(b"script").hexdigest(),
-        token="turn-token",
+        token=_TURN_TOKEN,
         dispatch=dispatch,
     )
     server = UnixToolBridgeServer(tmp_path / ".agent" / "bridge.sock", session)

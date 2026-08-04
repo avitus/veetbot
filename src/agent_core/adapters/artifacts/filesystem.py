@@ -102,6 +102,20 @@ class FilesystemArtifactStore:
         finally:
             await asyncio.to_thread(source.close)
 
+    async def open_verified(
+        self, ref: StoredArtifactRef, *, tenant_id: str
+    ) -> AsyncIterator[bytes]:
+        source = await self._open_verified(ref, tenant_id)
+
+        async def chunks() -> AsyncIterator[bytes]:
+            try:
+                while chunk := await asyncio.to_thread(source.read, self._CHUNK_BYTES):
+                    yield chunk
+            finally:
+                await asyncio.to_thread(source.close)
+
+        return chunks()
+
     async def delete(self, ref: StoredArtifactRef, *, tenant_id: str) -> None:
         await asyncio.to_thread(self._path(tenant_id, ref.artifact_id).unlink, missing_ok=True)
 
@@ -159,6 +173,6 @@ class FilesystemArtifactStore:
 
 
 def _restore_claim(claim: Path, destination: Path) -> None:
-    with suppress(FileExistsError):
+    with suppress(FileExistsError, FileNotFoundError):
         os.link(claim, destination)
     claim.unlink(missing_ok=True)

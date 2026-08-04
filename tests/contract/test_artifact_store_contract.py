@@ -64,21 +64,7 @@ async def test_artifact_store_rejects_digest_drift_without_committing(tmp_path: 
     content = b"bytes"
     store = FilesystemArtifactStore(tmp_path)
     metadata = _metadata(content)
-    broken = ArtifactMetadata(
-        metadata.artifact_id,
-        metadata.tenant_id,
-        metadata.principal_id,
-        metadata.session_id,
-        metadata.run_id,
-        metadata.origin,
-        metadata.filename,
-        metadata.media_type,
-        metadata.size_bytes,
-        "0" * 64,
-        metadata.trust,
-        metadata.created_at,
-        metadata.expires_at,
-    )
+    broken = replace(metadata, sha256="0" * 64)
     with pytest.raises(ArtifactIntegrityError):
         await store.put(_chunks(content), broken)
     ref = StoredArtifactRef(broken.artifact_id, broken.sha256, broken.size_bytes, broken.media_type)
@@ -113,20 +99,10 @@ async def test_reconciliation_does_not_delete_a_concurrent_replacement(tmp_path:
     now = datetime.now(UTC)
     old_timestamp = (now - timedelta(hours=2)).timestamp()
     os.utime(orphan_path, (old_timestamp, old_timestamp))
-    replacement_metadata = ArtifactMetadata(
-        metadata.artifact_id,
-        metadata.tenant_id,
-        metadata.principal_id,
-        metadata.session_id,
-        metadata.run_id,
-        metadata.origin,
-        metadata.filename,
-        metadata.media_type,
-        len(replacement),
-        hashlib.sha256(replacement).hexdigest(),
-        metadata.trust,
-        metadata.created_at,
-        metadata.expires_at,
+    replacement_metadata = replace(
+        metadata,
+        size_bytes=len(replacement),
+        sha256=hashlib.sha256(replacement).hexdigest(),
     )
 
     async def replace_during_lookup(_artifact_id: UUID) -> bool:
@@ -141,3 +117,22 @@ async def test_reconciliation_does_not_delete_a_concurrent_replacement(tmp_path:
         replacement_metadata.media_type,
     )
     assert b"".join([chunk async for chunk in store.open(ref, tenant_id="tenant-a")]) == replacement
+
+
+async def test_reconciliation_tolerates_a_claim_removed_by_another_sweep(
+    tmp_path: Path,
+) -> None:
+    content = b"concurrent orphan"
+    store = FilesystemArtifactStore(tmp_path)
+    orphan = await store.put(_chunks(content), _metadata(content))
+    orphan_path = next(tmp_path.rglob(str(orphan.artifact_id)))
+    now = datetime(2026, 1, 2, tzinfo=UTC)
+    old_timestamp = (now - timedelta(hours=2)).timestamp()
+    os.utime(orphan_path, (old_timestamp, old_timestamp))
+
+    async def remove_claim(_artifact_id: UUID) -> bool:
+        claim = next(tmp_path.rglob(f".reconcile-{orphan.artifact_id}-*"))
+        claim.unlink()
+        return True
+
+    assert await store.reconcile_orphans(remove_claim, now=now) == 0

@@ -91,11 +91,15 @@ class SandboxRunCommandTool:
         output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
     )
 
-    def __init__(self, manager: SandboxManager) -> None:
+    def __init__(self, manager: SandboxManager, *, hard_ceiling_multiplier: int = 4) -> None:
+        if hard_ceiling_multiplier < 1:
+            raise ValueError("hard ceiling multiplier must be positive")
         self._manager = manager
+        self._hard_ceiling_multiplier = hard_ceiling_multiplier
 
-    @staticmethod
-    def _command(arguments: dict[str, Any], context: ToolExecutionContext) -> ExecutionCommand:
+    def _command(
+        self, arguments: dict[str, Any], context: ToolExecutionContext
+    ) -> ExecutionCommand:
         raw = arguments.get("command")
         if not isinstance(raw, list) or not raw or any(not isinstance(item, str) for item in raw):
             raise ToolValidationError("command must be a non-empty argument vector of strings")
@@ -127,7 +131,7 @@ class SandboxRunCommandTool:
             working_directory=PurePosixPath(relative),
             timeout_seconds=min(requested, int(context.timeout_seconds)),
             stdin=None,
-            maximum_output_bytes=context.maximum_output_bytes * 4,
+            maximum_output_bytes=(context.maximum_output_bytes * self._hard_ceiling_multiplier),
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:

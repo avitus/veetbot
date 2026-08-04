@@ -315,27 +315,27 @@ verification:
           status contexts completed successfully.
     remaining: []
   milestone_6:
-    recorded_at: 2026-08-04T10:24:12Z
+    recorded_at: 2026-08-04T11:18:52Z
     status: in_review
     evidence:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 238 source and test
-          files, 219 static tests, 96 port contracts, 123 citation checks,
+          Ruff formatting and linting, strict mypy over 239 source and test
+          files, 224 static tests, 100 port contracts, 123 citation checks,
           strict documentation builds, and all 116 hard gates active through
           Milestone 6 passed.
       - check: complete non-live suite against PostgreSQL 16 and Docker
         outcome: passed
         detail: >-
-          All 393 non-live tests passed across the verified partitions with the
+          All 403 non-live tests passed across the verified partitions with the
           two credentialed provider tests deselected. This included the real
           Docker security partition and all PostgreSQL integration and
           resilience coverage.
       - check: PostgreSQL 16 integration partition
         outcome: passed
         detail: >-
-          All 68 integration and resilience tests passed, including durable
+          All 69 integration and resilience tests passed, including durable
           artifact metadata, verified content reopening, migrations, runtime,
           HTTP, model, trajectory, and recovery coverage.
       - check: real Docker sandbox security partition
@@ -351,6 +351,15 @@ verification:
           All eleven Milestone 6 gates have executable registry checks for the
           real runtime, structural boundary, artifact checksum, and opaque
           storage-key behavior.
+      - check: CodeRabbit full-review remediation
+        outcome: passed_locally
+        detail: >-
+          All 13 inline findings, the lease-reaper finding outside the diff,
+          and all 14 nitpicks from full review 4853417944 were fixed or answered
+          with plan-preserving behavior. Regression coverage now includes lease
+          cleanup fencing, concurrent reaper claims, pipelined proxy requests,
+          artifact expiry and eager opening, bridge timeout semantics, and
+          public-path output artifactization. A hosted follow-up review remains.
     remaining:
       - Hosted CircleCI must pass for the Milestone 6 pull request.
       - CodeRabbit review must have no unaddressed actionable comments.

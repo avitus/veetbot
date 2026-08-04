@@ -65,7 +65,30 @@ async def test_postgres_artifact_metadata_and_content_round_trip(tmp_path: Path)
         opened = await composition.services.artifacts.open_content(
             composition.principal, ref.artifact_id
         )
-        downloaded = b"".join([chunk async for chunk in opened.open()])
+        downloaded = b"".join([chunk async for chunk in await opened.open()])
+        expiry = ArtifactWriterFactory(
+            composition.uow_factory,
+            FilesystemArtifactStore(tmp_path),
+            composition.clock,
+            RandomIdFactory(),
+            retention_days=0,
+        )
+        expired_ref = await expiry.for_run(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            session_id=session.id,
+            run_id=run_id,
+            origin=ArtifactOrigin.TOOL_OUTPUT,
+        ).create(
+            _chunks(b"expired"),
+            "expired.bin",
+            "application/octet-stream",
+            TrustLevel.INTERNAL_TOOL,
+        )
+        assert await expiry.sweep_expired() == 1
+        assert await expiry.sweep_expired() == 0
+        async with composition.uow_factory() as uow:
+            assert await uow.artifacts.exists(expired_ref.artifact_id) is False
 
     assert view.sha256 == hashlib.sha256(content).hexdigest()
     assert view.size_bytes == len(content)

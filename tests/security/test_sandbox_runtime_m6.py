@@ -122,7 +122,7 @@ async def _execute(
 async def test_no_credential_reaches(
     runtime: tuple[DockerExecutionEnvironment, str],
 ) -> None:
-    secrets = {
+    parent_secrets = {
         "OPENAI_API_KEY": "synthetic-provider-value-7d951",
         "AGENT_DATABASE_URL": "synthetic-database-value-0be44",
         "AWS_SECRET_ACCESS_KEY": "synthetic-cloud-value-18c12",
@@ -136,12 +136,12 @@ for candidate in ('/proc/1/environ','/etc/hostname','/etc/resolv.conf'):
   except OSError as exc: observed[candidate]=type(exc).__name__
 print(json.dumps(observed,sort_keys=True))
 """
-    async with _environment(runtime, run_id=100, parent=secrets) as (adapter, handle):
+    async with _environment(runtime, run_id=100, parent=parent_secrets) as (adapter, handle):
         result = await _execute(adapter, handle, script)
     rendered = result.stdout.decode("utf-8", errors="replace")
     assert result.exit_code == 0
-    assert not set(secrets) & set(json.loads(rendered)["environment"])
-    assert all(value not in rendered for value in secrets.values())
+    assert not set(parent_secrets) & set(json.loads(rendered)["environment"])
+    assert all(value not in rendered for value in parent_secrets.values())
     assert all(name not in json.loads(rendered)["environment"] for name in TIER_ZERO_NAMES)
 
 
@@ -187,7 +187,7 @@ print(json.dumps(response,separators=(',',':')))
     script_hash = hashlib.sha256(source.encode()).hexdigest()
     session = ProgrammaticBridgeSession(
         script_hash=script_hash,
-        token="test",
+        token=secrets.token_urlsafe(32),
         dispatch=dispatch,
     )
     endpoint = BridgeEndpoint(PurePosixPath("/workspace/.agent/test-bridge.sock"), session.token)
@@ -272,7 +272,6 @@ except OSError: out['unproxied']=False
 print(json.dumps(out,sort_keys=True))
 """
     async with _environment(runtime, run_id=102, egress=policy) as (adapter, handle):
-        await asyncio.sleep(0.25)
         result = await _execute(adapter, handle, script, timeout=12)
         logs = await adapter.egress_log(handle)
     outcomes = json.loads(result.stdout)

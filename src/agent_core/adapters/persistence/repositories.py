@@ -1462,6 +1462,32 @@ class PostgresArtifactRepository:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
 
+    async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(ArtifactRow)
+                    .where(
+                        ArtifactRow.origin != "trajectory_export",
+                        ArtifactRow.expires_at <= now,
+                    )
+                    .order_by(ArtifactRow.expires_at, ArtifactRow.id)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return [artifact_to_domain(row) for row in rows]
+
+    async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
+        result = await self._session.execute(
+            delete(ArtifactRow).where(
+                ArtifactRow.id == artifact_id,
+                ArtifactRow.origin != "trajectory_export",
+                ArtifactRow.expires_at <= now,
+            )
+        )
+        return bool(_rowcount(result))
+
 
 class PostgresMaintenanceRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -1485,6 +1511,21 @@ class PostgresMaintenanceRepository:
             )
         ).all()
         return frozenset((run_id, int(lease_epoch)) for run_id, lease_epoch in rows)
+
+    async def is_live_run_lease(self, run_id: UUID, lease_epoch: int) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(RunRow.id)
+                .where(
+                    RunRow.id == run_id,
+                    RunRow.lease_epoch == lease_epoch,
+                    RunRow.lease_owner.is_not(None),
+                    RunRow.lease_expires_at.is_not(None),
+                    RunRow.lease_expires_at > func.now(),
+                )
+                .limit(1)
+            )
+        )
 
     async def projection_sessions(self, limit: int) -> list[UUID]:
         if not await self._acquire("maintenance.session_history"):

@@ -8,8 +8,9 @@ gVisor where it is installed.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -41,19 +42,29 @@ from agent_core.ports.determinism import Clock, IdFactory
 _VIRTUAL_ROOT = PurePosixPath("/workspace")
 _DOCKER_COMMAND_TIMEOUT_SECONDS = 60.0
 _SNAPSHOT_SCRIPT = r"""
-import hashlib,json,os,stat
+import hashlib,json,os,stat,sys
+try: previous=json.load(sys.stdin)
+except (json.JSONDecodeError,ValueError): previous={}
 result={}
 for base,dirs,files in os.walk('/workspace',followlinks=False):
   dirs[:]=[d for d in dirs if not os.path.islink(os.path.join(base,d))]
   for name in files:
     path=os.path.join(base,name)
     try:
-      mode=os.lstat(path).st_mode
-      if not stat.S_ISREG(mode): continue
-      h=hashlib.sha256()
-      with open(path,'rb') as source:
-        while chunk:=source.read(65536): h.update(chunk)
-      result[os.path.relpath(path,'/workspace')] = [os.path.getsize(path),h.hexdigest()]
+      metadata=os.lstat(path)
+      if not stat.S_ISREG(metadata.st_mode): continue
+      relative=os.path.relpath(path,'/workspace')
+      cached=previous.get(relative)
+      if (cached and cached[0]==metadata.st_size
+          and cached[1]==metadata.st_mtime_ns
+          and cached[2]==metadata.st_ctime_ns):
+        digest=cached[3]
+      else:
+        h=hashlib.sha256()
+        with open(path,'rb') as source:
+          while chunk:=source.read(65536): h.update(chunk)
+        digest=h.hexdigest()
+      result[relative] = [metadata.st_size,metadata.st_mtime_ns,metadata.st_ctime_ns,digest]
     except (FileNotFoundError,PermissionError,OSError): pass
 print(json.dumps(result,separators=(',',':'),sort_keys=True))
 """
@@ -65,9 +76,9 @@ for base,dirs,files in os.walk('/workspace',followlinks=False):
   dirs[:]=[d for d in dirs if not os.path.islink(os.path.join(base,d))]
   for name in files:
     try:
-      mode=os.lstat(os.path.join(base,name)).st_mode
-      if stat.S_ISREG(mode):
-        size += os.path.getsize(os.path.join(base,name))
+      metadata=os.lstat(os.path.join(base,name))
+      if stat.S_ISREG(metadata.st_mode):
+        size += metadata.st_size
         inodes += 1
     except (FileNotFoundError,PermissionError,OSError): pass
 print(f'{size} {inodes}')
@@ -294,6 +305,7 @@ class _DockerState:
     network_name: str | None = None
     proxy_container_id: str | None = None
     provenance: dict[PurePosixPath, WorkspaceProvenance] = field(default_factory=dict)
+    snapshot: dict[str, tuple[int, int, int, str]] = field(default_factory=dict)
 
 
 class DockerWorkspaceHandle:
@@ -444,6 +456,12 @@ class DockerWorkspaceHandle:
                 raise NotADirectoryError(path) from exc
             raise
         state.provenance[PurePosixPath(relative)] = WorkspaceProvenance.TOOL_WRITTEN
+        state.snapshot[relative] = (
+            len(data),
+            -1,
+            -1,
+            hashlib.sha256(data).hexdigest(),
+        )
 
     async def listdir(self, path: str, *, recursive: bool = False) -> tuple[WorkspaceEntry, ...]:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
@@ -662,10 +680,16 @@ class DockerExecutionEnvironment:
         self._state(environment)
         return DockerWorkspaceHandle(self, environment)
 
-    async def _snapshot(self, state: _DockerState) -> dict[str, tuple[int, str]]:
-        raw = await _docker("exec", state.container_id, "python", "-c", _SNAPSHOT_SCRIPT)
+    async def _snapshot(self, state: _DockerState) -> dict[str, tuple[int, int, int, str]]:
+        cached = json.dumps(state.snapshot, separators=(",", ":")).encode("utf-8")
+        raw = await _docker(
+            "exec", "-i", state.container_id, "python", "-c", _SNAPSHOT_SCRIPT, stdin=cached
+        )
         parsed = json.loads(raw.decode("utf-8"))
-        return {str(path): (int(value[0]), str(value[1])) for path, value in parsed.items()}
+        return {
+            str(path): (int(value[0]), int(value[1]), int(value[2]), str(value[3]))
+            for path, value in parsed.items()
+        }
 
     @staticmethod
     async def _wait_for_proxy(container_id: str) -> None:
@@ -681,6 +705,7 @@ class DockerExecutionEnvironment:
     async def _monitor_workspace_limits(
         state: _DockerState, stop: asyncio.Event
     ) -> KillReason | None:
+        interval = 0.25
         while not stop.is_set():
             try:
                 raw = await _docker(
@@ -689,13 +714,15 @@ class DockerExecutionEnvironment:
             except ExecutionUnavailable:
                 if stop.is_set():
                     return None
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(interval)
+                interval = min(1.0, interval * 1.5)
                 continue
             try:
                 size, inodes = (int(value) for value in raw.decode("ascii").split())
             except (UnicodeDecodeError, ValueError):
                 with suppress(TimeoutError):
-                    await asyncio.wait_for(stop.wait(), timeout=0.1)
+                    await asyncio.wait_for(stop.wait(), timeout=interval)
+                interval = min(1.0, interval * 1.5)
                 continue
             if (
                 size > state.specification.limits.workspace_bytes
@@ -703,7 +730,8 @@ class DockerExecutionEnvironment:
             ):
                 return KillReason.DISK
             with suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=0.1)
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+            interval = min(1.0, interval * 1.5)
         return None
 
     @staticmethod
@@ -836,7 +864,7 @@ class DockerExecutionEnvironment:
         working = PurePosixPath(
             *(() if raw_working == "." else validated_workspace_components(raw_working))
         )
-        before = await self._snapshot(state)
+        before = dict(state.snapshot)
         started = self._clock.now()
         effective_timeout = min(
             self._hard_cap_seconds,
@@ -956,6 +984,7 @@ class DockerExecutionEnvironment:
                 killed_by = KillReason.MEMORY
                 exit_code = None
             after = {} if killed_by is not None else await self._snapshot(state)
+            state.snapshot = after
             workspace_size = sum(item[0] for item in after.values())
             if killed_by is None and (
                 workspace_size > state.specification.limits.workspace_bytes
@@ -1018,16 +1047,19 @@ class DockerExecutionEnvironment:
 
     @staticmethod
     def _changes(
-        before: dict[str, tuple[int, str]], after: dict[str, tuple[int, str]]
+        before: dict[str, tuple[int, int, int, str]],
+        after: dict[str, tuple[int, int, int, str]],
     ) -> tuple[FileChange, ...]:
         result: list[FileChange] = []
         for path in sorted(before.keys() | after.keys()):
             if path not in after:
                 result.append(FileChange(PurePosixPath(path), ChangeKind.DELETED, 0, None))
             elif path not in before:
-                result.append(FileChange(PurePosixPath(path), ChangeKind.CREATED, *after[path]))
-            elif before[path] != after[path]:
-                result.append(FileChange(PurePosixPath(path), ChangeKind.MODIFIED, *after[path]))
+                size, _mtime, _ctime, digest = after[path]
+                result.append(FileChange(PurePosixPath(path), ChangeKind.CREATED, size, digest))
+            elif (before[path][0], before[path][3]) != (after[path][0], after[path][3]):
+                size, _mtime, _ctime, digest = after[path]
+                result.append(FileChange(PurePosixPath(path), ChangeKind.MODIFIED, size, digest))
         return tuple(result)
 
     async def destroy(self, environment: EnvironmentHandle) -> None:
@@ -1052,7 +1084,11 @@ class DockerExecutionEnvironment:
             if line.strip().startswith("{")
         )
 
-    async def reap(self, live_leases: frozenset[tuple[object, int]]) -> int:
+    async def reap(
+        self,
+        live_leases: frozenset[tuple[object, int]],
+        is_live: Callable[[UUID, int], Awaitable[bool]] | None = None,
+    ) -> int:
         raw = await _docker(
             "ps",
             "--all",
@@ -1089,6 +1125,8 @@ class DockerExecutionEnvironment:
             if not expired and (run_id, lease_epoch) in live_leases:
                 continue
             if not expired and not old_enough:
+                continue
+            if is_live is not None and await is_live(run_id, lease_epoch):
                 continue
             state = self._states.get(environment_id)
             if state is not None:

@@ -10,6 +10,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import BinaryIO
 
+from agent_core.domain.errors import ArtifactIntegrityError
 from agent_core.domain.trajectory import ArtifactRef
 
 
@@ -35,7 +36,9 @@ class LocalTrajectoryArtifactStore:
     async def write(self, artifact: ArtifactRef, content: bytes) -> ArtifactRef:
         digest = hashlib.sha256(content).hexdigest()
         if digest != artifact.sha256 or len(content) != artifact.size_bytes:
-            raise ValueError("artifact content does not match its declared digest and size")
+            raise ArtifactIntegrityError(
+                "artifact content does not match its declared digest and size"
+            )
         stored = artifact.model_copy(update={"storage_uri": self._relative(artifact).as_posix()})
         destination = self._resolve(stored)
 
@@ -61,11 +64,20 @@ class LocalTrajectoryArtifactStore:
             hashlib.sha256(content).hexdigest() != artifact.sha256
             or len(content) != artifact.size_bytes
         ):
-            raise ValueError("artifact content digest or size no longer matches its metadata")
+            raise ArtifactIntegrityError(
+                "artifact content digest or size no longer matches its metadata"
+            )
         return content
 
     async def stream(self, artifact: ArtifactRef) -> AsyncIterator[bytes]:
         """Verify without materializing, then yield from that same descriptor."""
+
+        stream = await self.open_verified(artifact)
+        async for chunk in stream:
+            yield chunk
+
+    async def open_verified(self, artifact: ArtifactRef) -> AsyncIterator[bytes]:
+        """Open and verify before returning a streaming iterator."""
 
         path = self._resolve(artifact)
 
@@ -78,7 +90,7 @@ class LocalTrajectoryArtifactStore:
                     digest.update(chunk)
                     size += len(chunk)
                 if digest.hexdigest() != artifact.sha256 or size != artifact.size_bytes:
-                    raise ValueError(
+                    raise ArtifactIntegrityError(
                         "artifact content digest or size no longer matches its metadata"
                     )
                 source.seek(0)
@@ -88,11 +100,15 @@ class LocalTrajectoryArtifactStore:
                 raise
 
         source = await asyncio.to_thread(open_verified)
-        try:
-            while chunk := await asyncio.to_thread(source.read, self._CHUNK_BYTES):
-                yield chunk
-        finally:
-            await asyncio.to_thread(source.close)
+
+        async def chunks() -> AsyncIterator[bytes]:
+            try:
+                while chunk := await asyncio.to_thread(source.read, self._CHUNK_BYTES):
+                    yield chunk
+            finally:
+                await asyncio.to_thread(source.close)
+
+        return chunks()
 
     async def delete(self, artifact: ArtifactRef) -> None:
         path = self._resolve(artifact)

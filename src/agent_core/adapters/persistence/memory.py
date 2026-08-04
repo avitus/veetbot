@@ -1003,10 +1003,36 @@ class InMemoryArtifactRepository:
                 return artifact.model_copy(deep=True)
         raise NotFoundError("artifact not found")
 
+    async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
+        async with self._lock:
+            return [
+                artifact.model_copy(deep=True)
+                for artifact in sorted(
+                    self._rows.values(), key=lambda item: (item.expires_at, item.id)
+                )
+                if artifact.origin != "trajectory_export" and artifact.expires_at <= now
+            ][:limit]
+
+    async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
+        async with self._lock:
+            artifact = self._rows.get(artifact_id)
+            if (
+                artifact is None
+                or artifact.origin == "trajectory_export"
+                or artifact.expires_at > now
+            ):
+                return False
+            del self._rows[artifact_id]
+            return True
+
 
 class InMemoryMaintenanceRepository:
     async def live_run_leases(self) -> frozenset[tuple[UUID, int]]:
         return frozenset()
+
+    async def is_live_run_lease(self, run_id: UUID, lease_epoch: int) -> bool:
+        del run_id, lease_epoch
+        return False
 
     async def projection_sessions(self, limit: int) -> list[UUID]:
         del limit

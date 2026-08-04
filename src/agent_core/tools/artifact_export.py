@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from typing import Any, cast
 
-from agent_core.domain.errors import WorkspaceEscape, WorkspaceReadLimitExceededError
+from agent_core.domain.errors import (
+    ArtifactIntegrityError,
+    WorkspaceEscape,
+    WorkspaceReadLimitExceededError,
+)
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
     ToolExecutionContext,
@@ -110,7 +114,7 @@ class ArtifactExportTool:
                     retryable=False,
                 ),
             )
-        except WorkspaceReadLimitExceededError as exc:
+        except (ArtifactIntegrityError, WorkspaceReadLimitExceededError) as exc:
             return ToolResult(
                 ok=False,
                 content=[],

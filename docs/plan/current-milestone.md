@@ -8,8 +8,9 @@ title: Current Milestone
 - **Next milestone:** Milestone 7 — context budgeting and structured working state
 - **Authorized milestones:** Milestones 0 through 9
 - **Project status:** Milestones 0 through 5 are complete. Milestone 6 is locally
-  implemented and awaiting hosted CI and CodeRabbit review. Milestones 7 through
-  9 are explicitly authorized and remain sequentially gated.
+  implemented; the latest full CodeRabbit findings are remediated locally and
+  await hosted CI and a clean follow-up review. Milestones 7 through 9 are
+  explicitly authorized and remain sequentially gated.
 
 Milestone 6 adds container-backed and deterministic fake execution adapters,
 lease-scoped isolated workspaces, resource and egress enforcement,
@@ -43,7 +44,8 @@ acceptance criteria.
 
 ## Completion rule
 
-Milestone 6 is ready for review: every canonical acceptance criterion and all
-116 cumulative gates pass locally, including the real-runtime security
-partition. Completion still requires hosted CircleCI to pass and CodeRabbit to
-have no unaddressed actionable review comments on the milestone pull request.
+Milestone 6 is ready for follow-up review: every canonical acceptance criterion
+and all 116 cumulative gates pass locally, including the real-runtime security
+partition. Completion still requires hosted CircleCI to pass on the remediation
+commit and CodeRabbit to have no unaddressed actionable review comments on the
+milestone pull request.

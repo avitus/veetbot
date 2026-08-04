@@ -396,6 +396,7 @@ async def _compose(
     identical_call_threshold: int,
     identical_denial_threshold: int,
     max_parallel_calls: int,
+    hard_ceiling_multiplier: int,
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
@@ -471,7 +472,9 @@ async def _compose(
     registry.register(WorkspaceWriteTextTool())
     registry.register(WorkspaceListFilesTool())
     registry.register(DemoExternalWriteTool())
-    registry.register(SandboxRunCommandTool(sandbox_manager))
+    registry.register(
+        SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
+    )
     registry.register(ArtifactExportTool())
     async with uow_factory() as uow:
         await uow.agents.put(agent)
@@ -541,6 +544,7 @@ async def _compose(
             artifact_writers=artifact_writers,
             current_principal=principal,
             max_parallel_calls=max_parallel_calls,
+            hard_ceiling_multiplier=hard_ceiling_multiplier,
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
         )
         token_slot = _ActiveToken()
@@ -663,6 +667,7 @@ async def _compose(
                     uow_factory=uow_factory,
                     clock=clock,
                     sweep_exports=trajectory_service.sweep_once,
+                    sweep_artifacts=artifact_writers.sweep_expired,
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                 ),
@@ -798,6 +803,7 @@ async def build(
     worker_config = runtime_config["worker"]
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
+    output_config = tool_config["output"]
     tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
@@ -921,6 +927,7 @@ async def build(
             identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
             identical_denial_threshold=int(circuit_breaker["identical_denied_threshold"]),
             max_parallel_calls=int(parallel["maximum_calls"]),
+            hard_ceiling_multiplier=int(output_config["hard_ceiling_multiplier"]),
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),

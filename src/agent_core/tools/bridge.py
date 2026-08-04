@@ -109,7 +109,7 @@ class ProgrammaticBridgeSession:
             response = {
                 "status": "suspended",
                 "reason_code": "bridge.approval_hold_expired",
-                "retryable": True,
+                "retryable": False,
             }
         allowed = {"status", "result", "reason_code", "retryable"}
         filtered = {key: value for key, value in response.items() if key in allowed}
