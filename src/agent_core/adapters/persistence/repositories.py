@@ -805,7 +805,6 @@ class PostgresApprovalRepository:
                 select(ApprovalRow).where(
                     ApprovalRow.id == approval_id,
                     ApprovalRow.tenant_id == principal.tenant_id,
-                    ApprovalRow.principal_id == principal.principal_id,
                 )
             )
         ).one_or_none()
@@ -843,7 +842,6 @@ class PostgresApprovalRepository:
     ) -> list[ApprovalRequest]:
         predicates: list[Any] = [
             ApprovalRow.tenant_id == principal.tenant_id,
-            ApprovalRow.principal_id == principal.principal_id,
             ApprovalRow.status == ApprovalStatus.PENDING.value,
         ]
         if run_id is not None:
@@ -876,7 +874,6 @@ class PostgresApprovalRepository:
                 .where(
                     ApprovalRow.id == approval_id,
                     ApprovalRow.tenant_id == principal.tenant_id,
-                    ApprovalRow.principal_id == principal.principal_id,
                 )
                 .with_for_update()
             )

@@ -40,15 +40,24 @@ def _read_yaml(path: Path) -> tuple[dict[str, Any], str]:
     return value, hashlib.sha256(raw).hexdigest()
 
 
+def _document_sha256(value: dict[str, Any]) -> str:
+    rendered = yaml.safe_dump(value, allow_unicode=True, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(rendered).hexdigest()
+
+
 def _require_exact_keys(value: dict[str, Any], expected: set[str], location: str) -> None:
     unknown = sorted(set(value) - expected)
     if unknown:
         raise ValueError(f"{location} contains unknown fields: {unknown}")
 
 
-def load_ruleset(profile_path: Path, hardline_path: Path) -> LoadedRuleset:
-    profile, profile_sha = _read_yaml(profile_path)
-    hardline, hardline_sha = _read_yaml(hardline_path)
+def _build_ruleset(
+    profile: dict[str, Any],
+    hardline: dict[str, Any],
+    *,
+    profile_sha: str,
+    hardline_sha: str,
+) -> LoadedRuleset:
     _require_exact_keys(profile, _PROFILE_KEYS, "policy profile")
     _require_exact_keys(hardline, _HARDLINE_KEYS, "hardline policy")
     if profile.get("schema_version") != 1 or hardline.get("schema_version") != 1:
@@ -122,7 +131,30 @@ def load_ruleset(profile_path: Path, hardline_path: Path) -> LoadedRuleset:
         hardline=hardline_rules,
         default_effect=PolicyDecisionType(profile.get("default_effect", "deny")),
         external_untrusted_requires_approval=external_requires_approval,
+        self_approval_enabled=profile["self_approval"]["enabled"],
         approval_expiry_seconds=expiry_values,
+    )
+
+
+def load_ruleset(profile_path: Path, hardline_path: Path) -> LoadedRuleset:
+    profile, profile_sha = _read_yaml(profile_path)
+    hardline, hardline_sha = _read_yaml(hardline_path)
+    return _build_ruleset(
+        profile,
+        hardline,
+        profile_sha=profile_sha,
+        hardline_sha=hardline_sha,
+    )
+
+
+def load_ruleset_documents(profile: dict[str, Any], hardline: dict[str, Any]) -> LoadedRuleset:
+    """Freeze effective merged documents and hash their canonical YAML form."""
+
+    return _build_ruleset(
+        profile,
+        hardline,
+        profile_sha=_document_sha256(profile),
+        hardline_sha=_document_sha256(hardline),
     )
 
 

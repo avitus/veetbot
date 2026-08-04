@@ -21,9 +21,10 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.errors import NotFoundError, ToolValidationError
+from agent_core.domain.errors import AuthorizationError, NotFoundError, ToolValidationError
 from agent_core.domain.messages import (
     FakeModelScript,
+    ScriptedToolCall,
     ScriptedTurn,
     StopReason,
     TextPart,
@@ -44,6 +45,7 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunStatus, Step
 from agent_core.domain.tools import (
     ToolExecutionContext,
+    ToolInvocationStatus,
     ToolOutcome,
     ToolOutcomeStatus,
     ToolResult,
@@ -114,14 +116,14 @@ class _RecordingTool:
         return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
 
 
-def _settings(tmp_path: Path) -> Settings:
+def _settings(tmp_path: Path, *, config_dir: Path | None = None) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/unused",
         deployment_mode=DeploymentMode.DEVELOPMENT,
         auth_mode=AuthMode.DEV,
         auth_token=None,
         sandbox=SandboxMechanism.FAKE,
-        config_dir=None,
+        config_dir=config_dir,
         credentials=MappingProxyType({}),
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
         artifact_root=tmp_path / "artifacts",
@@ -260,6 +262,45 @@ async def test_modification_rekeys_before_persistence(tmp_path: Path) -> None:
     )
 
 
+async def test_operator_policy_overlay_is_hashed_audited_and_evaluated(
+    tmp_path: Path,
+) -> None:
+    config_dir = tmp_path / "config"
+    policy_overlay = config_dir / "policy" / "default.yaml"
+    policy_overlay.parent.mkdir(parents=True)
+    policy_overlay.write_text("rules:\n  external_write:\n    decision: deny\n", encoding="utf-8")
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={"destination": "demo", "content": "blocked"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="denied safely", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    actor = Principal(tenant_id="local", principal_id="local-user")
+    async with build(settings=_settings(tmp_path, config_dir=config_dir), script=script) as app:
+        run_id = await app.runs.submit("apply the operator policy")
+        completed = await app.runs.get(run_id)
+        assert completed.status is RunStatus.COMPLETED
+        assert await app.approvals.list_pending(run_id=run_id) == []
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, actor))[0]
+            assert invocation.policy_decision is not None
+            profile = await uow.policy_profiles.get(invocation.policy_decision.policy_version)
+
+    assert invocation.status is ToolInvocationStatus.DENIED
+    assert invocation.outcome is not None
+    assert invocation.outcome.reason_code == "policy.matrix.external_write"
+    assert profile is not None
+    assert profile.policy_version != DEFAULT_RULESET.policy_version
+
+
 def test_hardline_immutable() -> None:
     with pytest.raises(ValidationError):
         DEFAULT_RULESET.hardline[0].id = "changed"
@@ -354,6 +395,35 @@ async def test_cross_tenant() -> None:
     assert await repository.list_pending(other) == []
     with pytest.raises(NotFoundError):
         await repository.resolve(created.id, other, ApprovalResolutionType.DENY, None)
+    tenant_resolver = Principal(tenant_id="tenant-a", principal_id="principal-b")
+    assert (await repository.get(created.id, tenant_resolver)).id == created.id
+    assert [item.id for item in await repository.list_pending(tenant_resolver)] == [created.id]
+
+
+async def test_profile_can_require_a_distinct_approval_resolver(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    policy_overlay = config_dir / "policy" / "default.yaml"
+    policy_overlay.parent.mkdir(parents=True)
+    policy_overlay.write_text("self_approval:\n  enabled: false\n", encoding="utf-8")
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={"destination": "demo", "content": "review me"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            )
+        ]
+    )
+    async with build(settings=_settings(tmp_path, config_dir=config_dir), script=script) as app:
+        run_id = await app.runs.submit("require another resolver")
+        approval = (await app.approvals.list_pending(run_id=run_id))[0]
+        with pytest.raises(AuthorizationError, match="distinct resolver"):
+            await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        assert (await app.approvals.get(approval.id)).status is ApprovalStatus.PENDING
 
 
 def test_no_leakage() -> None:

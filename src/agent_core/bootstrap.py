@@ -105,11 +105,11 @@ from agent_core.domain.messages import (
     ScriptedTurn,
     StopReason,
 )
-from agent_core.domain.policies import PolicyProfileRecord
+from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import CancelReason, RunLimits
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.policy.engine import DeterministicPolicyEngine
-from agent_core.policy.loader import DEFAULT_RULESET
+from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
@@ -281,6 +281,7 @@ async def _compose(
     heartbeat_divisor: int,
     worker_poll_interval: float,
     workspace_root: Path,
+    ruleset: LoadedRuleset,
 ) -> tuple[Composition, list[ModelProvider]]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
@@ -293,11 +294,11 @@ async def _compose(
         await uow.agents.put(agent)
         await uow.policy_profiles.record(
             PolicyProfileRecord(
-                policy_version=DEFAULT_RULESET.policy_version,
-                profile_name=DEFAULT_RULESET.profile_name,
-                profile_sha256=DEFAULT_RULESET.profile_sha256,
-                hardline_sha256=DEFAULT_RULESET.hardline_sha256,
-                rule_count=len(DEFAULT_RULESET.rules) + len(DEFAULT_RULESET.hardline),
+                policy_version=ruleset.policy_version,
+                profile_name=ruleset.profile_name,
+                profile_sha256=ruleset.profile_sha256,
+                hardline_sha256=ruleset.hardline_sha256,
+                rule_count=len(ruleset.rules) + len(ruleset.hardline),
                 loaded_at=clock.now(),
                 loaded_by="composition-root",
             )
@@ -318,7 +319,7 @@ async def _compose(
             uow_factory,
             clock,
             ids,
-            policy=DeterministicPolicyEngine(DEFAULT_RULESET),
+            policy=DeterministicPolicyEngine(ruleset),
             workspace_factory=LocalWorkspaceFactory(workspace_root),
             current_principal=principal,
             max_parallel_calls=max_parallel_calls,
@@ -379,6 +380,7 @@ async def _compose(
             principal=principal,
             clock=clock,
             resume_waiting_run=executor.requeue_after_approval,
+            self_approval_enabled=ruleset.self_approval_enabled,
         )
         return (
             Composition(
@@ -491,6 +493,26 @@ async def build(
     )
     runtime_config = load_config_document(effective_settings, "runtime/limits.yaml")
     tool_config = load_config_document(effective_settings, "tools/limits.yaml")
+    policy_document = load_config_document(effective_settings, "policy/default.yaml")
+    hardline_document = load_config_document(effective_settings, "policy/hardline.yaml")
+    ruleset = load_ruleset_documents(policy_document, hardline_document)
+    if ruleset.profile_name != policy_profile:
+        if policy_profile == f"eval.{ruleset.profile_name}":
+            ruleset = ruleset.model_copy(
+                update={
+                    "profile_name": policy_profile,
+                    "policy_version": (
+                        f"{policy_profile}@{ruleset.profile_sha256[:12]}"
+                        f"+h{ruleset.hardline_sha256[:8]}"
+                    ),
+                },
+                deep=True,
+            )
+        else:
+            raise ConfigurationError(
+                f"policy profile {policy_profile!r} does not match loaded profile "
+                f"{ruleset.profile_name!r}"
+            )
     context_config = load_config_document(effective_settings, "context/plan.yaml")
     run_defaults = runtime_config["run_defaults"]
     model_limits = runtime_config["model"]
@@ -615,6 +637,7 @@ async def build(
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
             workspace_root=effective_settings.artifact_root.parent / "workspaces",
+            ruleset=ruleset,
         )
         yield composition
     finally:

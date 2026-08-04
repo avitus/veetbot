@@ -145,6 +145,7 @@ class LoadedRuleset(BaseModel):
     hardline: tuple[HardlineRule, ...]
     default_effect: PolicyDecisionType
     external_untrusted_requires_approval: bool = True
+    self_approval_enabled: bool = True
     approval_expiry_seconds: tuple[tuple[RiskLevel, int], ...]
 
 

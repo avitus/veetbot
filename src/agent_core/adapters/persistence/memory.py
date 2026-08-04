@@ -411,10 +411,7 @@ class InMemoryApprovalRepository:
 
     @staticmethod
     def _visible(request: ApprovalRequest, principal: Principal) -> bool:
-        return (
-            request.tenant_id == principal.tenant_id
-            and request.principal_id == principal.principal_id
-        )
+        return request.tenant_id == principal.tenant_id
 
     async def get(self, approval_id: UUID, principal: Principal) -> ApprovalRequest:
         async with self._lock:

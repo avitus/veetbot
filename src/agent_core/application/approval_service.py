@@ -30,12 +30,14 @@ class ApprovalService:
         principal: Principal,
         clock: Clock,
         resume_waiting_run: ResumeWaitingRun,
+        self_approval_enabled: bool = True,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
         self._principal = principal
         self._clock = clock
         self._resume_waiting_run = resume_waiting_run
+        self._self_approval_enabled = self_approval_enabled
 
     def _require(self, scope: str) -> None:
         if scope not in self._principal.scopes:
@@ -71,11 +73,21 @@ class ApprovalService:
         self._require("approval.resolve")
         dispatch_run: UUID | None = None
         async with self._uow_factory() as uow:
+            visible = await uow.approvals.get(approval_id, self._principal)
+            if (
+                not self._self_approval_enabled
+                and visible.principal_id == self._principal.principal_id
+            ):
+                raise AuthorizationError("approval requires a distinct resolver")
             outcome = await uow.approvals.resolve(approval_id, self._principal, resolution, reason)
             if outcome.state is ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY:
                 raise ConflictError("approval was already resolved differently")
             if outcome.state is ApprovalResolutionState.APPLIED:
-                run = await uow.runs.get(outcome.approval.run_id, self._principal)
+                owner = Principal(
+                    tenant_id=outcome.approval.tenant_id,
+                    principal_id=outcome.approval.principal_id,
+                )
+                run = await uow.runs.get(outcome.approval.run_id, owner)
                 await uow.events.append(
                     NewEvent(
                         session_id=run.session_id,
@@ -102,7 +114,11 @@ class ApprovalService:
             expired = await uow.approvals.expire_due(self._clock.now(), limit)
             for approval in expired:
                 try:
-                    run = await uow.runs.get(approval.run_id, self._principal)
+                    owner = Principal(
+                        tenant_id=approval.tenant_id,
+                        principal_id=approval.principal_id,
+                    )
+                    run = await uow.runs.get(approval.run_id, owner)
                 except NotFoundError:
                     continue
                 await uow.events.append(
