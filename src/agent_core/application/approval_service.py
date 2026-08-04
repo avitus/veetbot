@@ -7,6 +7,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import (
+    ApprovalCursor,
     ApprovalRequest,
     ApprovalResolutionState,
     ApprovalResolutionType,
@@ -53,7 +54,7 @@ class ApprovalService:
         *,
         run_id: UUID | None = None,
         limit: int = 50,
-        cursor: str | None = None,
+        cursor: ApprovalCursor | None = None,
     ) -> list[ApprovalRequest]:
         self._require("approval.read")
         if not 1 <= limit <= 100:

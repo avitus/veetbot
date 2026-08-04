@@ -6,12 +6,16 @@ import asyncio
 import hashlib
 import os
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import BinaryIO
 
 from agent_core.domain.trajectory import ArtifactRef
 
 
 class LocalTrajectoryArtifactStore:
+    _CHUNK_BYTES = 64 * 1024
+
     def __init__(self, root: Path) -> None:
         self._root = root.resolve()
 
@@ -59,6 +63,36 @@ class LocalTrajectoryArtifactStore:
         ):
             raise ValueError("artifact content digest or size no longer matches its metadata")
         return content
+
+    async def stream(self, artifact: ArtifactRef) -> AsyncIterator[bytes]:
+        """Verify without materializing, then yield from that same descriptor."""
+
+        path = self._resolve(artifact)
+
+        def open_verified() -> BinaryIO:
+            digest = hashlib.sha256()
+            size = 0
+            source = path.open("rb")
+            try:
+                while chunk := source.read(self._CHUNK_BYTES):
+                    digest.update(chunk)
+                    size += len(chunk)
+                if digest.hexdigest() != artifact.sha256 or size != artifact.size_bytes:
+                    raise ValueError(
+                        "artifact content digest or size no longer matches its metadata"
+                    )
+                source.seek(0)
+                return source
+            except BaseException:
+                source.close()
+                raise
+
+        source = await asyncio.to_thread(open_verified)
+        try:
+            while chunk := await asyncio.to_thread(source.read, self._CHUNK_BYTES):
+                yield chunk
+        finally:
+            await asyncio.to_thread(source.close)
 
     async def delete(self, artifact: ArtifactRef) -> None:
         path = self._resolve(artifact)

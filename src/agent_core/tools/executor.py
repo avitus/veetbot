@@ -23,6 +23,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     RunCancelledError,
     ToolValidationError,
+    UserInputRequiredError,
     WorkspaceEscape,
 )
 from agent_core.domain.events import NewEvent
@@ -603,6 +604,30 @@ class ToolPipeline:
                 )
         if invocation.status is not ToolInvocationStatus.RUNNING:
             raise ConflictError(f"cannot recover tool invocation in {invocation.status.value}")
+
+        if tool.spec.name == "conversation.ask_user":
+            question_id = invocation.id
+            if invocation.suspended_kind is None:
+                suspended = invocation.model_copy(
+                    update={
+                        "suspended_kind": "user_input",
+                        "suspended_ref": str(question_id),
+                        "updated_at": self._clock.now(),
+                    },
+                    deep=True,
+                )
+                async with self._uow_factory() as uow:
+                    invocation = await uow.invocations.transition(
+                        invocation.id,
+                        ToolInvocationStatus.RUNNING,
+                        suspended,
+                        lease=lease,
+                    )
+            elif invocation.suspended_kind != "user_input" or invocation.suspended_ref != str(
+                question_id
+            ):
+                raise ConflictError("ask-user invocation has an invalid suspension marker")
+            raise UserInputRequiredError(question_id, invocation.id)
 
         effect_guard = asyncio.Lock()
 

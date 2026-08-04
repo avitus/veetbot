@@ -4,19 +4,16 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 4 — policy, approvals, and complete tool
-  lifecycle (complete)
-- **Next authorized milestone:** Milestone 5 — HTTP API and SSE (not started)
-- **Authorized milestones:** Milestones 0 through 5
-- **Project status:** Milestones 0 through 4 are complete. Milestone 5 is
-  explicitly authorized; its implementation state advances with the code and
-  tests that activate its gates.
+- **Current milestone:** Milestone 5 — HTTP API and SSE (complete)
+- **Next milestone:** Milestone 6 — isolated execution and artifacts
+- **Authorized milestones:** Milestones 0 through 9
+- **Project status:** Milestones 0 through 5 are complete. Milestones 6 through
+  9 are explicitly authorized and remain sequentially gated.
 
-Milestone 4 delivered the deterministic policy engine, principal scope checks,
-durable approvals and pause/resume, the workspace tools, and the complete tool
-lifecycle. Milestone 5 will deliver the authenticated HTTP API, session and
-message routes, run retrieval and cancellation, gapless SSE replay, request and
-idempotency identifiers, error envelopes, and health probes. The
+Milestone 5 delivered the authenticated HTTP API, session and message routes,
+run retrieval and cancellation, user-input suspension and resume, gapless SSE
+replay with transient delivery, request and idempotency identifiers, error
+envelopes, artifact downloads, and health probes. The
 machine-readable [project state](../status/project-state.yaml) records progress
 and evidence.
 
@@ -32,16 +29,19 @@ substitute.
 - [Milestone 3 — model adapters and normalized streaming](engineering-plan.md#milestone-3-model-adapters-openai-anthropic-openai-compatible-and-normalized-streaming)
 - [Milestone 4 — policy, approvals, and complete tool lifecycle](engineering-plan.md#milestone-4-policy-approvals-and-complete-tool-lifecycle)
 - [Milestone 5 — HTTP API and SSE](engineering-plan.md#milestone-5-http-api-and-sse)
+- [Milestone 6 — isolated execution and artifacts](engineering-plan.md#milestone-6-isolated-execution-and-artifacts)
+- [Milestone 7 — context budgeting and structured working state](engineering-plan.md#milestone-7-context-budgeting-and-structured-working-state)
+- [Milestone 8 — skills and MCP integration](engineering-plan.md#milestone-8-skills-and-mcp-integration)
+- [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-No milestone later than Milestone 5 is authorized. Complete the Milestone 5
-review cycle before beginning Milestone 6.
+Begin Milestone 6 only after the Milestone 5 pull request is merged. Milestone 10
+is not authorized because the readiness review records that it has no complete
+acceptance criteria.
 
 ## Completion rule
 
-Milestone 4 is complete with its exact evidence recorded in project state.
-Milestone 5 will complete only after every canonical acceptance criterion, all
-ten API gates plus the cancellation gate and all 105 cumulative gates pass, the
-full non-live suite passes against PostgreSQL, hosted CircleCI passes, and
-CodeRabbit has no unaddressed actionable review comments on the milestone pull
-request.
+Milestone 5 is complete: every canonical acceptance criterion, all ten API gates
+plus the cancellation gate, and all 105 cumulative gates pass; the full
+non-live suite passed against PostgreSQL; hosted CircleCI passed; and CodeRabbit
+has no unaddressed actionable review comments on the milestone pull request.

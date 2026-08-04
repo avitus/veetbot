@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-from collections.abc import AsyncIterator, Callable, Mapping
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,11 +22,16 @@ from agent_core.adapters.determinism import (
     RandomIdFactory,
     SequenceIdFactory,
     SystemClock,
+    UUID7RequestIdFactory,
 )
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
 from agent_core.adapters.execution.local_workspace import LocalWorkspaceFactory
 from agent_core.adapters.identity import StaticPrincipalResolver
+from agent_core.adapters.live_events import (
+    InMemoryLiveEventBroadcaster,
+    PostgresLiveEventBroadcaster,
+)
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -83,7 +90,25 @@ from agent_core.adapters.persistence.unit_of_work import (
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.application.approval_service import ApprovalService
+from agent_core.application.public_services import (
+    PublicApprovalService,
+    PublicArtifactService,
+    PublicRunService,
+    PublicSessionService,
+)
 from agent_core.application.run_service import RunService
+from agent_core.application.services import (
+    ApprovalService as PublicApprovalServiceContract,
+)
+from agent_core.application.services import (
+    ArtifactService as PublicArtifactServiceContract,
+)
+from agent_core.application.services import (
+    RunService as PublicRunServiceContract,
+)
+from agent_core.application.services import (
+    SessionService as PublicSessionServiceContract,
+)
 from agent_core.application.session_service import SessionService
 from agent_core.application.trajectory_service import (
     TrajectoryExportService,
@@ -103,10 +128,14 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.messages import (
     FakeModelScript,
+    ModelEvent,
+    ReasoningDeltaEvent,
     ResolvedModel,
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
+    TextDeltaEvent,
+    UsageEvent,
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import CancelReason, RunLimits
@@ -116,6 +145,7 @@ from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
+from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
@@ -123,6 +153,7 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
+from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
@@ -132,9 +163,26 @@ from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
+logger = logging.getLogger(__name__)
+LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationServices:
+    sessions: PublicSessionServiceContract
+    runs: PublicRunServiceContract
+    approvals: PublicApprovalServiceContract
+    artifacts: PublicArtifactServiceContract
+
 
 @dataclass(frozen=True, slots=True)
 class Composition:
+    settings: Settings
+    ruleset: LoadedRuleset
+    services: ApplicationServices
+    principal: Principal
+    new_request_id: Callable[[], str]
+    readiness_probe: Callable[[], Awaitable[bool]]
     runs: RunService
     approvals: ApprovalService
     sessions: SessionService
@@ -171,6 +219,44 @@ class _ActiveToken:
         for token in tokens:
             if token is not None:
                 token.cancel(CancelReason.REQUESTED)
+
+
+async def _publish_model_event(
+    broadcaster: LiveEventBroadcaster,
+    session_id: UUID,
+    run_id: UUID,
+    event: ModelEvent,
+) -> None:
+    event_name: str | None = None
+    data: dict[str, Any] = {
+        "run_id": str(run_id),
+        "step_number": event.step_number,
+        "attempt_id": str(event.attempt_id),
+    }
+    if isinstance(event, TextDeltaEvent):
+        event_name = "message.delta"
+        data.update({"item_index": event.item_index, "text": event.text})
+    elif isinstance(event, ReasoningDeltaEvent):
+        event_name = "reasoning.delta"
+        data.update(
+            {
+                "item_index": event.item_index,
+                "text": event.text,
+                "is_summary": event.is_summary,
+            }
+        )
+    elif isinstance(event, UsageEvent):
+        event_name = "usage.provisional"
+        data["usage"] = event.usage.model_dump(mode="json")
+    if event_name is None:
+        return
+    try:
+        await asyncio.wait_for(
+            broadcaster.publish(session_id, run_id, event_name, data),
+            timeout=LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("live_event_publish_failed", extra={"error_class": type(exc).__name__})
 
 
 def default_fake_script() -> FakeModelScript:
@@ -271,6 +357,7 @@ def _postgres_repository_factory(
 async def _compose(
     *,
     storage: Literal["memory", "postgres"],
+    settings: Settings,
     agent: AgentSpec,
     principal: Principal,
     uow_factory: UnitOfWorkFactory,
@@ -292,9 +379,11 @@ async def _compose(
     worker_poll_interval: float,
     workspace_root: Path,
     ruleset: LoadedRuleset,
+    live_events: LiveEventBroadcaster,
 ) -> tuple[Composition, list[ModelProvider]]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
+    registry.register(AskUserTool())
     registry.register(CurrentTimeTool(clock))
     registry.register(WorkspaceReadTextTool())
     registry.register(WorkspaceWriteTextTool())
@@ -368,6 +457,9 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
             on_token_complete=token_slot.discard,
+            on_model_event=lambda run, event: _publish_model_event(
+                live_events, run.session_id, run.id, event
+            ),
             max_internal_attempts=max_internal_attempts,
             identical_call_threshold=identical_call_threshold,
             identical_denial_threshold=identical_denial_threshold,
@@ -378,13 +470,14 @@ async def _compose(
             else PostgresRunDispatcher()
         )
         session_service = SessionService(uow_factory, clock, ids, principal, agent)
+        artifact_store = LocalTrajectoryArtifactStore(artifact_root)
         trajectory_service = TrajectoryExportService(
             uow_factory=uow_factory,
             principal=principal,
             clock=clock,
             ids=ids,
             tools=registry,
-            artifacts=LocalTrajectoryArtifactStore(artifact_root),
+            artifacts=artifact_store,
             tenant_enabled=trajectory_export_enabled,
             redactor=trajectory_redactor,
         )
@@ -408,8 +501,42 @@ async def _compose(
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
         )
+        public_session_service = PublicSessionService(uow_factory, clock, ids, agent)
+        public_services = ApplicationServices(
+            sessions=public_session_service,
+            runs=PublicRunService(
+                uow_factory=uow_factory,
+                dispatcher=dispatcher,
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                cancel_active=token_slot.cancel,
+                cancel_parked_run=executor.cancel_parked_run,
+                resume_waiting_run=executor.requeue_after_input,
+                trajectory_export_enabled=trajectory_export_enabled,
+                live_events=live_events,
+            ),
+            approvals=PublicApprovalService(
+                uow_factory=uow_factory,
+                dispatcher=dispatcher,
+                resume_waiting_run=executor.requeue_after_approval,
+                self_approval_enabled=ruleset.self_approval_enabled,
+            ),
+            artifacts=PublicArtifactService(
+                uow_factory=uow_factory,
+                artifacts=artifact_store,
+                clock=clock,
+            ),
+        )
+        request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
         return (
             Composition(
+                settings=settings,
+                ruleset=ruleset,
+                services=public_services,
+                principal=principal,
+                new_request_id=lambda: str(request_ids.new_id()),
+                readiness_probe=public_session_service.ready,
                 runs=run_service,
                 approvals=approval_service,
                 sessions=session_service,
@@ -505,12 +632,27 @@ async def build(
         overlay_root=effective_settings.config_dir,
     )
 
-    effective_principal = principal or Principal(
-        tenant_id="local",
-        principal_id="local-user",
-        roles={"user"},
-        scopes=set(PLATFORM_SCOPES),
-    )
+    if principal is not None:
+        effective_principal = principal
+    elif effective_settings.auth_mode.value == "dev":
+        effective_principal = Principal(
+            tenant_id="local",
+            principal_id="local-user",
+            roles={"user"},
+            scopes=set(PLATFORM_SCOPES),
+        )
+    else:
+        unknown_scopes = set(effective_settings.auth_scopes) - set(PLATFORM_SCOPES)
+        if unknown_scopes:
+            raise ConfigurationError(
+                f"AUTH_SCOPES contains unknown platform scopes: {', '.join(sorted(unknown_scopes))}"
+            )
+        effective_principal = Principal(
+            tenant_id=effective_settings.auth_tenant_id,
+            principal_id=effective_settings.auth_principal_id,
+            roles=set(effective_settings.auth_roles),
+            scopes=set(effective_settings.auth_scopes),
+        )
     validate_runtime_identity(
         effective_settings,
         tenant_id=effective_principal.tenant_id,
@@ -577,6 +719,7 @@ async def build(
             if enabled_tools is not None
             else [
                 "math.calculate",
+                "conversation.ask_user",
                 "system.current_time",
                 "workspace.read_text",
                 "workspace.write_text",
@@ -598,6 +741,11 @@ async def build(
         )
     engine = None
     model_providers: list[ModelProvider] = []
+    live_events: LiveEventBroadcaster = (
+        InMemoryLiveEventBroadcaster()
+        if storage == "memory"
+        else PostgresLiveEventBroadcaster(effective_settings.database_url)
+    )
     try:
         if storage == "memory":
             agent_repository = InMemoryAgentRepository()
@@ -643,6 +791,7 @@ async def build(
             provider_adapters[name] = override
         composition, model_providers = await _compose(
             storage=storage,
+            settings=effective_settings,
             agent=agent,
             principal=effective_principal,
             uow_factory=uow_factory,
@@ -664,10 +813,27 @@ async def build(
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
             workspace_root=effective_settings.artifact_root.parent / "workspaces",
             ruleset=ruleset,
+            live_events=live_events,
         )
         yield composition
     finally:
         for model_provider in model_providers:
-            await model_provider.close()
+            try:
+                await model_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "model_provider_close_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+        try:
+            await live_events.close()
+        except Exception as exc:
+            logger.warning("live_events_close_failed", extra={"error_class": type(exc).__name__})
         if engine is not None:
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            except Exception as exc:
+                logger.warning(
+                    "database_engine_close_failed",
+                    extra={"error_class": type(exc).__name__},
+                )

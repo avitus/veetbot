@@ -241,7 +241,13 @@ class ToolInvocationRow(Base):
 class ApprovalRow(Base):
     __tablename__ = "approvals"
     __table_args__ = (
-        Index("ix_approvals_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index(
+            "ix_approvals_tenant_status_created",
+            "tenant_id",
+            "status",
+            "created_at",
+            "id",
+        ),
         Index("ix_approvals_run_id", "run_id"),
         Index(
             "ix_approvals_pending_expiry",
@@ -331,10 +337,11 @@ class ArtifactRow(Base):
 
 class IdempotencyKeyRow(Base):
     __tablename__ = "idempotency_keys"
+    __table_args__ = (Index("ix_idempotency_keys_expires_at", "expires_at"),)
 
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
     key: Mapped[str] = mapped_column(Text, primary_key=True)
-    tenant_id: Mapped[str] = mapped_column(Text)
-    principal_id: Mapped[str] = mapped_column(Text)
     request_hash: Mapped[str] = mapped_column(String(64))
     run_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")

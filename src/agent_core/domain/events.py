@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 
 from agent_core.domain.messages import (
     AssistantMessage,
+    ContentPart,
     ConversationItem,
     TextPart,
     ToolResultItem,
@@ -17,6 +18,7 @@ from agent_core.domain.messages import (
 )
 
 CONVERSATION_ADAPTER: TypeAdapter[ConversationItem] = TypeAdapter(ConversationItem)
+CONTENT_ADAPTER: TypeAdapter[list[ContentPart]] = TypeAdapter(list[ContentPart])
 TOOL_RESULT_EVENTS = frozenset(
     {"tool.call.completed", "tool.call.failed", "tool.call.denied", "tool.call.uncertain"}
 )
@@ -68,11 +70,16 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
     payload = event.payload
     if event.event_type == "user.message.created":
         content = payload.get("content")
-        if not isinstance(content, str):
-            raise ValueError(f"user.message.created payload has no string content: {event.id}")
+        parts: list[ContentPart]
+        if isinstance(content, str):
+            parts = [TextPart(text=content)]
+        elif isinstance(content, list):
+            parts = CONTENT_ADAPTER.validate_python(content)
+        else:
+            raise ValueError(f"user.message.created payload has no content: {event.id}")
         return [
             UserMessage(
-                content=[TextPart(text=content)],
+                content=parts,
                 principal_id=event.actor_id,
             )
         ]

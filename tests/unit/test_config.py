@@ -198,6 +198,9 @@ def test_production_refuses_evaluation_identity() -> None:
         "DEPLOYMENT_MODE": "production",
         "AUTH_MODE": "token",
         "AUTH_TOKEN": "local-test-token-value",
+        "AUTH_TENANT_ID": "tenant-production",
+        "AUTH_PRINCIPAL_ID": "operator",
+        "AUTH_SCOPES": "session.read,run.read",
         "SANDBOX_MECHANISM": "microvm",
     }
     settings = load_settings(values)
@@ -216,6 +219,17 @@ def test_production_refuses_evaluation_identity() -> None:
         principal_id="eval.user",
         policy_profile="eval.default",
     )
+
+
+def test_token_auth_requires_a_configured_principal() -> None:
+    values = {
+        **base_environment(),
+        "AUTH_MODE": "token",
+        "AUTH_TOKEN": "local-test-token-value",
+        "SANDBOX_MECHANISM": "microvm",
+    }
+    with pytest.raises(ConfigurationError, match="configured principal"):
+        load_settings(values)
 
 
 def test_all_106_versioned_knobs_are_present_and_non_null() -> None:

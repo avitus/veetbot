@@ -20,6 +20,10 @@ class EventRepository(Protocol):
         self, session_id: UUID, sequence: int, principal: Principal
     ) -> list[EventEnvelope]: ...
 
+    async def get_by_derivation(
+        self, derivation_key: str, principal: Principal
+    ) -> EventEnvelope | None: ...
+
 
 class ProcessEventRepository(Protocol):
     async def append(self, event: ProcessEvent) -> ProcessEvent: ...

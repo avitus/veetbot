@@ -1,0 +1,222 @@
+"""PostgreSQL-backed Milestone 5 API concurrency and replay verification."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from typing import Any, cast
+from uuid import UUID
+
+import httpx
+
+from agent_core.api import create_app
+from agent_core.bootstrap import Composition, build
+from agent_core.domain.messages import FakeModelScript, ScriptedTurn, StopReason
+from agent_core.domain.runs import RunStatus
+from agent_core.domain.views import (
+    ContentBlock,
+    StreamFrame,
+    TextContentBlock,
+    TransientStreamFrame,
+)
+from agent_core.runtime.worker import DurableWorker
+from tests.integration.m2_support import database_settings
+
+
+@asynccontextmanager
+async def _client(composition: Composition) -> Any:
+    app = create_app(
+        composition.services,
+        composition.settings,
+        composition.principal,
+        composition.new_request_id,
+        composition.readiness_probe,
+    )
+    transport = httpx.ASGITransport(
+        app=app,
+        client=("127.0.0.1", 43105),
+        raise_app_exceptions=False,
+    )
+    async with httpx.AsyncClient(transport=transport, base_url="http://agent.test") as client:
+        yield client
+
+
+async def _create_session(client: httpx.AsyncClient) -> UUID:
+    response = await client.post("/v1/sessions", json={"agent_id": "general", "metadata": {}})
+    assert response.status_code == 201, response.text
+    return UUID(response.json()["id"])
+
+
+async def test_postgres_submit_idempotency_is_atomic_under_concurrency() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        session = await composition.services.sessions.create(composition.principal, "general", {})
+        content: list[ContentBlock] = [TextContentBlock(text="one durable run")]
+
+        first, second = await asyncio.gather(
+            composition.services.runs.submit(
+                composition.principal, session.id, content, "same-key", None
+            ),
+            composition.services.runs.submit(
+                composition.principal, session.id, content, "same-key", None
+            ),
+        )
+
+        assert first.run_id == second.run_id
+        assert {first.replayed, second.replayed} == {False, True}
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(session.id, 0, composition.principal)
+        assert [event.event_type for event in events].count("run.queued") == 1
+
+        async with _client(composition) as client:
+            changed = await client.post(
+                f"/v1/sessions/{session.id}/messages",
+                headers={"Idempotency-Key": "same-key"},
+                json={"content": [{"type": "text", "text": "different body"}]},
+            )
+        assert changed.status_code == 409
+        assert changed.json()["error"]["details"]["reason"] == "idempotency_key_reused"
+
+
+async def test_postgres_sse_reconnect_is_gapless_and_duplicate_free() -> None:
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        _client(composition) as client,
+    ):
+        session_id = await _create_session(client)
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "stream me"}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        run_id = UUID(submitted.json()["run_id"])
+        cancelled = await client.post(f"/v1/runs/{run_id}/cancel")
+        assert cancelled.status_code == 200
+
+        first = await client.get(f"/v1/runs/{run_id}/events")
+        assert first.status_code == 200
+        first_ids = [
+            int(line.removeprefix("id: "))
+            for line in first.text.splitlines()
+            if line.startswith("id: ")
+        ]
+        assert first_ids == sorted(set(first_ids))
+        assert len(first_ids) >= 3
+
+        replay = await client.get(
+            f"/v1/runs/{run_id}/events",
+            headers={"Last-Event-ID": str(first_ids[0])},
+        )
+        assert replay.status_code == 200, replay.text
+        replay_ids = [
+            int(line.removeprefix("id: "))
+            for line in replay.text.splitlines()
+            if line.startswith("id: ")
+        ]
+        assert replay_ids == first_ids[1:]
+
+        caught_up = await client.get(
+            f"/v1/runs/{run_id}/events",
+            headers={"Last-Event-ID": str(first_ids[-1])},
+        )
+        assert caught_up.status_code == 200, caught_up.text
+        assert "id: " not in caught_up.text
+
+
+async def test_api_cancellation_is_observed_by_a_separate_worker_composition() -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                text="this response must never commit",
+                stop_reason=StopReason.END_TURN,
+                delay_ms=1000,
+            )
+        ]
+    )
+    async with (
+        build(settings=database_settings(), storage="postgres") as api_composition,
+        build(
+            settings=database_settings(), storage="postgres", script=script
+        ) as worker_composition,
+        _client(api_composition) as client,
+    ):
+        session_id = await _create_session(client)
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "cancel cross-process"}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+        run_id = UUID(submitted.json()["run_id"])
+        worker = DurableWorker(
+            uow_factory=worker_composition.uow_factory,
+            executor=worker_composition.executor,
+            clock=worker_composition.clock,
+            worker_id="separate-api-cancellation-worker",
+            lease_seconds=0.3,
+            heartbeat_divisor=3,
+        )
+        work = asyncio.create_task(worker.run_once())
+        for _attempt in range(100):
+            observed = await client.get(f"/v1/runs/{run_id}")
+            if observed.json()["status"] == RunStatus.RUNNING.value:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("separate worker did not claim the run")
+
+        response = await client.post(f"/v1/runs/{run_id}/cancel")
+        assert response.status_code == 202
+        assert response.json()["cancel_requested_at"] is not None
+        assert await work
+        final = await client.get(f"/v1/runs/{run_id}")
+
+    assert final.json()["status"] == RunStatus.CANCELLED.value
+
+
+async def test_postgres_live_transport_delivers_transient_model_deltas() -> None:
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="a live delta", stop_reason=StopReason.END_TURN)]
+    )
+    async with (
+        build(settings=database_settings(), storage="postgres") as api_composition,
+        build(
+            settings=database_settings(), storage="postgres", script=script
+        ) as worker_composition,
+    ):
+        session = await api_composition.services.sessions.create(
+            api_composition.principal, "general", {}
+        )
+        submitted = await api_composition.services.runs.submit(
+            api_composition.principal,
+            session.id,
+            [TextContentBlock(text="stream the answer")],
+            None,
+            None,
+        )
+        stream = cast(
+            AsyncGenerator[StreamFrame, None],
+            api_composition.services.runs.stream(api_composition.principal, submitted.run_id, None),
+        )
+        await anext(stream)  # Opens LISTEN before the worker begins model I/O.
+        worker = DurableWorker(
+            uow_factory=worker_composition.uow_factory,
+            executor=worker_composition.executor,
+            clock=worker_composition.clock,
+            worker_id="live-delta-worker",
+        )
+        work = asyncio.create_task(worker.run_once())
+        live: TransientStreamFrame | None = None
+        try:
+            for _attempt in range(20):
+                frame = await asyncio.wait_for(anext(stream), timeout=2)
+                if isinstance(frame, TransientStreamFrame) and frame.event == "message.delta":
+                    live = frame
+                    break
+            else:
+                raise AssertionError("no transient message.delta frame arrived")
+        finally:
+            await work
+            await stream.aclose()
+
+    assert live is not None
+    assert live.data["text"] == "a live delta"

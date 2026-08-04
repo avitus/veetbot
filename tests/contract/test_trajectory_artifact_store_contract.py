@@ -35,6 +35,7 @@ async def test_trajectory_artifact_store_round_trip_and_delete(tmp_path: Path) -
     stored = await store.write(artifact(content), content)
     assert stored.storage_uri.startswith("trajectory/")
     assert await store.read(stored) == content
+    assert b"".join([chunk async for chunk in store.stream(stored)]) == content
     await store.delete(stored)
     assert not (tmp_path / stored.storage_uri).exists()
 
@@ -52,3 +53,5 @@ async def test_trajectory_artifact_store_rejects_integrity_drift(tmp_path: Path)
     (tmp_path / stored.storage_uri).write_bytes(content + b" ")
     with pytest.raises(ValueError, match="digest or size"):
         await store.read(stored)
+    with pytest.raises(ValueError, match="digest or size"):
+        _ = [chunk async for chunk in store.stream(stored)]

@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import cast as sql_cast
 
+from agent_core.adapters.live_events import event_channel
 from agent_core.adapters.persistence.mappers import (
     agent_to_domain,
     agent_values,
@@ -55,13 +56,19 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
+    ApprovalCursor,
     ApprovalRequest,
     ApprovalResolutionOutcome,
     ApprovalResolutionState,
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.errors import ConflictError, NotFoundError, WorkerFencedError
+from agent_core.domain.errors import (
+    ConcurrencyConflict,
+    ConflictError,
+    NotFoundError,
+    WorkerFencedError,
+)
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
@@ -72,8 +79,15 @@ from agent_core.domain.persistence import (
     WorkerLease,
 )
 from agent_core.domain.policies import PolicyProfileRecord
-from agent_core.domain.runs import Run, RunCheckpoint, RunFailure, RunStatus, RunUsage
-from agent_core.domain.sessions import Session
+from agent_core.domain.runs import (
+    TERMINAL_RUN_STATUSES,
+    Run,
+    RunCheckpoint,
+    RunFailure,
+    RunStatus,
+    RunUsage,
+)
+from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -182,6 +196,23 @@ class PostgresSessionRepository:
             raise NotFoundError("session not found")
         return session_to_domain(row)
 
+    async def close(self, session_id: UUID, principal: Principal, closed_at: datetime) -> Session:
+        row = (
+            await self._session.scalars(
+                update(SessionRow)
+                .where(
+                    SessionRow.id == session_id,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .values(status=SessionStatus.CLOSED.value, updated_at=closed_at)
+                .returning(SessionRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("session not found")
+        return session_to_domain(row)
+
 
 def _lease_predicates(lease: WorkerLease | None) -> list[Any]:
     if lease is None:
@@ -221,6 +252,24 @@ class PostgresRunRepository:
         if row is None:
             raise NotFoundError("run not found")
         return run_to_domain(row)
+
+    async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None:
+        rows = (
+            await self._session.scalars(
+                select(RunRow)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    RunRow.session_id == session_id,
+                    RunRow.status.not_in([status.value for status in TERMINAL_RUN_STATUSES]),
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .limit(2)
+            )
+        ).all()
+        if len(rows) > 1:
+            raise ConflictError("session has multiple active runs")
+        return None if not rows else run_to_domain(rows[0])
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         statement = (
@@ -398,7 +447,12 @@ class PostgresEventRepository:
                 )
             )
         await self._session.execute(
-            select(func.pg_notify("agent_events", f"{event.session_id}:{sequence}"))
+            select(
+                func.pg_notify(
+                    event_channel(event.session_id),
+                    f'{{"kind":"persisted","sequence":{sequence}}}',
+                )
+            )
         )
         return event_to_domain(row, self._upcasters)
 
@@ -422,6 +476,23 @@ class PostgresEventRepository:
             )
         ).all()
         return [event_to_domain(row, self._upcasters) for row in rows]
+
+    async def get_by_derivation(
+        self, derivation_key: str, principal: Principal
+    ) -> EventEnvelope | None:
+        row = (
+            await self._session.scalars(
+                select(EventRow)
+                .join(DerivedEventKeyRow, DerivedEventKeyRow.event_id == EventRow.id)
+                .join(SessionRow, SessionRow.id == EventRow.session_id)
+                .where(
+                    DerivedEventKeyRow.derivation_key == derivation_key,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else event_to_domain(row, self._upcasters)
 
 
 def _checkpoint_delta(previous: dict[str, Any], current: dict[str, Any]) -> dict[str, Any]:
@@ -866,8 +937,9 @@ class PostgresApprovalRepository:
         self,
         principal: Principal,
         run_id: UUID | None = None,
+        session_id: UUID | None = None,
         limit: int = 50,
-        cursor: str | None = None,
+        cursor: ApprovalCursor | None = None,
     ) -> list[ApprovalRequest]:
         predicates: list[Any] = [
             ApprovalRow.tenant_id == principal.tenant_id,
@@ -875,14 +947,19 @@ class PostgresApprovalRepository:
         ]
         if run_id is not None:
             predicates.append(ApprovalRow.run_id == run_id)
+        if session_id is not None:
+            predicates.append(ApprovalRow.session_id == session_id)
         if cursor is not None:
-            try:
-                predicates.append(ApprovalRow.id > UUID(cursor))
-            except ValueError as exc:
-                raise ValueError("approval cursor must be a UUID") from exc
+            predicates.append(
+                (ApprovalRow.created_at < cursor.created_at)
+                | ((ApprovalRow.created_at == cursor.created_at) & (ApprovalRow.id < cursor.id))
+            )
         rows = (
             await self._session.scalars(
-                select(ApprovalRow).where(*predicates).order_by(ApprovalRow.id).limit(limit)
+                select(ApprovalRow)
+                .where(*predicates)
+                .order_by(ApprovalRow.created_at.desc(), ApprovalRow.id.desc())
+                .limit(limit)
             )
         ).all()
         return [approval_to_domain(row) for row in rows]
@@ -1065,8 +1142,9 @@ class PostgresIdempotencyRepository:
         self._clock = clock
 
     async def get(self, key: str, tenant_id: str, principal_id: str) -> IdempotencyRecord | None:
+        lock_key = f"request:{tenant_id}:{principal_id}:{key}"
         await self._session.execute(
-            select(func.pg_advisory_xact_lock(func.hashtextextended(f"request:{key}", 0)))
+            select(func.pg_advisory_xact_lock(func.hashtextextended(lock_key, 0)))
         )
         row = (
             await self._session.scalars(
@@ -1081,19 +1159,28 @@ class PostgresIdempotencyRepository:
         return None if row is None else idempotency_to_domain(row)
 
     async def create(self, record: IdempotencyRecord) -> IdempotencyRecord:
+        lock_key = f"request:{record.tenant_id}:{record.principal_id}:{record.key}"
         await self._session.execute(
-            select(func.pg_advisory_xact_lock(func.hashtextextended(f"request:{record.key}", 0)))
+            select(func.pg_advisory_xact_lock(func.hashtextextended(lock_key, 0)))
         )
         await self._session.execute(
             delete(IdempotencyKeyRow).where(
                 IdempotencyKeyRow.key == record.key,
+                IdempotencyKeyRow.tenant_id == record.tenant_id,
+                IdempotencyKeyRow.principal_id == record.principal_id,
                 IdempotencyKeyRow.expires_at <= self._clock.now(),
             )
         )
         statement = (
             pg_insert(IdempotencyKeyRow)
             .values(**idempotency_values(record))
-            .on_conflict_do_nothing(index_elements=[IdempotencyKeyRow.key])
+            .on_conflict_do_nothing(
+                index_elements=[
+                    IdempotencyKeyRow.tenant_id,
+                    IdempotencyKeyRow.principal_id,
+                    IdempotencyKeyRow.key,
+                ]
+            )
             .returning(IdempotencyKeyRow)
         )
         row = (await self._session.scalars(statement)).one_or_none()
@@ -1101,7 +1188,7 @@ class PostgresIdempotencyRepository:
             return idempotency_to_domain(row)
         existing = await self.get(record.key, record.tenant_id, record.principal_id)
         if existing is None:
-            raise ConflictError("idempotency key belongs to another principal")
+            raise ConcurrencyConflict("idempotency reservation disappeared")
         if existing.request_hash != record.request_hash:
             raise ConflictError("idempotency key was reused with a different request")
         return existing
@@ -1268,6 +1355,25 @@ class PostgresTrajectoryExportRepository:
             pg_insert(TrajectoryExportRow).values(**trajectory_export_values(export))
         )
         return export.model_copy(deep=True)
+
+    async def get_artifact(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        row = (
+            await self._session.scalars(
+                select(ArtifactRow)
+                .join(
+                    TrajectoryExportRow,
+                    TrajectoryExportRow.artifact_id == ArtifactRow.id,
+                )
+                .where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return artifact_to_domain(row)
 
     async def expire_for_principal(
         self, tenant_id: str, principal_id: str, expired_at: datetime

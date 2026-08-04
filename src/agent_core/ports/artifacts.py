@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Protocol
 
 from agent_core.domain.trajectory import ArtifactRef
@@ -11,5 +12,7 @@ class TrajectoryArtifactStore(Protocol):
     async def write(self, artifact: ArtifactRef, content: bytes) -> ArtifactRef: ...
 
     async def read(self, artifact: ArtifactRef) -> bytes: ...
+
+    def stream(self, artifact: ArtifactRef) -> AsyncIterator[bytes]: ...
 
     async def delete(self, artifact: ArtifactRef) -> None: ...

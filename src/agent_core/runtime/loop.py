@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.errors import ApprovalRequiredError
+from agent_core.domain.errors import ApprovalRequiredError, UserInputRequiredError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -50,6 +50,7 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.repositories import BudgetLedger
 
 type ToolDispatch = Callable[..., Awaitable[list[ToolResultItem]]]
+type ModelEventCallback = Callable[[Run, ModelEvent], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -68,6 +69,7 @@ class RunContext:
     ids: IdFactory
     token: CancellationToken
     dispatch_tools: ToolDispatch
+    on_model_event: ModelEventCallback | None = None
     max_internal_attempts: int = 3
     identical_call_threshold: int = 5
     identical_denial_threshold: int = 3
@@ -272,6 +274,10 @@ async def _invoke_model(
                             step,
                         )
                     expected_sequence += 1
+                    if context.on_model_event is not None:
+                        # This callback is on the provider-consumption path and must
+                        # return promptly; it must never perform unbounded I/O.
+                        await context.on_model_event(context.run, event)
                     if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
                         if terminal is not None:
                             return _failure(
@@ -507,6 +513,17 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 suspension={
                     "kind": "approval",
                     "approval_id": str(exc.approval_id),
+                },
+            )
+        except UserInputRequiredError as exc:
+            context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
+            await checkpoint(context, "suspended")
+            return RunOutcome(
+                kind=OutcomeKind.SUSPENDED,
+                suspension={
+                    "kind": "user",
+                    "question_id": str(exc.question_id),
+                    "invocation_id": str(exc.invocation_id),
                 },
             )
         step.tool_call_count = len(results)

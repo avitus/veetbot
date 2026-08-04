@@ -58,7 +58,7 @@
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**Cancellation never abandons an effect.** No case produces a run in `CANCELLED` with a `tool_invocations` row whose `effect_sent_at` is set and whose status is `cancelled`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_api_m5.py::test_cancellation_cannot_mark_an_effect_cancelled
 - id: gate.runtime.build_fits
   milestone: 7
   kind: property

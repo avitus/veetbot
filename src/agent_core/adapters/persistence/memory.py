@@ -11,6 +11,7 @@ from uuid import UUID
 from agent_core.adapters.persistence.conversation import conversation_items
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
+    ApprovalCursor,
     ApprovalRequest,
     ApprovalResolutionOutcome,
     ApprovalResolutionState,
@@ -37,7 +38,7 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session
+from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -123,6 +124,23 @@ class InMemorySessionRepository:
                 raise NotFoundError("session not found")
             return session.model_copy(deep=True)
 
+    async def close(self, session_id: UUID, principal: Principal, closed_at: datetime) -> Session:
+        async with self._lock:
+            try:
+                session = self._sessions[session_id]
+            except KeyError as exc:
+                raise NotFoundError("session not found") from exc
+            if (
+                session.tenant_id != principal.tenant_id
+                or session.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("session not found")
+            updated = session.model_copy(
+                update={"status": SessionStatus.CLOSED, "updated_at": closed_at}, deep=True
+            )
+            self._sessions[session_id] = updated
+            return updated.model_copy(deep=True)
+
 
 class InMemoryRunRepository:
     def __init__(self, sessions: SessionRepository, clock: Clock) -> None:
@@ -145,6 +163,18 @@ class InMemoryRunRepository:
                 raise NotFoundError("run not found") from exc
         await self._sessions.get(run.session_id, principal)
         return run
+
+    async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None:
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            rows = [
+                run.model_copy(deep=True)
+                for run in self._runs.values()
+                if run.session_id == session_id and run.status not in TERMINAL_RUN_STATUSES
+            ]
+        if len(rows) > 1:
+            raise ConflictError("session has multiple active runs")
+        return rows[0] if rows else None
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         async with self._lock:
@@ -259,6 +289,7 @@ class InMemoryEventRepository:
         self._sessions = sessions
         self._clock = clock
         self._events: dict[UUID, list[EventEnvelope]] = defaultdict(list)
+        self._derived: dict[str, EventEnvelope] = {}
         self._next_id = 1
         self._lock = asyncio.Lock()
 
@@ -266,6 +297,10 @@ class InMemoryEventRepository:
         if lease is not None:
             raise NotImplementedError("the in-memory repository does not support worker leases")
         async with self._lock:
+            if event.derivation_key is not None:
+                existing = self._derived.get(event.derivation_key)
+                if existing is not None:
+                    return existing.model_copy(deep=True)
             stream = self._events[event.session_id]
             envelope = EventEnvelope(
                 id=self._next_id,
@@ -275,6 +310,8 @@ class InMemoryEventRepository:
             )
             self._next_id += 1
             stream.append(envelope)
+            if event.derivation_key is not None:
+                self._derived[event.derivation_key] = envelope
             return envelope.model_copy(deep=True)
 
     async def list_after(
@@ -287,6 +324,17 @@ class InMemoryEventRepository:
                 for event in self._events[session_id]
                 if event.sequence > sequence
             ]
+
+    async def get_by_derivation(
+        self, derivation_key: str, principal: Principal
+    ) -> EventEnvelope | None:
+        async with self._lock:
+            event = self._derived.get(derivation_key)
+            copied = None if event is None else event.model_copy(deep=True)
+        if copied is None:
+            return None
+        await self._sessions.get(copied.session_id, principal)
+        return copied
 
     async def raw_list(self, session_id: UUID, sequence: int = 0) -> list[EventEnvelope]:
         """Support the in-process projection without bypassing its lock."""
@@ -501,15 +549,10 @@ class InMemoryApprovalRepository:
         self,
         principal: Principal,
         run_id: UUID | None = None,
+        session_id: UUID | None = None,
         limit: int = 50,
-        cursor: str | None = None,
+        cursor: ApprovalCursor | None = None,
     ) -> list[ApprovalRequest]:
-        cursor_id: UUID | None = None
-        if cursor is not None:
-            try:
-                cursor_id = UUID(cursor)
-            except ValueError as exc:
-                raise ValueError("approval cursor must be a UUID") from exc
         async with self._lock:
             rows = [
                 request.model_copy(deep=True)
@@ -517,9 +560,13 @@ class InMemoryApprovalRepository:
                 if request.status is ApprovalStatus.PENDING
                 and self._visible(request, principal)
                 and (run_id is None or request.run_id == run_id)
-                and (cursor_id is None or request.id > cursor_id)
+                and (session_id is None or request.session_id == session_id)
+                and (
+                    cursor is None
+                    or (request.created_at, request.id.int) < (cursor.created_at, cursor.id.int)
+                )
             ]
-        return sorted(rows, key=lambda row: row.id.int)[:limit]
+        return sorted(rows, key=lambda row: (row.created_at, row.id.int), reverse=True)[:limit]
 
     async def resolve(
         self,
@@ -688,37 +735,29 @@ class InMemoryCheckpointRepository:
 class InMemoryIdempotencyRepository:
     def __init__(self, clock: Clock) -> None:
         self._clock = clock
-        self._records: dict[str, IdempotencyRecord] = {}
+        self._records: dict[tuple[str, str, str], IdempotencyRecord] = {}
         self._lock = asyncio.Lock()
 
     async def get(self, key: str, tenant_id: str, principal_id: str) -> IdempotencyRecord | None:
         async with self._lock:
-            record = self._records.get(key)
-            if (
-                record is None
-                or record.expires_at <= self._clock.now()
-                or record.tenant_id != tenant_id
-                or record.principal_id != principal_id
-            ):
+            scoped_key = (tenant_id, principal_id, key)
+            record = self._records.get(scoped_key)
+            if record is None or record.expires_at <= self._clock.now():
                 return None
             return record.model_copy(deep=True)
 
     async def create(self, record: IdempotencyRecord) -> IdempotencyRecord:
         async with self._lock:
-            existing = self._records.get(record.key)
+            scoped_key = (record.tenant_id, record.principal_id, record.key)
+            existing = self._records.get(scoped_key)
             if existing is not None and existing.expires_at <= self._clock.now():
-                del self._records[record.key]
+                del self._records[scoped_key]
                 existing = None
             if existing is not None:
-                if (
-                    existing.tenant_id != record.tenant_id
-                    or existing.principal_id != record.principal_id
-                ):
-                    raise ConflictError("idempotency key belongs to another principal")
                 if existing.request_hash != record.request_hash:
                     raise ConflictError("idempotency key was reused with a different request")
                 return existing.model_copy(deep=True)
-            self._records[record.key] = record.model_copy(deep=True)
+            self._records[scoped_key] = record.model_copy(deep=True)
             return record.model_copy(deep=True)
 
 
@@ -887,6 +926,18 @@ class InMemoryTrajectoryExportRepository:
                 return existing.model_copy(deep=True)
             self._rows[export.run_id] = export.model_copy(deep=True)
             return export.model_copy(deep=True)
+
+    async def get_artifact(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        async with self._lock:
+            for row in self._rows.values():
+                artifact = row.artifact
+                if (
+                    artifact.id == artifact_id
+                    and artifact.tenant_id == principal.tenant_id
+                    and artifact.principal_id == principal.principal_id
+                ):
+                    return artifact.model_copy(deep=True)
+        raise NotFoundError("artifact not found")
 
     async def expire_for_principal(
         self, tenant_id: str, principal_id: str, expired_at: datetime
