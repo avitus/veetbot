@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import ast
+import os
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from uuid import UUID
@@ -157,3 +160,27 @@ def test_provider_sdks_are_isolated_to_their_own_adapter_modules() -> None:
     assert "anthropic" in imports["anthropic_messages.py"]
     assert "openai" not in imports["anthropic_messages.py"]
     assert not ({"openai", "anthropic"} & imports["chat_completions.py"])
+
+
+def test_live_provider_smokes_execute_as_clean_credential_skips() -> None:
+    environment = os.environ.copy()
+    environment["RUN_LIVE_MODEL_TESTS"] = "1"
+    environment.pop("OPENAI_API_KEY", None)
+    environment.pop("ANTHROPIC_API_KEY", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/live/test_model_providers_m3.py::test_vendor_one_call_smoke",
+            "-q",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "2 skipped" in result.stdout

@@ -12,6 +12,7 @@ from agent_core.adapters.persistence.conversation import conversation_items
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
     ModelCallRecord,
@@ -209,9 +210,7 @@ class InMemoryRunRepository:
                 deep=True,
             )
 
-    async def set_provider_pin(self, run_id: UUID, pin: object) -> None:
-        from agent_core.domain.messages import ProviderPin
-
+    async def set_provider_pin(self, run_id: UUID, pin: ProviderPin) -> None:
         typed = ProviderPin.model_validate(pin)
         async with self._lock:
             try:
@@ -613,6 +612,8 @@ class InMemoryExportConsentRepository:
             existing = self._rows.get(key)
             if existing is None:
                 raise NotFoundError("export consent not found")
+            if existing.withdrawn_at is not None:
+                return existing.model_copy(deep=True)
             updated = existing.model_copy(update={"withdrawn_at": withdrawn_at})
             self._rows[key] = updated
             return updated.model_copy(deep=True)

@@ -304,7 +304,15 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
-    serialized = yaml.safe_dump(dict(merged), sort_keys=True)
+    _validate_interpolation(relative, merged, interpolation)
+
+
+def _validate_interpolation(
+    relative: str,
+    document: Mapping[str, Any],
+    interpolation: Mapping[str, str],
+) -> None:
+    serialized = yaml.safe_dump(dict(document), sort_keys=True)
     missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
     if missing:
         names = ", ".join(missing)
@@ -329,6 +337,8 @@ def _validate_documents(config_dir: Path | None, interpolation: Mapping[str, str
                 raise ConfigurationError("policy/hardline.yaml cannot be overlaid")
             if relative in SHIPPED_CONFIGS:
                 overlay_files[relative] = path
+            elif is_provider_profile:
+                _validate_interpolation(relative, _read_yaml(path), interpolation)
 
     for relative in SHIPPED_CONFIGS:
         shipped = _read_yaml(PACKAGE_ROOT / relative)

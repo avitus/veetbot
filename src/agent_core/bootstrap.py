@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Literal, cast
 from uuid import UUID
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -35,14 +37,42 @@ from agent_core.adapters.persistence.database import (
 )
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
+    InMemoryCheckpointRepository,
     InMemoryEventRepository,
+    InMemoryExportConsentRepository,
+    InMemoryIdempotencyRepository,
+    InMemoryMaintenanceRepository,
     InMemoryRunRepository,
+    InMemorySessionHistoryRepository,
     InMemorySessionRepository,
     InMemoryToolInvocationRepository,
+    InMemoryTrajectoryExportRepository,
+    InMemoryTrajectoryProjectionRepository,
+    InMemoryUsageRepository,
+)
+from agent_core.adapters.persistence.projections import (
+    PostgresSessionHistoryRepository,
+    PostgresTrajectoryProjectionRepository,
+)
+from agent_core.adapters.persistence.queue import PostgresRunQueue
+from agent_core.adapters.persistence.repositories import (
+    PostgresAgentRepository,
+    PostgresCheckpointRepository,
+    PostgresEventRepository,
+    PostgresExportConsentRepository,
+    PostgresIdempotencyRepository,
+    PostgresMaintenanceRepository,
+    PostgresRunRepository,
+    PostgresSessionRepository,
+    PostgresToolInvocationRepository,
+    PostgresTrajectoryExportRepository,
+    PostgresUsageRepository,
 )
 from agent_core.adapters.persistence.unit_of_work import (
     MemoryUnitOfWorkFactory,
+    PostgresRepositoryFactory,
     PostgresUnitOfWorkFactory,
+    UnitOfWorkRepositories,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.application.run_service import RunService
@@ -136,6 +166,75 @@ def default_fake_script() -> FakeModelScript:
             ScriptedTurn(text="391", stop_reason=StopReason.END_TURN),
         ]
     )
+
+
+def _memory_uow_repositories(
+    *,
+    agents: InMemoryAgentRepository,
+    sessions: InMemorySessionRepository,
+    runs: InMemoryRunRepository,
+    events: InMemoryEventRepository,
+    invocations: InMemoryToolInvocationRepository,
+    clock: Clock,
+) -> UnitOfWorkRepositories:
+    return UnitOfWorkRepositories(
+        agents=agents,
+        sessions=sessions,
+        runs=runs,
+        events=events,
+        invocations=invocations,
+        checkpoints=InMemoryCheckpointRepository(),
+        idempotency=InMemoryIdempotencyRepository(clock),
+        usage=InMemoryUsageRepository(runs),
+        history=InMemorySessionHistoryRepository(events),
+        trajectory=InMemoryTrajectoryProjectionRepository(events),
+        export_consent=InMemoryExportConsentRepository(),
+        trajectory_exports=InMemoryTrajectoryExportRepository(),
+        maintenance=InMemoryMaintenanceRepository(),
+        queue=None,
+    )
+
+
+def _postgres_repository_factory(
+    clock: Clock,
+    upcasters: EventUpcasterRegistry,
+    *,
+    lease_seconds: float,
+    max_attempts: int,
+) -> PostgresRepositoryFactory:
+    def repositories(session: AsyncSession) -> UnitOfWorkRepositories:
+        agents = PostgresAgentRepository(session, clock)
+        sessions = PostgresSessionRepository(session)
+        runs = PostgresRunRepository(session, clock)
+        events = PostgresEventRepository(session, clock, upcasters)
+        history = PostgresSessionHistoryRepository(session, clock, upcasters)
+        trajectory = PostgresTrajectoryProjectionRepository(session, clock, upcasters)
+        checkpoints = PostgresCheckpointRepository(session, clock, history)
+        invocations = PostgresToolInvocationRepository(session, runs)
+        return UnitOfWorkRepositories(
+            agents=agents,
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=invocations,
+            checkpoints=checkpoints,
+            idempotency=PostgresIdempotencyRepository(session, clock),
+            usage=PostgresUsageRepository(session),
+            history=history,
+            trajectory=trajectory,
+            export_consent=PostgresExportConsentRepository(session),
+            trajectory_exports=PostgresTrajectoryExportRepository(session),
+            maintenance=PostgresMaintenanceRepository(session),
+            queue=PostgresRunQueue(
+                session,
+                clock,
+                events,
+                lease_seconds=lease_seconds,
+                max_attempts=max_attempts,
+            ),
+        )
+
+    return repositories
 
 
 async def _compose(
@@ -395,12 +494,14 @@ async def build(
             uow_factory: UnitOfWorkFactory = cast(
                 UnitOfWorkFactory,
                 MemoryUnitOfWorkFactory(
-                    agents=agent_repository,
-                    sessions=session_repository,
-                    runs=run_repository,
-                    events=event_repository,
-                    invocations=invocation_repository,
-                    clock=effective_clock,
+                    _memory_uow_repositories(
+                        agents=agent_repository,
+                        sessions=session_repository,
+                        runs=run_repository,
+                        events=event_repository,
+                        invocations=invocation_repository,
+                        clock=effective_clock,
+                    )
                 ),
             )
         else:
@@ -410,10 +511,12 @@ async def build(
                 UnitOfWorkFactory,
                 PostgresUnitOfWorkFactory(
                     create_session_factory(engine),
-                    effective_clock,
-                    EventUpcasterRegistry(),
-                    lease_seconds=float(worker_config["lease_seconds"]),
-                    max_attempts=int(queue_config["max_attempts"]),
+                    _postgres_repository_factory(
+                        effective_clock,
+                        EventUpcasterRegistry(),
+                        lease_seconds=float(worker_config["lease_seconds"]),
+                        max_attempts=int(queue_config["max_attempts"]),
+                    ),
                 ),
             )
         provider_adapters = _provider_adapters(effective_settings, provider_registry)

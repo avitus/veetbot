@@ -140,13 +140,18 @@ def _canonical_hash(value: object) -> str:
             return nested.isoformat()
         raise TypeError(f"unsupported YAML scalar {type(nested).__name__}")
 
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-        default=yaml_scalar,
-    )
+    try:
+        payload = json.dumps(
+            value,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+            default=yaml_scalar,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProfileValidationError(
+            "provider registry: any level: unsupported value in canonical hash"
+        ) from exc
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -311,7 +316,7 @@ class ProviderRegistry:
         )
         loaded: dict[str, LoadedProfile] = {}
         aliases: dict[str, RegistryModel] = {}
-        model_ids: dict[tuple[str, str], RegistryModel] = {}
+        adapter_models: set[tuple[str, str]] = set()
         for expected_name, (path, raw) in raw_profiles.items():
             profile, models = cls._validate_profile(
                 path,
@@ -328,13 +333,22 @@ class ProviderRegistry:
                 models=tuple(models),
             )
             for model in models:
-                model_ids[(expected_name, model.model_id)] = model
-                for alias in model.aliases:
-                    if alias in aliases:
-                        _fail(path, "models[].aliases", f"alias {alias!r} is not globally unique")
-                    aliases[alias] = model
-        for model in model_ids.values():
-            aliases.setdefault(model.model_id, model)
+                adapter_model = (profile.adapter, model.model_id)
+                if adapter_model in adapter_models:
+                    _fail(
+                        path,
+                        "models[].id",
+                        "adapter and model id pair must be globally unique",
+                    )
+                adapter_models.add(adapter_model)
+                for lookup_name in (model.model_id, *model.aliases):
+                    if lookup_name in aliases:
+                        _fail(
+                            path,
+                            "models[].aliases",
+                            f"model id or alias {lookup_name!r} is not globally unique",
+                        )
+                    aliases[lookup_name] = model
         return cls(policies=policies, profiles=loaded, aliases=aliases)
 
     @classmethod

@@ -132,6 +132,34 @@ def test_unquoted_yaml_dates_fail_as_profile_validation_not_hashing_type_errors(
         ProviderRegistry.load(case_root, adapters=ADAPTER_DEFINITIONS)
 
 
+def test_duplicate_adapter_and_model_identity_is_rejected(tmp_path: Path) -> None:
+    case_root = tmp_path / "duplicate-adapter-model"
+    shutil.copytree(MODELS, case_root)
+    duplicate_path = case_root / "providers/duplicate-local.yaml"
+    duplicate = load_yaml(case_root / "providers/ollama.yaml")
+    duplicate["profile"] = "duplicate-local"
+    write_yaml(duplicate_path, duplicate)
+    policies_path = case_root / "policies.yaml"
+    policies = load_yaml(policies_path)
+    policies["enabled_profiles"].append("duplicate-local")
+    write_yaml(policies_path, policies)
+
+    with pytest.raises(ProfileValidationError, match="adapter and model id pair"):
+        ProviderRegistry.load(case_root, adapters=ADAPTER_DEFINITIONS)
+
+
+def test_alias_cannot_collide_with_a_model_id(tmp_path: Path) -> None:
+    case_root = tmp_path / "alias-model-collision"
+    shutil.copytree(MODELS, case_root)
+    anthropic_path = case_root / "providers/anthropic.yaml"
+    anthropic = load_yaml(anthropic_path)
+    anthropic["models"][0]["aliases"].append("qwen3:8b")
+    write_yaml(anthropic_path, anthropic)
+
+    with pytest.raises(ProfileValidationError, match="model id or alias"):
+        ProviderRegistry.load(case_root, adapters=ADAPTER_DEFINITIONS)
+
+
 async def test_provider_pin_resolves_identically_after_router_reconstruction() -> None:
     registry = ProviderRegistry.load(MODELS, adapters=ADAPTER_DEFINITIONS)
     first = StaticModelRouter(registry, FixedClock(NOW))

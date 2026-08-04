@@ -291,7 +291,7 @@ class PostgresRunRepository:
                 raise NotFoundError("run not found")
             raise ConflictError("run seed sequence was already assigned")
 
-    async def set_provider_pin(self, run_id: UUID, pin: object) -> None:
+    async def set_provider_pin(self, run_id: UUID, pin: ProviderPin) -> None:
         typed = ProviderPin.model_validate(pin)
         serialized = typed.model_dump(mode="json")
         statement = (
@@ -910,13 +910,23 @@ class PostgresExportConsentRepository:
             .where(
                 ExportConsentRow.tenant_id == tenant_id,
                 ExportConsentRow.principal_id == principal_id,
+                ExportConsentRow.withdrawn_at.is_(None),
             )
             .values(withdrawn_at=withdrawn_at)
             .returning(ExportConsentRow)
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
-            raise NotFoundError("export consent not found")
+            row = (
+                await self._session.scalars(
+                    select(ExportConsentRow).where(
+                        ExportConsentRow.tenant_id == tenant_id,
+                        ExportConsentRow.principal_id == principal_id,
+                    )
+                )
+            ).one_or_none()
+            if row is None:
+                raise NotFoundError("export consent not found")
         return ExportConsent(
             tenant_id=row.tenant_id,
             principal_id=row.principal_id,
@@ -978,7 +988,10 @@ class PostgresTrajectoryExportRepository:
             (
                 await self._session.scalars(
                     select(ArtifactRow)
-                    .where(ArtifactRow.expires_at <= now)
+                    .where(
+                        ArtifactRow.origin == "trajectory_export",
+                        ArtifactRow.expires_at <= now,
+                    )
                     .order_by(ArtifactRow.expires_at, ArtifactRow.id)
                     .limit(limit)
                 )
@@ -990,6 +1003,7 @@ class PostgresTrajectoryExportRepository:
         result = await self._session.execute(
             delete(ArtifactRow).where(
                 ArtifactRow.id == artifact_id,
+                ArtifactRow.origin == "trajectory_export",
                 ArtifactRow.expires_at <= now,
             )
         )

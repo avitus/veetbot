@@ -373,7 +373,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
                     item.model_dump(mode="json") for item in turn.provider_reasoning_items
                 ],
             )
-        elif not turn.tool_calls:
+        else:
             context.checkpoint.provider_continuation = None
         context.checkpoint.conversation.extend(turn.assistant_messages)
         context.checkpoint.conversation.extend(turn.tool_calls)

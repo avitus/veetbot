@@ -98,40 +98,44 @@ class OpenAIResponsesProvider:
             return
 
         for internal_attempt in range(1, self._max_internal_attempts + 1):
-            emitted = False
+            emitted_count = 0
             try:
                 async for event in self._translate(
                     self._source(payload), request, resolved, attempt
                 ):
-                    emitted = True
+                    emitted_count = event.sequence + 1
                     yield event
                 return
             except (APIConnectionError, APITimeoutError):
-                if not emitted and internal_attempt < self._max_internal_attempts:
+                if emitted_count == 0 and internal_attempt < self._max_internal_attempts:
                     continue
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
-                    sequence=0 if not emitted else 1,
+                    sequence=emitted_count,
                     category="transient",
                     provider_code="transport_error",
-                    stream_had_output=emitted,
+                    stream_had_output=emitted_count > 0,
                 )
                 return
             except APIStatusError as exc:
                 transient = exc.status_code == 429 or exc.status_code >= 500
-                if transient and not emitted and internal_attempt < self._max_internal_attempts:
+                if (
+                    transient
+                    and emitted_count == 0
+                    and internal_attempt < self._max_internal_attempts
+                ):
                     continue
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
-                    sequence=0 if not emitted else 1,
+                    sequence=emitted_count,
                     category="transient" if transient else "permanent",
                     provider_code=f"http_{exc.status_code}",
                     http_status=exc.status_code,
-                    stream_had_output=emitted,
+                    stream_had_output=emitted_count > 0,
                 )
                 return
 
@@ -146,10 +150,16 @@ class OpenAIResponsesProvider:
         accumulator = ModelStreamAccumulator()
         tool_identity: dict[int, tuple[str, str]] = {}
         reasoning_items: list[ProviderReasoningItem] = []
+        response_id: str | None = None
         terminal = False
 
         async for raw in source:
             event_type = raw.get("type")
+            response_id = _optional_string(raw.get("response_id")) or response_id
+            if event_type in {"response.created", "response.in_progress"}:
+                response = raw.get("response")
+                if isinstance(response, dict):
+                    response_id = _optional_string(response.get("id")) or response_id
             if event_type == "response.output_item.added":
                 item = raw.get("item")
                 if isinstance(item, dict) and item.get("type") == "function_call":
@@ -228,6 +238,8 @@ class OpenAIResponsesProvider:
                     opaque = {
                         key: item[key] for key in ("id", "type", "encrypted_content") if key in item
                     }
+                    if response_id is not None:
+                        opaque["response_id"] = response_id
                     if opaque:
                         reasoning_items.append(
                             ProviderReasoningItem(
@@ -240,11 +252,15 @@ class OpenAIResponsesProvider:
                 response = raw.get("response")
                 if not isinstance(response, dict):
                     response = {}
+                response_id = _optional_string(response.get("id")) or response_id
+                if response_id is not None:
+                    for reasoning_item in reasoning_items:
+                        reasoning_item.provider_payload.setdefault("response_id", response_id)
                 usage = self._usage(response, resolved)
                 stop_reason = self._stop_reason(response, accumulator)
                 metadata = ProviderMetadata(
                     provider_api="responses",
-                    response_id=_optional_string(response.get("id")),
+                    response_id=response_id,
                     request_id=_optional_string(
                         raw.get("request_id") or response.get("request_id")
                     ),
@@ -298,15 +314,24 @@ class OpenAIResponsesProvider:
         usage = response.get("usage")
         if not isinstance(usage, dict):
             usage = {}
+        input_tokens = max(0, int(usage.get("input_tokens", 0)))
+        cached_input_tokens = min(
+            input_tokens,
+            max(0, int(nested(usage, "input_tokens_details", "cached_tokens", default=0))),
+        )
+        output_tokens = max(0, int(usage.get("output_tokens", 0)))
+        reasoning_tokens = min(
+            output_tokens,
+            max(
+                0,
+                int(nested(usage, "output_tokens_details", "reasoning_tokens", default=0)),
+            ),
+        )
         normalized = ModelUsage(
-            input_tokens=int(usage.get("input_tokens", 0)),
-            cached_input_tokens=int(
-                nested(usage, "input_tokens_details", "cached_tokens", default=0)
-            ),
-            output_tokens=int(usage.get("output_tokens", 0)),
-            reasoning_tokens=int(
-                nested(usage, "output_tokens_details", "reasoning_tokens", default=0)
-            ),
+            input_tokens=input_tokens,
+            cached_input_tokens=cached_input_tokens,
+            output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
             provider="openai",
             model=resolved.model,
         )
@@ -358,7 +383,9 @@ class OpenAIResponsesProvider:
             elif isinstance(item, ProviderReasoningItem):
                 if item.provider != "openai":
                     raise ModelStreamError("reasoning continuation belongs to another provider")
-                inputs.append(item.provider_payload)
+                provider_payload = dict(item.provider_payload)
+                provider_payload.pop("response_id", None)
+                inputs.append(provider_payload)
         payload: dict[str, Any] = {
             "model": resolved.model,
             "input": inputs,

@@ -43,6 +43,10 @@ class ExportConsentError(AgentCoreError):
     """Trajectory export was not authorized for this run."""
 
 
+class ExportStateError(AgentCoreError):
+    """Trajectory export state is not ready or is no longer exportable."""
+
+
 class ExportRedactionError(AgentCoreError):
     """A finished export still contained sensitive-shaped content."""
 

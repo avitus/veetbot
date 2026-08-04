@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 
+from agent_core.domain.errors import ArtifactSweepError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import ClaimedRun
 from agent_core.domain.runs import CancelReason
@@ -183,7 +184,10 @@ class MaintenanceWorker:
             async with self._uow_factory() as uow:
                 await uow.checkpoints.prune(run_id, terminal=terminal)
         if self._sweep_exports is not None:
-            await self._sweep_exports()
+            try:
+                await self._sweep_exports()
+            except ArtifactSweepError:
+                logger.exception("trajectory artifact sweep failed")
         return reclaimed
 
     async def run_forever(self) -> None:

@@ -53,8 +53,11 @@ class LocalTrajectoryArtifactStore:
 
     async def read(self, artifact: ArtifactRef) -> bytes:
         content = await asyncio.to_thread(self._resolve(artifact).read_bytes)
-        if hashlib.sha256(content).hexdigest() != artifact.sha256:
-            raise ValueError("artifact content digest no longer matches its metadata")
+        if (
+            hashlib.sha256(content).hexdigest() != artifact.sha256
+            or len(content) != artifact.size_bytes
+        ):
+            raise ValueError("artifact content digest or size no longer matches its metadata")
         return content
 
     async def delete(self, artifact: ArtifactRef) -> None:

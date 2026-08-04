@@ -10,18 +10,27 @@ from uuid import UUID
 import httpx
 import pytest
 from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError
+from openai import APIConnectionError as OpenAIAPIConnectionError
+from pydantic import ValidationError
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
-from agent_core.adapters.models.recorded import RecordedFixture, RecordedModelProvider
+from agent_core.adapters.models.recorded import (
+    RecordedEventSource,
+    RecordedFixture,
+    RecordedModelProvider,
+)
 from agent_core.domain.messages import (
+    CostSource,
     FakeModelScript,
     ModelAttempt,
     ModelCapabilities,
     ModelFailedEvent,
+    ModelLimits,
+    ModelPricing,
     ModelRequest,
     ModelTurn,
     ModelUsage,
@@ -36,7 +45,8 @@ from agent_core.domain.messages import (
     ToolResultItem,
     UserMessage,
 )
-from agent_core.model.streaming import ModelStreamAccumulator
+from agent_core.model.cost import price_usage
+from agent_core.model.streaming import ModelStreamAccumulator, collect_turn, validated_stream
 from agent_core.ports.models import ModelProvider
 from agent_core.tools.calculator import CalculatorTool
 from tests.contract.model_fixtures import (
@@ -91,12 +101,13 @@ def providers_for_tool(arguments: str = ARGUMENTS) -> list[tuple[str, ModelProvi
     openai_source = ScriptedRawSource([openai_tool_events(arguments)])
     anthropic_source = ScriptedRawSource([anthropic_tool_events(arguments)])
     chat_source = ScriptedRawSource([chat_tool_events(arguments)])
+    recorded_fixture = RecordedFixture(
+        schema_version=1,
+        provider_api="responses",
+        events=openai_tool_events(arguments),
+    )
     recorded = RecordedModelProvider(
-        RecordedFixture(
-            schema_version=1,
-            provider_api="responses",
-            events=openai_tool_events(arguments),
-        )
+        OpenAIResponsesProvider(event_source=RecordedEventSource(recorded_fixture))
     )
     fake = FakeModelProvider(
         FakeModelScript(
@@ -130,8 +141,6 @@ def providers_for_tool(arguments: str = ARGUMENTS) -> list[tuple[str, ModelProvi
 
 
 async def collect(provider: ModelProvider, provider_name: str) -> ModelTurn:
-    from agent_core.model.streaming import collect_turn
-
     try:
         return await collect_turn(provider.stream(request(), resolved(provider_name), ATTEMPT))
     finally:
@@ -193,8 +202,6 @@ async def test_call_id_round_trips_through_provider_request(
         ),
         ToolResultItem(call_id="call-byte-1", content=[TextPart(text="391")]),
     ]
-    from agent_core.model.streaming import collect_turn
-
     try:
         await collect_turn(provider.stream(request(history), resolved(provider_name), ATTEMPT))
     finally:
@@ -213,7 +220,34 @@ def test_usage_cost_is_exact_decimal_and_anthropic_reasoning_is_not_double_count
         provider="anthropic",
         model="contract-model",
     )
-    assert usage.cost == Decimal("0")
+    pricing = ModelPricing(
+        input_per_mtok=Decimal("5"),
+        cached_input_per_mtok=Decimal("0.5"),
+        output_per_mtok=Decimal("25"),
+        reasoning_per_mtok=Decimal("30"),
+        reasoning_priced_separately=True,
+        source=CostSource.DOCS_SNAPSHOT,
+    )
+    assert price_usage(usage, pricing).cost == Decimal("9.55")
+    assert price_usage(
+        usage.model_copy(update={"reasoning_tokens": 100_000}), pricing
+    ).cost == Decimal("10.05")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        {"context_window_tokens": 100, "max_output_tokens": 101},
+        {
+            "context_window_tokens": 100,
+            "max_output_tokens": 50,
+            "default_output_reserve": 51,
+        },
+    ],
+)
+def test_model_limits_reject_invalid_composed_values(values: dict[str, int]) -> None:
+    with pytest.raises(ValidationError):
+        ModelLimits.model_validate(values)
 
 
 def test_empty_tool_arguments_close_as_an_empty_object() -> None:
@@ -249,8 +283,6 @@ async def test_native_chat_completion_keeps_literal_xml_tool_text_visible() -> N
             )
         }
     )
-    from agent_core.model.streaming import collect_turn
-
     try:
         turn = await collect_turn(provider.stream(request(), native, ATTEMPT))
     finally:
@@ -269,14 +301,13 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
     }
     first_source = ScriptedRawSource([[reasoning, *openai_tool_events(ARGUMENTS)]])
     first = OpenAIResponsesProvider(event_source=first_source)
-    from agent_core.model.streaming import collect_turn
-
     first_turn = await collect_turn(first.stream(request(), resolved("openai"), ATTEMPT))
     await first.close()
     assert first_turn.provider_reasoning_items[0].provider_payload == {
         "id": "reasoning-item",
         "type": "reasoning",
         "encrypted_content": "opaque",
+        "response_id": "resp-tool",
     }
 
     second_source = ScriptedRawSource([openai_text_events()])
@@ -287,7 +318,7 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
             *first_turn.provider_reasoning_items,
         ]
     )
-    await collect_turn(second.stream(continued, resolved("openai"), ATTEMPT))
+    second_turn = await collect_turn(second.stream(continued, resolved("openai"), ATTEMPT))
     await second.close()
     assert "previous_response_id" not in second_source.requests[0]
     assert second_source.requests[0]["input"][-1] == {
@@ -295,6 +326,84 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
         "type": "reasoning",
         "encrypted_content": "opaque",
     }
+    assert second_turn.provider_metadata is not None
+    assert second_turn.provider_metadata.previous_response_id == "resp-tool"
+
+
+async def test_openai_midstream_transport_failure_uses_the_next_sequence() -> None:
+    async def disconnect(_request: dict[str, Any]) -> Any:
+        yield {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "first",
+        }
+        yield {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "second",
+        }
+        raise OpenAIAPIConnectionError(
+            request=httpx.Request("POST", "https://api.openai.com/v1/responses")
+        )
+
+    provider = OpenAIResponsesProvider(event_source=disconnect)
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("openai"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+    assert [event.sequence for event in events] == [0, 1, 2]
+    assert isinstance(events[-1], ModelFailedEvent)
+    assert events[-1].error.kind == "transient"
+
+
+def test_provider_usage_counters_are_clamped_to_their_totals() -> None:
+    openai_usage = OpenAIResponsesProvider._usage(
+        {
+            "usage": {
+                "input_tokens": -1,
+                "input_tokens_details": {"cached_tokens": 20},
+                "output_tokens": 3,
+                "output_tokens_details": {"reasoning_tokens": 10},
+            }
+        },
+        resolved("openai"),
+    )
+    assert openai_usage.input_tokens == openai_usage.cached_input_tokens == 0
+    assert openai_usage.output_tokens == 3
+    assert openai_usage.reasoning_tokens == 3
+
+    chat_usage = ChatCompletionsProvider._usage(
+        {
+            "prompt_tokens": 2,
+            "prompt_tokens_details": {"cached_tokens": 5},
+            "completion_tokens": -1,
+        },
+        resolved("chat_completions"),
+    )
+    assert chat_usage.input_tokens == chat_usage.cached_input_tokens == 2
+    assert chat_usage.output_tokens == 0
+
+
+async def test_recorded_fixture_fails_after_its_declared_streams_are_exhausted() -> None:
+    fixture = RecordedFixture(
+        schema_version=1,
+        provider_api="responses",
+        streams=[openai_text_events("once")],
+    )
+    provider = RecordedModelProvider(
+        OpenAIResponsesProvider(event_source=RecordedEventSource(fixture))
+    )
+    try:
+        first = await collect_turn(provider.stream(request(), resolved("openai"), ATTEMPT))
+        assert first.assistant_messages[0].content == [TextPart(text="once")]
+        with pytest.raises(ValueError, match="streams are exhausted"):
+            await collect_turn(provider.stream(request(), resolved("openai"), ATTEMPT))
+    finally:
+        await provider.close()
 
 
 async def test_midstream_chat_transport_failure_keeps_a_gapless_terminal_sequence() -> None:
@@ -311,8 +420,6 @@ async def test_midstream_chat_transport_failure_keeps_a_gapless_terminal_sequenc
         base_url="http://127.0.0.1:11434/v1",
         event_source=disconnect,
     )
-    from agent_core.model.streaming import validated_stream
-
     events = []
     try:
         async for event in validated_stream(
@@ -336,8 +443,6 @@ async def test_anthropic_usage_and_indexes_default_defensively() -> None:
     events[4].pop("usage")
     source = ScriptedRawSource([events])
     provider = AnthropicMessagesProvider(event_source=source)
-    from agent_core.model.streaming import collect_turn
-
     try:
         turn = await collect_turn(provider.stream(request(), resolved("anthropic"), ATTEMPT))
     finally:
@@ -364,8 +469,6 @@ async def test_anthropic_error_type_drives_retry_and_sdk_errors_are_normalized()
             yield event
 
     provider = AnthropicMessagesProvider(event_source=overload_then_text)
-    from agent_core.model.streaming import collect_turn, validated_stream
-
     try:
         turn = await collect_turn(provider.stream(request(), resolved("anthropic"), ATTEMPT))
     finally:
@@ -402,8 +505,6 @@ async def test_anthropic_midstream_transport_failure_keeps_sequence_gapless() ->
         )
 
     provider = AnthropicMessagesProvider(event_source=disconnect)
-    from agent_core.model.streaming import validated_stream
-
     events = []
     try:
         async for event in validated_stream(

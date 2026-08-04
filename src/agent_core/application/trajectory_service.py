@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from collections.abc import Iterable
 from datetime import timedelta
@@ -17,6 +18,7 @@ from agent_core.domain.errors import (
     ExportConsentError,
     ExportRedactionError,
     ExportRedactionPatternError,
+    ExportStateError,
     NotFoundError,
 )
 from agent_core.domain.events import conversation_items
@@ -36,6 +38,7 @@ from agent_core.ports.tools import ToolRegistry
 BUILDER_VERSION = "trajectory@3"
 RULESET_VERSION = "secrets@1"
 RETENTION = timedelta(days=30)
+logger = logging.getLogger(__name__)
 SENSITIVE_KEY = re.compile(r"secret|token|password|api_?key|authorization", re.IGNORECASE)
 QUANTIFIED_GROUP = re.compile(r"\)(?:[*+]|\{\d)")
 UNSAFE_TENANT_PATTERN = re.compile(r"(?:\.\*|\.\+|\\[1-9]|\(\?P=|\(\?<?[=!]|\(\?\()")
@@ -181,7 +184,7 @@ class TrajectoryExportService:
             if not run.export_consent:
                 raise ExportConsentError("the run was not consent-stamped when it started")
             if run.status not in TERMINAL_RUN_STATUSES:
-                raise ExportConsentError("only terminal runs can be exported")
+                raise ExportStateError("only terminal runs can be exported")
             existing = await uow.trajectory_exports.get_for_run(run.id)
             if existing is not None:
                 if (
@@ -191,10 +194,10 @@ class TrajectoryExportService:
                     raise ExportConsentError("the run was exported by another principal")
                 if existing.artifact.expires_at > now:
                     return existing.artifact
-                raise ExportConsentError("the prior export expired and awaits its sweep")
+                raise ExportStateError("the prior export expired and awaits its sweep")
             projection = await uow.trajectory.catch_up(run.id)
             if projection is None or not projection.terminal:
-                raise ExportConsentError("the terminal trajectory projection is unavailable")
+                raise ExportStateError("the terminal trajectory projection is unavailable")
             events = await uow.events.list_after(
                 run.session_id,
                 projection.first_sequence - 1,
@@ -301,6 +304,10 @@ class TrajectoryExportService:
                         now=now,
                     )
             except Exception:
+                logger.exception(
+                    "trajectory_artifact_sweep_failed",
+                    extra={"artifact_id": str(artifact.id)},
+                )
                 failures += 1
             else:
                 if removed:

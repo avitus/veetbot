@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent_core.domain.policies import TrustLevel
 
@@ -271,6 +271,14 @@ class ModelLimits(BaseModel):
     default_output_reserve: int = Field(default=4096, gt=0)
     max_cache_breakpoints: int = Field(default=0, ge=0)
     max_tool_count: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_composed_limits(self) -> ModelLimits:
+        if self.default_output_reserve > self.max_output_tokens:
+            raise ValueError("default output reserve exceeds maximum output tokens")
+        if self.max_output_tokens > self.context_window_tokens:
+            raise ValueError("maximum output tokens exceed context window")
+        return self
 
 
 class ModelPricing(BaseModel):

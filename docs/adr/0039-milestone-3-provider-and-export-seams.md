@@ -27,6 +27,8 @@ They do not weaken a security requirement or an acceptance criterion.
    Anthropic, and Ollama ship as separate profile documents. Unknown fields,
    undeclared capabilities, unsafe base URLs, incomplete pricing, alias
    collisions, and unavailable policy targets fail before an adapter is used.
+   Duplicate adapter-and-model identities also fail because the normative pin
+   has no separate profile field with which to disambiguate them.
    A pin records the provider, resolved model, profile hash, registry version,
    and pricing snapshot so resume never silently follows a changed alias.
 2. **Missing remote credentials fail at use, not at process startup.** The
@@ -93,8 +95,8 @@ They do not weaken a security requirement or an acceptance criterion.
 ## Consequences
 
 - A new provider can be added through a profile and adapter without changing
-  the runtime protocol, but the current composition permits only one enabled
-  profile per adapter kind.
+  the runtime protocol. Multiple profiles may share an adapter only when their
+  provider model identifiers are distinct.
 - A run can resume after profile aliases change because the resolved identity
   and price snapshot are durable.
 - The local trajectory store is a compatibility seam, not the future general
@@ -128,15 +130,17 @@ opposite behavior:
   visible.
 - `ResolvedModel` and `ProviderPin` do not gain a profile field. Their normative
   shapes define `provider` as the adapter key, while the profile name is already
-  the prefix of `registry_version`. The current composition deliberately
-  permits one enabled profile per adapter.
+  the prefix of `registry_version`. The merged registry instead rejects a
+  duplicate adapter-and-model identity before a pin can become ambiguous.
 - A trajectory tool descriptor remains `{name, schema_sha256}`. Export schema
   version 1 explicitly fixes those two fields; adding `version` requires a
   schema revision rather than an undocumented producer-only key.
-- OpenAI `previous_response_id` remains absent under `store=False`. Stateless
-  and zero-data-retention continuation replays the provider's reasoning item and
-  encrypted content verbatim; the reasoning item's `id` is not a response id
-  and must not be mislabeled as one.
+- OpenAI `previous_response_id` remains absent from requests under `store=False`.
+  Stateless and zero-data-retention continuation replays the provider's
+  reasoning item and encrypted content verbatim. The actual response id is
+  carried beside that opaque item for closed telemetry, then removed from the
+  provider input; the reasoning item's own `id` is never mislabeled as a
+  response id.
 
 The second full pass produced nine further findings, all applied. Most
 materially, artifact expiry is now two-phase: the sweeper lists expired

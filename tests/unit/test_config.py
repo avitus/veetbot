@@ -161,6 +161,15 @@ def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
         load_settings(values)
 
 
+def test_undeclared_interpolation_in_new_provider_profile_is_refused(tmp_path: Path) -> None:
+    overlay = tmp_path / "models" / "providers" / "custom.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("model: ${UNDECLARED_PROVIDER_MODEL}\n", encoding="utf-8")
+    values = {**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)}
+    with pytest.raises(ConfigurationError, match="UNDECLARED_PROVIDER_MODEL"):
+        load_settings(values)
+
+
 def test_credentials_are_profile_keyed_and_repr_safe() -> None:
     settings = load_settings(
         {

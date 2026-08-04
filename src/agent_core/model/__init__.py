@@ -15,3 +15,6 @@ __all__ = [
     "validate_conversation_pairing",
     "validated_stream",
 ]
+"""Provider-neutral model-layer constants and services."""
+
+NON_ROUTED_MODEL_POLICIES = frozenset({"deterministic", "fake-balanced"})

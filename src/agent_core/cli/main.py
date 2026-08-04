@@ -24,6 +24,7 @@ from agent_core.domain.errors import (
     EvalExpectationError,
     ExportConsentError,
     ExportRedactionError,
+    ExportStateError,
     NotFoundError,
 )
 from agent_core.domain.events import EventEnvelope
@@ -173,6 +174,8 @@ def run_command(
 ) -> None:
     """Execute one run through the shared RunService."""
 
+    if session_id is not None and model_policy is not None:
+        raise typer.BadParameter("--model-policy can only be used for a new session")
     try:
         run, events = asyncio.run(_submit(prompt, session_id, idempotency_key, model_policy))
     except QueuedRunTimeoutError as exc:
@@ -242,7 +245,12 @@ def run_export(
     except NotFoundError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(2) from exc
-    except (ConfigurationError, ExportConsentError, ExportRedactionError) as exc:
+    except (
+        ConfigurationError,
+        ExportConsentError,
+        ExportRedactionError,
+        ExportStateError,
+    ) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(artifact.model_dump_json() if json_output else str(artifact.id))

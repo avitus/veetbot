@@ -246,6 +246,20 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
     ]
     assert seen[2][1] == UUID(session_id)
 
+    conflicting_policy = runner.invoke(
+        app,
+        [
+            "run",
+            "--session",
+            session_id,
+            "--model-policy",
+            "balanced",
+            "with conflict",
+        ],
+    )
+    assert conflicting_policy.exit_code == 2
+    assert "--model-policy can only be used for a new session" in conflicting_policy.stderr
+
 
 def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:
     queued_id = UUID("00000000-0000-0000-0000-000000000040")

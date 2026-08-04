@@ -178,8 +178,6 @@ class AnthropicMessagesProvider:
         response_id: str | None = None
         request_id: str | None = None
         response_model: str | None = None
-        terminal = False
-
         async for raw in source:
             event_type = raw.get("type")
             if event_type == "message_start":
@@ -399,15 +397,14 @@ class AnthropicMessagesProvider:
                     stream_had_output=sequence > 0,
                 )
                 return
-        if not terminal:
-            yield failed_event(
-                attempt=attempt,
-                provider=self.name,
-                model=resolved.model,
-                sequence=sequence,
-                category="protocol",
-                detail="Messages stream ended without message_stop",
-            )
+        yield failed_event(
+            attempt=attempt,
+            provider=self.name,
+            model=resolved.model,
+            sequence=sequence,
+            category="protocol",
+            detail="Messages stream ended without message_stop",
+        )
 
     @staticmethod
     def _usage(

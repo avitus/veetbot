@@ -105,15 +105,16 @@ class MinimalContextBuilder:
                 if not isinstance(item, ToolResultItem):
                     break
                 trailing_result_ids.add(item.call_id)
-            insertion = len(checkpoint_items)
-            if trailing_result_ids:
-                matching = [
-                    index
-                    for index, item in enumerate(checkpoint_items)
-                    if isinstance(item, ToolCallItem) and item.call_id in trailing_result_ids
-                ]
-                if matching:
-                    insertion = min(matching)
+            if not trailing_result_ids:
+                raise ValueError("checkpoint continuation has no trailing tool-result anchor")
+            matching = [
+                index
+                for index, item in enumerate(checkpoint_items)
+                if isinstance(item, ToolCallItem) and item.call_id in trailing_result_ids
+            ]
+            if not matching:
+                raise ValueError("checkpoint continuation has no matching tool-call anchor")
+            insertion = min(matching)
             checkpoint_items[insertion:insertion] = opaque_items
         if checkpoint_items and checkpoint_items[-1].kind == "user":
             body = [*checkpoint_items[:-1], runtime_item, checkpoint_items[-1]]

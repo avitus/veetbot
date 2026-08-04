@@ -29,6 +29,7 @@ from agent_core.domain.runs import (
     RunStatus,
     Step,
 )
+from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.models import ModelProvider, ModelRouter
@@ -145,10 +146,10 @@ class RunExecutor:
             model_provider = self._model_provider
             resolved_model = self._resolved_model
             pin_created = False
-            if self._model_router is not None and agent.model_policy not in {
-                "deterministic",
-                "fake-balanced",
-            }:
+            if (
+                self._model_router is not None
+                and agent.model_policy not in NON_ROUTED_MODEL_POLICIES
+            ):
                 if checkpoint_state.provider_pin is None and run.provider_pin is not None:
                     checkpoint_state.provider_pin = run.provider_pin.model_copy(deep=True)
                 if checkpoint_state.provider_pin is None:
