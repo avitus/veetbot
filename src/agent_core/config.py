@@ -7,6 +7,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -194,7 +195,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 FROZEN_CONFIG = "policy/hardline.yaml"
 INTERPOLATION = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
-MINIMUM_CONFIG_VALUES: Mapping[str, int] = MappingProxyType(
+MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
         "runtime/limits.yaml:queue.max_attempts": 1,
@@ -293,7 +294,11 @@ def _validate_document_value(
     if not valid_type:
         raise ConfigurationError(f"{location} must be {expected}")
     minimum = MINIMUM_CONFIG_VALUES.get(location)
-    if minimum is not None and isinstance(value, int) and value < minimum:
+    if (
+        minimum is not None
+        and isinstance(value, (int, float))
+        and (not isfinite(value) or value < minimum)
+    ):
         raise ConfigurationError(f"{location} must be at least {minimum}")
 
 

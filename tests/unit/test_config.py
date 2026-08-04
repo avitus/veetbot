@@ -124,6 +124,11 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
         ),
         (
             "runtime/limits.yaml",
+            "worker:\n  lease_seconds: 0.5\n",
+            r"worker\.lease_seconds must be at least 1",
+        ),
+        (
+            "runtime/limits.yaml",
             "run_defaults: disabled\n",
             r"run_defaults must be a mapping",
         ),

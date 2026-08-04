@@ -179,7 +179,7 @@ def run_command(
     try:
         run, events = asyncio.run(_submit(prompt, session_id, idempotency_key, model_policy))
     except QueuedRunTimeoutError as exc:
-        typer.echo(f"run queued: {exc.run_id}", err=True)
+        typer.echo(f"run did not reach a terminal state: {exc.run_id}", err=True)
         raise typer.Exit(5) from exc
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
