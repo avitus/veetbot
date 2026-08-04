@@ -46,7 +46,8 @@ class RequestBoundaryMiddleware:
         method = str(scope.get("method", ""))
         path = str(scope.get("path", ""))
         has_body = method in {"POST", "PUT", "PATCH"}
-        if has_body and path.startswith("/v1/"):
+        is_versioned_api = path.startswith("/v1/")
+        if has_body and is_versioned_api:
             try:
                 state["authenticated_principal"] = self._early_authenticate(scope)
             except AuthenticationError:
@@ -105,7 +106,7 @@ class RequestBoundaryMiddleware:
         consumed = 0
         buffered: deque[Message] = deque()
         body_slot_acquired = False
-        if has_body:
+        if has_body and is_versioned_api:
             await self._body_slots.acquire()
             body_slot_acquired = True
             try:

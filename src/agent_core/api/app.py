@@ -57,6 +57,10 @@ def _content_disposition(filename: str) -> str:
     ).strip()
     safe_name = safe_name or "artifact"
     fallback = unicodedata.normalize("NFKD", safe_name).encode("ascii", "ignore").decode()
+    fallback = "".join(
+        "_" if character in '/\\"' or unicodedata.category(character) == "Cc" else character
+        for character in fallback
+    ).strip()
     fallback = fallback or "artifact"
     encoded = quote(safe_name, safe="")
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"

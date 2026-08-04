@@ -623,7 +623,7 @@ async def test_artifact_content_is_always_an_attachment(tmp_path: Path) -> None:
             principal_id=composition.principal.principal_id,
             session_id=svg_session,
             run_id=svg_run_id,
-            name="../résumé.svg",
+            name="../résumé\uff02.svg",
             media_type="image/svg+xml",
             storage_uri="pending",
             sha256=__import__("hashlib").sha256(svg).hexdigest(),
@@ -651,7 +651,11 @@ async def test_artifact_content_is_always_an_attachment(tmp_path: Path) -> None:
         second = await client.get(f"/v1/artifacts/{artifact.id}/content")
         assert second.status_code == 200
         assert second.headers["content-disposition"].startswith("attachment;")
-        assert "filename*=UTF-8''.._r%C3%A9sum%C3%A9.svg" in second.headers["content-disposition"]
+        assert 'filename=".._resume_.svg"' in second.headers["content-disposition"]
+        assert (
+            "filename*=UTF-8''.._r%C3%A9sum%C3%A9%EF%BC%82.svg"
+            in second.headers["content-disposition"]
+        )
         assert "../" not in second.headers["content-disposition"]
         cached = await client.get(
             f"/v1/artifacts/{artifact.id}/content",

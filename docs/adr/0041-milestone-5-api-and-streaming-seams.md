@@ -98,7 +98,7 @@ authorization order, tenant concealment, durable event log, and hard gates.
 - Unauthenticated requests cannot reserve body buffers, and a worker holds at
   most 16 MiB of buffered request bodies even under concurrent load.
 - A delayed live notification cannot stall provider stream consumption; the
-  client recovers omitted transient frames from the eventual durable state.
+  client recovers the eventual durable state after omitted transient frames.
 - The public API can evolve its adapters without moving authorization or state
   transitions into route code.
 
