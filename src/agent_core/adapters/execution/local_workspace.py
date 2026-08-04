@@ -16,6 +16,22 @@ from agent_core.ports.execution import WorkspaceHandle
 _VIRTUAL_ROOT = PurePosixPath("/workspace")
 
 
+def validated_workspace_components(path: str | PurePosixPath) -> tuple[str, ...]:
+    raw = str(path)
+    if "\x00" in raw or raw.startswith("/"):
+        raise WorkspaceEscape("workspace path must be relative and contain no NUL")
+    if raw == "":
+        return ()
+    components = tuple(raw.split("/"))
+    if any(component in {"", ".", ".."} for component in components):
+        raise WorkspaceEscape("workspace path contains a forbidden component")
+    if any(len(component.encode("utf-8")) > 255 for component in components):
+        raise WorkspaceEscape("workspace path component exceeds 255 bytes")
+    if len(raw.encode("utf-8")) > 4096:
+        raise WorkspaceEscape("workspace path exceeds 4096 bytes")
+    return components
+
+
 class LocalWorkspaceHandle:
     def __init__(self, host_root: Path) -> None:
         self._host_root = host_root.resolve()
@@ -28,19 +44,7 @@ class LocalWorkspaceHandle:
 
     @staticmethod
     def _components(path: str | PurePosixPath) -> tuple[str, ...]:
-        raw = str(path)
-        if "\x00" in raw or raw.startswith("/"):
-            raise WorkspaceEscape("workspace path must be relative and contain no NUL")
-        if raw == "":
-            return ()
-        components = tuple(raw.split("/"))
-        if any(component in {"", ".", ".."} for component in components):
-            raise WorkspaceEscape("workspace path contains a forbidden component")
-        if any(len(component.encode("utf-8")) > 255 for component in components):
-            raise WorkspaceEscape("workspace path component exceeds 255 bytes")
-        if len(raw.encode("utf-8")) > 4096:
-            raise WorkspaceEscape("workspace path exceeds 4096 bytes")
-        return components
+        return validated_workspace_components(path)
 
     def _host_path(self, path: str | PurePosixPath) -> Path:
         components = self._components(path)
@@ -135,7 +139,8 @@ class LocalWorkspaceFactory:
         self._base_directory = base_directory
         self._handles: dict[tuple[str, UUID], LocalWorkspaceHandle] = {}
 
-    def for_run(self, tenant_id: str, run_id: object) -> WorkspaceHandle:
+    def for_run(self, tenant_id: str, run_id: object, lease_epoch: int = 0) -> WorkspaceHandle:
+        del lease_epoch
         if not isinstance(run_id, UUID):
             raise TypeError("run_id must be a UUID")
         tenant_key = hashlib.sha256(tenant_id.encode("utf-8")).hexdigest()

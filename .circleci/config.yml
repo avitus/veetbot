@@ -72,6 +72,17 @@ jobs:
           name: Migrations and integration tests
           command: make migrate test-integration
 
+  sandbox:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: medium
+    steps:
+      - checkout
+      - install_uv
+      - run:
+          name: Real-runtime sandbox security gates
+          command: make test-sandbox
+
   live:
     docker:
       - image: cimg/python:3.12
@@ -90,6 +101,7 @@ workflows:
       - static
       - contract
       - integration
+      - sandbox
 
   live_manual:
     when: << pipeline.parameters.run_live >>

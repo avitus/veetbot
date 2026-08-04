@@ -1,0 +1,11 @@
+schema_version: 1
+resources:
+  cpu_millicores: 2000
+  memory_bytes: 2147483648
+  pids_max: 512
+  workspace_bytes: 4294967296
+  inodes_max: 100000
+  wall_clock_seconds: 300
+egress:
+  mode: deny
+  destinations: []

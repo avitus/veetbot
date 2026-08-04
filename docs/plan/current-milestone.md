@@ -4,16 +4,18 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 5 — HTTP API and SSE (complete)
-- **Next milestone:** Milestone 6 — isolated execution and artifacts
+- **Current milestone:** Milestone 6 — isolated execution and artifacts (review)
+- **Next milestone:** Milestone 7 — context budgeting and structured working state
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 5 are complete. Milestones 6 through
+- **Project status:** Milestones 0 through 5 are complete. Milestone 6 is locally
+  implemented and awaiting hosted CI and CodeRabbit review. Milestones 7 through
   9 are explicitly authorized and remain sequentially gated.
 
-Milestone 5 delivered the authenticated HTTP API, session and message routes,
-run retrieval and cancellation, user-input suspension and resume, gapless SSE
-replay with transient delivery, request and idempotency identifiers, error
-envelopes, artifact downloads, and health probes. The
+Milestone 6 adds container-backed and deterministic fake execution adapters,
+lease-scoped isolated workspaces, resource and egress enforcement,
+`sandbox.run_command`, the in-sandbox programmatic tool bridge, filesystem
+artifacts with tenant-authorized verified downloads, output artifactization,
+cleanup, and real-runtime security tests. The
 machine-readable [project state](../status/project-state.yaml) records progress
 and evidence.
 
@@ -35,13 +37,13 @@ substitute.
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Begin Milestone 6 only after the Milestone 5 pull request is merged. Milestone 10
+Begin Milestone 7 only after the Milestone 6 pull request is merged. Milestone 10
 is not authorized because the readiness review records that it has no complete
 acceptance criteria.
 
 ## Completion rule
 
-Milestone 5 is complete: every canonical acceptance criterion, all ten API gates
-plus the cancellation gate, and all 105 cumulative gates pass; the full
-non-live suite passed against PostgreSQL; hosted CircleCI passed; and CodeRabbit
-has no unaddressed actionable review comments on the milestone pull request.
+Milestone 6 is ready for review: every canonical acceptance criterion and all
+116 cumulative gates pass locally, including the real-runtime security
+partition. Completion still requires hosted CircleCI to pass and CodeRabbit to
+have no unaddressed actionable review comments on the milestone pull request.

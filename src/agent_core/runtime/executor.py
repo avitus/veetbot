@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -61,6 +61,7 @@ from agent_core.runtime.loop import (
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
 type TokenCompleteCallback = Callable[[UUID], None]
+type RunCompleteCallback = Callable[[UUID], Awaitable[None]]
 logger = logging.getLogger(__name__)
 
 
@@ -93,6 +94,7 @@ class RunExecutor:
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
         on_token_complete: TokenCompleteCallback | None = None,
+        on_run_complete: RunCompleteCallback | None = None,
         on_model_event: ModelEventCallback | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
@@ -113,6 +115,7 @@ class RunExecutor:
         self._seed_checkpoint = seed_checkpoint
         self._on_token = on_token
         self._on_token_complete = on_token_complete
+        self._on_run_complete = on_run_complete
         self._on_model_event = on_model_event
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
@@ -219,7 +222,7 @@ class RunExecutor:
         try:
             await self._execute_running(run, lease=None)
         finally:
-            self._complete_token(run.id)
+            await self._complete_run(run.id)
 
     async def execute_claimed(
         self,
@@ -232,7 +235,16 @@ class RunExecutor:
         try:
             await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
         finally:
-            self._complete_token(claimed.run.id)
+            await self._complete_run(claimed.run.id)
+
+    async def _complete_run(self, run_id: UUID) -> None:
+        try:
+            if self._on_run_complete is not None:
+                await self._on_run_complete(run_id)
+        except Exception:
+            logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
+        finally:
+            self._complete_token(run_id)
 
     def _complete_token(self, run_id: UUID) -> None:
         if self._on_token_complete is not None:

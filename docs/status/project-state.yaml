@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_5_complete
+  status: milestone_6_in_review
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 5
+  current_milestone: 6
   authorized_milestones:
     - 0
     - 1
@@ -39,7 +39,7 @@ milestones:
     status: complete
   "6":
     title: Isolated execution and artifacts
-    status: not_started
+    status: in_review
   "7":
     title: Context budgeting and structured working state
     status: not_started
@@ -314,6 +314,49 @@ verification:
           static, and contract partitions respectively; all three GitHub commit
           status contexts completed successfully.
     remaining: []
+  milestone_6:
+    recorded_at: 2026-08-04T06:29:55Z
+    status: in_review
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 238 source and test
+          files, 200 static tests, 78 port contracts, 123 citation checks,
+          strict documentation builds, and all 116 hard gates active through
+          Milestone 6 passed.
+      - check: complete non-live suite against PostgreSQL 16 and Docker
+        outcome: passed
+        detail: >-
+          All 354 non-live tests passed across the verified partitions with the two credentialed
+          provider tests deselected. This included the real Docker security
+          partition and all PostgreSQL integration and resilience coverage.
+      - check: PostgreSQL 16 integration partition
+        outcome: passed
+        detail: >-
+          All 68 integration and resilience tests passed, including durable
+          artifact metadata, verified content reopening, migrations, runtime,
+          HTTP, model, trajectory, and recovery coverage.
+      - check: real Docker sandbox security partition
+        outcome: passed
+        detail: >-
+          Eight real-runtime tests passed against the immutable sandbox image,
+          covering secret exclusion, default-deny and allowlisted egress, the
+          in-sandbox Unix tool bridge, every resource limit, escape probes,
+          workspace isolation, and lease reaping. The fake adapter was not used.
+      - check: 116 cumulative hard gates
+        outcome: passed_locally
+        detail: >-
+          All eleven Milestone 6 gates have executable registry checks for the
+          real runtime, structural boundary, artifact checksum, and opaque
+          storage-key behavior.
+    remaining:
+      - Hosted CircleCI must pass for the Milestone 6 pull request.
+      - CodeRabbit review must have no unaddressed actionable comments.
+      - >-
+        Owner review is requested for proposed ADR-0042, especially the
+        sandbox-profile conflict with the pre-existing 106-knob inventory and
+        the Docker-development/gVisor-production runtime split.
 
 documentation:
   canonical_format: markdown

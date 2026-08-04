@@ -803,6 +803,9 @@ class PostgresToolInvocationRepository:
                 "suspended_ref": invocation.suspended_ref,
                 "policy_decision": invocation.policy_decision,
                 "structured_result": invocation.structured_result,
+                "output_bytes": invocation.output_bytes,
+                "truncated": invocation.truncated,
+                "artifact_id": invocation.artifact_id,
                 "outcome": invocation.outcome,
                 "result_item": invocation.result_item,
                 "updated_at": invocation.updated_at,
@@ -829,6 +832,9 @@ class PostgresToolInvocationRepository:
                     else invocation.policy_decision.model_dump(mode="json")
                 ),
                 structured_result=invocation.structured_result,
+                output_bytes=invocation.output_bytes,
+                truncated=invocation.truncated,
+                artifact_id=invocation.artifact_id,
                 outcome=(
                     None
                     if invocation.outcome is None
@@ -1419,6 +1425,37 @@ class PostgresTrajectoryExportRepository:
         return bool(_rowcount(result))
 
 
+class PostgresArtifactRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(self, artifact: ArtifactRef) -> ArtifactRef:
+        statement = pg_insert(ArtifactRow).values(**artifact_values(artifact))
+        statement = statement.on_conflict_do_nothing(index_elements=[ArtifactRow.id])
+        await self._session.execute(statement)
+        row = await self._session.get(ArtifactRow, artifact.id)
+        if row is None:
+            raise ConflictError("artifact metadata was not persisted")
+        stored = artifact_to_domain(row)
+        if stored != artifact:
+            raise ConflictError("artifact id already exists with different metadata")
+        return stored
+
+    async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        row = (
+            await self._session.scalars(
+                select(ArtifactRow).where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return artifact_to_domain(row)
+
+
 class PostgresMaintenanceRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -1429,6 +1466,18 @@ class PostgresMaintenanceRepository:
                 select(func.pg_try_advisory_xact_lock(func.hashtextextended(sweep_name, 0)))
             )
         )
+
+    async def live_run_leases(self) -> frozenset[tuple[UUID, int]]:
+        rows = (
+            await self._session.execute(
+                select(RunRow.id, RunRow.lease_epoch).where(
+                    RunRow.lease_owner.is_not(None),
+                    RunRow.lease_expires_at.is_not(None),
+                    RunRow.lease_expires_at > func.now(),
+                )
+            )
+        ).all()
+        return frozenset((run_id, int(lease_epoch)) for run_id, lease_epoch in rows)
 
     async def projection_sessions(self, limit: int) -> list[UUID]:
         if not await self._acquire("maintenance.session_history"):

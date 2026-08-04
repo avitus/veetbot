@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
+from uuid import UUID
 
 from agent_core.domain.errors import ArtifactSweepError
 from agent_core.domain.events import NewEvent
@@ -161,12 +162,14 @@ class MaintenanceWorker:
         poll_interval_seconds: float = 5,
         reclaim_limit: int = 100,
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
+        sweep_sandboxes: Callable[[frozenset[tuple[UUID, int]]], Awaitable[int]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._poll_interval = poll_interval_seconds
         self._reclaim_limit = reclaim_limit
         self._sweep_exports = sweep_exports
+        self._sweep_sandboxes = sweep_sandboxes
         self._stopping = False
 
     def stop(self) -> None:
@@ -177,6 +180,12 @@ class MaintenanceWorker:
             if uow.queue is None:
                 raise RuntimeError("maintenance worker requires a queue repository")
             reclaimed = await uow.queue.reclaim_expired(self._reclaim_limit)
+            live_run_leases = await uow.maintenance.live_run_leases()
+        if self._sweep_sandboxes is not None:
+            try:
+                await self._sweep_sandboxes(live_run_leases)
+            except Exception:
+                logger.exception("sandbox reaper failed")
         async with self._uow_factory() as uow:
             sessions = await uow.maintenance.projection_sessions(self._reclaim_limit)
         for session_id in sessions:

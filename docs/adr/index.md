@@ -50,3 +50,4 @@ implementation without one.
 - [ADR-0039 — Milestone 3 provider and trajectory-export seams (Proposed)](0039-milestone-3-provider-and-export-seams.md)
 - [ADR-0040 — Milestone 4 policy, approval, and workspace seams (Proposed)](0040-milestone-4-policy-and-tool-seams.md)
 - [ADR-0041 — Milestone 5 API, identity, and streaming seams (Proposed)](0041-milestone-5-api-and-streaming-seams.md)
+- [ADR-0042 — Milestone 6 sandbox, bridge, and artifact seams (Proposed)](0042-milestone-6-sandbox-and-artifact-seams.md)

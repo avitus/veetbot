@@ -460,6 +460,9 @@ class InMemoryToolInvocationRepository:
                         if invocation.structured_result is None
                         else dict(invocation.structured_result)
                     ),
+                    "output_bytes": invocation.output_bytes,
+                    "truncated": invocation.truncated,
+                    "artifact_id": invocation.artifact_id,
                     "outcome": (
                         None
                         if invocation.outcome is None
@@ -947,7 +950,7 @@ class InMemoryTrajectoryExportRepository:
             for run_id, row in list(self._rows.items()):
                 if row.tenant_id != tenant_id or row.principal_id != principal_id:
                     continue
-                if row.artifact.expires_at <= expired_at:
+                if row.artifact.expires_at is None or row.artifact.expires_at <= expired_at:
                     continue
                 artifact = row.artifact.model_copy(update={"expires_at": expired_at})
                 self._rows[run_id] = row.model_copy(update={"artifact": artifact})
@@ -960,20 +963,51 @@ class InMemoryTrajectoryExportRepository:
             for row in self._rows.values():
                 if len(expired) >= limit:
                     break
-                if row.artifact.expires_at <= now:
+                if row.artifact.expires_at is not None and row.artifact.expires_at <= now:
                     expired.append(row.artifact.model_copy(deep=True))
         return expired
 
     async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
         async with self._lock:
             for run_id, row in list(self._rows.items()):
-                if row.artifact.id == artifact_id and row.artifact.expires_at <= now:
+                if (
+                    row.artifact.id == artifact_id
+                    and row.artifact.expires_at is not None
+                    and row.artifact.expires_at <= now
+                ):
                     del self._rows[run_id]
                     return True
         return False
 
 
+class InMemoryArtifactRepository:
+    def __init__(self) -> None:
+        self._rows: dict[UUID, ArtifactRef] = {}
+        self._lock = asyncio.Lock()
+
+    async def create(self, artifact: ArtifactRef) -> ArtifactRef:
+        async with self._lock:
+            existing = self._rows.get(artifact.id)
+            if existing is not None and existing != artifact:
+                raise ConflictError("artifact id already exists with different metadata")
+            self._rows[artifact.id] = artifact.model_copy(deep=True)
+            return artifact.model_copy(deep=True)
+
+    async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        async with self._lock:
+            artifact = self._rows.get(artifact_id)
+            if artifact is not None and (
+                artifact.tenant_id == principal.tenant_id
+                and artifact.principal_id == principal.principal_id
+            ):
+                return artifact.model_copy(deep=True)
+        raise NotFoundError("artifact not found")
+
+
 class InMemoryMaintenanceRepository:
+    async def live_run_leases(self) -> frozenset[tuple[UUID, int]]:
+        return frozenset()
+
     async def projection_sessions(self, limit: int) -> list[UUID]:
         del limit
         return []

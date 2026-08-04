@@ -111,7 +111,7 @@ def test_compose_has_one_healthy_postgres_service() -> None:
     assert set(compose["volumes"]) == {"agent-pgdata"}
 
 
-def test_ci_has_the_four_required_partitions() -> None:
+def test_ci_has_the_required_partitions() -> None:
     workflow_directory = ROOT / ".github" / "workflows"
     assert not list(workflow_directory.glob("*.yml"))
     assert not list(workflow_directory.glob("*.yaml"))
@@ -119,8 +119,11 @@ def test_ci_has_the_four_required_partitions() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
     assert config["version"] == 2.1
     jobs = config["jobs"]
-    assert set(jobs) == {"static", "contract", "integration", "live"}
-    for job in jobs.values():
+    assert set(jobs) == {"static", "contract", "integration", "sandbox", "live"}
+    for name, job in jobs.items():
+        if name == "sandbox":
+            assert job["machine"] == {"image": "ubuntu-2404:current"}
+            continue
         assert job["docker"][0]["image"] == "cimg/python:3.12"
 
     postgres = jobs["integration"]["docker"][1]
@@ -143,13 +146,14 @@ def test_ci_has_the_four_required_partitions() -> None:
     assert "make lint typecheck test-static docs-check" in commands["static"]
     assert "make test-contract" in commands["contract"]
     assert "make migrate test-integration" in commands["integration"]
+    assert "make test-sandbox" in commands["sandbox"]
     assert "make test-live" in commands["live"]
 
     workflows = config["workflows"]
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
     assert workflows["verify"] == {
         "unless": "<< pipeline.parameters.run_live >>",
-        "jobs": ["static", "contract", "integration"],
+        "jobs": ["static", "contract", "integration", "sandbox"],
     }
     assert workflows["live_manual"]["when"] == "<< pipeline.parameters.run_live >>"
     nightly = workflows["live_nightly"]
