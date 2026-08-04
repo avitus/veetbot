@@ -120,13 +120,16 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
     still authenticates each forwarded request to the host bridge, so the
     plan's bearer-token boundary remains enforced without making the bearer
     available to the least-trusted process.
-15. **Operational waits have bounded cleanup.** Docker CLI calls have a
-    60-second adapter timeout and are killed and waited when the timeout or
-    caller cancellation wins. Execution monitor tasks are cancelled and joined
+15. **Operational waits have bounded cleanup.** Control-plane Docker CLI calls
+    have a 60-second adapter timeout, and direct workspace stream reads have the
+    same stall bound; their processes are killed and waited when the timeout or
+    caller cancellation wins. Tool execution remains bounded by its declared
+    command and lease limits. Execution monitor tasks are cancelled and joined
     on every path. Release waits up to five seconds for abandoned workspace
-    streams before forcing teardown; artifact export explicitly closes its
-    source stream after the store finishes or fails. These bounds trade a
-    potentially incomplete abandoned read for deterministic lease cleanup.
+    streams before forcing teardown, but it still reconciles an in-flight
+    provision before completing; artifact export explicitly closes its source
+    stream after the store finishes or fails. These bounds trade a potentially
+    incomplete abandoned read for deterministic lease cleanup.
 16. **Raw artifact filenames are preserved and sanitized at download.** The
     implementation follows `sandbox-isolation.md:1100-1122` and
     `sandbox-isolation.md:1599-1601`: a producer name such as

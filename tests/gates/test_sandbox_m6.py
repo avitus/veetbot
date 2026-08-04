@@ -19,10 +19,12 @@ from agent_core.adapters.execution import docker as docker_adapter
 from agent_core.adapters.execution.docker import DockerExecutionEnvironment
 from agent_core.domain.errors import ExecutionUnavailable
 from agent_core.domain.execution import (
+    EgressPolicy,
     EnvironmentHandle,
     EnvironmentSpec,
     ExecutionResult,
     FileChange,
+    ResourceLimits,
 )
 from agent_core.execution.egress_core import address_is_public
 from agent_core.execution.environment import build_sandbox_environment
@@ -132,6 +134,7 @@ async def test_docker_commands_are_bounded_and_reaped(
     class HangingProcess:
         returncode: int | None = None
         killed = False
+        waited = False
 
         async def communicate(self, stdin: bytes | None = None) -> tuple[bytes, bytes]:
             del stdin
@@ -143,6 +146,7 @@ async def test_docker_commands_are_bounded_and_reaped(
             self.returncode = -9
 
         async def wait(self) -> int:
+            self.waited = True
             assert self.returncode is not None
             return self.returncode
 
@@ -156,6 +160,70 @@ async def test_docker_commands_are_bounded_and_reaped(
     with pytest.raises(ExecutionUnavailable, match="timed out"):
         await docker_adapter._docker("ps", timeout_seconds=0.001)
     assert process.killed is True
+    assert process.waited is True
+
+
+async def test_docker_workspace_stream_is_bounded_and_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HangingReader:
+        async def read(self, maximum_bytes: int) -> bytes:
+            del maximum_bytes
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    class HangingProcess:
+        stdout = HangingReader()
+        returncode: int | None = None
+        killed = False
+        waited = False
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            self.waited = True
+            assert self.returncode is not None
+            return self.returncode
+
+    process = HangingProcess()
+
+    async def spawn(*args: object, **kwargs: object) -> HangingProcess:
+        del args, kwargs
+        return process
+
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = DockerExecutionEnvironment(clock, SequenceIdFactory())
+    run_id = UUID(int=93)
+    handle = EnvironmentHandle(
+        "environment",
+        "tenant-a",
+        run_id,
+        1,
+        clock.now(),
+        clock.now() + timedelta(minutes=1),
+    )
+    adapter._states[handle.environment_id] = docker_adapter._DockerState(
+        EnvironmentSpec(
+            "tenant-a",
+            run_id,
+            1,
+            "sha256:" + "0" * 64,
+            ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30),
+            EgressPolicy(),
+            {},
+        ),
+        "container",
+        "volume",
+    )
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(docker_adapter, "_DOCKER_COMMAND_TIMEOUT_SECONDS", 0.001)
+    stream = adapter.workspace(handle).stream("file", 1024)
+    with pytest.raises(ExecutionUnavailable, match="stream timed out"):
+        await anext(stream)
+    assert process.killed is True
+    assert process.waited is True
 
 
 @pytest.mark.parametrize(

@@ -39,6 +39,7 @@ from agent_core.domain.execution import (
 from agent_core.ports.determinism import Clock, IdFactory
 
 _VIRTUAL_ROOT = PurePosixPath("/workspace")
+_DOCKER_COMMAND_TIMEOUT_SECONDS = 60.0
 _SNAPSHOT_SCRIPT = r"""
 import hashlib,json,os,stat
 result={}
@@ -229,7 +230,7 @@ class _DockerCommandError(ExecutionUnavailable):
 async def _docker(
     *arguments: str,
     stdin: bytes | None = None,
-    timeout_seconds: float = 60.0,
+    timeout_seconds: float = _DOCKER_COMMAND_TIMEOUT_SECONDS,
 ) -> bytes:
     try:
         process = await asyncio.create_subprocess_exec(
@@ -358,17 +359,21 @@ class DockerWorkspaceHandle:
             stderr=asyncio.subprocess.DEVNULL,
         )
         if process.stdout is None:
+            process.kill()
+            await asyncio.gather(process.wait(), return_exceptions=True)
             raise ExecutionUnavailable("container runtime did not provide an output pipe")
         observed = 0
         try:
-            while chunk := await process.stdout.read(64 * 1024):
+            while chunk := await asyncio.wait_for(
+                process.stdout.read(64 * 1024), _DOCKER_COMMAND_TIMEOUT_SECONDS
+            ):
                 observed += len(chunk)
                 if observed > maximum_bytes:
                     process.kill()
                     await process.wait()
                     raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
                 yield chunk
-            return_code = await process.wait()
+            return_code = await asyncio.wait_for(process.wait(), _DOCKER_COMMAND_TIMEOUT_SECONDS)
             if return_code == 44:
                 raise FileNotFoundError(path)
             if return_code == 45:
@@ -381,10 +386,12 @@ class DockerWorkspaceHandle:
                 raise NotADirectoryError(path)
             if return_code != 0:
                 raise ExecutionUnavailable("container workspace stream failed")
+        except TimeoutError as exc:
+            raise ExecutionUnavailable("container workspace stream timed out") from exc
         finally:
             if process.returncode is None:
                 process.kill()
-                await process.wait()
+                await asyncio.gather(process.wait(), return_exceptions=True)
 
     async def write(self, path: str, data: bytes) -> None:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
@@ -771,7 +778,11 @@ class DockerExecutionEnvironment:
                 await asyncio.wait_for(relay.wait(), timeout=1)
             if relay.returncode is None:
                 relay.terminate()
-                await relay.wait()
+                try:
+                    await asyncio.wait_for(relay.wait(), timeout=1)
+                except TimeoutError:
+                    relay.kill()
+                    await asyncio.gather(relay.wait(), return_exceptions=True)
             pump.cancel()
             await asyncio.gather(pump, return_exceptions=True)
 

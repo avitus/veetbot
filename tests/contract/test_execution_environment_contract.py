@@ -80,6 +80,18 @@ class _FailingProvisionEnvironment(FakeExecutionEnvironment):
         raise RuntimeError("synthetic provision failure")
 
 
+class _BlockingProvisionEnvironment(FakeExecutionEnvironment):
+    def __init__(self, clock: FixedClock, ids: SequenceIdFactory) -> None:
+        super().__init__(clock, ids)
+        self.started = asyncio.Event()
+        self.proceed = asyncio.Event()
+
+    async def provision(self, specification: EnvironmentSpec) -> EnvironmentHandle:
+        self.started.set()
+        await self.proceed.wait()
+        return await super().provision(specification)
+
+
 async def test_execution_environment_lifecycle_stdin_and_output_limit() -> None:
     clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
     adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
@@ -353,3 +365,52 @@ async def test_sandbox_release_bounds_an_abandoned_workspace_stream() -> None:
     await asyncio.wait_for(manager.release_run(run_id), timeout=0.2)
     assert adapter.live_environment_ids() == frozenset()
     await stream.aclose()  # type: ignore[attr-defined]
+
+
+async def test_sandbox_release_reconciles_provisioning_after_drain_timeout() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _BlockingProvisionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(
+        adapter,
+        image_digest=fake_image_digest(),
+        limits=_limits(),
+        drain_timeout_seconds=0.01,
+    )
+    run_id = UUID(int=24)
+    operation = asyncio.create_task(manager.for_run("tenant-a", run_id, 1).write("late", b"x"))
+    await adapter.started.wait()
+    release = asyncio.create_task(manager.release_run(run_id))
+    await asyncio.sleep(0.02)
+    assert release.done() is False
+    adapter.proceed.set()
+    with pytest.raises(ExecutionRejected, match="released"):
+        await operation
+    await release
+    assert adapter.live_environment_ids() == frozenset()
+    assert manager._locks == {}
+    assert manager._lock_users == {}
+
+
+async def test_sandbox_close_reconciles_provisioning_after_drain_timeout() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _BlockingProvisionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(
+        adapter,
+        image_digest=fake_image_digest(),
+        limits=_limits(),
+        drain_timeout_seconds=0.01,
+    )
+    operation = asyncio.create_task(
+        manager.for_run("tenant-a", UUID(int=25), 1).write("late", b"x")
+    )
+    await adapter.started.wait()
+    closing = asyncio.create_task(manager.close())
+    await asyncio.sleep(0.02)
+    assert closing.done() is False
+    adapter.proceed.set()
+    with pytest.raises(ExecutionRejected, match="closing"):
+        await operation
+    await closing
+    assert adapter.live_environment_ids() == frozenset()
+    assert manager._locks == {}
+    assert manager._lock_users == {}

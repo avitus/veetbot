@@ -157,6 +157,10 @@ class SandboxManager:
             self._lock_users[key] = self._lock_users.get(key, 0) + 1
         try:
             async with lock:
+                if self._closing:
+                    raise ExecutionRejected("sandbox manager is closing")
+                if run_id in self._released_runs:
+                    raise ExecutionRejected("sandbox run has been released")
                 current = self._handles.get(key)
                 if current is not None:
                     return current
@@ -180,15 +184,23 @@ class SandboxManager:
                 # ownership; release and close rely on this handoff being atomic
                 # with respect to asyncio task cancellation.
                 self._handles[key] = handle
+                if self._closing or run_id in self._released_runs:
+                    reason = "closing" if self._closing else "released"
+                    # The teardown flow snapshots and retries retained handles.
+                    with suppress(Exception):
+                        await self._destroy_matches(((key, handle),))
+                    raise ExecutionRejected(f"sandbox run is {reason}")
                 return handle
         finally:
-            remaining = self._lock_users[key] - 1
-            if remaining:
-                self._lock_users[key] = remaining
-            else:
-                self._lock_users.pop(key, None)
-                if key not in self._handles:
-                    self._locks.pop(key, None)
+            async with self._condition:
+                remaining = self._lock_users.get(key, 1) - 1
+                if remaining:
+                    self._lock_users[key] = remaining
+                else:
+                    self._lock_users.pop(key, None)
+                    if key not in self._handles:
+                        self._locks.pop(key, None)
+                self._condition.notify_all()
 
     @asynccontextmanager
     async def _operation(
@@ -257,8 +269,8 @@ class SandboxManager:
                 async with self._guard:
                     if self._handles.get(key) == handle:
                         self._handles.pop(key, None)
-                        self._locks.pop(key, None)
-                        self._lock_users.pop(key, None)
+                        if self._lock_users.get(key, 0) == 0:
+                            self._locks.pop(key, None)
         if cancelled is not None:
             raise cancelled
         if errors:
@@ -267,7 +279,11 @@ class SandboxManager:
     async def _discard_unused_locks(self, run_id: UUID | None = None) -> None:
         async with self._guard:
             for key in tuple(self._locks):
-                if key not in self._handles and (run_id is None or key[1] == run_id):
+                if (
+                    key not in self._handles
+                    and self._lock_users.get(key, 0) == 0
+                    and (run_id is None or key[1] == run_id)
+                ):
                     self._locks.pop(key, None)
                     self._lock_users.pop(key, None)
 
@@ -303,6 +319,9 @@ class SandboxManager:
                         await self._condition.wait_for(
                             lambda: not any(key[1] == run_id for key in self._active)
                         )
+                await self._condition.wait_for(
+                    lambda: not any(key[1] == run_id for key in self._lock_users)
+                )
                 matches = tuple(
                     (key, handle) for key, handle in self._handles.items() if key[1] == run_id
                 )
@@ -326,6 +345,7 @@ class SandboxManager:
             with suppress(TimeoutError):
                 async with asyncio.timeout(self._drain_timeout_seconds):
                     await self._condition.wait_for(lambda: not self._active)
+            await self._condition.wait_for(lambda: not self._lock_users)
         async with self._teardown_lock:
             try:
                 await self._destroy_matches(tuple(self._handles.items()))

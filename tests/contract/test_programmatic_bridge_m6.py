@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import os
+import secrets
 import stat
 import tempfile
 from pathlib import Path
@@ -138,7 +139,7 @@ async def test_unix_bridge_starts_with_a_private_socket() -> None:
         socket_path = Path(directory) / "bridge.sock"
         session = ProgrammaticBridgeSession(
             script_hash=hashlib.sha256(b"script").hexdigest(),
-            token="turn-token",
+            token=secrets.token_urlsafe(16),
             dispatch=dispatch,
         )
         server = UnixToolBridgeServer(socket_path, session)
