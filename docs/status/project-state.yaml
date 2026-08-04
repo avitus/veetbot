@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_3_in_progress
+  status: milestone_3_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 3
   authorized_milestones:
@@ -24,7 +24,7 @@ milestones:
     status: complete
   "3":
     title: Model adapters (OpenAI, Anthropic, OpenAI-compatible) and normalized streaming
-    status: in_progress
+    status: complete
   "4":
     title: Policy, approvals, and complete tool lifecycle
     status: not_started
@@ -188,13 +188,44 @@ verification:
           contexts completed successfully.
     remaining: []
   milestone_3:
-    recorded_at: 2026-08-03T20:44:21Z
-    status: in_progress
-    evidence: []
-    remaining:
-      - Implement and verify all 15 Milestone 3 hard gates.
-      - Pass local static, contract, integration, and optional credentialed live checks.
-      - Pass the hosted CircleCI static, contract, and integration workflow.
+    recorded_at: 2026-08-04T00:19:40Z
+    status: complete
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 161 source files, 145
+          static tests, 57 port contracts, 123 citation checks, strict
+          documentation builds, and all 72 gates active through Milestone 3
+          passed.
+      - check: complete non-live suite against PostgreSQL 16
+        outcome: passed
+        detail: >-
+          All 255 non-live tests passed together. The run included 53
+          integration and resilience tests covering the provider adapters,
+          durable pin and continuation recovery, trajectory persistence,
+          migrations, event runtime, evaluation cases, and tool recovery.
+      - check: credentialed provider smoke tests
+        outcome: passed
+        detail: >-
+          Both vendor one-call smoke tests passed. The locally supplied OpenAI
+          project key was mapped only into the test process and was neither
+          printed nor persisted.
+      - check: CodeRabbit implementation review
+        outcome: passed_with_documented_exception
+        detail: >-
+          All actionable Milestone 3 findings and follow-up findings were fixed
+          and revalidated across the three stacked pull requests. The sole
+          deferred performance suggestion would narrow the normalized-event
+          secret scan; it remains deferred until equivalent security coverage
+          can be proved.
+      - check: hosted CircleCI for pull request 4 commit 6768e82
+        outcome: passed
+        detail: >-
+          CircleCI jobs 67, 68, and 69 ran the static, PostgreSQL integration,
+          and contract partitions respectively; all three GitHub commit status
+          contexts completed successfully.
+    remaining: []
 
 documentation:
   canonical_format: markdown
@@ -484,5 +515,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-03T23:37:12Z
+last_updated: 2026-08-04T00:19:40Z
 last_reviewed_commit: c7fd4a2

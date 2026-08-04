@@ -4,7 +4,7 @@ title: Changelog
 
 # Changelog
 
-## 2026-08-03 — Milestone 3 started
+## 2026-08-03 — Milestone 3 completed
 
 - Authorized Milestone 3 and began implementation of the normalized model
   gateway, OpenAI Responses, Anthropic Messages, and OpenAI-compatible
@@ -34,6 +34,13 @@ title: Changelog
 - Proposed ADR-0039 for the reversible provider, configuration, pinning,
   metadata, fixture, and narrow artifact-store choices forced by the first
   Milestone 3 implementation.
+- Passed Ruff, strict mypy, 145 static tests, 57 contracts, all 255 non-live
+  tests against PostgreSQL 16, both credentialed vendor smoke tests, strict
+  documentation and citation checks, and all 72 cumulative hard gates.
+- Addressed the complete CodeRabbit review and its incremental follow-ups
+  across the three stacked pull requests. CircleCI jobs 67, 68, and 69 passed
+  the static, integration, and contract partitions for pull request 4 commit
+  `6768e82`, closing the final acceptance gap.
 
 ## 2026-08-03 — Milestone 2 completed
 
