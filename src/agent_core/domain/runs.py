@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, PositiveInt, model_validator
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
 from agent_core.domain.provenance import ElidedSpan
+from agent_core.domain.skills import LoadedSkillBody
+from agent_core.domain.tools import ToolSpec
 
 
 class RunStatus(StrEnum):
@@ -110,7 +112,12 @@ class RunCheckpoint(BaseModel):
     conversation: list[ConversationItem] = Field(default_factory=list)
     pending_tool_calls: list[Any] = Field(default_factory=list)
     pending_approval_ids: list[UUID] = Field(default_factory=list)
+    tool_pins_initialized: bool = False
+    pinned_tool_names: list[str] = Field(default_factory=list)
+    pinned_tool_versions: dict[str, str] = Field(default_factory=dict)
+    pinned_tool_specs: dict[str, ToolSpec] = Field(default_factory=dict)
     working_state: dict[str, Any] = Field(default_factory=dict)
+    loaded_skills: list[LoadedSkillBody] = Field(default_factory=list)
     compacted_summary: str | None = None
     summary_source_event_ids: list[PositiveInt] = Field(default_factory=list)
     summary_elided: list[ElidedSpan] = Field(default_factory=list)
@@ -122,6 +129,13 @@ class RunCheckpoint(BaseModel):
     provider_continuation: ProviderContinuation | None = None
     provider_pin: ProviderPin | None = None
     created_at: datetime
+
+    @model_validator(mode="after")
+    def pinned_tools_match(self) -> RunCheckpoint:
+        names = set(self.pinned_tool_names)
+        if not set(self.pinned_tool_versions) <= names or not set(self.pinned_tool_specs) <= names:
+            raise ValueError("checkpoint pinned tool metadata does not match its pinned tool names")
+        return self
 
 
 class Run(BaseModel):

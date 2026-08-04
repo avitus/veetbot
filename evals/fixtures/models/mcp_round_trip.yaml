@@ -1,0 +1,8 @@
+turns:
+  - kind: tool_call
+    tool_name: mcp.docs.search
+    arguments: {query: retention}
+    call_id: call_mcp_search
+  - kind: final
+    text: Retention is thirty days.
+    stop_reason: end_turn

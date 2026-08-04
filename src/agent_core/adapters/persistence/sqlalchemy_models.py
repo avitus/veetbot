@@ -12,6 +12,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Identity,
     Index,
     Integer,
@@ -494,3 +495,105 @@ class ModelCallRow(Base):
     cache_breakpoints_dropped: Mapped[int] = mapped_column(SmallInteger, server_default=text("0"))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SkillRow(Base):
+    __tablename__ = "skills"
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_skills_tenant_name"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SkillRevisionRow(Base):
+    __tablename__ = "skill_revisions"
+    __table_args__ = (
+        UniqueConstraint("skill_id", "revision", name="uq_skill_revisions_skill_revision"),
+        Index(
+            "ix_skill_revisions_skill_status_revision_desc",
+            "skill_id",
+            "status",
+            text("revision DESC"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    skill_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE")
+    )
+    revision: Mapped[int] = mapped_column(Integer)
+    version: Mapped[str] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text)
+    required_tools: Mapped[list[str]] = mapped_column(JSONB)
+    body: Mapped[str] = mapped_column(Text)
+    body_tokens: Mapped[int] = mapped_column(Integer)
+    content_sha256: Mapped[str] = mapped_column(String(64))
+    package_key: Mapped[str] = mapped_column(Text)
+    package_bytes: Mapped[int] = mapped_column(BigInteger)
+    file_count: Mapped[int] = mapped_column(Integer)
+    trust: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    authored_by_run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="RESTRICT")
+    )
+    authored_by_principal_id: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MCPServerRow(Base):
+    __tablename__ = "mcp_servers"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "server_id", name="uq_mcp_servers_tenant_server"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    server_id: Mapped[str] = mapped_column(Text)
+    transport: Mapped[str] = mapped_column(Text)
+    endpoint: Mapped[str] = mapped_column(Text)
+    operator_configured: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    auth_scheme: Mapped[str] = mapped_column(Text)
+    auth_name: Mapped[str | None] = mapped_column(Text)
+    credential_ref: Mapped[str | None] = mapped_column(Text)
+    token_endpoint: Mapped[str | None] = mapped_column(Text)
+    token_scopes: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    side_effect: Mapped[str] = mapped_column(Text)
+    risk: Mapped[str] = mapped_column(Text)
+    idempotency: Mapped[str] = mapped_column(Text)
+    required_scopes: Mapped[list[str]] = mapped_column(JSONB)
+    timeout_seconds: Mapped[int] = mapped_column(Integer)
+    maximum_output_bytes: Mapped[int] = mapped_column(BigInteger)
+    enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MCPToolCatalogRow(Base):
+    __tablename__ = "mcp_tool_catalog"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "server_id"],
+            ["mcp_servers.tenant_id", "mcp_servers.server_id"],
+            name="fk_mcp_tool_catalog_tenant_server_mcp_servers",
+            ondelete="CASCADE",
+        ),
+        UniqueConstraint(
+            "tenant_id",
+            "server_id",
+            "catalog_hash",
+            "remote_name",
+            name="uq_mcp_catalog_generation_tool",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    server_id: Mapped[str] = mapped_column(Text)
+    catalog_hash: Mapped[str] = mapped_column(String(64))
+    remote_name: Mapped[str] = mapped_column(Text)
+    registry_name: Mapped[str] = mapped_column(Text)
+    input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

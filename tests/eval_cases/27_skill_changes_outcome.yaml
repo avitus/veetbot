@@ -1,0 +1,26 @@
+name: skill_changes_outcome
+milestone: 8
+tags: [skills, comparison]
+input:
+  text: Determine whether this release is ready.
+model_fixture: skill_changes_outcome
+fixtures:
+  tools: [skill.load]
+  skills: [rel]
+arms:
+  - name: without_skill
+    skills: []
+    expected:
+      terminal_status: FAILED
+      failure_reason: model_permanent_error
+      model_calls: 2
+  - name: with_skill
+    skills: [rel@1]
+    expected:
+      terminal_status: COMPLETED
+      final_text: READY_FOR_RELEASE
+      model_calls: 2
+      tool_started_count: 1
+delta:
+  policy_failures: same
+  outcome: improves

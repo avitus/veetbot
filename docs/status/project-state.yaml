@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_7_complete
+  status: milestone_8_complete
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 7
+  current_milestone: 8
   authorized_milestones:
     - 0
     - 1
@@ -45,7 +45,7 @@ milestones:
     status: complete
   "8":
     title: Skills and MCP integration
-    status: not_started
+    status: complete
   "9":
     title: Long-term memory and knowledge retrieval
     status: not_started
@@ -450,6 +450,63 @@ verification:
           tool visibility was rejected because the normative context design pins
           the advertised tool set and requires authorization changes not to rewrite
           the stable prefix. Revoked calls remain denied by policy.
+    remaining: []
+  milestone_8:
+    recorded_at: 2026-08-04T18:36:55Z
+    status: complete
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 288 source and test
+          files, 268 static tests, 115 port contracts, strict documentation
+          builds, 123 citation checks, and all 140 hard gates active through
+          Milestone 8 passed.
+      - check: 140 cumulative hard gates
+        outcome: passed
+        detail: >-
+          Every active gate passed, including the real official-SDK stdio
+          subprocess, centralized builtin/MCP pipeline parity, immutable skill
+          revision, tenant isolation, and no-socket MCP harness checks.
+      - check: PostgreSQL 16 integration partition
+        outcome: passed
+        detail: >-
+          All 74 integration and resilience tests passed. Coverage includes the
+          Milestone 8 migration and reconstruction of the same session with its
+          recorded skill revision, loaded body, persisted MCP server, rediscovered
+          tool, and successful remote call.
+      - check: complete non-live suite against PostgreSQL 16 and Docker
+        outcome: passed
+        detail: >-
+          All 467 non-live tests passed with only the two credentialed provider
+          smoke tests deselected. This included the PostgreSQL integration and
+          resilience coverage and ten real-Docker sandbox security tests.
+      - check: CodeRabbit local review remediation
+        outcome: passed_locally
+        detail: >-
+          The local review found one additional reconstruction ambiguity around
+          an explicitly empty persisted tool-pin set. An initialization marker
+          and regression test now distinguish an empty pin set from missing pin
+          state.
+      - check: hosted CircleCI for pull request 9
+        outcome: passed
+        detail: >-
+          The static, contract, PostgreSQL integration, and real-Docker sandbox
+          lanes all passed on review-remediation commit 0db9cff.
+      - check: CodeRabbit hosted review remediation
+        outcome: passed
+        detail: >-
+          All 19 initial actionable review threads were fixed, answered, and
+          resolved. Three incremental summary findings were also fixed. The final
+          hosted review of commit 0db9cff completed without new findings, and no
+          review threads remain unresolved.
+      - check: proposed ADR-0044
+        outcome: owner_review_requested
+        detail: >-
+          The forced implementation choices are recorded explicitly, including
+          deterministic tar.zst archives, event-reconstructed pins, ephemeral MCP
+          prompts, exact SDK subprocess environments, and the managed worker
+          egress proxy.
     remaining: []
 
 documentation:

@@ -4,17 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.context import WorkingState
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.messages import (
     FakeModelScript,
     ScriptedToolCall,
     ScriptedTurn,
 )
-from agent_core.domain.runs import RunLimits, RunStatus
+from agent_core.domain.runs import RunCheckpoint, RunLimits, RunStatus
 from agent_core.ports.context import PressureAwareContextBuilder
 from tests.contract.support import NOW
 
@@ -100,6 +103,61 @@ async def test_build_stable() -> None:
 
     assert first.model_dump_json() == second.model_dump_json()
     assert first.metadata["prefix_sha256"] == second.metadata["prefix_sha256"]
+
+
+async def test_resumed_run_preserves_tool_pins_across_context_rotation() -> None:
+    async with build(
+        settings=_settings(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        session_id = await composition.sessions.create()
+        run_id = await composition.runs.submit("establish context plan", session_id)
+        await composition.runs.wait_terminal(run_id)
+        plan = await composition.executor._context_planner.current(session_id)
+        assert plan is not None and plan.tool_specs
+        checkpoint = RunCheckpoint(
+            run_id=SequenceIdFactory().new_id(),
+            version=2,
+            status=RunStatus.RUNNING,
+            pending_tool_calls=[{"call_id": "pending"}],
+            tool_pins_initialized=True,
+            pinned_tool_names=list(plan.tool_names),
+            pinned_tool_versions={spec.name: spec.version for spec in plan.tool_specs},
+            pinned_tool_specs={spec.name: spec.model_copy(deep=True) for spec in plan.tool_specs},
+            created_at=NOW,
+        )
+        rotated = plan.model_copy(update={"epoch": plan.epoch + 1})
+        composition.executor._apply_tool_pins(checkpoint, rotated, restored=True)
+        assert checkpoint.pending_tool_calls == [{"call_id": "pending"}]
+        assert checkpoint.pinned_tool_versions == {
+            spec.name: spec.version for spec in plan.tool_specs
+        }
+
+        changed_specs = (
+            plan.tool_specs[0].model_copy(update={"version": "review-mismatch"}),
+            *plan.tool_specs[1:],
+        )
+        changed = plan.model_copy(
+            update={
+                "epoch": plan.epoch + 2,
+                "tool_specs": changed_specs,
+                "tool_schema_sha256": "f" * 64,
+            }
+        )
+        with pytest.raises(ConflictError, match="persisted tool pins"):
+            composition.executor._apply_tool_pins(checkpoint, changed, restored=True)
+
+        missing = checkpoint.model_copy(
+            update={
+                "pinned_tool_names": [],
+                "pinned_tool_versions": {},
+                "pinned_tool_specs": {},
+            },
+            deep=True,
+        )
+        with pytest.raises(ConflictError, match="persisted tool pins"):
+            composition.executor._apply_tool_pins(missing, plan, restored=True)
 
 
 async def test_working_state_event_replays_into_the_next_run() -> None:

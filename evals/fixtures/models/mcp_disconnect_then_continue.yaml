@@ -1,0 +1,12 @@
+turns:
+  - kind: tool_call
+    tool_name: mcp.docs_disconnect.search
+    arguments: {query: first}
+    call_id: call_mcp_first
+  - kind: tool_call
+    tool_name: mcp.docs_disconnect.search
+    arguments: {query: second}
+    call_id: call_mcp_second
+  - kind: final
+    text: Continued after the server became unavailable.
+    stop_reason: end_turn

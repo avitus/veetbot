@@ -4,6 +4,31 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-04 — Milestone 8 skills and MCP integration completed
+
+- Added validated immutable skill packages, content-addressed deterministic
+  archives, positive revision pinning, a capped metadata-only session catalog,
+  and selective body loading with checkpoint and process-reconstruction support.
+- Added official-SDK stdio and HTTP MCP adapters behind repository-owned ports,
+  normalized discovery, bounded authentication recovery, dynamic tool and prompt
+  registration, and ordinary centralized-pipeline execution.
+- Added a managed audited worker egress proxy for HTTP MCP and exact constructed
+  stdio child environments. Persisted destinations are revalidated against the
+  current deployment policy whenever a composition is reconstructed.
+- Added deterministic two-arm skill evaluation, scripted MCP round-trip and
+  disconnect cases, and the no-socket MCP harness gate. Activated all 17
+  Milestone 8 gates, bringing the cumulative active gate count to 140.
+- Proposed ADR-0044 for the reversible archive, pin reconstruction, prompt,
+  official-SDK, child-environment, proxy, evaluation, and trace choices forced by
+  the first implementation.
+- Passed `make check`, all 467 non-live tests against PostgreSQL 16 and Docker,
+  the 74-test PostgreSQL integration partition, strict documentation builds, and
+  all 140 cumulative gates.
+- Passed all four hosted CircleCI lanes on pull request 9. Addressed and resolved
+  all 19 initial CodeRabbit review threads and all three incremental findings;
+  the final hosted review completed without findings. Milestone 9 remains gated
+  on merging the reviewed Milestone 8 pull request into `dev`.
+
 ## 2026-08-03 — Milestone 3 completed
 
 - Authorized Milestone 3 and began implementation of the normalized model

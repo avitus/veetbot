@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
@@ -12,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 from agent_core.domain.messages import CacheBreakpoint, ModelRequest
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.provenance import ElidedSpan
+from agent_core.domain.skills import CatalogMetadata, SkillPin
 from agent_core.domain.tools import ToolSpec
 
 
@@ -96,7 +96,8 @@ class ContextPlan(BaseModel):
     tool_schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     snapshot_id: UUID | None = None
     snapshot_watermark: int = Field(default=0, ge=0)
-    skill_pins: tuple[dict[str, Any], ...] = ()
+    skill_pins: tuple[SkillPin, ...] = ()
+    skill_catalog: tuple[CatalogMetadata, ...] = ()
     cache_breakpoints: tuple[CacheBreakpoint, ...] = ()
     policy_version: str
     builder_version: str

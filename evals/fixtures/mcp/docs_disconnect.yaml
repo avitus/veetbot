@@ -1,0 +1,18 @@
+server_id: docs_disconnect
+transport: stdio
+endpoint: /fixture/docs-disconnect
+tools:
+  - name: search
+    description: Search a server that disconnects during the second call.
+    input_schema:
+      type: object
+      properties:
+        query: {type: string}
+      required: [query]
+      additionalProperties: false
+    replies:
+      - content: First call completed.
+      - error: REMOTE_DISCONNECT_DETAIL_MUST_NOT_REACH_THE_MESSAGE
+script:
+  - at_call: 2
+    action: disconnect

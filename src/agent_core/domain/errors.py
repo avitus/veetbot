@@ -132,6 +132,48 @@ class ContextOverflow(AgentCoreError):  # noqa: N818 - normative taxonomy name
     """The request cannot fit the configured context window."""
 
 
+class SkillValidationError(AgentCoreError):
+    """A skill package failed one named, total validation rule."""
+
+    def __init__(self, rule: str, message: str) -> None:
+        super().__init__(message)
+        self.rule = rule
+
+
+class SkillRevisionConflict(ConflictError):  # noqa: N818 - normative taxonomy name
+    """Optimistic skill revision assignment observed a newer winner."""
+
+    def __init__(self, current_revision: int) -> None:
+        super().__init__(
+            "skill revision changed during installation",
+            reason="skill_revision_conflict",
+            details={"current_revision": current_revision},
+        )
+        self.current_revision = current_revision
+
+
+class MCPUnavailableError(AgentCoreError):
+    """An MCP server is unavailable without escaping the tool outcome vocabulary."""
+
+    def __init__(self, reason_code: str) -> None:
+        super().__init__(reason_code)
+        self.reason_code = reason_code
+
+
+class MCPTransportError(MCPUnavailableError):
+    """An established MCP transport disconnected or could not complete a request."""
+
+    def __init__(self) -> None:
+        super().__init__("tool.server_unreachable")
+
+
+class MCPUnauthorizedError(MCPUnavailableError):
+    """An MCP connection or call was rejected as unauthorized."""
+
+    def __init__(self) -> None:
+        super().__init__("tool.server_unauthorized")
+
+
 class ToolLoopDetected(ConflictError):  # noqa: N818 - normative taxonomy name
     """The runtime detected a repeated tool-call loop."""
 

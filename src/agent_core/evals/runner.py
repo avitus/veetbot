@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -16,8 +17,12 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.runs import Run, RunLimits, RunStatus
-from agent_core.evals.cases import EvalCase, load_cases
-from agent_core.evals.fixtures import resolve_model_fixture
+from agent_core.evals.cases import EvalCase, EvalExpected, load_cases
+from agent_core.evals.fixtures import (
+    resolve_mcp_fixture,
+    resolve_model_fixture,
+    resolve_skill_fixture,
+)
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 
@@ -28,6 +33,8 @@ class EvalResult:
     events: list[EventEnvelope]
     pending_approvals: int = 0
     runs: tuple[Run, ...] = ()
+    arm_name: str | None = None
+    arm_results: tuple[EvalResult, ...] = ()
 
 
 def _settings() -> Settings:
@@ -54,10 +61,12 @@ def _assert_subsequence(actual: list[str], expected: list[str]) -> None:
             ) from exc
 
 
-def assert_expected(result: EvalResult) -> None:
+def assert_expected(result: EvalResult, expected: EvalExpected | None = None) -> None:
     case = result.case
     run = result.run
-    expected = case.expected
+    expected = expected or case.expected
+    if expected is None:
+        raise EvalExpectationError("comparison cases must supply an arm expectation")
     if run.status != expected.terminal_status:
         raise EvalExpectationError(
             f"expected terminal status {expected.terminal_status}, got {run.status}"
@@ -123,9 +132,28 @@ def assert_expected(result: EvalResult) -> None:
         raise EvalExpectationError(
             f"expected reason codes were not observed: {sorted(missing_reason_codes)}"
         )
+    persisted_and_visible = json.dumps(
+        {
+            "final_message": run.final_message,
+            "events": [event.payload for event in result.events],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str,
+    )
+    leaked = [marker for marker in expected.absent_strings if marker in persisted_and_visible]
+    if leaked:
+        raise EvalExpectationError(f"forbidden strings were observed: {leaked}")
 
 
-async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
+async def _run_single(
+    case: EvalCase,
+    fixture_root: Path,
+    *,
+    expected: EvalExpected,
+    enabled_skills: list[str],
+    arm_name: str | None = None,
+) -> EvalResult:
     script = resolve_model_fixture(fixture_root, case.model_fixture)
     limits = RunLimits(**case.fixtures.run_limits.model_dump())
     principal = Principal(
@@ -135,6 +163,18 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         scopes=set(PLATFORM_SCOPES),
     )
     event_reader_principal = principal.model_copy(deep=True)
+    fixture_base = fixture_root.parent
+    skill_packages = tuple(
+        resolve_skill_fixture(fixture_base / "skills", name) for name in case.fixtures.skills
+    )
+    resolved_mcp = tuple(
+        resolve_mcp_fixture(
+            fixture_base / "mcp",
+            name,
+            tenant_id=principal.tenant_id,
+        )
+        for name in case.fixtures.mcp_servers
+    )
     bootstrap: Any = importlib.import_module("agent_core.bootstrap")
     async with bootstrap.build(
         settings=_settings(),
@@ -143,6 +183,10 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         sequential_ids=True,
         limits=limits,
         enabled_tools=case.fixtures.tools,
+        enabled_skills=enabled_skills,
+        skill_packages=skill_packages,
+        mcp_servers=tuple(fixture.config for fixture in resolved_mcp),
+        mcp_scripts={fixture.config.server_id: fixture.script for fixture in resolved_mcp},
         principal=principal,
         policy_profile=case.policy_profile,
     ) as composition:
@@ -215,15 +259,97 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
                     event_reader_principal,
                 )
         run = completed_runs[-1]
+        if case.session is None:
+            async with composition.uow_factory() as uow:
+                all_events = await uow.events.list_after(
+                    run.session_id,
+                    0,
+                    event_reader_principal,
+                )
     result = EvalResult(
         case=case,
         run=run,
         events=all_events,
         pending_approvals=pending_count,
         runs=tuple(completed_runs),
+        arm_name=arm_name,
     )
-    assert_expected(result)
+    assert_expected(result, expected)
     return result
+
+
+def _policy_failure_count(result: EvalResult) -> int:
+    return sum(
+        event.event_type == "tool.call.denied"
+        or (
+            isinstance((reason := event.payload.get("reason_code")), str)
+            and reason.startswith("policy.")
+        )
+        for event in result.events
+    )
+
+
+async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
+    if not case.arms:
+        assert case.expected is not None
+        return await _run_single(
+            case,
+            fixture_root,
+            expected=case.expected,
+            enabled_skills=case.fixtures.skills,
+        )
+    arm_results = tuple(
+        [
+            await _run_single(
+                case,
+                fixture_root,
+                expected=arm.expected,
+                enabled_skills=arm.skills,
+                arm_name=arm.name,
+            )
+            for arm in case.arms
+        ]
+    )
+    before, after = arm_results
+    assert case.delta is not None
+    before_policy = _policy_failure_count(before)
+    after_policy = _policy_failure_count(after)
+    if case.delta.policy_failures == "same" and before_policy != after_policy:
+        raise EvalExpectationError(
+            f"policy failures differ between arms: {before_policy} != {after_policy}"
+        )
+    if case.delta.policy_failures == "not_worse" and after_policy > before_policy:
+        raise EvalExpectationError(
+            f"policy failures worsened between arms: {before_policy} -> {after_policy}"
+        )
+    status_rank = {
+        RunStatus.FAILED: 0,
+        RunStatus.CANCELLED: 0,
+        RunStatus.WAITING_FOR_APPROVAL: 1,
+        RunStatus.WAITING_FOR_USER: 1,
+        RunStatus.QUEUED: 1,
+        RunStatus.RUNNING: 1,
+        RunStatus.COMPLETED: 2,
+    }
+    before_rank = status_rank[before.run.status]
+    after_rank = status_rank[after.run.status]
+    if case.delta.outcome == "improves" and after_rank <= before_rank:
+        raise EvalExpectationError(
+            f"outcome did not improve between arms: {before.run.status} -> {after.run.status}"
+        )
+    if case.delta.outcome == "not_worse" and after_rank < before_rank:
+        raise EvalExpectationError(
+            f"outcome worsened between arms: {before.run.status} -> {after.run.status}"
+        )
+    return EvalResult(
+        case=case,
+        run=after.run,
+        events=after.events,
+        pending_approvals=after.pending_approvals,
+        runs=after.runs,
+        arm_name=after.arm_name,
+        arm_results=arm_results,
+    )
 
 
 async def run_selected(

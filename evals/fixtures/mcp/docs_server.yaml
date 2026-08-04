@@ -1,0 +1,14 @@
+server_id: docs
+transport: stdio
+endpoint: /fixture/docs-server
+tools:
+  - name: search
+    description: Search the product documentation.
+    input_schema:
+      type: object
+      properties:
+        query: {type: string}
+      required: [query]
+      additionalProperties: false
+    replies:
+      - content: Retention is thirty days.

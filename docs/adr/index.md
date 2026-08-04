@@ -52,3 +52,4 @@ implementation without one.
 - [ADR-0041 — Milestone 5 API, identity, and streaming seams (Proposed)](0041-milestone-5-api-and-streaming-seams.md)
 - [ADR-0042 — Milestone 6 sandbox, bridge, and artifact seams (Proposed)](0042-milestone-6-sandbox-and-artifact-seams.md)
 - [ADR-0043 — Milestone 7 context-engine seams (Proposed)](0043-milestone-7-context-engine-seams.md)
+- [ADR-0044 — Milestone 8 skill and MCP seams (Proposed)](0044-milestone-8-skills-and-mcp-seams.md)

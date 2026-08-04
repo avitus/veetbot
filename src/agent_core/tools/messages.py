@@ -29,6 +29,11 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.timeout": "The tool did not finish within its allowed time.",
     "tool.internal_error": "The tool could not complete because of an internal error.",
     "tool.outcome_unknown": "The outcome of this call is unknown. Do not repeat it.",
+    "tool.server_unreachable": "The tool server is unavailable. Continue without this call.",
+    "tool.server_unauthorized": "The tool server rejected its credential and is unavailable.",
+    "tool.server_error": "The tool server reported that the call failed.",
+    "tool.auth_failed": "The tool server rejected its configured credential.",
+    "tool.auth_unsupported": "The tool server requires an unsupported authorization flow.",
     "policy.scope.missing": "Not performed. The principal lacks a required scope.",
     "policy.milestone1.non_pure": (
         "Not performed. This milestone authorizes only side-effect-free tools."

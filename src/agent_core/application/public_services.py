@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
     ApprovalCursor,
@@ -71,6 +72,7 @@ from agent_core.ports.persistence import (
     RepositoryUnitOfWork,
     UnitOfWorkFactory,
 )
+from agent_core.ports.skills import SkillCatalog
 
 type CancelParkedRun = Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]]
 type ResumeWaitingRun = Callable[[RepositoryUnitOfWork, Run], Awaitable[Run]]
@@ -199,11 +201,17 @@ class PublicSessionService:
         clock: Clock,
         ids: IdFactory,
         default_agent: AgentSpec,
+        catalogs: SkillCatalog | None = None,
+        activate_session: Callable[[UUID], Awaitable[None]] | None = None,
+        close_session: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
         self._default_agent = default_agent
+        self._catalogs = catalogs
+        self._activate_session = activate_session
+        self._close_session = close_session
 
     async def _resolve_agent(self, uow: RepositoryUnitOfWork, agent_id: str) -> AgentSpec:
         if agent_id in {"general", str(self._default_agent.id)}:
@@ -227,8 +235,16 @@ class PublicSessionService:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             agent = await self._resolve_agent(uow, agent_id)
+            session_id, catalog = await bootstrap_session(
+                uow,
+                self._ids,
+                self._catalogs,
+                self._close_session,
+                agent,
+                principal,
+            )
             session = Session(
-                id=self._ids.new_id(),
+                id=session_id,
                 tenant_id=principal.tenant_id,
                 principal_id=principal.principal_id,
                 agent_id=agent.id,
@@ -247,9 +263,20 @@ class PublicSessionService:
                     payload_schema_version=2,
                     actor_type="principal",
                     actor_id=principal.principal_id,
-                    payload={"agent_id": str(agent.id), "title": None},
+                    payload={
+                        "agent_id": str(agent.id),
+                        "title": None,
+                        "skill_pins": (
+                            []
+                            if catalog is None
+                            else [pin.model_dump(mode="json") for pin in catalog.pins]
+                        ),
+                        "dropped_skills": ([] if catalog is None else list(catalog.dropped_names)),
+                    },
                 )
             )
+        if self._activate_session is not None:
+            await self._activate_session(session.id)
         return _session_view(session, None)
 
     async def get(self, principal: Principal, session_id: UUID) -> SessionView:
@@ -272,6 +299,8 @@ class PublicSessionService:
                 )
             if session.status is SessionStatus.ACTIVE:
                 session = await uow.sessions.close(session_id, principal, self._clock.now())
+        if self._close_session is not None:
+            await self._close_session(session_id)
         return _session_view(session, None)
 
     async def ready(self) -> bool:

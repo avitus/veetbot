@@ -20,6 +20,7 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.skills import CatalogMetadata
 from agent_core.domain.tools import ToolSpec
 
 PLATFORM_FRAMING = (
@@ -30,9 +31,13 @@ PLATFORM_FRAMING = (
 )
 
 
-def build_prefix(agent: AgentSpec, tools: Sequence[ToolSpec]) -> list[SystemMessage]:
+def build_prefix(
+    agent: AgentSpec,
+    tools: Sequence[ToolSpec],
+    skill_catalog: Sequence[CatalogMetadata] = (),
+) -> list[ConversationItem]:
     tool_names = ", ".join(spec.name for spec in tools) or "none"
-    return [
+    base: list[ConversationItem] = [
         SystemMessage(content=[TextPart(text=PLATFORM_FRAMING)]),
         SystemMessage(
             content=[TextPart(text=agent.instructions)],
@@ -43,9 +48,28 @@ def build_prefix(agent: AgentSpec, tools: Sequence[ToolSpec]) -> list[SystemMess
             trust=TrustLevel.TRUSTED_CONFIGURATION,
         ),
     ]
+    catalog_items = [
+        UserMessage(
+            content=[
+                TextPart(
+                    text=(
+                        "Available skill metadata (load with skill.load): "
+                        f"name={entry.manifest.name}; "
+                        f"version={entry.manifest.version}; revision={entry.revision}; "
+                        f"description={entry.manifest.description}; required_tools="
+                        f"{','.join(entry.manifest.required_tools) or 'none'}"
+                    )
+                )
+            ],
+            trust=entry.trust,
+            principal_id=None,
+        )
+        for entry in skill_catalog
+    ]
+    return [*base, *envelope_items(catalog_items)]
 
 
-def prefix_bytes(prefix: Sequence[SystemMessage], tools: Sequence[ToolSpec]) -> bytes:
+def prefix_bytes(prefix: Sequence[ConversationItem], tools: Sequence[ToolSpec]) -> bytes:
     return canonical_json_bytes(
         {
             "conversation": [item.model_dump(mode="json") for item in prefix],
