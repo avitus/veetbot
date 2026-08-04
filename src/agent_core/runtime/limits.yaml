@@ -7,7 +7,7 @@ queue:
     async: 10
     maintenance: 20
 worker:
-  lease_seconds: 30
+  lease_seconds: 30.0
   heartbeat_divisor: 3
 sweeps:
   reclaim_expired_seconds: 5

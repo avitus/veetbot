@@ -261,6 +261,8 @@ def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPa
     result = CliRunner().invoke(app, ["run", "queued work"])
 
     assert result.exit_code == 5
+    assert "run did not reach a terminal state" in result.stderr
+    assert "run queued" not in result.stderr
     assert str(queued_id) in result.stderr
 
 
