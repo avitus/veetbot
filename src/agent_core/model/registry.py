@@ -47,6 +47,32 @@ PRICING_FIELDS = frozenset(
         "effective_at",
     }
 )
+PROFILE_VALIDATION_RULES = frozenset(
+    {
+        "schema_version",
+        "profile_grammar",
+        "profile_file_stem",
+        "profile_unique",
+        "adapter_registered",
+        "api_closed",
+        "api_permitted",
+        "base_url",
+        "credential_ref",
+        "capabilities_closed",
+        "capability_ceiling",
+        "limits_closed",
+        "in_band_reasoning",
+        "models_cardinality",
+        "model_id_unique",
+        "aliases_unique",
+        "catalog_resolves",
+        "pricing_xor_catalog",
+        "pricing_decimal_strings",
+        "pricing_required_amount",
+        "effective_at_offset",
+        "unknown_key",
+    }
+)
 
 
 class ProfileValidationError(ConfigurationError):

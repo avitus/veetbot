@@ -152,7 +152,9 @@ ALLOWED_TOOL_TRANSITIONS: dict[ToolInvocationStatus, frozenset[ToolInvocationSta
             ToolInvocationStatus.DENIED,
         }
     ),
-    ToolInvocationStatus.AUTHORIZED: frozenset({ToolInvocationStatus.RUNNING}),
+    ToolInvocationStatus.AUTHORIZED: frozenset(
+        {ToolInvocationStatus.RUNNING, ToolInvocationStatus.WAITING_FOR_APPROVAL}
+    ),
     ToolInvocationStatus.WAITING_FOR_APPROVAL: frozenset(
         {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
     ),
@@ -182,8 +184,8 @@ class ToolInvocation(BaseModel):
     tool_source: ToolSource = ToolSource.BUILTIN
     server_id: str | None = None
     idempotency_class: IdempotencyClass = IdempotencyClass.READ_ONLY
-    side_effect: SideEffectClass = SideEffectClass.NONE
-    risk: RiskLevel = RiskLevel.LOW
+    side_effect: SideEffectClass
+    risk: RiskLevel
     attempt_number: int = 1
     status: ToolInvocationStatus
     raw_arguments: str

@@ -11,6 +11,7 @@ import yaml
 from agent_core.domain.policies import (
     HardlineRule,
     LoadedRuleset,
+    PolicyCondition,
     PolicyDecisionType,
     PolicyRule,
     RiskLevel,
@@ -83,7 +84,9 @@ def _build_ruleset(
             PolicyRule(
                 side_effect=effect,
                 decision=PolicyDecisionType(row["decision"]),
-                condition=row.get("condition"),
+                condition=(
+                    PolicyCondition(row["condition"]) if row.get("condition") is not None else None
+                ),
                 otherwise=(PolicyDecisionType(row["otherwise"]) if row.get("otherwise") else None),
             )
         )
@@ -98,7 +101,12 @@ def _build_ruleset(
     expiry = profile.get("approval_expiry_seconds", {})
     if not isinstance(expiry, dict) or set(expiry) != {risk.value for risk in RiskLevel}:
         raise ValueError("approval expiry must define every risk level exactly once")
-    expiry_values = tuple((risk, int(expiry[risk.value])) for risk in RiskLevel)
+    if any(
+        not isinstance(expiry[risk.value], int) or isinstance(expiry[risk.value], bool)
+        for risk in RiskLevel
+    ):
+        raise ValueError("approval expiry values must be integers")
+    expiry_values = tuple((risk, expiry[risk.value]) for risk in RiskLevel)
     if any(seconds <= 0 for _risk, seconds in expiry_values):
         raise ValueError("approval expiry values must be positive")
     trust_overlay = profile.get("trust_overlay")
@@ -112,7 +120,9 @@ def _build_ruleset(
     unknown_tool = profile.get("unknown_tool")
     if not isinstance(unknown_tool, dict) or set(unknown_tool) != {"decision"}:
         raise ValueError("unknown-tool policy has an invalid shape")
-    PolicyDecisionType(unknown_tool["decision"])
+    unknown_tool_decision = PolicyDecisionType(unknown_tool["decision"])
+    if unknown_tool_decision is not PolicyDecisionType.DENY:
+        raise ValueError("unknown-tool policy must fail closed with deny")
     for section in ("self_approval", "advisory"):
         value = profile.get(section)
         if not isinstance(value, dict) or set(value) != {"enabled"}:
@@ -130,6 +140,7 @@ def _build_ruleset(
         rules=tuple(rules),
         hardline=hardline_rules,
         default_effect=PolicyDecisionType(profile.get("default_effect", "deny")),
+        unknown_tool_decision=unknown_tool_decision,
         external_untrusted_requires_approval=external_requires_approval,
         self_approval_enabled=profile["self_approval"]["enabled"],
         approval_expiry_seconds=expiry_values,

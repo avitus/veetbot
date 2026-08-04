@@ -111,7 +111,9 @@ class ApprovalService:
     async def expire_due(self, *, limit: int = 100) -> int:
         dispatch: list[UUID] = []
         async with self._uow_factory() as uow:
-            expired = await uow.approvals.expire_due(self._clock.now(), limit)
+            expired = await uow.approvals.expire_due(
+                self._clock.now(), limit, tenant_id=self._principal.tenant_id
+            )
             for approval in expired:
                 try:
                     owner = Principal(

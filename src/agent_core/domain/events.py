@@ -49,6 +49,19 @@ class EventEnvelope(BaseModel):
     created_at: datetime
 
 
+class ProcessEvent(BaseModel):
+    """An append-only process-scoped event with no synthetic session identity."""
+
+    id: UUID
+    event_type: str
+    payload_schema_version: int = 1
+    actor_type: str
+    actor_id: str | None = None
+    payload: dict[str, Any] = Field(default_factory=dict)
+    derivation_key: str
+    created_at: datetime
+
+
 def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
     """Project content-bearing events into provider-neutral conversation items."""
 

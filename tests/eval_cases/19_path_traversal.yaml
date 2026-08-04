@@ -9,6 +9,6 @@ expected:
   terminal_status: COMPLETED
   final_text: The path was rejected.
   model_calls: 2
-  tool_started_count: 1
-  reason_codes: [tool.arguments_invalid]
-  event_order: [tool.call.started, tool.call.failed, run.completed]
+  tool_started_count: 0
+  reason_codes: [policy.matrix.workspace_read]
+  event_order: [tool.call.denied, run.completed]

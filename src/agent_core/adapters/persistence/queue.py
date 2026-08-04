@@ -94,7 +94,7 @@ class PostgresRunQueue:
         lease = WorkerLease(run_id=run.id, worker_id=worker_id, lease_epoch=run.lease_epoch)
         return ClaimedRun(run=run, lease=lease)
 
-    async def heartbeat(self, lease: WorkerLease) -> bool:
+    async def heartbeat(self, lease: WorkerLease) -> tuple[bool, bool]:
         statement = (
             update(RunRow)
             .where(
@@ -107,8 +107,12 @@ class PostgresRunQueue:
                 lease_expires_at=self._clock.now() + timedelta(seconds=self._lease_seconds),
                 updated_at=self._clock.now(),
             )
+            .returning(RunRow.id, RunRow.cancel_requested_at)
         )
-        return bool(_rowcount(await self._session.execute(statement)))
+        row = (await self._session.execute(statement)).one_or_none()
+        if row is None:
+            return False, False
+        return True, row.cancel_requested_at is not None
 
     async def release(self, lease: WorkerLease, status: RunStatus) -> None:
         statement = (

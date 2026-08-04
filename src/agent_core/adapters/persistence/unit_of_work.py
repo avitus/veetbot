@@ -10,7 +10,7 @@ from types import TracebackType
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from agent_core.ports.dispatch import RunQueue
-from agent_core.ports.events import EventRepository
+from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -48,6 +48,7 @@ class UnitOfWorkRepositories:
     agents: AgentRepository
     approvals: ApprovalRepository
     policy_profiles: PolicyProfileRepository
+    process_events: ProcessEventRepository
     sessions: SessionRepository
     runs: RunRepository
     events: EventRepository
@@ -81,6 +82,7 @@ class MemoryUnitOfWork:
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
+        self.process_events = repositories.process_events
         self.sessions = repositories.sessions
         self.runs = repositories.runs
         self.events = repositories.events
@@ -140,6 +142,7 @@ class PostgresUnitOfWork:
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
+        self.process_events = repositories.process_events
         self.sessions = repositories.sessions
         self.runs = repositories.runs
         self.events = repositories.events

@@ -35,6 +35,7 @@ TOOL_MESSAGES: dict[str, str] = {
     ),
     "policy.matrix.unknown_tool": "Not performed. The requested capability is unknown.",
     "policy.matrix.external_write": "Not performed. Approval is required.",
+    "policy.matrix.workspace_read": "Not performed. The path is outside the workspace.",
     "policy.unclassifiable_action": "Not performed. The action could not be classified.",
     "policy.revalidation.changed": "Not performed. The approved action changed.",
     "policy.revalidation.escalated": "Not performed. Policy changed before execution.",

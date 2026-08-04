@@ -18,7 +18,7 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -145,6 +145,27 @@ class InMemoryRunRepository:
                 raise NotFoundError("run not found") from exc
         await self._sessions.get(run.session_id, principal)
         return run
+
+    async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
+        async with self._lock:
+            try:
+                current = self._runs[run_id]
+            except KeyError as exc:
+                raise NotFoundError("run not found") from exc
+            if current.status is not expected_status:
+                raise ConflictError(
+                    f"cancellation request expected {expected_status.value}, "
+                    f"found {current.status.value}"
+                )
+            updated = current.model_copy(
+                update={
+                    "cancel_requested_at": current.cancel_requested_at or self._clock.now(),
+                    "updated_at": self._clock.now(),
+                },
+                deep=True,
+            )
+            self._runs[run_id] = updated
+            return updated.model_copy(deep=True)
 
     async def transition(
         self,
@@ -290,6 +311,33 @@ class InMemoryEventRepository:
             )
 
 
+class InMemoryProcessEventRepository:
+    def __init__(self) -> None:
+        self._events: dict[str, ProcessEvent] = {}
+        self._lock = asyncio.Lock()
+
+    async def append(self, event: ProcessEvent) -> ProcessEvent:
+        async with self._lock:
+            existing = self._events.get(event.derivation_key)
+            if existing is not None:
+                if existing.model_dump(exclude={"created_at"}) != event.model_dump(
+                    exclude={"created_at"}
+                ):
+                    raise ConflictError("process event derivation identifies different content")
+                return existing.model_copy(deep=True)
+            self._events[event.derivation_key] = event.model_copy(deep=True)
+            return event.model_copy(deep=True)
+
+    async def list(self, event_type: str | None = None) -> list[ProcessEvent]:
+        async with self._lock:
+            rows = [
+                event.model_copy(deep=True)
+                for event in self._events.values()
+                if event_type is None or event.event_type == event_type
+            ]
+        return sorted(rows, key=lambda event: (event.created_at, event.id.int))
+
+
 class InMemoryToolInvocationRepository:
     def __init__(self, runs: RunRepository) -> None:
         self._runs = runs
@@ -409,6 +457,16 @@ class InMemoryApprovalRepository:
             self._actions[request.action_id] = request.id
             return request.model_copy(deep=True)
 
+    async def discard_pending(self, approval_id: UUID) -> None:
+        async with self._lock:
+            request = self._approvals.get(approval_id)
+            if request is None:
+                return
+            if request.status is not ApprovalStatus.PENDING:
+                raise ConflictError("only a pending approval can be discarded")
+            del self._approvals[approval_id]
+            self._actions.pop(request.action_id, None)
+
     @staticmethod
     def _visible(request: ApprovalRequest, principal: Principal) -> bool:
         return request.tenant_id == principal.tenant_id
@@ -455,7 +513,7 @@ class InMemoryApprovalRepository:
                 and (run_id is None or request.run_id == run_id)
                 and (cursor is None or str(request.id) > cursor)
             ]
-        return sorted(rows, key=lambda row: (row.created_at, row.id.int))[:limit]
+        return sorted(rows, key=lambda row: row.id.int)[:limit]
 
     async def resolve(
         self,
@@ -498,13 +556,16 @@ class InMemoryApprovalRepository:
                 approval=updated.model_copy(deep=True),
             )
 
-    async def expire_due(self, now: datetime, limit: int) -> list[ApprovalRequest]:
+    async def expire_due(
+        self, now: datetime, limit: int, *, tenant_id: str
+    ) -> list[ApprovalRequest]:
         async with self._lock:
             due = sorted(
                 (
                     request
                     for request in self._approvals.values()
                     if request.status is ApprovalStatus.PENDING
+                    and request.tenant_id == tenant_id
                     and request.expires_at is not None
                     and request.expires_at <= now
                 ),

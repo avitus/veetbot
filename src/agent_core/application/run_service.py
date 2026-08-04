@@ -39,7 +39,7 @@ class RunService:
         principal: Principal,
         clock: Clock,
         ids: IdFactory,
-        cancel_active: Callable[[], None],
+        cancel_active: Callable[[UUID | None], None],
         seed_checkpoint: CheckpointSeeder,
         cancel_parked_run: CancelParkedRun,
         trajectory_export_enabled: bool = False,
@@ -175,8 +175,15 @@ class RunService:
                 return run
             if run.status in {RunStatus.QUEUED, RunStatus.WAITING_FOR_APPROVAL}:
                 return await self._cancel_parked_run(uow, run, self._principal.principal_id)
-        self._cancel_active()
-        return run
+            try:
+                requested = await uow.runs.request_cancellation(run.id, run.status)
+            except ConflictError:
+                refreshed = await uow.runs.get(run_id, self._principal)
+                if refreshed.status in TERMINAL_RUN_STATUSES:
+                    return refreshed
+                raise
+        self._cancel_active(run_id)
+        return requested
 
     def interrupt(self) -> None:
-        self._cancel_active()
+        self._cancel_active(None)

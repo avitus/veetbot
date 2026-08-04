@@ -24,11 +24,11 @@ committed spec and its dependents.
 ADR-0040 records the policy, approval, and workspace choices made during the
 autonomous implementation. The highest-value review points are:
 
-- **Process-wide policy audit without a session event (moderate):** the ruleset
-  is durably recorded in `policy_profiles`, but the specified
-  `policy.profile.loaded` event is not synthesized because the current event
-  model requires a real session before one exists. A global operational event
-  stream or an explicit specification amendment is still needed.
+- **Narrow process-wide operational event stream (moderate):** the ruleset is
+  durably recorded in `policy_profiles`, and `policy.profile.loaded` is emitted
+  to a separate append-only `process_events` stream because a hidden session
+  would misstate ownership. Review whether later operational events should
+  reuse this deliberately small stream or receive a broader design.
 - **Approval HTTP binding waits for Milestone 5 (cheap):** Milestone 4 exposes
   the complete transport-neutral application service and CLI. The HTTP route
   will bind that service when the plan's server, authentication, request IDs,
@@ -44,6 +44,15 @@ autonomous implementation. The highest-value review points are:
   execution could finish without an external change.
 - **Mixed batches remain sequential (cheap):** concurrency is admitted only
   when every call in the batch is an authorized, parallel-safe read.
+- **DNS protection is split across pure policy and future egress (moderate):**
+  literal protected addresses are denied by the frozen hardline rules. DNS is
+  not resolved during policy evaluation; no hostname is allowlisted in the M4
+  tier, and any later network adapter must enforce protected ranges against the
+  address actually connected.
+- **Legacy runs receive the pre-scope platform authority stamp (moderate):** the
+  M4 migration backfills existing runs with the 15 scopes that were implicit
+  before scope enforcement. Leaving the migration default `[]` would make every
+  pre-M4 run unable to resume.
 
 The complete rationale, consequences, and rejected alternatives are in
 [ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md).

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent_core.domain.errors import WorkspaceEscape, WorkspaceReadLimitExceededError
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
-from agent_core.tools.workspace.common import checksum, success, workspace_from
+from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
+from agent_core.tools.workspace.common import checksum, failure, success, workspace_from
 
 INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -55,11 +56,26 @@ class WorkspaceWriteTextTool:
         data = str(arguments["content"]).encode("utf-8", errors="strict")
         workspace = workspace_from(context)
         try:
-            await workspace.read(path)
+            await workspace.read_bounded(path, 0)
             created = False
-        except (FileNotFoundError, IsADirectoryError):
+        except WorkspaceReadLimitExceededError:
+            created = False
+        except FileNotFoundError:
             created = True
-        await workspace.write(path, data)
+        except (WorkspaceEscape, IsADirectoryError):
+            return failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "tool.arguments_invalid",
+                "workspace path is not a writable file",
+            )
+        try:
+            await workspace.write(path, data)
+        except (WorkspaceEscape, IsADirectoryError):
+            return failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "tool.arguments_invalid",
+                "workspace path is not a writable file",
+            )
         return success(
             {
                 "path": path,

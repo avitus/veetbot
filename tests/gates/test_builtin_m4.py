@@ -40,12 +40,12 @@ def test_handle_only() -> None:
         tree = ast.parse(
             (ROOT / "src/agent_core/tools/workspace" / name).read_text(encoding="utf-8")
         )
-        imports = {
-            alias.name.partition(".")[0]
-            for node in ast.walk(tree)
-            if isinstance(node, (ast.Import, ast.ImportFrom))
-            for alias in node.names
-        }
+        imports: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.update(alias.name.partition(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module is not None:
+                imports.add(node.module.partition(".")[0])
         calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
         assert imports.isdisjoint(forbidden_imports)
         assert not [
@@ -75,6 +75,24 @@ async def test_text_only(tmp_path: Path) -> None:
     assert text.ok
     assert text.structured is not None
     assert text.structured["content"] == "a" * 4095 + "€"
+    await handle.write(
+        "oversized.txt", b"x" * (WorkspaceReadTextTool.spec.maximum_output_bytes + 1)
+    )
+    oversized = await WorkspaceReadTextTool().execute(
+        {"path": "oversized.txt"}, replace(tool_context(), workspace=handle)
+    )
+    assert not oversized.ok
+    assert oversized.failure is not None
+    assert oversized.failure.kind.value == "output_too_large"
+
+
+async def test_invalid_workspace_paths_are_structured_failures(tmp_path: Path) -> None:
+    handle = LocalWorkspaceHandle(tmp_path / "workspace")
+    context = replace(tool_context(), workspace=handle)
+    read = await WorkspaceReadTextTool().execute({"path": "../outside"}, context)
+    write = await WorkspaceWriteTextTool().execute({"path": "../outside", "content": "no"}, context)
+    assert read.failure is not None and read.failure.kind.value == "invalid_arguments"
+    assert write.failure is not None and write.failure.kind.value == "invalid_arguments"
 
 
 async def test_write_idempotent(tmp_path: Path) -> None:
@@ -101,12 +119,24 @@ async def test_listing_stable(tmp_path: Path) -> None:
     result = await WorkspaceListFilesTool().execute(
         {"path": "", "recursive": False}, replace(tool_context(), workspace=handle)
     )
+    untruncated_root = tmp_path / "small-workspace"
+    untruncated_root.mkdir()
+    for index in range(1000):
+        (untruncated_root / f"file-{999 - index:04d}.txt").write_text(str(index), encoding="utf-8")
+    untruncated = await WorkspaceListFilesTool().execute(
+        {"path": "", "recursive": False},
+        replace(tool_context(), workspace=LocalWorkspaceHandle(untruncated_root)),
+    )
     assert result.ok and result.structured is not None
     paths = [entry["path"] for entry in result.structured["entries"]]
     assert paths == sorted(paths, key=lambda value: value.encode("utf-8"))
     assert len(paths) == 1000
     assert result.structured["truncated"] is True
     assert "outside-link" not in paths
+    assert untruncated.structured is not None
+    untruncated_paths = [entry["path"] for entry in untruncated.structured["entries"]]
+    assert untruncated.structured["truncated"] is False
+    assert paths == untruncated_paths
 
 
 async def test_provenance(tmp_path: Path) -> None:
@@ -121,6 +151,8 @@ async def test_provenance(tmp_path: Path) -> None:
     assert written.output_trust is TrustLevel.INTERNAL_TOOL
     assert fixture.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
     assert listing.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
+    assert listing.structured is not None
+    assert {entry["path"] for entry in listing.structured["entries"]} == {"a.md", "b.md"}
 
 
 async def test_demo_records(tmp_path: Path) -> None:

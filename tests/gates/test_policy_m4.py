@@ -61,7 +61,7 @@ from agent_core.policy.loader import DEFAULT_RULESET, load_ruleset
 from agent_core.policy.revalidation import revalidation_denial_reason
 from agent_core.policy.scopes import PLATFORM_SCOPES, missing_scopes
 from agent_core.runtime.cancellation import RunCancellationToken
-from agent_core.tools.executor import ToolPipeline, _idempotency_key
+from agent_core.tools.executor import ToolPipeline, _approval_argument_view, _idempotency_key
 from agent_core.tools.registry import StaticToolRegistry, validate_registration
 from agent_core.tools.validation import validate_and_normalize
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, ids, principal, run
@@ -81,6 +81,19 @@ class _ModifyingPolicy:
             explanation="Narrow the test value.",
             modified_arguments={"value": "effective"},
             policy_version="test@modified+h00000000",
+        )
+
+
+class _AllowPolicy:
+    async def evaluate(
+        self, proposed: ProposedAction, actor: Principal, active_run: Run
+    ) -> PolicyDecision:
+        del proposed, actor, active_run
+        return PolicyDecision(
+            decision=PolicyDecisionType.ALLOW,
+            reason_code="policy.test.allow",
+            explanation="Allow the scheduling contract fixture.",
+            policy_version="test@allow+h00000000",
         )
 
 
@@ -114,6 +127,53 @@ class _RecordingTool:
         del context
         self.observed = arguments
         return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
+
+
+class _SchedulingTool:
+    def __init__(self, *, name: str, side_effect: SideEffectClass, parallel: bool) -> None:
+        self.spec = ToolSpec(
+            name=name,
+            version="1.0.0",
+            description="Exercise scheduler overlap boundaries.",
+            input_schema={"type": "object", "additionalProperties": False},
+            output_schema={"type": "object"},
+            side_effect=side_effect,
+            risk=RiskLevel.HIGH if side_effect is SideEffectClass.EXTERNAL_WRITE else RiskLevel.LOW,
+            idempotency=(
+                IdempotencyClass.NON_IDEMPOTENT
+                if side_effect is SideEffectClass.EXTERNAL_WRITE
+                else IdempotencyClass.READ_ONLY
+            ),
+            required_scopes=(
+                {"demo.write"} if side_effect is SideEffectClass.EXTERNAL_WRITE else set()
+            ),
+            timeout_seconds=1,
+            maximum_output_bytes=1024,
+            allow_parallel=parallel,
+            output_trust=TrustLevel.INTERNAL_TOOL,
+        )
+        self.started = 0
+        self.active = 0
+        self.peak = 0
+        self.release = asyncio.Event()
+
+    async def execute(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> ToolResult:
+        del arguments, context
+        self.started += 1
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        try:
+            if self.spec.side_effect is SideEffectClass.NONE:
+                if self.started == 2:
+                    self.release.set()
+                await asyncio.wait_for(self.release.wait(), timeout=0.5)
+            else:
+                await asyncio.sleep(0.01)
+            return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
+        finally:
+            self.active -= 1
 
 
 def _settings(tmp_path: Path, *, config_dir: Path | None = None) -> Settings:
@@ -170,6 +230,57 @@ def test_totality(tmp_path: Path) -> None:
     unknown.write_text(yaml.safe_dump(profile), encoding="utf-8")
     with pytest.raises(ValueError, match="unknown fields"):
         load_ruleset(unknown, ROOT / "src/agent_core/policy/hardline.yaml")
+
+    invalid_condition = yaml.safe_load((ROOT / "src/agent_core/policy/default.yaml").read_text())
+    invalid_condition["rules"]["workspace_read"]["condition"] = "typo"
+    invalid_condition_path = tmp_path / "invalid-condition.yaml"
+    invalid_condition_path.write_text(yaml.safe_dump(invalid_condition), encoding="utf-8")
+    with pytest.raises(ValueError, match="typo"):
+        load_ruleset(invalid_condition_path, ROOT / "src/agent_core/policy/hardline.yaml")
+
+    for value in (True, "3600", 1.5):
+        invalid_expiry = yaml.safe_load((ROOT / "src/agent_core/policy/default.yaml").read_text())
+        invalid_expiry["approval_expiry_seconds"]["high"] = value
+        invalid_expiry_path = tmp_path / f"invalid-expiry-{type(value).__name__}.yaml"
+        invalid_expiry_path.write_text(yaml.safe_dump(invalid_expiry), encoding="utf-8")
+        with pytest.raises(ValueError, match="must be integers"):
+            load_ruleset(invalid_expiry_path, ROOT / "src/agent_core/policy/hardline.yaml")
+
+    unsafe_unknown = yaml.safe_load((ROOT / "src/agent_core/policy/default.yaml").read_text())
+    unsafe_unknown["unknown_tool"]["decision"] = "allow"
+    unsafe_unknown_path = tmp_path / "unsafe-unknown.yaml"
+    unsafe_unknown_path.write_text(yaml.safe_dump(unsafe_unknown), encoding="utf-8")
+    with pytest.raises(ValueError, match="fail closed"):
+        load_ruleset(unsafe_unknown_path, ROOT / "src/agent_core/policy/hardline.yaml")
+
+
+async def test_workspace_condition_checks_path_and_origin_trust_overlay() -> None:
+    engine = DeterministicPolicyEngine(DEFAULT_RULESET)
+
+    def workspace_action(path: str, *, origin: TrustLevel) -> ProposedAction:
+        return action(SideEffectClass.WORKSPACE_WRITE, {"path": path}).model_copy(
+            update={
+                "argument_trust": {"path": TrustLevel.USER},
+                "origin_trust": origin,
+            },
+            deep=True,
+        )
+
+    allowed = await engine.evaluate(
+        workspace_action("notes/result.txt", origin=TrustLevel.USER), principal(), run()
+    )
+    assert allowed.decision is PolicyDecisionType.ALLOW
+    for path in ("../outside", "./relative", "nested//empty", "/absolute"):
+        denied = await engine.evaluate(
+            workspace_action(path, origin=TrustLevel.USER), principal(), run()
+        )
+        assert denied.decision is PolicyDecisionType.DENY
+    escalated = await engine.evaluate(
+        workspace_action("notes/result.txt", origin=TrustLevel.EXTERNAL_UNTRUSTED),
+        principal(),
+        run(),
+    )
+    assert escalated.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
 async def test_determinism() -> None:
@@ -262,6 +373,84 @@ async def test_modification_rekeys_before_persistence(tmp_path: Path) -> None:
     )
 
 
+async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    actor = Principal(
+        tenant_id="local",
+        principal_id="local-user",
+        scopes=set(PLATFORM_SCOPES),
+    )
+    parallel_read = _SchedulingTool(
+        name="demo.parallel_read",
+        side_effect=SideEffectClass.NONE,
+        parallel=True,
+    )
+    external_write = _SchedulingTool(
+        name="demo.serial_write",
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
+        parallel=True,
+    )
+    registry = StaticToolRegistry()
+    registry.register(parallel_read)
+    registry.register(external_write)
+    async with build(settings=_settings(tmp_path), script=script, principal=actor) as app:
+        run_id = await app.runs.submit("prepare scheduler tests")
+        active_run = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            active_checkpoint = await uow.checkpoints.latest(run_id)
+        assert active_checkpoint is not None
+        active_agent = active_agent.model_copy(
+            update={"enabled_tools": [parallel_read.spec.name, external_write.spec.name]},
+            deep=True,
+        )
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=_AllowPolicy(),
+        )
+
+        def calls(name: str) -> list[ToolCallItem]:
+            return [
+                ToolCallItem(
+                    call_id=f"{name}-{index}",
+                    item_index=index,
+                    name=name,
+                    arguments={},
+                    raw_arguments="{}",
+                )
+                for index in range(2)
+            ]
+
+        await pipeline.dispatch(
+            run=active_run,
+            checkpoint=active_checkpoint,
+            tool_calls=calls(parallel_read.spec.name),
+            principal=actor,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+        await pipeline.dispatch(
+            run=active_run,
+            checkpoint=active_checkpoint,
+            tool_calls=calls(external_write.spec.name),
+            principal=actor,
+            step=Step(run_id=run_id, step_number=3, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+
+    assert parallel_read.peak == 2
+    assert external_write.peak == 1
+
+
 async def test_operator_policy_overlay_is_hashed_audited_and_evaluated(
     tmp_path: Path,
 ) -> None:
@@ -301,6 +490,46 @@ async def test_operator_policy_overlay_is_hashed_audited_and_evaluated(
     assert profile.policy_version != DEFAULT_RULESET.policy_version
 
 
+async def test_policy_load_is_process_scoped_event_and_approval_arguments_are_redacted(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={
+                            "destination": "demo",
+                            "content": "x" * 600,
+                        },
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            )
+        ]
+    )
+    async with build(settings=_settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("request a redacted approval")
+        approval = (await app.approvals.list_pending(run_id=run_id))[0]
+        async with app.uow_factory() as uow:
+            events = await uow.process_events.list("policy.profile.loaded")
+
+    assert approval.arguments == {
+        "destination": "demo",
+        "content": f"{'x' * 512}…[TRUNCATED]",
+    }
+    assert _approval_argument_view({"api_key": "secret", "content": "token=value"}) == {
+        "api_key": "[REDACTED]",
+        "content": "[REDACTED]",
+    }
+    assert len(events) == 1
+    assert events[0].payload == {
+        "policy_version": approval.policy_version,
+        "profile_name": "default",
+    }
+
+
 def test_hardline_immutable() -> None:
     with pytest.raises(ValidationError):
         DEFAULT_RULESET.hardline[0].id = "changed"
@@ -331,6 +560,35 @@ def test_hardline_immutable() -> None:
             rule,
             action(near_effects.get(rule.id, effect), {"content": rule.near_miss}),
         )
+    protected = next(rule for rule in DEFAULT_RULESET.hardline if rule.id == "protected_host_path")
+    for path in (
+        "/etc//passwd",
+        "./etc/passwd",
+        "workspace/../etc/passwd",
+        "\\etc\\passwd",
+        ".ssh/id_rsa",
+    ):
+        assert hardline_matches(
+            protected,
+            action(SideEffectClass.WORKSPACE_WRITE, {"path": path}),
+        )
+    assert not hardline_matches(
+        protected,
+        action(SideEffectClass.WORKSPACE_WRITE, {"path": ".ssh-backup/id_rsa"}),
+    )
+
+
+async def test_network_argument_cannot_authorize_its_own_host() -> None:
+    engine = DeterministicPolicyEngine(DEFAULT_RULESET)
+    decision = await engine.evaluate(
+        action(
+            SideEffectClass.NETWORK_READ,
+            {"url": "https://example.com/", "host_allowed": True},
+        ),
+        principal(),
+        run(),
+    )
+    assert decision.decision is PolicyDecisionType.DENY
 
 
 def test_revalidation() -> None:
@@ -346,6 +604,21 @@ def test_revalidation() -> None:
         )
         is None
     )
+    for fresh_decision in (
+        PolicyDecisionType.DENY,
+        PolicyDecisionType.ALLOW_WITH_MODIFICATIONS,
+    ):
+        assert (
+            revalidation_denial_reason(
+                approval,
+                arguments_hash="hash",
+                principal_scopes={"demo.write"},
+                agent_version="1.0.0",
+                policy_version=approval.policy_version,
+                policy_decision=fresh_decision,
+            )
+            == "policy.revalidation.escalated"
+        )
     for arguments_hash, principal_scopes, agent_version in (
         ("other", {"demo.write"}, "1.0.0"),
         ("hash", set(), "1.0.0"),
@@ -404,7 +677,10 @@ async def test_profile_can_require_a_distinct_approval_resolver(tmp_path: Path) 
     config_dir = tmp_path / "config"
     policy_overlay = config_dir / "policy" / "default.yaml"
     policy_overlay.parent.mkdir(parents=True)
-    policy_overlay.write_text("self_approval:\n  enabled: false\n", encoding="utf-8")
+    policy_overlay.write_text(
+        "self_approval:\n  enabled: false\napproval_expiry_seconds:\n  high: 7\n",
+        encoding="utf-8",
+    )
     script = FakeModelScript(
         turns=[
             ScriptedTurn(
@@ -421,9 +697,46 @@ async def test_profile_can_require_a_distinct_approval_resolver(tmp_path: Path) 
     async with build(settings=_settings(tmp_path, config_dir=config_dir), script=script) as app:
         run_id = await app.runs.submit("require another resolver")
         approval = (await app.approvals.list_pending(run_id=run_id))[0]
+        assert approval.expires_at is not None
+        assert (approval.expires_at - approval.created_at).total_seconds() == 7
         with pytest.raises(AuthorizationError, match="distinct resolver"):
             await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
         assert (await app.approvals.get(approval.id)).status is ApprovalStatus.PENDING
+
+
+async def test_approval_revalidation_intersects_live_and_run_scopes(tmp_path: Path) -> None:
+    actor = Principal(
+        tenant_id="local",
+        principal_id="local-user",
+        scopes=set(PLATFORM_SCOPES),
+    )
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={"destination": "demo", "content": "scope check"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="scope revocation honored", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(settings=_settings(tmp_path), script=script, principal=actor) as app:
+        run_id = await app.runs.submit("revalidate current authority")
+        approval = (await app.approvals.list_pending(run_id=run_id))[0]
+        actor.scopes.remove("demo.write")
+        await app.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        completed = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, actor))[0]
+
+    assert completed.status is RunStatus.COMPLETED
+    assert invocation.status is ToolInvocationStatus.DENIED
+    assert invocation.outcome is not None
+    assert invocation.outcome.reason_code == "policy.revalidation.changed"
 
 
 def test_no_leakage() -> None:

@@ -8,7 +8,7 @@ import os
 from pathlib import Path, PurePosixPath
 from uuid import UUID
 
-from agent_core.domain.errors import WorkspaceEscape
+from agent_core.domain.errors import WorkspaceEscape, WorkspaceReadLimitExceededError
 from agent_core.domain.execution import WorkspaceEntry, WorkspaceProvenance
 from agent_core.ports.execution import WorkspaceHandle
 
@@ -59,6 +59,22 @@ class LocalWorkspaceHandle:
     async def read(self, path: str) -> bytes:
         target = self._host_path(path)
         return await asyncio.to_thread(target.read_bytes)
+
+    async def read_bounded(self, path: str, maximum_bytes: int) -> bytes:
+        if maximum_bytes < 0:
+            raise ValueError("maximum_bytes must not be negative")
+        target = self._host_path(path)
+
+        def _read() -> bytes:
+            if target.stat().st_size > maximum_bytes:
+                raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
+            with target.open("rb") as source:
+                data = source.read(maximum_bytes + 1)
+            if len(data) > maximum_bytes:
+                raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
+            return data
+
+        return await asyncio.to_thread(_read)
 
     async def write(self, path: str, data: bytes) -> None:
         target = self._host_path(path)

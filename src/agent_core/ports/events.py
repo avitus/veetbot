@@ -7,7 +7,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.persistence import ProjectionCursor, WorkerLease
 
 
@@ -19,6 +19,12 @@ class EventRepository(Protocol):
     async def list_after(
         self, session_id: UUID, sequence: int, principal: Principal
     ) -> list[EventEnvelope]: ...
+
+
+class ProcessEventRepository(Protocol):
+    async def append(self, event: ProcessEvent) -> ProcessEvent: ...
+
+    async def list(self, event_type: str | None = None) -> list[ProcessEvent]: ...
 
 
 class Upcaster(Protocol):

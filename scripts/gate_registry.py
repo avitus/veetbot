@@ -216,8 +216,8 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
                     errors.append(f"active corpus gate {gate_id} lacks corpus metadata")
                 elif entry.minimum_members <= 0:
                     errors.append(f"active corpus gate {gate_id} has no positive minimum")
-                elif not (root / entry.corpus).exists():
-                    errors.append(f"active corpus gate {gate_id} corpus does not exist")
+                elif not (root / entry.corpus).is_dir():
+                    errors.append(f"active corpus gate {gate_id} corpus is not a directory")
 
     spec_counts = Counter(entry.spec.split("#", 1)[0].rsplit("/", 1)[-1] for entry in entries)
     for filename, (declared, aliases) in DECLARING_SPECS.items():

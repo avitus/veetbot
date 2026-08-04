@@ -16,7 +16,9 @@ expected:
     - approval.requested
     - approval.resolved
     - tool.call.started
+    - tool.call.completed
     - approval.requested
     - approval.resolved
     - tool.call.started
+    - tool.call.completed
     - run.completed

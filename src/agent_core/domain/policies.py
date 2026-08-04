@@ -74,6 +74,20 @@ class PolicyDecisionRank(IntEnum):
     DENY = 3
 
 
+class PolicyCondition(StrEnum):
+    PATH_INSIDE_WORKSPACE = "path_inside_workspace"
+    HOST_ON_ALLOWLIST = "host_on_allowlist"
+    TARGET_ISOLATED = "target_isolated"
+
+
+class HardlineRuleKind(StrEnum):
+    SIDE_EFFECT = "side_effect"
+    COMMAND_REGEX = "command_regex"
+    PROTECTED_PATH = "protected_path"
+    NETWORK_RANGE = "network_range"
+    TRUST_FLOW = "trust_flow"
+
+
 class ActionKind(StrEnum):
     TOOL_CALL = "tool_call"
     MEMORY_WRITE = "memory_write"
@@ -116,7 +130,7 @@ class PolicyRule(BaseModel):
 
     side_effect: SideEffectClass
     decision: PolicyDecisionType
-    condition: str | None = None
+    condition: PolicyCondition | None = None
     otherwise: PolicyDecisionType | None = None
 
 
@@ -124,7 +138,7 @@ class HardlineRule(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
-    kind: str
+    kind: HardlineRuleKind
     applies_to: tuple[SideEffectClass, ...]
     message_code: str
     near_miss: str
@@ -144,6 +158,7 @@ class LoadedRuleset(BaseModel):
     rules: tuple[PolicyRule, ...]
     hardline: tuple[HardlineRule, ...]
     default_effect: PolicyDecisionType
+    unknown_tool_decision: PolicyDecisionType
     external_untrusted_requires_approval: bool = True
     self_approval_enabled: bool = True
     approval_expiry_seconds: tuple[tuple[RiskLevel, int], ...]

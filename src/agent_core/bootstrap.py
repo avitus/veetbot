@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
     InMemoryPolicyProfileRepository,
+    InMemoryProcessEventRepository,
     InMemoryRunRepository,
     InMemorySessionHistoryRepository,
     InMemorySessionRepository,
@@ -67,6 +68,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresIdempotencyRepository,
     PostgresMaintenanceRepository,
     PostgresPolicyProfileRepository,
+    PostgresProcessEventRepository,
     PostgresRunRepository,
     PostgresSessionRepository,
     PostgresToolInvocationRepository,
@@ -98,6 +100,7 @@ from agent_core.config import (
 )
 from agent_core.context.builder import MinimalContextBuilder
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.events import ProcessEvent
 from agent_core.domain.messages import (
     FakeModelScript,
     ResolvedModel,
@@ -155,14 +158,16 @@ def _content_addressed_agent_version(agent: AgentSpec) -> str:
 
 class _ActiveToken:
     def __init__(self) -> None:
-        self._token: RunCancellationToken | None = None
+        self._tokens: dict[UUID, RunCancellationToken] = {}
 
-    def set(self, token: RunCancellationToken) -> None:
-        self._token = token
+    def set(self, run_id: UUID, token: RunCancellationToken) -> None:
+        self._tokens[run_id] = token
 
-    def cancel(self) -> None:
-        if self._token is not None:
-            self._token.cancel(CancelReason.REQUESTED)
+    def cancel(self, run_id: UUID | None) -> None:
+        tokens = tuple(self._tokens.values()) if run_id is None else (self._tokens.get(run_id),)
+        for token in tokens:
+            if token is not None:
+                token.cancel(CancelReason.REQUESTED)
 
 
 def default_fake_script() -> FakeModelScript:
@@ -198,6 +203,7 @@ def _memory_uow_repositories(
         agents=agents,
         approvals=approvals,
         policy_profiles=InMemoryPolicyProfileRepository(),
+        process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
         runs=runs,
         events=events,
@@ -234,6 +240,7 @@ def _postgres_repository_factory(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
             policy_profiles=PostgresPolicyProfileRepository(session),
+            process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
             runs=runs,
             events=events,
@@ -303,6 +310,20 @@ async def _compose(
                 loaded_by="composition-root",
             )
         )
+        derivation_key = f"policy.profile.loaded:{ruleset.policy_version}"
+        await uow.process_events.append(
+            ProcessEvent(
+                id=uuid5(NAMESPACE_URL, derivation_key),
+                event_type="policy.profile.loaded",
+                actor_type="composition-root",
+                payload={
+                    "policy_version": ruleset.policy_version,
+                    "profile_name": ruleset.profile_name,
+                },
+                derivation_key=derivation_key,
+                created_at=clock.now(),
+            )
+        )
     model_provider = FakeModelProvider(script or default_fake_script(), clock)
     effective_providers = {"fake": model_provider, **model_providers}
     try:
@@ -323,6 +344,7 @@ async def _compose(
             workspace_factory=LocalWorkspaceFactory(workspace_root),
             current_principal=principal,
             max_parallel_calls=max_parallel_calls,
+            approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
         )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)

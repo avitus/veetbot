@@ -45,6 +45,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     IdempotencyKeyRow,
     ModelCallRow,
     PolicyProfileRow,
+    ProcessEventRow,
     ProjectionWatermarkRow,
     RunRow,
     SessionRow,
@@ -61,7 +62,7 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError, WorkerFencedError
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -219,6 +220,22 @@ class PostgresRunRepository:
         ).one_or_none()
         if row is None:
             raise NotFoundError("run not found")
+        return run_to_domain(row)
+
+    async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
+        statement = (
+            update(RunRow)
+            .where(RunRow.id == run_id, RunRow.status == expected_status.value)
+            .values(
+                cancel_requested_at=func.coalesce(RunRow.cancel_requested_at, self._clock.now()),
+                updated_at=self._clock.now(),
+            )
+            .returning(RunRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            await self._raise_guard_failure(run_id, expected_status, None, "cancellation request")
+            raise AssertionError("guard failure helper must raise")
         return run_to_domain(row)
 
     async def _raise_guard_failure(
@@ -799,6 +816,18 @@ class PostgresApprovalRepository:
             raise ConflictError("approval already exists for action")
         return approval_to_domain(row)
 
+    async def discard_pending(self, approval_id: UUID) -> None:
+        result = await self._session.execute(
+            delete(ApprovalRow).where(
+                ApprovalRow.id == approval_id,
+                ApprovalRow.status == ApprovalStatus.PENDING.value,
+            )
+        )
+        if not _rowcount(result):
+            row = await self._session.get(ApprovalRow, approval_id)
+            if row is not None:
+                raise ConflictError("only a pending approval can be discarded")
+
     async def get(self, approval_id: UUID, principal: Principal) -> ApprovalRequest:
         row = (
             await self._session.scalars(
@@ -853,10 +882,7 @@ class PostgresApprovalRepository:
                 raise ValueError("approval cursor must be a UUID") from exc
         rows = (
             await self._session.scalars(
-                select(ApprovalRow)
-                .where(*predicates)
-                .order_by(ApprovalRow.created_at, ApprovalRow.id)
-                .limit(limit)
+                select(ApprovalRow).where(*predicates).order_by(ApprovalRow.id).limit(limit)
             )
         ).all()
         return [approval_to_domain(row) for row in rows]
@@ -916,11 +942,14 @@ class PostgresApprovalRepository:
             approval=approval_to_domain(updated_row),
         )
 
-    async def expire_due(self, now: datetime, limit: int) -> list[ApprovalRequest]:
+    async def expire_due(
+        self, now: datetime, limit: int, *, tenant_id: str
+    ) -> list[ApprovalRequest]:
         rows = (
             await self._session.scalars(
                 select(ApprovalRow)
                 .where(
+                    ApprovalRow.tenant_id == tenant_id,
                     ApprovalRow.status == ApprovalStatus.PENDING.value,
                     ApprovalRow.expires_at.is_not(None),
                     ApprovalRow.expires_at <= now,
@@ -981,6 +1010,53 @@ class PostgresPolicyProfileRepository:
             loaded_at=row.loaded_at,
             loaded_by=row.loaded_by,
         )
+
+
+class PostgresProcessEventRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _to_domain(row: ProcessEventRow) -> ProcessEvent:
+        return ProcessEvent(
+            id=row.id,
+            event_type=row.event_type,
+            payload_schema_version=row.payload_schema_version,
+            actor_type=row.actor_type,
+            actor_id=row.actor_id,
+            payload=dict(row.payload),
+            derivation_key=row.derivation_key,
+            created_at=row.created_at,
+        )
+
+    async def append(self, event: ProcessEvent) -> ProcessEvent:
+        await self._session.execute(
+            pg_insert(ProcessEventRow)
+            .values(**event.model_dump())
+            .on_conflict_do_nothing(index_elements=[ProcessEventRow.derivation_key])
+        )
+        row = (
+            await self._session.scalars(
+                select(ProcessEventRow).where(
+                    ProcessEventRow.derivation_key == event.derivation_key
+                )
+            )
+        ).one()
+        stored = self._to_domain(row)
+        if stored.model_dump(exclude={"created_at"}) != event.model_dump(exclude={"created_at"}):
+            raise ConflictError("process event derivation identifies different content")
+        return stored
+
+    async def list(self, event_type: str | None = None) -> list[ProcessEvent]:
+        statement = select(ProcessEventRow)
+        if event_type is not None:
+            statement = statement.where(ProcessEventRow.event_type == event_type)
+        rows = (
+            await self._session.scalars(
+                statement.order_by(ProcessEventRow.created_at, ProcessEventRow.id)
+            )
+        ).all()
+        return [self._to_domain(row) for row in rows]
 
 
 class PostgresIdempotencyRepository:

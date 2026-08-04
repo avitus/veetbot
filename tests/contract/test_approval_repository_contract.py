@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock
@@ -63,3 +64,43 @@ async def test_approval_repository_first_resolution_wins_idempotently() -> None:
     assert different.state is ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY
     revalidated = await repository.record_revalidation(created.action_id, "default@new+hline")
     assert revalidated.revalidated_policy_version == "default@new+hline"
+
+
+async def test_approval_repository_paginates_by_its_cursor_and_expires_one_tenant() -> None:
+    repository = InMemoryApprovalRepository(FixedClock(NOW))
+    rows = [
+        request().model_copy(
+            update={
+                "id": UUID(int=value),
+                "action_id": UUID(int=100 + value),
+                "tool_invocation_id": UUID(int=100 + value),
+                "created_at": NOW + timedelta(seconds=10 - value),
+                "expires_at": NOW,
+            },
+            deep=True,
+        )
+        for value in (3, 1, 2)
+    ]
+    foreign = request().model_copy(
+        update={
+            "id": UUID(int=4),
+            "action_id": UUID(int=104),
+            "tool_invocation_id": UUID(int=104),
+            "tenant_id": "tenant-b",
+            "expires_at": NOW,
+        },
+        deep=True,
+    )
+    for row in (*rows, foreign):
+        await repository.create(row)
+
+    first = await repository.list_pending(principal(), limit=2)
+    second = await repository.list_pending(principal(), limit=2, cursor=str(first[-1].id))
+    assert [row.id.int for row in first] == [1, 2]
+    assert [row.id.int for row in second] == [3]
+
+    expired = await repository.expire_due(NOW, 10, tenant_id=TENANT)
+    assert {row.id.int for row in expired} == {1, 2, 3}
+    assert (
+        await repository.get(foreign.id, principal().model_copy(update={"tenant_id": "tenant-b"}))
+    ).status is ApprovalStatus.PENDING

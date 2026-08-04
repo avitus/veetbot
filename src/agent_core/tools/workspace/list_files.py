@@ -87,10 +87,9 @@ class WorkspaceListFilesTool:
         result = success(
             {"path": path, "entries": entries, "truncated": len(ordered) > ENTRY_LIMIT}
         )
-        provenances = [await workspace.provenance(str(item.path)) for item in selected]
-        result.output_trust = (
-            TrustLevel.INTERNAL_TOOL
-            if all(value is WorkspaceProvenance.TOOL_WRITTEN for value in provenances)
-            else TrustLevel.EXTERNAL_UNTRUSTED
-        )
+        result.output_trust = TrustLevel.INTERNAL_TOOL
+        for item in selected:
+            if await workspace.provenance(str(item.path)) is not WorkspaceProvenance.TOOL_WRITTEN:
+                result.output_trust = TrustLevel.EXTERNAL_UNTRUSTED
+                break
         return result

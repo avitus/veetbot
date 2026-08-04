@@ -288,6 +288,20 @@ class PolicyProfileRow(Base):
     loaded_by: Mapped[str] = mapped_column(Text)
 
 
+class ProcessEventRow(Base):
+    __tablename__ = "process_events"
+    __table_args__ = (Index("ix_process_events_type_created", "event_type", "created_at"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    event_type: Mapped[str] = mapped_column(Text)
+    payload_schema_version: Mapped[int] = mapped_column(Integer)
+    actor_type: Mapped[str] = mapped_column(Text)
+    actor_id: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    derivation_key: Mapped[str] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class ArtifactRow(Base):
     __tablename__ = "artifacts"
     __table_args__ = (Index("ix_artifacts_expires_at", "expires_at"),)

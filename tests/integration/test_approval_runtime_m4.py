@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
@@ -71,3 +73,45 @@ async def test_approval_resumes_after_worker_and_composition_restart() -> None:
     assert invocations[0].status is ToolInvocationStatus.SUCCEEDED
     assert invocations[0].structured_result is not None
     assert invocations[0].structured_result["byte_count"] == 12
+
+
+async def test_active_run_cancellation_is_persisted_and_observed_by_worker() -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                text="this response must be cancelled",
+                stop_reason=StopReason.END_TURN,
+                delay_ms=1000,
+            )
+        ]
+    )
+    async with build(
+        settings=database_settings(), storage="postgres", script=script
+    ) as composition:
+        run_id = await composition.runs.submit("cancel this active run")
+        worker = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=composition.clock,
+            worker_id="cancellation-worker",
+            lease_seconds=0.3,
+            heartbeat_divisor=3,
+        )
+        work = asyncio.create_task(worker.run_once())
+        for _attempt in range(100):
+            active = await composition.runs.get(run_id)
+            if active.status is RunStatus.RUNNING:
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("worker did not claim the cancellation fixture")
+
+        requested = await composition.runs.cancel(run_id)
+        assert requested.status is RunStatus.RUNNING
+        assert requested.cancel_requested_at is not None
+        assert await work
+        cancelled = await composition.runs.get(run_id)
+        events = await composition.runs.events(run_id)
+
+    assert cancelled.status is RunStatus.CANCELLED
+    assert [event.event_type for event in events].count("run.cancelled") == 1

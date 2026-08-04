@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-from collections.abc import AsyncIterator
+import re
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
@@ -61,6 +62,40 @@ from agent_core.tools.messages import message_for
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_ARGUMENT_KEY = re.compile(
+    r"(?:api[_-]?key|secret|password|token|authorization|credential)", re.I
+)
+_CREDENTIAL_SHAPE = re.compile(r"(?:api[_-]?key|secret|password|token|bearer)\s*[:=]\s*\S+", re.I)
+
+
+def _approval_argument_value(value: Any, *, key: str | None = None) -> Any:
+    if key is not None and _SENSITIVE_ARGUMENT_KEY.search(key) is not None:
+        return "[REDACTED]"
+    if isinstance(value, str):
+        if _CREDENTIAL_SHAPE.search(value) is not None:
+            return "[REDACTED]"
+        return value if len(value) <= 512 else f"{value[:512]}…[TRUNCATED]"
+    if isinstance(value, dict):
+        items = list(value.items())[:50]
+        redacted = {
+            str(nested_key): _approval_argument_value(nested, key=str(nested_key))
+            for nested_key, nested in items
+        }
+        if len(value) > len(items):
+            redacted["[TRUNCATED]"] = f"{len(value) - len(items)} field(s) omitted"
+        return redacted
+    if isinstance(value, list):
+        items = value[:50]
+        redacted_items = [_approval_argument_value(item) for item in items]
+        if len(value) > len(items):
+            redacted_items.append(f"[TRUNCATED: {len(value) - len(items)} item(s) omitted]")
+        return redacted_items
+    return value
+
+
+def _approval_argument_view(arguments: dict[str, Any]) -> dict[str, Any]:
+    return cast(dict[str, Any], _approval_argument_value(arguments))
 
 
 class _UnavailableCollaborator:
@@ -183,6 +218,7 @@ class ToolPipeline:
         workspace_factory: WorkspaceFactory | None = None,
         current_principal: Principal | None = None,
         max_parallel_calls: int = 8,
+        approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
     ) -> None:
         self._registry = registry
         self._uow_factory = uow_factory
@@ -197,6 +233,15 @@ class ToolPipeline:
         self._workspace_factory = workspace_factory
         self._current_principal = current_principal
         self._max_parallel_calls = max_parallel_calls
+        self._approval_expiry_seconds = dict(
+            approval_expiry_seconds
+            or {
+                RiskLevel.LOW: 86_400,
+                RiskLevel.MEDIUM: 86_400,
+                RiskLevel.HIGH: 14_400,
+                RiskLevel.CRITICAL: 3_600,
+            }
+        )
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
 
@@ -232,24 +277,29 @@ class ToolPipeline:
     ) -> list[ToolResultItem]:
         del checkpoint
         if self._parallel_ok(tool_calls, run, principal, agent):
+            token.raise_if_cancelled()
             parallel_group = self._ids.new_id()
-            return list(
-                await asyncio.gather(
-                    *(
-                        self._dispatch_one(
-                            run=run,
-                            call=call,
-                            principal=principal,
-                            step=step,
-                            agent=agent,
-                            token=token,
-                            lease=lease,
-                            parallel_group=parallel_group,
-                        )
-                        for call in tool_calls
+            settled = await asyncio.gather(
+                *(
+                    self._dispatch_one(
+                        run=run,
+                        call=call,
+                        principal=principal,
+                        step=step,
+                        agent=agent,
+                        token=token,
+                        lease=lease,
+                        parallel_group=parallel_group,
                     )
-                )
+                    for call in tool_calls
+                ),
+                return_exceptions=True,
             )
+            for item in settled:
+                if isinstance(item, BaseException):
+                    raise item
+            token.raise_if_cancelled()
+            return [cast(ToolResultItem, item) for item in settled]
         results: list[ToolResultItem] = []
         for call in tool_calls:
             token.raise_if_cancelled()
@@ -322,21 +372,20 @@ class ToolPipeline:
             )
 
         key = _idempotency_key(run, step, call, tool, arguments_hash)
-        async with self._key_lock(key):
-            return await self._execute_once(
-                run=run,
-                call=call,
-                principal=principal,
-                agent=agent,
-                step=step,
-                tool=tool,
-                arguments=arguments,
-                arguments_hash=arguments_hash,
-                key=key,
-                token=token,
-                lease=lease,
-                parallel_group=parallel_group,
-            )
+        return await self._execute_once(
+            run=run,
+            call=call,
+            principal=principal,
+            agent=agent,
+            step=step,
+            tool=tool,
+            arguments=arguments,
+            arguments_hash=arguments_hash,
+            key=key,
+            token=token,
+            lease=lease,
+            parallel_group=parallel_group,
+        )
 
     async def _execute_once(
         self,
@@ -354,34 +403,39 @@ class ToolPipeline:
         lease: WorkerLease | None,
         parallel_group: UUID | None,
         approval_granted: bool = False,
+        prepared_candidate: ToolInvocation | None = None,
+        prepared_decision: PolicyDecision | None = None,
+        lock_acquired: bool = False,
     ) -> ToolResultItem:
-        now = self._clock.now()
-        candidate = ToolInvocation(
-            id=self._ids.new_id(),
-            run_id=run.id,
-            session_id=run.session_id,
-            step_number=step.step_number,
-            call_id=call.call_id,
-            tool_name=tool.spec.name,
-            tool_version=tool.spec.version,
-            tool_source=tool.spec.source,
-            server_id=tool.spec.server_id,
-            idempotency_class=tool.spec.idempotency,
-            side_effect=tool.spec.side_effect,
-            risk=tool.spec.risk,
-            status=ToolInvocationStatus.PROPOSED,
-            raw_arguments=call.raw_arguments,
-            normalized_arguments=arguments,
-            normalized_arguments_hash=arguments_hash,
-            effective_arguments_hash=arguments_hash,
-            idempotency_key=key,
-            origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
-            parallel_group=parallel_group,
-            created_at=now,
-            updated_at=now,
-        )
-        decision: PolicyDecision | None = None
-        if not approval_granted:
+        decision = prepared_decision
+        candidate = prepared_candidate
+        if candidate is None:
+            now = self._clock.now()
+            candidate = ToolInvocation(
+                id=self._ids.new_id(),
+                run_id=run.id,
+                session_id=run.session_id,
+                step_number=step.step_number,
+                call_id=call.call_id,
+                tool_name=tool.spec.name,
+                tool_version=tool.spec.version,
+                tool_source=tool.spec.source,
+                server_id=tool.spec.server_id,
+                idempotency_class=tool.spec.idempotency,
+                side_effect=tool.spec.side_effect,
+                risk=tool.spec.risk,
+                status=ToolInvocationStatus.PROPOSED,
+                raw_arguments=call.raw_arguments,
+                normalized_arguments=arguments,
+                normalized_arguments_hash=arguments_hash,
+                effective_arguments_hash=arguments_hash,
+                idempotency_key=key,
+                origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                parallel_group=parallel_group,
+                created_at=now,
+                updated_at=now,
+            )
+        if not approval_granted and decision is None:
             action = self._proposed_action(run, step, tool, candidate, arguments, arguments_hash)
             decision = await self._policy.evaluate(action, principal, run)
             effective_hash = arguments_hash
@@ -400,6 +454,26 @@ class ToolPipeline:
                 },
                 deep=True,
             )
+        if not lock_acquired:
+            async with self._key_lock(key):
+                return await self._execute_once(
+                    run=run,
+                    call=call,
+                    principal=principal,
+                    agent=agent,
+                    step=step,
+                    tool=tool,
+                    arguments=arguments,
+                    arguments_hash=arguments_hash,
+                    key=key,
+                    token=token,
+                    lease=lease,
+                    parallel_group=parallel_group,
+                    approval_granted=approval_granted,
+                    prepared_candidate=candidate,
+                    prepared_decision=decision,
+                    lock_acquired=True,
+                )
         async with self._uow_factory() as uow:
             existing = await uow.invocations.find_by_idempotency_key(run.id, key)
             if existing is not None:
@@ -716,12 +790,6 @@ class ToolPipeline:
     ) -> ApprovalRequest:
         if invocation.normalized_arguments is None or invocation.normalized_arguments_hash is None:
             raise ConflictError("approval action has no normalized arguments")
-        expiry_by_risk = {
-            RiskLevel.LOW: 86_400,
-            RiskLevel.MEDIUM: 86_400,
-            RiskLevel.HIGH: 14_400,
-            RiskLevel.CRITICAL: 3_600,
-        }
         now = self._clock.now()
         approval = ApprovalRequest(
             id=self._ids.new_id(),
@@ -735,7 +803,7 @@ class ToolPipeline:
             status=ApprovalStatus.PENDING,
             action_summary=f"Run {tool.spec.name} with validated arguments.",
             tool_name=tool.spec.name,
-            arguments=dict(invocation.normalized_arguments),
+            arguments=_approval_argument_view(dict(invocation.normalized_arguments)),
             normalized_arguments_hash=invocation.normalized_arguments_hash,
             required_scopes=set(tool.spec.required_scopes),
             agent_version=agent.version,
@@ -743,7 +811,7 @@ class ToolPipeline:
             policy_reason=decision.reason_code,
             policy_decision=decision,
             policy_version=decision.policy_version,
-            expires_at=now + timedelta(seconds=expiry_by_risk[tool.spec.risk]),
+            expires_at=now + timedelta(seconds=self._approval_expiry_seconds[tool.spec.risk]),
             created_at=now,
         )
         waiting = invocation.model_copy(
@@ -757,10 +825,14 @@ class ToolPipeline:
             deep=True,
         )
         async with self._uow_factory() as uow:
-            await uow.invocations.transition(
-                invocation.id, ToolInvocationStatus.PROPOSED, waiting, lease=lease
-            )
             created = await uow.approvals.create(approval)
+            try:
+                await uow.invocations.transition(
+                    invocation.id, invocation.status, waiting, lease=lease
+                )
+            except BaseException:
+                await uow.approvals.discard_pending(created.id)
+                raise
         return created
 
     async def _resume_approval(
@@ -792,7 +864,19 @@ class ToolPipeline:
                 ApprovalStatus.CANCELLED: "approval.cancelled",
             }[approval.status]
             return await self._deny_invocation(run, call, tool, invocation, reason, lease)
-        current = self._current_principal or principal
+        current = principal
+        if self._current_principal is not None:
+            if (
+                self._current_principal.tenant_id != principal.tenant_id
+                or self._current_principal.principal_id != principal.principal_id
+            ):
+                raise ConflictError("approval principal does not match the run principal")
+            current = principal.model_copy(
+                update={
+                    "scopes": principal.scopes & self._current_principal.scopes,
+                },
+                deep=True,
+            )
         action = self._proposed_action(run, step, tool, invocation, arguments, arguments_hash)
         revalidated = await self._policy.evaluate(action, current, run)
         async with self._uow_factory() as uow:
@@ -847,6 +931,7 @@ class ToolPipeline:
             lease=lease,
             approval_granted=True,
             parallel_group=invocation.parallel_group,
+            lock_acquired=True,
         )
 
     def _parallel_ok(
@@ -905,6 +990,8 @@ class ToolPipeline:
                 "status": ToolInvocationStatus.DENIED,
                 "outcome": denied,
                 "result_item": result_item,
+                "suspended_kind": None,
+                "suspended_ref": None,
                 "updated_at": self._clock.now(),
             },
             deep=True,

@@ -357,14 +357,22 @@ def approval_list() -> None:
     typer.echo(json.dumps([row.model_dump(mode="json") for row in rows], default=str))
 
 
-async def _resolve_approval(approval_id: UUID, resolution: ApprovalResolutionType) -> Any:
+async def _resolve_approval(
+    approval_id: UUID,
+    resolution: ApprovalResolutionType,
+    reason: str | None,
+) -> Any:
     async with build(storage="postgres") as composition:
-        return await composition.approvals.resolve(approval_id, resolution)
+        return await composition.approvals.resolve(approval_id, resolution, reason=reason)
 
 
-def _approval_resolution_command(approval_id: UUID, resolution: ApprovalResolutionType) -> None:
+def _approval_resolution_command(
+    approval_id: UUID,
+    resolution: ApprovalResolutionType,
+    reason: str | None,
+) -> None:
     try:
-        resolved = asyncio.run(_resolve_approval(approval_id, resolution))
+        resolved = asyncio.run(_resolve_approval(approval_id, resolution, reason))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -375,17 +383,23 @@ def _approval_resolution_command(approval_id: UUID, resolution: ApprovalResoluti
 
 
 @approval_app.command("approve")
-def approval_approve(approval_id: UUID) -> None:
+def approval_approve(
+    approval_id: UUID,
+    reason: Annotated[str | None, typer.Option("--reason")] = None,
+) -> None:
     """Approve one pending action and resume its run."""
 
-    _approval_resolution_command(approval_id, ApprovalResolutionType.APPROVE_ONCE)
+    _approval_resolution_command(approval_id, ApprovalResolutionType.APPROVE_ONCE, reason)
 
 
 @approval_app.command("deny")
-def approval_deny(approval_id: UUID) -> None:
+def approval_deny(
+    approval_id: UUID,
+    reason: Annotated[str | None, typer.Option("--reason")] = None,
+) -> None:
     """Deny one pending action and resume its run with a denial result."""
 
-    _approval_resolution_command(approval_id, ApprovalResolutionType.DENY)
+    _approval_resolution_command(approval_id, ApprovalResolutionType.DENY, reason)
 
 
 @eval_app.command("run")

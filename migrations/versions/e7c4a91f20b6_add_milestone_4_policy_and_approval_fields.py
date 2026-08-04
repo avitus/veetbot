@@ -26,6 +26,19 @@ def upgrade() -> None:
             nullable=False,
         ),
     )
+    # Pre-M4 runs operated under the local platform principal with implicit full
+    # authority. Preserve that authority explicitly rather than turning every
+    # migrated run into an empty-scope run that cannot resume.
+    op.execute(
+        sa.text(
+            "UPDATE runs SET principal_scopes = "
+            '\'["approval.read","approval.resolve","artifact.read",'
+            '"artifact.write","demo.write","knowledge.write","run.cancel",'
+            '"run.read","run.write","sandbox.execute","session.read",'
+            '"session.write","skill.write","workspace.read",'
+            '"workspace.write"]\'::jsonb'
+        )
+    )
     op.add_column(
         "tool_invocations",
         sa.Column("side_effect", sa.Text(), server_default=sa.text("'none'"), nullable=False),
@@ -87,9 +100,29 @@ def upgrade() -> None:
         sa.Column("loaded_by", sa.Text(), nullable=False),
         sa.PrimaryKeyConstraint("policy_version", name=op.f("pk_policy_profiles")),
     )
+    op.create_table(
+        "process_events",
+        sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("event_type", sa.Text(), nullable=False),
+        sa.Column("payload_schema_version", sa.Integer(), nullable=False),
+        sa.Column("actor_type", sa.Text(), nullable=False),
+        sa.Column("actor_id", sa.Text(), nullable=True),
+        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+        sa.Column("derivation_key", sa.Text(), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_process_events")),
+        sa.UniqueConstraint("derivation_key", name=op.f("uq_process_events_derivation_key")),
+    )
+    op.create_index(
+        "ix_process_events_type_created",
+        "process_events",
+        ["event_type", "created_at"],
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_process_events_type_created", table_name="process_events")
+    op.drop_table("process_events")
     op.drop_table("policy_profiles")
     op.drop_index("uq_approvals_action_id", table_name="approvals")
     op.drop_index("ix_approvals_pending_expiry", table_name="approvals")

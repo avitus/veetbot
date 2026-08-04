@@ -44,7 +44,7 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.loop import RunContext, ToolDispatch, checkpoint, run_loop
 
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
-type TokenCallback = Callable[[RunCancellationToken], None]
+type TokenCallback = Callable[[UUID, RunCancellationToken], None]
 logger = logging.getLogger(__name__)
 
 
@@ -219,7 +219,7 @@ class RunExecutor:
                 model_provider = selected
             callback = on_token or self._on_token
             if callback is not None:
-                callback(token)
+                callback(run.id, token)
             context = RunContext(
                 run=run,
                 checkpoint=checkpoint_state,
@@ -373,41 +373,12 @@ async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutco
             step_number=context.run.step_count or None,
             occurred_at=context.clock.now(),
         )
+        if outcome.kind is OutcomeKind.SUSPENDED:
+            async with context.uow_factory() as uow:
+                await uow.approvals.cancel_for_run(context.run.id)
         await _finalize_once(
             context,
             RunOutcome(kind=OutcomeKind.FAILED, failure=failure),
-        )
-        return
-    if outcome.kind is OutcomeKind.SUSPENDED:
-        try:
-            await _emit_approval_requested(context)
-        except Exception as exc:
-            logger.exception(
-                "approval_event_emit_failed",
-                extra={
-                    "run_id": str(context.run.id),
-                    "error_class": type(exc).__name__,
-                },
-            )
-
-
-async def _emit_approval_requested(context: RunContext | _FinalizationContext) -> None:
-    approval_id = (
-        context.checkpoint.pending_approval_ids[0]
-        if context.checkpoint.pending_approval_ids
-        else None
-    )
-    if approval_id is None:
-        raise RuntimeError("approval suspension has no pending approval id")
-    async with context.uow_factory() as uow:
-        await uow.events.append(
-            NewEvent(
-                session_id=context.run.session_id,
-                run_id=context.run.id,
-                event_type="approval.requested",
-                actor_type="runtime",
-                payload={"approval_id": str(approval_id)},
-            )
         )
 
 
@@ -460,7 +431,26 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             ),
             lease=context.lease,
         )
-        context.checkpoint.last_event_sequence = terminal_event.sequence
+        last_event = terminal_event
+        if outcome.kind is OutcomeKind.SUSPENDED:
+            approval_id = (
+                context.checkpoint.pending_approval_ids[0]
+                if context.checkpoint.pending_approval_ids
+                else None
+            )
+            if approval_id is None:
+                raise RuntimeError("approval suspension has no pending approval id")
+            last_event = await uow.events.append(
+                NewEvent(
+                    session_id=context.run.session_id,
+                    run_id=context.run.id,
+                    event_type="approval.requested",
+                    actor_type="runtime",
+                    payload={"approval_id": str(approval_id)},
+                ),
+                lease=context.lease,
+            )
+        context.checkpoint.last_event_sequence = last_event.sequence
         await uow.checkpoints.write(
             context.run.id,
             context.checkpoint,

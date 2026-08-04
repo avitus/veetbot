@@ -49,6 +49,10 @@ class WorkspaceEscape(ToolValidationError):  # noqa: N818 - normative domain nam
     """A path failed the workspace containment boundary."""
 
 
+class WorkspaceReadLimitExceededError(ToolValidationError):
+    """A bounded workspace read exceeded its declared byte limit."""
+
+
 class ModelScriptExhaustedError(AgentCoreError):
     """A deterministic fake provider was called beyond its authored script."""
 

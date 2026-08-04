@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import ipaddress
+import posixpath
 import re
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import urlparse
 
-from agent_core.domain.policies import HardlineRule, ProposedAction
+from agent_core.domain.policies import HardlineRule, HardlineRuleKind, ProposedAction
 
 
 def _strings(value: Any) -> Iterable[str]:
@@ -23,31 +24,46 @@ def _strings(value: Any) -> Iterable[str]:
             yield from _strings(nested)
 
 
+def _canonical_path(value: str) -> str:
+    normalized = posixpath.normpath(value.replace("\\", "/"))
+    if normalized.startswith("~/"):
+        normalized = f"/home/{normalized.removeprefix('~/')}"
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    return posixpath.normpath(normalized)
+
+
+def _is_within(candidate: str, protected: str) -> bool:
+    normalized = _canonical_path(candidate)
+    target = _canonical_path(protected)
+    return normalized == target or normalized.startswith(f"{target}/")
+
+
 def hardline_matches(rule: HardlineRule, action: ProposedAction) -> bool:
     if action.side_effect not in rule.applies_to:
         return False
     values = tuple(_strings(action.arguments))
-    if rule.kind == "side_effect":
+    if rule.kind is HardlineRuleKind.SIDE_EFFECT:
         return True
-    if rule.kind == "command_regex":
+    if rule.kind is HardlineRuleKind.COMMAND_REGEX:
         return any(re.search(rule.pattern or r"(?!x)x", value) is not None for value in values)
-    if rule.kind == "protected_path":
+    if rule.kind is HardlineRuleKind.PROTECTED_PATH:
         for value in values:
-            normalized = value.replace("\\", "/")
+            normalized = _canonical_path(value)
+            components = tuple(part for part in normalized.split("/") if part)
             for protected in rule.paths:
-                expanded = protected.replace("~/", "/home/")
                 if protected == ".env":
-                    basename = normalized.rsplit("/", 1)[-1]
+                    basename = components[-1] if components else ""
                     if basename == ".env" or (
                         basename.startswith(".env.") and basename != ".env.example"
                     ):
                         return True
-                if normalized == protected or normalized.startswith(f"{protected}/"):
+                if _is_within(normalized, protected):
                     return True
-                if expanded.startswith("/home/") and "/.ssh" in normalized:
+                if protected == "~/.ssh" and ".ssh" in components:
                     return True
         return False
-    if rule.kind == "network_range":
+    if rule.kind is HardlineRuleKind.NETWORK_RANGE:
         networks = tuple(ipaddress.ip_network(cidr) for cidr in rule.cidrs)
         for value in values:
             host = urlparse(value).hostname or value
@@ -57,7 +73,7 @@ def hardline_matches(rule: HardlineRule, action: ProposedAction) -> bool:
             except ValueError:
                 continue
         return False
-    if rule.kind == "trust_flow":
+    if rule.kind is HardlineRuleKind.TRUST_FLOW:
         credential_shape = re.compile(
             r"(?:api[_-]?key|secret|password|token|bearer)\s*[:=]\s*\S+", re.I
         )

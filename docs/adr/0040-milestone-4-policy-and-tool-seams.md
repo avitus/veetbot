@@ -14,10 +14,10 @@ durable approvals, principal scopes, resumable tool authorization, workspace
 handles, and parallel read-only calls. The detailed designs fix the observable
 security and recovery guarantees, while several composition and boundary
 choices remain for the first implementation. Two requirements also meet
-surfaces that the plan deliberately schedules later: all current events belong
-to a session even though a profile-load event is process-wide, and the HTTP
-transport is Milestone 5 even though the Milestone 4 implement list names an
-approval API.
+surfaces that the plan deliberately schedules later: the existing conversation
+event log belongs to sessions even though a profile-load event is process-wide,
+and the HTTP transport is Milestone 5 even though the Milestone 4 implement
+list names an approval API.
 
 These choices are proposed for owner review. They do not weaken a hardline
 policy rule, scope check, approval revalidation check, or workspace containment
@@ -31,16 +31,12 @@ rule.
    `{profile}@{sha12}+h{sha8}` version. A `policy_profiles` row records the
    complete hashes and load identity in both persistence tiers. Rules never come
    from the database.
-2. **The process-wide profile-load audit currently uses the audit table, not a
-   synthetic session event.** The event model and database require every event
-   to have a real `session_id`, while `policy.profile.loaded` is specified at
-   process startup before a tenant or session exists. Creating a hidden session
-   would misstate ownership and pollute session history; making event session
-   identity nullable would change the established event-log invariant. The
-   durable audit row therefore carries this fact until a global operational
-   event stream is explicitly designed. This is a documented deviation from the
-   detailed design's additional event requirement, not a claim that the event
-   was emitted.
+2. **Process-wide profile loads use a narrow operational event stream.** The
+   conversation event model and database continue to require a real
+   `session_id`. A separate append-only `process_events` stream records
+   `policy.profile.loaded` with a content-derived idempotency key and no
+   synthetic tenant or session. The `policy_profiles` row remains the rule-hash
+   audit record; the process event is the required operational notification.
 3. **The approval application service is Milestone 4's transport-neutral API;
    HTTP binding remains Milestone 5.** It provides tenant-scoped get, list,
    idempotent resolve, expiry, and authenticated resume operations, and the CLI
@@ -55,12 +51,12 @@ rule.
    needs no second message because the committed queue row is authoritative;
    the inline dispatcher executes immediately so deterministic and local
    operation retain the same application-service behavior.
-5. **`approval.requested` is a post-park latency hint.** Invocation and approval
-   creation share one transaction. Checkpoint, waiting transition, and lease
-   release share the finalization transaction. Only after that commit does the
-   runtime append `approval.requested`; an append failure is logged and does not
-   undo a correctly parked run. Approval listing reads the repository rather
-   than depending on notification delivery.
+5. **`approval.requested` commits with suspension finalization.** Invocation and
+   approval creation share one transaction. The checkpoint, waiting transition,
+   `run.waiting_for_approval`, `approval.requested`, and lease release share the
+   finalization transaction. An event-append failure therefore rolls back the
+   parked-run finalization instead of leaving a durable approval without its
+   audit event.
 6. **The local workspace adapter uses a deterministic per-tenant, per-run root
    and never exposes its host path.** Tools receive only a `WorkspaceHandle`.
    The handle rejects absolute paths, parent traversal, empty path components,
@@ -88,6 +84,20 @@ rule.
     marked `allow_parallel`, classified as `NONE`, `WORKSPACE_READ`, or
     `NETWORK_READ`, and admitted by the remaining run budget. Any unknown,
     malformed, effectful, or mixed batch runs sequentially.
+11. **CIDR hardline matching remains pure and literal; the egress boundary must
+    enforce resolved addresses.** The hardline evaluator blocks literal IP
+    addresses in protected ranges without performing DNS I/O. Hostname
+    resolution cannot be made safe in a pure preflight check because the
+    connected address can change after the decision. Milestone 4 therefore
+    denies every hostname at the policy allowlist condition because no
+    authoritative allowlist or network tool exists. Before a later milestone
+    enables egress, its connection adapter must validate the address actually
+    connected against the same protected ranges.
+12. **Cancellation authority is durable and run-specific.** Active cancellation
+    writes `runs.cancel_requested_at`; the durable heartbeat returns lease
+    ownership and the cancellation flag from one query and sets only the
+    matching run token. The local token registry is keyed by run id. Parked runs
+    still transition directly to `CANCELLED` and reap pending approvals.
 
 ## Consequences
 
@@ -96,23 +106,22 @@ rule.
 - Approval waiting consumes no worker lease, slot, or open transaction, and a
   reconstructed worker resumes at the persisted invocation rather than asking
   again.
-- A notification failure may delay a UI until its next repository poll but
-  cannot lose an approval or strand a run.
+- Process-level profile events are consumable without inventing a session, and
+  approval notifications cannot commit separately from the parked run.
 - Workspace tools cannot name a host path, and restart provenance errs toward
   less authority.
 - Milestone 5 has one existing approval service to bind and must add the HTTP
   transport rather than a second approval implementation.
-- A future global event stream decision must either add the missing
-  `policy.profile.loaded` event or explicitly amend that detailed-design
-  requirement.
+- DNS names remain denied until an authoritative hostname allowlist and a
+  connect-time address guard exist together.
 
 ## Alternatives considered
 
 - **Create one hidden session per process for policy events:** rejected because
   a process-wide ruleset has no honest tenant, principal, or session owner.
-- **Make every event's session nullable in Milestone 4:** rejected because it
-  changes allocation, replay, projection, and authorization invariants outside
-  this milestone's smallest coherent scope.
+- **Make every conversation event's session nullable in Milestone 4:** rejected
+  because it changes allocation, replay, projection, and authorization
+  invariants; a separate operational stream keeps those invariants intact.
 - **Build a temporary approval-only HTTP server:** rejected because Milestone 5
   already owns the complete HTTP composition and security boundary.
 - **Persist host paths on tool execution contexts:** rejected because it lets a

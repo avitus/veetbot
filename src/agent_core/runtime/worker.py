@@ -88,10 +88,15 @@ class DurableWorker:
         if claimed is None:
             return False
         token: RunCancellationToken | None = None
+        cancellation_pending = False
 
-        def capture(active: RunCancellationToken) -> None:
+        def capture(run_id: object, active: RunCancellationToken) -> None:
             nonlocal token
+            if run_id != claimed.run.id:
+                raise RuntimeError("worker received a cancellation token for another run")
             token = active
+            if cancellation_pending:
+                token.cancel(CancelReason.REQUESTED)
 
         execution = asyncio.create_task(
             self._executor.execute_claimed(claimed, on_token=capture),
@@ -111,7 +116,7 @@ class DurableWorker:
                 async with self._uow_factory() as uow:
                     if uow.queue is None:
                         raise RuntimeError("durable worker requires a queue repository")
-                    owned = await uow.queue.heartbeat(claimed.lease)
+                    owned, cancellation_requested = await uow.queue.heartbeat(claimed.lease)
                 if not owned:
                     if token is not None:
                         token.cancel(CancelReason.FENCED)
@@ -119,6 +124,10 @@ class DurableWorker:
                         execution.cancel()
                         cancelled_without_token = True
                     break
+                if cancellation_requested:
+                    cancellation_pending = True
+                    if token is not None:
+                        token.cancel(CancelReason.REQUESTED)
             if cancelled_without_token:
                 await asyncio.gather(execution, return_exceptions=True)
             else:

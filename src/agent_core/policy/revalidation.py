@@ -21,9 +21,13 @@ def revalidation_denial_reason(
         or agent_version != approval.agent_version
     ):
         return "policy.revalidation.changed"
+    if policy_decision is PolicyDecisionType.DENY:
+        return "policy.revalidation.escalated"
     if (
         approval.policy_version != policy_version
         and policy_decision is not PolicyDecisionType.ALLOW
     ):
+        return "policy.revalidation.escalated"
+    if policy_decision is PolicyDecisionType.ALLOW_WITH_MODIFICATIONS:
         return "policy.revalidation.escalated"
     return None

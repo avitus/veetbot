@@ -1,4 +1,7 @@
+import pytest
+
 from agent_core.adapters.persistence.memory import InMemoryPolicyProfileRepository
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.policies import PolicyProfileRecord
 from tests.contract.support import NOW
 
@@ -16,3 +19,5 @@ async def test_policy_profile_repository_records_content_addressed_audit_data() 
     )
     assert await repository.record(record) == record
     assert await repository.get(record.policy_version) == record
+    with pytest.raises(ConflictError):
+        await repository.record(record.model_copy(update={"profile_sha256": "c" * 64}))

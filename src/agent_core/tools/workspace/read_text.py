@@ -5,6 +5,7 @@ from __future__ import annotations
 import codecs
 from typing import Any
 
+from agent_core.domain.errors import WorkspaceEscape, WorkspaceReadLimitExceededError
 from agent_core.domain.execution import WorkspaceProvenance
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
@@ -50,7 +51,19 @@ class WorkspaceReadTextTool:
         path = str(arguments["path"])
         workspace = workspace_from(context)
         try:
-            data = await workspace.read(path)
+            data = await workspace.read_bounded(path, self.spec.maximum_output_bytes)
+        except WorkspaceEscape:
+            return failure(
+                ToolFailureKind.INVALID_ARGUMENTS,
+                "tool.arguments_invalid",
+                "workspace path failed containment validation",
+            )
+        except WorkspaceReadLimitExceededError:
+            return failure(
+                ToolFailureKind.OUTPUT_TOO_LARGE,
+                "tool.output_invalid",
+                "workspace file exceeds the declared output limit",
+            )
         except FileNotFoundError:
             return failure(
                 ToolFailureKind.NOT_FOUND,
