@@ -90,12 +90,15 @@ class EvalExpected(StrictModel):
 class EvalArm(StrictModel):
     name: str
     skills: list[str] = Field(default_factory=list)
+    carry: list[Literal["memory"]] = Field(default_factory=list)
     expected: EvalExpected
 
     @model_validator(mode="after")
     def stable_name(self) -> EvalArm:
         if CASE_NAME.fullmatch(self.name) is None:
             raise ValueError("arm name must use lower snake case")
+        if len(set(self.carry)) != len(self.carry):
+            raise ValueError("arm carry subjects must be unique")
         return self
 
 

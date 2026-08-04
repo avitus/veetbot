@@ -16,10 +16,12 @@ from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import ConflictError, ContextOverflow
 from agent_core.domain.events import NewEvent
+from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.sessions import Session
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
+from agent_core.ports.memory import MemoryRetriever
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
@@ -42,6 +44,7 @@ class EventContextPlanner:
         *,
         policy_version: str,
         skill_catalogs: SkillCatalog | None = None,
+        memory_retriever: MemoryRetriever | None = None,
         cache_capacity: int = 1_024,
     ) -> None:
         if cache_capacity <= 0:
@@ -54,6 +57,7 @@ class EventContextPlanner:
         self._config = config
         self._policy_version = policy_version
         self._skill_catalogs = skill_catalogs
+        self._memory_retriever = memory_retriever
         self._allocator = ContextBudgetAllocator(config)
         self._cache_capacity = cache_capacity
         self._cache: OrderedDict[UUID, ContextPlan] = OrderedDict()
@@ -115,7 +119,12 @@ class EventContextPlanner:
             if current is not None:
                 if self._skill_catalogs is not None:
                     await self._skill_catalogs.open(session.id, agent, principal)
-                current_prefix = build_prefix(agent, current.tool_specs, current.skill_catalog)
+                current_prefix = build_prefix(
+                    agent,
+                    current.tool_specs,
+                    current.skill_catalog,
+                    current.memory_snapshot,
+                )
                 current_prefix_sha256 = hashlib.sha256(
                     prefix_bytes(current_prefix, current.tool_specs)
                 ).hexdigest()
@@ -198,15 +207,41 @@ class EventContextPlanner:
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )
-        prefix = build_prefix(agent, tools, catalog_metadata)
+        memory_config = classes.get("memory_snapshot")
+        if self._memory_retriever is not None and not isinstance(memory_config, dict):
+            raise ValueError("memory-snapshot context configuration must be a mapping")
+        if self._memory_retriever is None:
+            snapshot = None
+        else:
+            assert isinstance(memory_config, dict)
+            snapshot = await self._memory_retriever.recall(
+                RecallQuery(
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    current_scope=str(session.metadata.get("project_scope", "general")),
+                    profile=RecallProfile.CORE,
+                    budget_tokens=int(memory_config["max_tokens"]),
+                    max_items=int(memory_config["max_items"]),
+                    min_score=0.1,
+                    sensitivity_ceiling=Sensitivity.RESTRICTED,
+                ),
+                session_id=session.id,
+                moment=RecallMoment.SNAPSHOT.value,
+            )
+        memory_snapshot = "" if snapshot is None or not snapshot.items else snapshot.rendered
+        prefix = build_prefix(agent, tools, catalog_metadata, memory_snapshot)
         base_prefix = build_prefix(agent, tools)
+        catalog_prefix = build_prefix(agent, tools, catalog_metadata)
         model_id = f"{model.provider}:{model.model}"
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
         tool_tokens = self._estimator.estimate(
             base_prefix[2:], model_id
         ) + self._estimator.estimate_tools(tools, model_id)
-        skill_catalog_tokens = self._estimator.estimate(prefix[len(base_prefix) :], model_id)
+        skill_catalog_tokens = self._estimator.estimate(
+            catalog_prefix[len(base_prefix) :], model_id
+        )
+        memory_tokens = self._estimator.estimate(prefix[len(catalog_prefix) :], model_id)
         if framing_tokens > int(classes["platform_policy"]["max_tokens"]):
             raise ContextOverflow("context prefix class platform_policy exceeds its cap")
         if agent_tokens > int(classes["agent_instructions"]["max_tokens"]):
@@ -218,8 +253,12 @@ class EventContextPlanner:
             raise ValueError("skill-catalog context configuration must be a mapping")
         if skill_catalog_tokens > int(skill_config["max_tokens"]):
             raise ContextOverflow("context prefix class skill_catalog exceeds its cap")
+        if isinstance(memory_config, dict) and memory_tokens > int(memory_config["max_tokens"]):
+            raise ContextOverflow("context prefix class memory_snapshot exceeds its cap")
         encoded_prefix = prefix_bytes(prefix, tools)
-        prefix_tokens = framing_tokens + agent_tokens + tool_tokens + skill_catalog_tokens
+        prefix_tokens = (
+            framing_tokens + agent_tokens + tool_tokens + skill_catalog_tokens + memory_tokens
+        )
         prefix_config = self._config.get("prefix")
         if not isinstance(prefix_config, dict):
             raise ValueError("context prefix configuration must be a mapping")
@@ -236,6 +275,9 @@ class EventContextPlanner:
             tool_names=tuple(tool.name for tool in tools),
             tool_specs=tuple(tool.model_copy(deep=True) for tool in tools),
             tool_schema_sha256=hashlib.sha256(schema_bytes).hexdigest(),
+            snapshot_id=None if snapshot is None else snapshot.trace_id,
+            snapshot_watermark=0 if snapshot is None else snapshot.watermark,
+            memory_snapshot=memory_snapshot,
             skill_pins=() if catalog is None else catalog.pins,
             skill_catalog=catalog_metadata,
             cache_breakpoints=(

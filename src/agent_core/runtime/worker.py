@@ -169,6 +169,7 @@ class MaintenanceWorker:
         sweep_artifacts: Callable[[], Awaitable[int]] | None = None,
         sweep_sandboxes: SandboxSweep | None = None,
         sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
+        sweep_memory: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
     ) -> None:
         self._uow_factory = uow_factory
@@ -179,6 +180,7 @@ class MaintenanceWorker:
         self._sweep_artifacts = sweep_artifacts
         self._sweep_sandboxes = sweep_sandboxes
         self._sweep_artifact_orphans = sweep_artifact_orphans
+        self._sweep_memory = sweep_memory
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
         self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
@@ -229,6 +231,11 @@ class MaintenanceWorker:
                 await self._sweep_artifacts()
             except Exception:
                 logger.exception("general artifact expiry sweep failed")
+        if self._sweep_memory is not None:
+            try:
+                await self._sweep_memory()
+            except Exception:
+                logger.exception("memory expiry sweep failed")
         orphan_sweep_due = (
             self._last_artifact_orphan_sweep_at is None
             or self._clock.now() - self._last_artifact_orphan_sweep_at

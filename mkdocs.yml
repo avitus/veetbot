@@ -133,4 +133,5 @@ nav:
       - ADR-0042 Milestone 6 sandbox, bridge, and artifact seams: adr/0042-milestone-6-sandbox-and-artifact-seams.md
       - ADR-0043 Milestone 7 context-engine seams: adr/0043-milestone-7-context-engine-seams.md
       - ADR-0044 Milestone 8 skill and MCP seams: adr/0044-milestone-8-skills-and-mcp-seams.md
+      - ADR-0045 Milestone 9 memory and knowledge seams: adr/0045-milestone-9-memory-and-knowledge-seams.md
   - Changelog: changelog.md

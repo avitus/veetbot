@@ -4,70 +4,72 @@
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Ingestion trust** — an ingest attempted from a turn below `USER` origin trust is refused, and nothing is written."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_ingest_trust
 - id: gate.knowledge.no_secrets
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**No secrets ingested** — a source containing a credential pattern fails the ingest, and no document, chunk, index row, or artifact survives the attempt."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_no_secrets
 - id: gate.knowledge.chunk_stable
   milestone: 9
   kind: property
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Chunk determinism** — the same bytes under the same `chunker_version` produce identical chunk ids, across processes and across runs. A property gate."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_chunk_stable
 - id: gate.knowledge.visibility
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Visibility isolation** — zero cross-tenant results, and zero results whose `visibility` does not admit the querying principal. A hard gate, not a metric to improve."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_visibility
 - id: gate.knowledge.verbatim
   milestone: 9
   kind: property
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Passage verbatim** — every rendered passage matches its chunk's stored text exactly, and the chunk matches its `content_sha256`. A property gate."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_verbatim
 - id: gate.knowledge.cite_resolves
   milestone: 9
   kind: property
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Citation resolves** — every chunk id in a rendered block resolves to a live chunk whose text contains what was quoted. A property gate."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_cite_resolves
 - id: gate.knowledge.budget_yield
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Budget yield** — under pressure the knowledge class yields before in-turn recall, and passages are dropped whole rather than truncated."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_budget_yield
 - id: gate.knowledge.supersession
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Version supersession** — after a new version is ingested, live retrieval returns the new passages and never the old, while an `as_of` query still returns the old ones."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_supersession
 - id: gate.knowledge.delete_cascades
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Deletion cascades** — after a delete, no chunk, index row, or retrievable passage remains, the source artifact is swept, and a trace that cited it renders as deleted rather than dangling."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_delete_cascades
 - id: gate.knowledge.trace_complete
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Trace completeness** — for sampled turns, a trace that rendered passages lists them, and the listed passages reproduce the rendered block the recorded hash covers."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_trace_complete
 - id: gate.knowledge.no_belief_write
   milestone: 9
   kind: case
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**No belief from a document** — a consolidation pass over a session in which passages were rendered writes zero beliefs whose provenance is a document."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_no_belief_write
 - id: gate.knowledge.corpus_recall
   milestone: 9
   kind: corpus
   spec: docs/plan/knowledge-documents.md#hard-gates
   statement: "**Corpus retrieval** — a labelled corpus of questions and their answering passages, with a floor on passage recall@3 and a ceiling on noise ratio. A corpus gate."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_knowledge_m9.py::test_corpus_recall
+  corpus: evals/corpora/knowledge_recall/
+  minimum_members: 3

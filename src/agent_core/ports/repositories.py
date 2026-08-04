@@ -53,7 +53,7 @@ class SessionRepository(Protocol):
 
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
-    ) -> Session: ...
+    ) -> tuple[Session, bool]: ...
 
 
 class RunRepository(Protocol):
@@ -261,6 +261,14 @@ class ArtifactRepository(Protocol):
     async def exists(self, artifact_id: UUID) -> bool: ...
 
     async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef: ...
+
+    async def retain_for_knowledge(
+        self, artifact_id: UUID, principal: Principal
+    ) -> ArtifactRef: ...
+
+    async def expire(
+        self, artifact_id: UUID, principal: Principal, expired_at: datetime
+    ) -> ArtifactRef: ...
 
     async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]: ...
 

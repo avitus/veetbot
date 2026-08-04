@@ -37,6 +37,7 @@ from agent_core.domain.messages import (
     TextPart,
     ToolCallItem,
     ToolResultItem,
+    UserMessage,
 )
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
@@ -234,6 +235,36 @@ def _writer_origin(tool: Tool) -> ArtifactOrigin:
     if tool.spec.name == "artifact.export":
         return ArtifactOrigin.SANDBOX_EXPORT
     return ArtifactOrigin.TOOL_OUTPUT
+
+
+def _action_kind(tool: Tool) -> ActionKind:
+    return ActionKind.MEMORY_WRITE if tool.spec.name == "memory.remember" else ActionKind.TOOL_CALL
+
+
+def _turn_origin_trust(checkpoint: RunCheckpoint) -> TrustLevel:
+    """Conservatively taint writes when the active turn consumed external content."""
+
+    origin_trust = checkpoint.context_origin_trust
+    active_turn: list[object] = []
+    for item in reversed(checkpoint.conversation):
+        active_turn.append(item)
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
+            break
+    else:
+        return TrustLevel.EXTERNAL_UNTRUSTED
+    for active_item in active_turn:
+        if isinstance(active_item, ToolResultItem) and active_item.trust in {
+            TrustLevel.EXTERNAL_UNTRUSTED,
+            TrustLevel.KNOWLEDGE,
+        }:
+            return TrustLevel.EXTERNAL_UNTRUSTED
+        if (
+            isinstance(active_item, ToolResultItem)
+            and active_item.trust is TrustLevel.MEMORY
+            and origin_trust is TrustLevel.USER
+        ):
+            origin_trust = TrustLevel.MEMORY
+    return origin_trust
 
 
 async def authorize_tool_invocation(
@@ -527,7 +558,7 @@ class ToolPipeline:
                 normalized_arguments_hash=arguments_hash,
                 effective_arguments_hash=arguments_hash,
                 idempotency_key=key,
-                origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                origin_trust=_turn_origin_trust(checkpoint),
                 parallel_group=parallel_group,
                 created_at=now,
                 updated_at=now,
@@ -872,6 +903,7 @@ class ToolPipeline:
             working_state=deepcopy(checkpoint.working_state),
             loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),
+            origin_trust=invocation.origin_trust,
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
@@ -1106,7 +1138,7 @@ class ToolPipeline:
         arguments_hash: str,
     ) -> ProposedAction:
         return ProposedAction(
-            kind=ActionKind.TOOL_CALL,
+            kind=_action_kind(tool),
             action_id=invocation.id,
             tenant_id=run.tenant_id,
             session_id=run.session_id,
@@ -1152,7 +1184,7 @@ class ToolPipeline:
             principal_id=principal.principal_id,
             session_id=run.session_id,
             run_id=run.id,
-            action_kind=ActionKind.TOOL_CALL,
+            action_kind=_action_kind(tool),
             action_id=invocation.id,
             tool_invocation_id=invocation.id,
             status=ApprovalStatus.PENDING,

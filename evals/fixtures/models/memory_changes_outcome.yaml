@@ -1,0 +1,20 @@
+turns:
+  - kind: final
+    context_contains: "User launch code is ORBIT-7 (user, medium)"
+    text: ORBIT-7
+    stop_reason: end_turn
+  - kind: tool_call
+    tool_name: memory.remember
+    arguments:
+      statement: User launch code is ORBIT-7
+      subject: launch code
+      scope: account-recovery
+      belief_type: fact
+      portability: contextual
+      sensitivity: internal
+    call_id: call_memory_remember
+  - kind: tool_call
+    tool_name: conversation.ask_user
+    arguments:
+      question: What is your launch code?
+    call_id: call_ask_launch_code

@@ -46,7 +46,12 @@ class ContextBudgetAllocator:
         tools = self._integer(class_config("tool_definitions"), "max_tokens")
         skill_catalog = self._integer(class_config("skill_catalog"), "max_tokens")
         skill_body = self._integer(class_config("skill_bodies"), "max_tokens")
-        memory = self._integer(class_config("memory_snapshot"), "max_tokens")
+        raw_memory = classes.get("memory_snapshot")
+        memory = (
+            0
+            if raw_memory is None
+            else self._integer(self._mapping(raw_memory, "classes.memory_snapshot"), "max_tokens")
+        )
         recall = self._integer(class_config("in_turn_recall"), "max_tokens")
         working = self._integer(class_config("working_state"), "max_tokens")
         knowledge = self._integer(class_config("knowledge_passages"), "max_tokens")

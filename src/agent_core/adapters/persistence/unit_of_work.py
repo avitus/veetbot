@@ -14,7 +14,9 @@ from sqlalchemy.sql.functions import func
 
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
+from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
+from agent_core.ports.memory import MemoryStore, TraceStore
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.repositories import (
     AgentRepository,
@@ -72,6 +74,9 @@ class UnitOfWorkRepositories:
     maintenance: MaintenanceRepository
     skills: SkillRepository
     mcp_servers: MCPServerRepository
+    memories: MemoryStore
+    traces: TraceStore
+    knowledge: KnowledgeStore
     queue: RunQueue | None
 
 
@@ -111,6 +116,9 @@ class MemoryUnitOfWork:
         self.maintenance = repositories.maintenance
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
+        self.memories = repositories.memories
+        self.traces = repositories.traces
+        self.knowledge = repositories.knowledge
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -200,6 +208,9 @@ class PostgresUnitOfWork:
         self.maintenance = repositories.maintenance
         self.skills = repositories.skills
         self.mcp_servers = repositories.mcp_servers
+        self.memories = repositories.memories
+        self.traces = repositories.traces
+        self.knowledge = repositories.knowledge
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self

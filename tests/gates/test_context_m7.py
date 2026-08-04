@@ -21,6 +21,16 @@ from agent_core.context.rendering import build_prefix, envelope_item, prefix_byt
 from agent_core.context.working_state import WorkingStateLimitError, WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextBudget, ContextPlan, TaskStatus, WorkingState
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryAuthority,
+    MemoryStatus,
+    Portability,
+    RecalledBelief,
+    RecallQuery,
+    RecallResult,
+    Sensitivity,
+)
 from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
@@ -32,11 +42,13 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.runs import RunCheckpoint, RunStatus
+from agent_core.domain.runs import Run, RunCheckpoint, RunStatus
 from agent_core.domain.sessions import Session
 from agent_core.domain.skills import LoadedSkillBody
 from agent_core.evals.cases import load_cases
 from agent_core.evals.runner import run_case
+from agent_core.ports.memory import MemoryRetriever, QueryFormer
+from agent_core.runtime.loop import _apply_context_origin_trust
 from agent_core.tools.context_update import UpdateWorkingStateTool
 from tests.contract.support import NOW, agent, principal, run, session, tool_context
 
@@ -98,10 +110,17 @@ class _PlanStore:
         return self.value.model_copy(deep=True)
 
 
-def _builder(*, history: int = 18_000, tool_results: int = 4_000) -> BudgetedContextBuilder:
+def _builder(
+    *,
+    history: int = 18_000,
+    tool_results: int = 4_000,
+    memory_snapshot: str = "",
+    memory_retriever: MemoryRetriever | None = None,
+    query_former: QueryFormer | None = None,
+) -> BudgetedContextBuilder:
     configured_agent = agent()
     estimator = ConservativeTokenEstimator()
-    prefix = build_prefix(configured_agent, [])
+    prefix = build_prefix(configured_agent, [], memory_snapshot=memory_snapshot)
     plan = ContextPlan(
         session_id=session().id,
         epoch=1,
@@ -111,12 +130,108 @@ def _builder(*, history: int = 18_000, tool_results: int = 4_000) -> BudgetedCon
         tool_names=(),
         tool_specs=(),
         tool_schema_sha256=hashlib.sha256(b"[]").hexdigest(),
+        memory_snapshot=memory_snapshot,
         policy_version="milestone-7-test",
         builder_version="context-builder@2",
         budget=_budget(history=history, tool_results=tool_results),
         created_at=NOW,
     )
-    return BudgetedContextBuilder(_PlanStore(plan), estimator, FixedClock(NOW), _working_state())
+    return BudgetedContextBuilder(
+        _PlanStore(plan),
+        estimator,
+        FixedClock(NOW),
+        _working_state(),
+        memory_retriever,
+        query_former,
+    )
+
+
+class _StaticQueryFormer:
+    def form(
+        self,
+        active_run: Run,
+        working_state: WorkingState,
+        message: str | None,
+    ) -> list[RecallQuery]:
+        del active_run, working_state, message
+        return [
+            RecallQuery(
+                tenant_id=principal().tenant_id,
+                principal_id=principal().principal_id,
+                current_scope="project-a",
+                text="concise answers",
+                budget_tokens=500,
+                max_items=5,
+                min_score=0.1,
+            )
+        ]
+
+
+class _StaticMemoryRetriever:
+    async def recall(
+        self,
+        query: RecallQuery,
+        *,
+        session_id: UUID,
+        run_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        moment: str = "in_turn",
+        surface_id: str = "private",
+    ) -> RecallResult:
+        del query, session_id, run_id, turn_id, moment, surface_id
+        return RecallResult(
+            items=[
+                RecalledBelief(
+                    belief_id=UUID(int=901),
+                    subject="answer style",
+                    statement="User prefers concise answers",
+                    belief_type=BeliefType.PREFERENCE,
+                    status=MemoryStatus.ACTIVE,
+                    confidence_band="high",
+                    authority=MemoryAuthority.USER,
+                    origin_scope="project-a",
+                    portability=Portability.PORTABLE,
+                    sensitivity=Sensitivity.INTERNAL,
+                    valid_from=NOW,
+                    score=1.0,
+                    arms=["structured"],
+                    source_event_ids=[1],
+                )
+            ],
+            rendered='<memory as_of="2026-01-01T00:00:00Z">concise</memory>',
+            tokens=16,
+            truncated=False,
+            trace_id=UUID(int=902),
+            watermark=1,
+        )
+
+
+class _CountingMemoryRetriever(_StaticMemoryRetriever):
+    def __init__(self, *, fail: bool = False) -> None:
+        self.calls = 0
+        self._fail = fail
+
+    async def recall(
+        self,
+        query: RecallQuery,
+        *,
+        session_id: UUID,
+        run_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        moment: str = "in_turn",
+        surface_id: str = "private",
+    ) -> RecallResult:
+        self.calls += 1
+        if self._fail:
+            raise RuntimeError("recall unavailable")
+        return await super().recall(
+            query,
+            session_id=session_id,
+            run_id=run_id,
+            turn_id=turn_id,
+            moment=moment,
+            surface_id=surface_id,
+        )
 
 
 @st.composite
@@ -287,6 +402,90 @@ async def test_current_turn_is_subtracted_before_history_selection() -> None:
     assert fixed_blocked.fits is False
     assert fixed_blocked.compactable is False
     assert fixed_blocked.reason == "fixed_body_exceeds_context_window"
+
+
+async def test_memory_context_marks_snapshot_and_recall_provenance() -> None:
+    active_run = run(status=RunStatus.RUNNING)
+    checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="How should you answer?")])],
+        created_at=NOW,
+    )
+    snapshot_only = _builder(
+        memory_snapshot='<memory as_of="2026-01-01T00:00:00Z">concise</memory>'
+    )
+    snapshot_request = await snapshot_only.build(active_run, checkpoint, agent(), principal())
+    assert snapshot_request.metadata["context_origin_trust"] == TrustLevel.MEMORY.value
+    _apply_context_origin_trust(checkpoint, snapshot_request)
+    assert checkpoint.context_origin_trust is TrustLevel.MEMORY
+
+    recall_only = _builder(
+        memory_retriever=_StaticMemoryRetriever(),
+        query_former=_StaticQueryFormer(),
+    )
+    recall_checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="How should you answer?")])],
+        created_at=NOW,
+    )
+    recall_request = await recall_only.build(active_run, recall_checkpoint, agent(), principal())
+    assert recall_request.metadata["context_origin_trust"] == TrustLevel.MEMORY.value
+    _apply_context_origin_trust(recall_checkpoint, recall_request)
+    assert recall_checkpoint.context_origin_trust is TrustLevel.MEMORY
+    assert any(
+        isinstance(item, UserMessage) and item.trust is TrustLevel.MEMORY
+        for item in recall_request.conversation
+    )
+
+
+async def test_measure_and_build_share_one_recall_trace() -> None:
+    retriever = _CountingMemoryRetriever()
+    builder = _builder(memory_retriever=retriever, query_former=_StaticQueryFormer())
+    active_run = run(status=RunStatus.RUNNING)
+    checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="How should you answer?")])],
+        created_at=NOW,
+    )
+
+    await builder.measure(active_run, checkpoint, agent(), principal())
+    request = await builder.build(active_run, checkpoint, agent(), principal())
+
+    assert retriever.calls == 1
+    assert request.metadata["context_origin_trust"] == TrustLevel.MEMORY.value
+
+
+async def test_recall_failure_degrades_and_no_user_turn_skips_recall() -> None:
+    failing = _CountingMemoryRetriever(fail=True)
+    builder = _builder(memory_retriever=failing, query_former=_StaticQueryFormer())
+    active_run = run(status=RunStatus.RUNNING)
+    user_checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        conversation=[UserMessage(content=[TextPart(text="Continue")])],
+        created_at=NOW,
+    )
+    request = await builder.build(active_run, user_checkpoint, agent(), principal())
+    assert failing.calls == 1
+    assert request.metadata["context_origin_trust"] == TrustLevel.USER.value
+
+    no_user = RunCheckpoint(
+        run_id=active_run.id,
+        version=2,
+        status=RunStatus.RUNNING,
+        conversation=[AssistantMessage(content=[TextPart(text="No new user turn")])],
+        created_at=NOW,
+    )
+    request = await builder.build(active_run, no_user, agent(), principal())
+    assert failing.calls == 1
+    assert request.metadata["context_origin_trust"] == TrustLevel.USER.value
 
 
 async def test_loaded_skill_overflow_is_reported_as_context_pressure() -> None:

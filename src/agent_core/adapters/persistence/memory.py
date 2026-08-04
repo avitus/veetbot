@@ -124,7 +124,9 @@ class InMemorySessionRepository:
                 raise NotFoundError("session not found")
             return session.model_copy(deep=True)
 
-    async def close(self, session_id: UUID, principal: Principal, closed_at: datetime) -> Session:
+    async def close(
+        self, session_id: UUID, principal: Principal, closed_at: datetime
+    ) -> tuple[Session, bool]:
         async with self._lock:
             try:
                 session = self._sessions[session_id]
@@ -135,11 +137,13 @@ class InMemorySessionRepository:
                 or session.principal_id != principal.principal_id
             ):
                 raise NotFoundError("session not found")
+            if session.status is not SessionStatus.ACTIVE:
+                return session.model_copy(deep=True), False
             updated = session.model_copy(
                 update={"status": SessionStatus.CLOSED, "updated_at": closed_at}, deep=True
             )
             self._sessions[session_id] = updated
-            return updated.model_copy(deep=True)
+            return updated.model_copy(deep=True), True
 
 
 class InMemoryRunRepository:
@@ -315,15 +319,27 @@ class InMemoryEventRepository:
             return envelope.model_copy(deep=True)
 
     async def list_after(
-        self, session_id: UUID, sequence: int, principal: Principal
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        created_at_or_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int | None = None,
     ) -> list[EventEnvelope]:
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be nonnegative")
         await self._sessions.get(session_id, principal)
         async with self._lock:
-            return [
+            matching = [
                 event.model_copy(deep=True)
                 for event in self._events[session_id]
                 if event.sequence > sequence
+                and (created_at_or_after is None or event.created_at >= created_at_or_after)
+                and (created_before is None or event.created_at < created_before)
             ]
+            return matching if limit is None else matching[:limit]
 
     async def latest_before(
         self,
@@ -978,7 +994,7 @@ class InMemoryTrajectoryExportRepository:
             for run_id, row in list(self._rows.items()):
                 if row.tenant_id != tenant_id or row.principal_id != principal_id:
                     continue
-                if row.artifact.expires_at <= expired_at:
+                if row.artifact.expires_at is None or row.artifact.expires_at <= expired_at:
                     continue
                 artifact = row.artifact.model_copy(update={"expires_at": expired_at})
                 self._rows[run_id] = row.model_copy(update={"artifact": artifact})
@@ -991,14 +1007,18 @@ class InMemoryTrajectoryExportRepository:
             for row in self._rows.values():
                 if len(expired) >= limit:
                     break
-                if row.artifact.expires_at <= now:
+                if row.artifact.expires_at is not None and row.artifact.expires_at <= now:
                     expired.append(row.artifact.model_copy(deep=True))
         return expired
 
     async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
         async with self._lock:
             for run_id, row in list(self._rows.items()):
-                if row.artifact.id == artifact_id and row.artifact.expires_at <= now:
+                if (
+                    row.artifact.id == artifact_id
+                    and row.artifact.expires_at is not None
+                    and row.artifact.expires_at <= now
+                ):
                     del self._rows[run_id]
                     return True
         return False
@@ -1031,14 +1051,49 @@ class InMemoryArtifactRepository:
                 return artifact.model_copy(deep=True)
         raise NotFoundError("artifact not found")
 
+    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        async with self._lock:
+            artifact = self._rows.get(artifact_id)
+            if artifact is None or (
+                artifact.tenant_id != principal.tenant_id
+                or artifact.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("artifact not found")
+            retained = artifact.model_copy(
+                update={"origin": "knowledge_source", "expires_at": None}, deep=True
+            )
+            self._rows[artifact_id] = retained
+            return retained.model_copy(deep=True)
+
+    async def expire(
+        self, artifact_id: UUID, principal: Principal, expired_at: datetime
+    ) -> ArtifactRef:
+        async with self._lock:
+            artifact = self._rows.get(artifact_id)
+            if artifact is None or (
+                artifact.tenant_id != principal.tenant_id
+                or artifact.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("artifact not found")
+            expired = artifact.model_copy(update={"expires_at": expired_at}, deep=True)
+            self._rows[artifact_id] = expired
+            return expired.model_copy(deep=True)
+
     async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
         async with self._lock:
+            expired = [
+                artifact
+                for artifact in self._rows.values()
+                if artifact.origin != "trajectory_export"
+                and artifact.expires_at is not None
+                and artifact.expires_at <= now
+            ]
             return [
                 artifact.model_copy(deep=True)
                 for artifact in sorted(
-                    self._rows.values(), key=lambda item: (item.expires_at, item.id)
+                    expired,
+                    key=lambda item: (item.expires_at, item.id),
                 )
-                if artifact.origin != "trajectory_export" and artifact.expires_at <= now
             ][:limit]
 
     async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
@@ -1047,6 +1102,7 @@ class InMemoryArtifactRepository:
             if (
                 artifact is None
                 or artifact.origin == "trajectory_export"
+                or artifact.expires_at is None
                 or artifact.expires_at > now
             ):
                 return False

@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_8_complete
+  status: milestone_9_complete
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 8
+  current_milestone: 9
   authorized_milestones:
     - 0
     - 1
@@ -48,7 +48,7 @@ milestones:
     status: complete
   "9":
     title: Long-term memory and knowledge retrieval
-    status: not_started
+    status: complete
   "10":
     title: Scheduling, model routing, and subagents
     status: not_started
@@ -507,6 +507,73 @@ verification:
           deterministic tar.zst archives, event-reconstructed pins, ephemeral MCP
           prompts, exact SDK subprocess environments, and the managed worker
           egress proxy.
+    remaining: []
+  milestone_9:
+    recorded_at: 2026-08-04T21:22:54Z
+    status: complete
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 323 source and test
+          files, 307 static tests, 132 port contracts, strict documentation
+          builds, 123 citation checks, and all 166 hard gates active through
+          Milestone 9 passed.
+      - check: 166 cumulative hard gates
+        outcome: passed_locally
+        detail: >-
+          All 26 Milestone 9 gates have executable checks for governed
+          formation, corrections, hybrid recall, trace fidelity, isolation,
+          cache stability, knowledge ingestion, citations, deletion, and the
+          deterministic cross-arm memory-lift case.
+      - check: PostgreSQL 16 integration partition
+        outcome: passed
+        detail: >-
+          All 77 integration and resilience tests passed. The new coverage
+          migrates memory, consolidation, trace, knowledge-document, and chunk
+          storage and reconstructs memory and knowledge across independent
+          compositions, including structured-subject retrieval.
+      - check: complete non-live suite against PostgreSQL 16 and Docker
+        outcome: passed
+        detail: >-
+          All 526 non-live tests passed across the verified partitions with
+          only the two credentialed provider smoke tests deselected. This
+          included 439 static and contract tests, 77 PostgreSQL integration and
+          resilience tests, and ten real-Docker sandbox security tests.
+      - check: Alembic revision and metadata
+        outcome: passed
+        detail: >-
+          PostgreSQL upgraded through revision c6d8e9f0a1b2, the Milestone 9
+          migration round-tripped from its predecessor, and alembic check
+          reported no schema drift.
+      - check: memory_changes_outcome evaluation
+        outcome: passed
+        detail: >-
+          The isolated first arm could not answer without memory and formed one
+          provenance-linked belief. The second arm re-formed that supported
+          belief from fresh source events and answered ORBIT-7 from its frozen
+          snapshot without a tool call.
+      - check: CodeRabbit local review remediation
+        outcome: passed_locally
+        detail: >-
+          The original three local findings and all hosted-review remediation
+          were re-reviewed locally. Follow-up findings covering explicit tenant
+          trace redaction, document replacement ownership, event limits,
+          tokenizer symmetry, and the no-read oversized-source gate were fixed;
+          the final full review completed with zero findings.
+      - check: hosted CircleCI and CodeRabbit for pull request 10
+        outcome: passed
+        detail: >-
+          The static, contract, PostgreSQL integration, and real-Docker sandbox
+          lanes plus GitGuardian passed on final review-remediation commit
+          e5c2140. Every CodeRabbit review thread was answered and resolved, and
+          the final incremental review completed without a new finding.
+      - check: proposed ADR-0045
+        outcome: owner_review_requested
+        detail: >-
+          The reversible CLI, deterministic extraction, conflict, audit,
+          PostgreSQL FTS, evaluation carry, tool classification, retained
+          source, and context-snapshot choices are recorded for owner review.
     remaining: []
 
 documentation:

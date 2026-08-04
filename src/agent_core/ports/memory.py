@@ -1,0 +1,144 @@
+"""Long-term memory formation, retrieval, and trace ports."""
+
+from __future__ import annotations
+
+from typing import Protocol
+from uuid import UUID
+
+from agent_core.domain.agents import Principal
+from agent_core.domain.context import WorkingState
+from agent_core.domain.events import EventEnvelope
+from agent_core.domain.memory import (
+    BeliefRejection,
+    BeliefType,
+    ConsolidationResult,
+    ConsolidationRun,
+    EpisodeQuery,
+    MemoryEdit,
+    MemoryRecord,
+    RecalledBelief,
+    RecallQuery,
+    RecallResult,
+    RecallTrace,
+    RecallTraceView,
+)
+from agent_core.domain.runs import Run
+
+
+class MemoryStore(Protocol):
+    async def next_position(self) -> int: ...
+
+    async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord: ...
+
+    async def query(self, query: RecallQuery) -> list[MemoryRecord]: ...
+
+    async def related(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        subject: str,
+        belief_type: BeliefType,
+    ) -> list[MemoryRecord]: ...
+
+    async def upsert_belief(self, belief: MemoryRecord) -> MemoryRecord: ...
+
+    async def reinforce(self, belief: MemoryRecord) -> MemoryRecord: ...
+
+    async def supersede(
+        self, current: MemoryRecord, replacement: MemoryRecord
+    ) -> tuple[MemoryRecord, MemoryRecord]: ...
+
+    async def list_memories(
+        self, principal: Principal, *, include_inactive: bool = False, limit: int = 200
+    ) -> list[MemoryRecord]: ...
+
+    async def edit(
+        self, belief_id: UUID, principal: Principal, edit: MemoryEdit, edited: MemoryRecord
+    ) -> MemoryRecord: ...
+
+    async def delete(
+        self, belief_id: UUID, principal: Principal, tombstone: BeliefRejection
+    ) -> None: ...
+
+    async def reject(self, rejection: BeliefRejection, updated: MemoryRecord) -> MemoryRecord: ...
+
+    async def outstanding_rejections(
+        self, tenant_id: str, principal_id: str
+    ) -> list[BeliefRejection]: ...
+
+    async def record_consolidation(self, run: ConsolidationRun) -> ConsolidationRun: ...
+
+    async def consolidation_watermark(self, session_id: UUID, principal: Principal) -> int: ...
+
+    async def set_consolidation_watermark(
+        self, session_id: UUID, principal: Principal, sequence: int
+    ) -> None: ...
+
+    async def expire(self, principal: Principal) -> list[MemoryRecord]: ...
+
+
+class MemoryConsolidator(Protocol):
+    async def run(
+        self,
+        *,
+        trigger: str,
+        scope: str,
+        session_id: UUID | None,
+        since_watermark: int | None = None,
+    ) -> ConsolidationResult: ...
+
+
+class Salience(Protocol):
+    def eligible(self, statement: str, *, explicit: bool) -> bool: ...
+
+
+class ConflictResolver(Protocol):
+    def relationship(
+        self, existing: MemoryRecord, statement: str, source_event_ids: list[int]
+    ) -> str: ...
+
+
+class MemoryRetriever(Protocol):
+    async def recall(
+        self,
+        query: RecallQuery,
+        *,
+        session_id: UUID,
+        run_id: UUID | None = None,
+        turn_id: UUID | None = None,
+        moment: str = "in_turn",
+        surface_id: str = "private",
+    ) -> RecallResult: ...
+
+
+class QueryFormer(Protocol):
+    def form(
+        self,
+        run: Run,
+        working_state: WorkingState,
+        message: str | None,
+    ) -> list[RecallQuery]: ...
+
+
+class Ranker(Protocol):
+    def rank(
+        self, candidates: list[RecalledBelief], query: RecallQuery
+    ) -> list[RecalledBelief]: ...
+
+
+class EpisodeSearch(Protocol):
+    async def search(self, query: EpisodeQuery) -> list[EventEnvelope]: ...
+
+
+class TraceStore(Protocol):
+    async def record(self, trace: RecallTrace) -> None: ...
+
+    async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...
+
+    async def get(self, trace_id: UUID, principal: Principal) -> RecallTrace: ...
+
+    async def user_view(
+        self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str
+    ) -> RecallTraceView: ...
+
+    async def mark_document_deleted(self, tenant_id: str, document_id: UUID) -> None: ...

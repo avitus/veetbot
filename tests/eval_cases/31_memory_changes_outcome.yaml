@@ -1,0 +1,24 @@
+name: memory_changes_outcome
+milestone: 9
+tags: [memory, comparison]
+input:
+  text: Remember that my launch code is ORBIT-7, then answer from long-term memory only.
+model_fixture: memory_changes_outcome
+fixtures:
+  tools: [memory.remember, conversation.ask_user]
+arms:
+  - name: without_memory
+    expected:
+      terminal_status: WAITING_FOR_USER
+      model_calls: 2
+      tool_started_count: 2
+  - name: with_memory
+    carry: [memory]
+    expected:
+      terminal_status: COMPLETED
+      final_text: ORBIT-7
+      model_calls: 1
+      tool_started_count: 0
+delta:
+  policy_failures: same
+  outcome: improves

@@ -42,7 +42,7 @@ class ArtifactRef(BaseModel):
         "knowledge_source",
     ] = "trajectory_export"
     trust: TrustLevel
-    expires_at: datetime
+    expires_at: datetime | None
     created_at: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
 

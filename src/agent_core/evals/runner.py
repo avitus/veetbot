@@ -16,6 +16,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.evals.cases import EvalCase, EvalExpected, load_cases
 from agent_core.evals.fixtures import (
@@ -35,6 +36,7 @@ class EvalResult:
     runs: tuple[Run, ...] = ()
     arm_name: str | None = None
     arm_results: tuple[EvalResult, ...] = ()
+    memories: tuple[MemoryRecord, ...] = ()
 
 
 def _settings() -> Settings:
@@ -153,6 +155,7 @@ async def _run_single(
     expected: EvalExpected,
     enabled_skills: list[str],
     arm_name: str | None = None,
+    carried_memories: tuple[MemoryRecord, ...] = (),
 ) -> EvalResult:
     script = resolve_model_fixture(fixture_root, case.model_fixture)
     limits = RunLimits(**case.fixtures.run_limits.model_dump())
@@ -192,8 +195,34 @@ async def _run_single(
     ) as composition:
         session_id = None
         prompts = [case.input.text]
-        if case.session is not None:
+        if case.session is not None or carried_memories:
             session_id = await composition.sessions.create()
+        if carried_memories:
+            assert session_id is not None
+            for belief in carried_memories:
+                async with composition.uow_factory() as uow:
+                    source = await uow.events.append(
+                        NewEvent(
+                            session_id=session_id,
+                            run_id=None,
+                            event_type="user.message.created",
+                            actor_type="eval",
+                            actor_id=principal.principal_id,
+                            payload={"content": belief.statement},
+                        )
+                    )
+                await composition.memory.remember(
+                    session_id=session_id,
+                    run_id=None,
+                    statement=belief.statement,
+                    subject=belief.subject,
+                    scope=belief.scope,
+                    belief_type=belief.belief_type,
+                    portability=belief.portability,
+                    sensitivity=belief.sensitivity,
+                    source_event_ids=[source.sequence],
+                )
+        if case.session is not None:
             prompts = [
                 (
                     f"{case.input.text}\nTurn {turn} of {case.session.turns}.\n"
@@ -266,6 +295,7 @@ async def _run_single(
                     0,
                     event_reader_principal,
                 )
+        memories = tuple(await composition.memory.list_memories())
     result = EvalResult(
         case=case,
         run=run,
@@ -273,6 +303,7 @@ async def _run_single(
         pending_approvals=pending_count,
         runs=tuple(completed_runs),
         arm_name=arm_name,
+        memories=memories,
     )
     assert_expected(result, expected)
     return result
@@ -298,18 +329,24 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
             expected=case.expected,
             enabled_skills=case.fixtures.skills,
         )
-    arm_results = tuple(
-        [
-            await _run_single(
-                case,
-                fixture_root,
-                expected=arm.expected,
-                enabled_skills=arm.skills,
-                arm_name=arm.name,
-            )
-            for arm in case.arms
-        ]
+    first_arm, second_arm = case.arms
+    first = await _run_single(
+        case,
+        fixture_root,
+        expected=first_arm.expected,
+        enabled_skills=first_arm.skills,
+        arm_name=first_arm.name,
     )
+    carried_memories = first.memories if "memory" in second_arm.carry else ()
+    second = await _run_single(
+        case,
+        fixture_root,
+        expected=second_arm.expected,
+        enabled_skills=second_arm.skills,
+        arm_name=second_arm.name,
+        carried_memories=carried_memories,
+    )
+    arm_results = (first, second)
     before, after = arm_results
     assert case.delta is not None
     before_policy = _policy_failure_count(before)
@@ -349,6 +386,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         runs=after.runs,
         arm_name=after.arm_name,
         arm_results=arm_results,
+        memories=after.memories,
     )
 
 

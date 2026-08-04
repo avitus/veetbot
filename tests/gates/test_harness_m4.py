@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_corpus_minimum() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    corpus_gates = [entry for entry in entries if entry.kind == "corpus" and entry.milestone <= 4]
+    corpus_gates = [entry for entry in entries if entry.kind == "corpus" and entry.milestone <= 9]
     assert corpus_gates
     for gate in corpus_gates:
         assert gate.corpus is not None

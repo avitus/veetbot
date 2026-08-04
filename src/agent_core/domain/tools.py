@@ -122,6 +122,7 @@ class ToolExecutionContext:
     mark_effect_sent: Callable[[], Awaitable[None]]
     loaded_skills: tuple[dict[str, Any], ...] = ()
     available_tools: frozenset[str] = frozenset()
+    origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
 
 
 class ToolOutcomeStatus(StrEnum):

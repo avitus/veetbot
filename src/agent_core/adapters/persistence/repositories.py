@@ -196,7 +196,9 @@ class PostgresSessionRepository:
             raise NotFoundError("session not found")
         return session_to_domain(row)
 
-    async def close(self, session_id: UUID, principal: Principal, closed_at: datetime) -> Session:
+    async def close(
+        self, session_id: UUID, principal: Principal, closed_at: datetime
+    ) -> tuple[Session, bool]:
         row = (
             await self._session.scalars(
                 update(SessionRow)
@@ -204,14 +206,15 @@ class PostgresSessionRepository:
                     SessionRow.id == session_id,
                     SessionRow.tenant_id == principal.tenant_id,
                     SessionRow.principal_id == principal.principal_id,
+                    SessionRow.status == SessionStatus.ACTIVE.value,
                 )
                 .values(status=SessionStatus.CLOSED.value, updated_at=closed_at)
                 .returning(SessionRow)
             )
         ).one_or_none()
-        if row is None:
-            raise NotFoundError("session not found")
-        return session_to_domain(row)
+        if row is not None:
+            return session_to_domain(row), True
+        return await self.get(session_id, principal), False
 
 
 def _lease_predicates(lease: WorkerLease | None) -> list[Any]:
@@ -457,8 +460,17 @@ class PostgresEventRepository:
         return event_to_domain(row, self._upcasters)
 
     async def list_after(
-        self, session_id: UUID, sequence: int, principal: Principal
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        created_at_or_after: datetime | None = None,
+        created_before: datetime | None = None,
+        limit: int | None = None,
     ) -> list[EventEnvelope]:
+        if limit is not None and limit < 0:
+            raise ValueError("limit must be nonnegative")
         allowed = await self._session.scalar(
             select(SessionRow.id).where(
                 SessionRow.id == session_id,
@@ -468,13 +480,17 @@ class PostgresEventRepository:
         )
         if allowed is None:
             raise NotFoundError("session not found")
-        rows = (
-            await self._session.scalars(
-                select(EventRow)
-                .where(EventRow.session_id == session_id, EventRow.sequence > sequence)
-                .order_by(EventRow.sequence, EventRow.id)
-            )
-        ).all()
+        statement = select(EventRow).where(
+            EventRow.session_id == session_id, EventRow.sequence > sequence
+        )
+        if created_at_or_after is not None:
+            statement = statement.where(EventRow.created_at >= created_at_or_after)
+        if created_before is not None:
+            statement = statement.where(EventRow.created_at < created_before)
+        statement = statement.order_by(EventRow.sequence, EventRow.id)
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
         return [event_to_domain(row, self._upcasters) for row in rows]
 
     async def latest_before(
@@ -1527,6 +1543,42 @@ class PostgresArtifactRepository:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
 
+    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        row = (
+            await self._session.scalars(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .values(origin="knowledge_source", expires_at=None)
+                .returning(ArtifactRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return artifact_to_domain(row)
+
+    async def expire(
+        self, artifact_id: UUID, principal: Principal, expired_at: datetime
+    ) -> ArtifactRef:
+        row = (
+            await self._session.scalars(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .values(expires_at=expired_at)
+                .returning(ArtifactRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return artifact_to_domain(row)
+
     async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
         rows = list(
             (
@@ -1534,6 +1586,7 @@ class PostgresArtifactRepository:
                     select(ArtifactRow)
                     .where(
                         ArtifactRow.origin != "trajectory_export",
+                        ArtifactRow.expires_at.is_not(None),
                         ArtifactRow.expires_at <= now,
                     )
                     .order_by(ArtifactRow.expires_at, ArtifactRow.id)

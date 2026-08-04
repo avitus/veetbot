@@ -1,3 +1,5 @@
+import pytest
+
 from agent_core.domain.events import NewEvent
 from tests.contract.support import SESSION_ID, memory_stack, principal
 
@@ -16,6 +18,8 @@ async def test_event_repository_assigns_gapless_per_session_sequences() -> None:
     events = await repository.list_after(SESSION_ID, 0, principal())
     assert [event.sequence for event in events] == [1, 2]
     assert [event.event_type for event in events] == ["first", "second"]
+    with pytest.raises(ValueError, match="nonnegative"):
+        await repository.list_after(SESSION_ID, 0, principal(), limit=-1)
 
 
 async def test_event_repository_reads_an_idempotent_derivation_key() -> None:

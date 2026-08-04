@@ -69,3 +69,40 @@ async def test_context_planner_persists_and_rotates_a_session_plan() -> None:
     assert rotated.prefix_sha256 == prefix_rotated.prefix_sha256
     assert conflict_rotated.epoch == 4
     assert conflict_rotated.model_id == "fake:other"
+
+
+async def test_context_planner_does_not_require_snapshot_config_without_memory() -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    del config["classes"]["memory_snapshot"]
+    planner = EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    )
+
+    created = await planner.plan(
+        session(),
+        agent(),
+        principal(),
+        ResolvedModel(provider="fake", model="scripted", resolved_at=NOW),
+    )
+
+    assert created.memory_snapshot == ""
+    assert created.budget.retrieved_context_tokens == 2_000

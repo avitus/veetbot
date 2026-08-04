@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -78,6 +79,22 @@ type CancelParkedRun = Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]
 type ResumeWaitingRun = Callable[[RepositoryUnitOfWork, Run], Awaitable[Run]]
 logger = logging.getLogger(__name__)
 _IDLE_POLL_SECONDS = 5.0
+
+
+async def _notify_session_closed(
+    callback: Callable[[UUID], Awaitable[None]], session_id: UUID
+) -> None:
+    """Run post-commit consolidation best-effort without swallowing cancellation."""
+
+    (result,) = await asyncio.gather(callback(session_id), return_exceptions=True)
+    if not isinstance(result, BaseException):
+        return
+    if not isinstance(result, Exception):
+        raise result
+    logger.warning(
+        "session_close_callback_failed",
+        extra={"session_id": str(session_id), "error_class": type(result).__name__},
+    )
 
 
 def _session_view(session: Session, active: Run | None) -> SessionView:
@@ -204,6 +221,7 @@ class PublicSessionService:
         catalogs: SkillCatalog | None = None,
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
         close_session: Callable[[UUID], Awaitable[None]] | None = None,
+        on_session_closed: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -212,6 +230,7 @@ class PublicSessionService:
         self._catalogs = catalogs
         self._activate_session = activate_session
         self._close_session = close_session
+        self._on_session_closed = on_session_closed
 
     async def _resolve_agent(self, uow: RepositoryUnitOfWork, agent_id: str) -> AgentSpec:
         if agent_id in {"general", str(self._default_agent.id)}:
@@ -288,6 +307,7 @@ class PublicSessionService:
 
     async def close(self, principal: Principal, session_id: UUID) -> SessionView:
         require_scope(principal, "session.write")
+        closed_now = False
         async with self._uow_factory() as uow:
             session = await uow.sessions.get(session_id, principal)
             active = await uow.runs.active_for_session(session_id, principal)
@@ -297,10 +317,11 @@ class PublicSessionService:
                     reason="active_run_exists",
                     details={"run_id": str(active.id), "run_status": active.status.value},
                 )
-            if session.status is SessionStatus.ACTIVE:
-                session = await uow.sessions.close(session_id, principal, self._clock.now())
+            session, closed_now = await uow.sessions.close(session_id, principal, self._clock.now())
         if self._close_session is not None:
             await self._close_session(session_id)
+        if closed_now and self._on_session_closed is not None:
+            await _notify_session_closed(self._on_session_closed, session_id)
         return _session_view(session, None)
 
     async def ready(self) -> bool:
@@ -906,7 +927,7 @@ class PublicArtifactService:
                 artifact = await uow.artifacts.get(artifact_id, principal)
                 is_trajectory = False
         # ArtifactRef requires an expiry, and persistence mapping rejects legacy null rows.
-        if artifact.expires_at <= self._clock.now():
+        if artifact.expires_at is not None and artifact.expires_at <= self._clock.now():
             raise NotFoundError("artifact not found")
         return artifact, is_trajectory
 

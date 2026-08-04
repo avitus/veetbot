@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, PositiveInt, model_validator
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.provenance import ElidedSpan
 from agent_core.domain.skills import LoadedSkillBody
 from agent_core.domain.tools import ToolSpec
@@ -128,6 +129,7 @@ class RunCheckpoint(BaseModel):
     last_event_sequence: int = 0
     provider_continuation: ProviderContinuation | None = None
     provider_pin: ProviderPin | None = None
+    context_origin_trust: TrustLevel = TrustLevel.USER
     created_at: datetime
 
     @model_validator(mode="after")

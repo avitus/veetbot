@@ -30,6 +30,7 @@ from agent_core.domain.messages import (
     ToolResultItem,
 )
 from agent_core.domain.persistence import WorkerLease
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import (
     BudgetScope,
     FailureReason,
@@ -183,6 +184,15 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
             },
         )
         await checkpoint(context, "compaction")
+
+
+def _apply_context_origin_trust(checkpoint_state: RunCheckpoint, request: ModelRequest) -> None:
+    try:
+        checkpoint_state.context_origin_trust = TrustLevel(
+            request.metadata.get("context_origin_trust", TrustLevel.USER.value)
+        )
+    except ValueError as exc:
+        raise ContextOverflow("context builder returned an invalid trust marker") from exc
 
 
 async def checkpoint(context: RunContext, trigger: str) -> None:
@@ -536,6 +546,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             started_at=context.clock.now(),
         )
         request = await build_with_pressure(context, step)
+        _apply_context_origin_trust(context.checkpoint, request)
         invoked = await _invoke_model(context, step, request)
         if isinstance(invoked, RunOutcome):
             return invoked

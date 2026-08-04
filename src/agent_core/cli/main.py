@@ -34,6 +34,7 @@ from agent_core.domain.errors import (
     NotFoundError,
 )
 from agent_core.domain.events import EventEnvelope
+from agent_core.domain.memory import MemoryEdit, Portability, Sensitivity
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.views import (
@@ -77,10 +78,12 @@ run_app = typer.Typer(name="run", cls=ReservedRunGroup, no_args_is_help=True)
 session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
 approval_app = typer.Typer(name="approval", no_args_is_help=True)
+memory_app = typer.Typer(name="memory", no_args_is_help=True)
 app.add_typer(run_app)
 app.add_typer(session_app)
 app.add_typer(eval_app)
 app.add_typer(approval_app)
+app.add_typer(memory_app)
 
 
 class _EvalRunnerModule(Protocol):
@@ -456,6 +459,82 @@ def session_export_consent(
     typer.echo(consent.model_dump_json())
 
 
+async def _memory_list(include_inactive: bool, limit: int) -> list[Any]:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.list_memories(
+            include_inactive=include_inactive,
+            limit=limit,
+        )
+
+
+@memory_app.command("list")
+def memory_list(
+    include_inactive: Annotated[
+        bool,
+        typer.Option("--include-inactive", help="Include superseded and expired beliefs."),
+    ] = False,
+    limit: Annotated[int, typer.Option(min=1, max=200)] = 100,
+) -> None:
+    """Inspect the authenticated principal's governed memories."""
+
+    try:
+        rows = asyncio.run(_memory_list(include_inactive, limit))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(json.dumps([row.model_dump(mode="json") for row in rows], default=str))
+
+
+async def _memory_edit(belief_id: UUID, edit: MemoryEdit) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.edit(belief_id, edit)
+
+
+@memory_app.command("edit")
+def memory_edit(
+    belief_id: UUID,
+    statement: Annotated[str, typer.Option("--statement", help="Replacement statement.")],
+    sensitivity: Annotated[Sensitivity | None, typer.Option()] = None,
+    portability: Annotated[Portability | None, typer.Option()] = None,
+    scope: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """Edit one belief through an auditable, tenant-scoped correction path."""
+
+    try:
+        row = asyncio.run(
+            _memory_edit(
+                belief_id,
+                MemoryEdit(
+                    statement=statement,
+                    sensitivity=sensitivity,
+                    portability=portability,
+                    scope=scope,
+                ),
+            )
+        )
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(row.model_dump_json())
+
+
+async def _memory_delete(belief_id: UUID) -> None:
+    async with build(storage="postgres") as composition:
+        await composition.memory.delete(belief_id)
+
+
+@memory_app.command("delete")
+def memory_delete(belief_id: UUID) -> None:
+    """Delete one belief and retain only its non-recallable rejection tombstone."""
+
+    try:
+        asyncio.run(_memory_delete(belief_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(str(belief_id))
+
+
 async def _approval_list() -> list[Any]:
     async with build(storage="postgres") as composition:
         rows: list[Any] = []
@@ -548,7 +627,7 @@ def eval_run(
     try:
         module = cast(_EvalRunnerModule, importlib.import_module("agent_core.evals.runner"))
         results = module.run_selected_sync(
-            Path.cwd(), current_milestone=5, tag=tag, case_name=case_name
+            Path.cwd(), current_milestone=9, tag=tag, case_name=case_name
         )
     except (EvalExpectationError, ImportError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)
