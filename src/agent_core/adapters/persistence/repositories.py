@@ -196,7 +196,9 @@ class PostgresSessionRepository:
             raise NotFoundError("session not found")
         return session_to_domain(row)
 
-    async def close(self, session_id: UUID, principal: Principal, closed_at: datetime) -> Session:
+    async def close(
+        self, session_id: UUID, principal: Principal, closed_at: datetime
+    ) -> tuple[Session, bool]:
         row = (
             await self._session.scalars(
                 update(SessionRow)
@@ -204,14 +206,15 @@ class PostgresSessionRepository:
                     SessionRow.id == session_id,
                     SessionRow.tenant_id == principal.tenant_id,
                     SessionRow.principal_id == principal.principal_id,
+                    SessionRow.status == SessionStatus.ACTIVE.value,
                 )
                 .values(status=SessionStatus.CLOSED.value, updated_at=closed_at)
                 .returning(SessionRow)
             )
         ).one_or_none()
-        if row is None:
-            raise NotFoundError("session not found")
-        return session_to_domain(row)
+        if row is not None:
+            return session_to_domain(row), True
+        return await self.get(session_id, principal), False
 
 
 def _lease_predicates(lease: WorkerLease | None) -> list[Any]:

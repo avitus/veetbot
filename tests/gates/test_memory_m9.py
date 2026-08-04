@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import timedelta
 from pathlib import Path
@@ -387,8 +388,10 @@ async def test_session_close_consolidation_callback_is_once_and_nonblocking() ->
         on_session_closed=fail_after_recording,
     )
     writer = principal().model_copy(update={"scopes": {"session.write"}})
-    first = await sessions.close(writer, SESSION_ID)
-    second = await sessions.close(writer, SESSION_ID)
+    first, second = await asyncio.gather(
+        sessions.close(writer, SESSION_ID),
+        sessions.close(writer, SESSION_ID),
+    )
 
     assert first.status is SessionStatus.CLOSED
     assert second.status is SessionStatus.CLOSED

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -78,6 +79,22 @@ type CancelParkedRun = Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]
 type ResumeWaitingRun = Callable[[RepositoryUnitOfWork, Run], Awaitable[Run]]
 logger = logging.getLogger(__name__)
 _IDLE_POLL_SECONDS = 5.0
+
+
+async def _notify_session_closed(
+    callback: Callable[[UUID], Awaitable[None]], session_id: UUID
+) -> None:
+    """Run post-commit consolidation best-effort without swallowing cancellation."""
+
+    (result,) = await asyncio.gather(callback(session_id), return_exceptions=True)
+    if not isinstance(result, BaseException):
+        return
+    if not isinstance(result, Exception):
+        raise result
+    logger.warning(
+        "session_close_callback_failed",
+        extra={"session_id": str(session_id), "error_class": type(result).__name__},
+    )
 
 
 def _session_view(session: Session, active: Run | None) -> SessionView:
@@ -300,22 +317,11 @@ class PublicSessionService:
                     reason="active_run_exists",
                     details={"run_id": str(active.id), "run_status": active.status.value},
                 )
-            if session.status is SessionStatus.ACTIVE:
-                session = await uow.sessions.close(session_id, principal, self._clock.now())
-                closed_now = True
+            session, closed_now = await uow.sessions.close(session_id, principal, self._clock.now())
         if self._close_session is not None:
             await self._close_session(session_id)
         if closed_now and self._on_session_closed is not None:
-            try:
-                await self._on_session_closed(session_id)
-            except Exception as exc:
-                logger.warning(
-                    "session_close_callback_failed",
-                    extra={
-                        "session_id": str(session_id),
-                        "error_class": type(exc).__name__,
-                    },
-                )
+            await _notify_session_closed(self._on_session_closed, session_id)
         return _session_view(session, None)
 
     async def ready(self) -> bool:

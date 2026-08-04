@@ -53,7 +53,7 @@ class SessionRepository(Protocol):
 
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
-    ) -> Session: ...
+    ) -> tuple[Session, bool]: ...
 
 
 class RunRepository(Protocol):

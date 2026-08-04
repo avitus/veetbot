@@ -624,7 +624,7 @@ class PostgresKnowledgeStore:
                 )
                 .order_by(KnowledgeDocumentRow.version.desc())
                 .limit(1)
-                .with_for_update()
+                .with_for_update(of=KnowledgeDocumentRow)
             )
         ).one_or_none()
         return None if result is None else _knowledge_document(result[0], result[1])

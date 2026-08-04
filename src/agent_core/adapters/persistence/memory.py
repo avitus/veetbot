@@ -124,7 +124,9 @@ class InMemorySessionRepository:
                 raise NotFoundError("session not found")
             return session.model_copy(deep=True)
 
-    async def close(self, session_id: UUID, principal: Principal, closed_at: datetime) -> Session:
+    async def close(
+        self, session_id: UUID, principal: Principal, closed_at: datetime
+    ) -> tuple[Session, bool]:
         async with self._lock:
             try:
                 session = self._sessions[session_id]
@@ -135,11 +137,13 @@ class InMemorySessionRepository:
                 or session.principal_id != principal.principal_id
             ):
                 raise NotFoundError("session not found")
+            if session.status is not SessionStatus.ACTIVE:
+                return session.model_copy(deep=True), False
             updated = session.model_copy(
                 update={"status": SessionStatus.CLOSED, "updated_at": closed_at}, deep=True
             )
             self._sessions[session_id] = updated
-            return updated.model_copy(deep=True)
+            return updated.model_copy(deep=True), True
 
 
 class InMemoryRunRepository:
