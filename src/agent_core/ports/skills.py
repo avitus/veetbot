@@ -57,6 +57,10 @@ class SkillCatalog(Protocol):
 
     def current(self, session_id: UUID) -> SessionSkillCatalog: ...
 
+    async def discard(self, session_id: UUID) -> None:
+        """Forget uncommitted session catalog state."""
+        ...
+
     async def load(
         self,
         session_id: UUID,

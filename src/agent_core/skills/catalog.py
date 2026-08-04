@@ -55,6 +55,10 @@ class SkillCatalogService:
         self._catalogs: OrderedDict[UUID, SessionSkillCatalog] = OrderedDict()
         self._locks: WeakValueDictionary[UUID, asyncio.Lock] = WeakValueDictionary()
 
+    @property
+    def maximum_body_tokens(self) -> int:
+        return self._maximum_body_tokens
+
     def _lock(self, session_id: UUID) -> asyncio.Lock:
         lock = self._locks.get(session_id)
         if lock is None:
@@ -123,7 +127,7 @@ class SkillCatalogService:
             configured: list[CatalogEntry] = []
             revisions = []
             async with self._uow_factory() as uow:
-                refs = (
+                raw_refs = (
                     [
                         SkillRef(name=pin.name, revision=pin.revision)
                         for pin in recorded_pins
@@ -138,6 +142,15 @@ class SkillCatalogService:
                 )
                 if recorded_pins is None and agent is None:
                     raise NotFoundError("session skill pins are unavailable")
+                refs: list[SkillRef] = []
+                configured_dropped: list[str] = []
+                seen_names: set[str] = set()
+                for ref in raw_refs:
+                    if ref.name in seen_names or len(refs) >= self._maximum_entries:
+                        configured_dropped.append(ref.name)
+                        continue
+                    seen_names.add(ref.name)
+                    refs.append(ref)
                 for ref in refs:
                     revision = await uow.skills.resolve(
                         principal.tenant_id,
@@ -175,7 +188,7 @@ class SkillCatalogService:
                 missing_pins = []
             ordered = [*configured, *remote]
             kept: list[CatalogEntry] = []
-            dropped: list[str] = [*missing_pins]
+            dropped: list[str] = [*configured_dropped, *missing_pins]
             used_tokens = 0
             for index, entry in enumerate(ordered):
                 rendered = self.render_entry(entry)
@@ -199,6 +212,10 @@ class SkillCatalogService:
             return catalog.model_copy(deep=True)
         except KeyError as exc:
             raise NotFoundError("session skill catalog is not open") from exc
+
+    async def discard(self, session_id: UUID) -> None:
+        self._catalogs.pop(session_id, None)
+        self._locks.pop(session_id, None)
 
     @staticmethod
     def render_entry(entry: CatalogEntry) -> str:

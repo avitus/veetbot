@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
@@ -49,6 +50,8 @@ from agent_core.ports.tools import ToolRegistry
 
 _SKILL_CHARACTERS = re.compile(r"[^a-z0-9-]")
 _SKILL_HYPHENS = re.compile(r"-+")
+type _RegistrationKey = tuple[str, str, str]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -121,12 +124,38 @@ class MCPRuntime:
         self._sessions: dict[UUID, dict[str, _Connection]] = {}
         self._prepared: set[UUID] = set()
         self._locks: dict[UUID, asyncio.Lock] = {}
-        self._registered: set[tuple[str, str, str]] = set()
+        self._session_registrations: dict[UUID, set[_RegistrationKey]] = {}
+        self._registration_owners: dict[_RegistrationKey, set[UUID]] = {}
         self._deferred_events: set[UUID] = set()
         self._pending_events: dict[UUID, list[tuple[str, dict[str, Any]]]] = {}
 
     def _lock(self, session_id: UUID) -> asyncio.Lock:
         return self._locks.setdefault(session_id, asyncio.Lock())
+
+    def _register(
+        self,
+        session_id: UUID,
+        tenant_id: str,
+        tool: MCPTool | MCPResourceTool,
+    ) -> None:
+        key = (tenant_id, tool.spec.name, tool.spec.version)
+        owners = self._registration_owners.get(key)
+        if owners is None:
+            self._registry.register_dynamic(tool, tenant_id=tenant_id)
+            owners = set()
+            self._registration_owners[key] = owners
+        owners.add(session_id)
+        self._session_registrations.setdefault(session_id, set()).add(key)
+
+    def _unregister_session(self, session_id: UUID) -> None:
+        for key in self._session_registrations.pop(session_id, set()):
+            owners = self._registration_owners[key]
+            owners.discard(session_id)
+            if owners:
+                continue
+            tenant_id, name, version = key
+            self._registry.unregister_dynamic(name, version, tenant_id=tenant_id)
+            self._registration_owners.pop(key, None)
 
     async def _credential(self, config: MCPServerConfig) -> SecretValue | None:
         if config.credential_ref is None:
@@ -240,13 +269,11 @@ class MCPRuntime:
                     connections[config.server_id] = connection
                     await self._record_catalog(connection)
                     for mapped in report.accepted:
-                        key = (principal.tenant_id, mapped.spec.name, mapped.spec.version)
-                        if key not in self._registered:
-                            self._registry.register_dynamic(
-                                MCPTool(self, mapped.spec, mapped.remote_name),
-                                tenant_id=principal.tenant_id,
-                            )
-                            self._registered.add(key)
+                        self._register(
+                            session_id,
+                            principal.tenant_id,
+                            MCPTool(self, mapped.spec, mapped.remote_name),
+                        )
                     for group in report.conflicts:
                         await self._event(
                             session_id,
@@ -261,13 +288,11 @@ class MCPRuntime:
                         )
                     if discovery.resources:
                         spec = self._resource_spec(config, report.catalog_hash)
-                        key = (principal.tenant_id, spec.name, spec.version)
-                        if key not in self._registered:
-                            self._registry.register_dynamic(
-                                MCPResourceTool(self, spec),
-                                tenant_id=principal.tenant_id,
-                            )
-                            self._registered.add(key)
+                        self._register(
+                            session_id,
+                            principal.tenant_id,
+                            MCPResourceTool(self, spec),
+                        )
                     await self._event(
                         session_id,
                         "mcp.server.connected",
@@ -283,6 +308,7 @@ class MCPRuntime:
                 for connection in connections.values():
                     with suppress(BaseException):
                         await connection.client.__aexit__(None, None, None)
+                self._unregister_session(session_id)
                 raise
             self._sessions[session_id] = connections
             self._prepared.add(session_id)
@@ -607,9 +633,24 @@ class MCPRuntime:
         self._locks.pop(session_id, None)
         self._deferred_events.discard(session_id)
         self._pending_events.pop(session_id, None)
-        for connection in connections.values():
-            await connection.client.__aexit__(None, None, None)
+        try:
+            for connection in connections.values():
+                try:
+                    await connection.client.__aexit__(None, None, None)
+                except BaseException:
+                    logger.exception(
+                        "mcp_connection_close_failed",
+                        extra={
+                            "session_id": str(session_id),
+                            "server_id": connection.config.server_id,
+                        },
+                    )
+        finally:
+            self._unregister_session(session_id)
 
     async def close(self) -> None:
         for session_id in list(self._sessions):
-            await self.close_session(session_id)
+            try:
+                await self.close_session(session_id)
+            except BaseException:
+                logger.exception("mcp_session_close_failed", extra={"session_id": str(session_id)})

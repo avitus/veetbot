@@ -137,6 +137,22 @@ class StaticToolRegistry:
         self._dynamic_tools[key] = RegisteredTool(spec=spec, implementation=tool)
         self._dynamic_latest[(tenant_id, spec.name)] = spec.version
 
+    def unregister_dynamic(self, name: str, version: str, *, tenant_id: str) -> None:
+        key = (tenant_id, name, version)
+        self._dynamic_tools.pop(key, None)
+        latest_key = (tenant_id, name)
+        if self._dynamic_latest.get(latest_key) != version:
+            return
+        remaining = sorted(
+            candidate_version
+            for candidate_tenant, candidate_name, candidate_version in self._dynamic_tools
+            if candidate_tenant == tenant_id and candidate_name == name
+        )
+        if remaining:
+            self._dynamic_latest[latest_key] = remaining[-1]
+        else:
+            self._dynamic_latest.pop(latest_key, None)
+
     def get(
         self,
         name: str,

@@ -157,7 +157,7 @@ from agent_core.domain.execution import (
     EgressPolicy,
     ResourceLimits,
 )
-from agent_core.domain.mcp import MCPServerConfig, ScriptedMCPServer
+from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelEvent,
@@ -633,7 +633,7 @@ async def _compose(
             if mcp_scripts is not None:
                 mcp_clients = ScriptedMCPClientFactory(dict(mcp_scripts))
             else:
-                if any(config.transport.value == "http" for config in effective_mcp_configs):
+                if any(config.transport is MCPTransport.HTTP for config in effective_mcp_configs):
                     mcp_proxy = await start_worker_egress_proxy(
                         egress,
                         tenant_id=principal.tenant_id,
@@ -768,6 +768,7 @@ async def _compose(
             agent,
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
+            close_session=mcp_runtime.close_session,
         )
         trajectory_service = TrajectoryExportService(
             uow_factory=uow_factory,
@@ -806,6 +807,7 @@ async def _compose(
             agent,
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
+            close_session=mcp_runtime.close_session,
         )
         public_services = ApplicationServices(
             sessions=public_session_service,

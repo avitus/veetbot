@@ -34,6 +34,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.sessions import Session
+from agent_core.domain.skills import LoadedSkillBody
 from agent_core.evals.cases import load_cases
 from agent_core.evals.runner import run_case
 from agent_core.tools.context_update import UpdateWorkingStateTool
@@ -286,6 +287,34 @@ async def test_current_turn_is_subtracted_before_history_selection() -> None:
     assert fixed_blocked.fits is False
     assert fixed_blocked.compactable is False
     assert fixed_blocked.reason == "fixed_body_exceeds_context_window"
+
+
+async def test_loaded_skill_overflow_is_reported_as_context_pressure() -> None:
+    builder = _builder()
+    active_run = run(status=RunStatus.RUNNING)
+    checkpoint = RunCheckpoint(
+        run_id=active_run.id,
+        version=1,
+        status=RunStatus.RUNNING,
+        loaded_skills=[
+            LoadedSkillBody(
+                name=f"skill-{index}",
+                revision=1,
+                content="body",
+                tokens=1,
+                trust=TrustLevel.TRUSTED_CONFIGURATION,
+                content_sha256="0" * 64,
+            )
+            for index in range(3)
+        ],
+        created_at=NOW,
+    )
+
+    pressure = await builder.measure(active_run, checkpoint, agent(), principal())
+
+    assert pressure.fits is False
+    assert pressure.compactable is False
+    assert pressure.reason == "skill_bodies_exceed_cap"
 
 
 async def test_tool_pair_integ() -> None:

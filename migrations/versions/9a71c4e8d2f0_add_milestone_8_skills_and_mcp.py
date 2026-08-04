@@ -50,7 +50,7 @@ def upgrade() -> None:
             ["authored_by_run_id"],
             ["runs.id"],
             name=op.f("fk_skill_revisions_authored_by_run_id_runs"),
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["skill_id"],
@@ -60,6 +60,11 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_skill_revisions")),
         sa.UniqueConstraint("skill_id", "revision", name="uq_skill_revisions_skill_revision"),
+    )
+    op.create_index(
+        "ix_skill_revisions_skill_status_revision_desc",
+        "skill_revisions",
+        ["skill_id", "status", sa.text("revision DESC")],
     )
     op.create_table(
         "mcp_servers",

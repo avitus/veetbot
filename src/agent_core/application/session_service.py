@@ -23,6 +23,7 @@ class SessionService:
         default_agent: AgentSpec,
         catalogs: SkillCatalog | None = None,
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
+        close_session: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -31,6 +32,7 @@ class SessionService:
         self._default_agent = default_agent
         self._catalogs = catalogs
         self._activate_session = activate_session
+        self._close_session = close_session
 
     async def create(self) -> UUID:
         async with self._uow_factory() as uow:
@@ -43,10 +45,16 @@ class SessionService:
             await self._activate_session(session_id)
 
     async def create_in(self, uow: RepositoryUnitOfWork) -> UUID:
-        """Create a session inside a caller-owned submission transaction."""
+        """Create inside a caller-owned transaction; activate after it commits."""
 
         now = self._clock.now()
         session_id = self._ids.new_id()
+        catalogs = self._catalogs
+        if catalogs is not None:
+            uow.on_rollback(lambda: catalogs.discard(session_id))
+        close_session = self._close_session
+        if close_session is not None:
+            uow.on_rollback(lambda: close_session(session_id))
         catalog = (
             None
             if self._catalogs is None

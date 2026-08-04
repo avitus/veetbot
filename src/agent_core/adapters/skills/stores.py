@@ -81,6 +81,8 @@ class FilesystemSkillPackageStore:
             delete=False,
         ) as staged:
             staged.write(archive)
+            staged.flush()
+            os.fsync(staged.fileno())
             temporary = Path(staged.name)
         try:
             try:
@@ -91,6 +93,11 @@ class FilesystemSkillPackageStore:
                         "immutable skill archive key already contains different bytes"
                     ) from None
                 return SkillPackagePut(key=key, created=False)
+            directory = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
             return SkillPackagePut(key=key, created=True)
         finally:
             temporary.unlink(missing_ok=True)

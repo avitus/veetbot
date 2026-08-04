@@ -115,8 +115,9 @@ class _TenantTool:
 
 
 class _TrackedClient:
-    def __init__(self, *, fail_discovery: bool) -> None:
+    def __init__(self, *, fail_discovery: bool, fail_close: bool = False) -> None:
         self.fail_discovery = fail_discovery
+        self.fail_close = fail_close
         self.entered = False
         self.closed = False
 
@@ -133,6 +134,8 @@ class _TrackedClient:
         del exc_type, exc, traceback
         self.entered = False
         self.closed = True
+        if self.fail_close:
+            raise RuntimeError("injected MCP close failure")
 
     async def discover(self) -> MCPDiscovery:
         if self.fail_discovery:
@@ -155,8 +158,15 @@ class _TrackedClient:
 
 
 class _TrackedFactory:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        fail_discovery: frozenset[str] = frozenset({"second"}),
+        fail_close: frozenset[str] = frozenset(),
+    ) -> None:
         self.clients: list[_TrackedClient] = []
+        self.fail_discovery = fail_discovery
+        self.fail_close = fail_close
 
     def __call__(
         self,
@@ -165,7 +175,10 @@ class _TrackedFactory:
         environment: dict[str, str],
     ) -> _TrackedClient:
         del credential, environment
-        client = _TrackedClient(fail_discovery=config.server_id == "second")
+        client = _TrackedClient(
+            fail_discovery=config.server_id in self.fail_discovery,
+            fail_close=config.server_id in self.fail_close,
+        )
         self.clients.append(client)
         return client
 
@@ -219,7 +232,7 @@ async def test_oauth_reauthentication_refreshes_an_unchanged_client_secret(
             "endpoint": "https://allowed.test/mcp",
             "auth_scheme": MCPAuthScheme.OAUTH2_CLIENT,
             "credential_ref": "oauth-ref",
-            "token_" + "endpoint": "https://allowed.test/token",
+            "token_endpoint": "https://allowed.test/token",
         }
     )
     credential = SecretValue('{"client_id":"id","client_secret":"secret"}')
@@ -238,6 +251,54 @@ async def test_oauth_reauthentication_refreshes_an_unchanged_client_secret(
     assert calls == ["close", "connect"]
 
 
+async def test_oauth_token_exchange_disables_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = MCPServerConfig(
+        tenant_id="local",
+        server_id="oauth_redirect",
+        transport=MCPTransport.HTTP,
+        endpoint="https://allowed.test/mcp",
+        auth_scheme=MCPAuthScheme.OAUTH2_CLIENT,
+        credential_ref="oauth-ref",
+        token_endpoint="/".join(("https:", "", "allowed.test", "token")),
+    )
+    observed: dict[str, object] = {}
+
+    class _Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return
+
+        def json(self) -> dict[str, str]:
+            return {"access_token": "fixture-access-token"}
+
+    class _Client:
+        def __init__(self, **kwargs: object) -> None:
+            observed.update(kwargs)
+
+        async def __aenter__(self) -> _Client:
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return
+
+        async def post(self, url: str, **_kwargs: object) -> _Response:
+            observed["url"] = url
+            return _Response()
+
+    monkeypatch.setattr("agent_core.adapters.mcp.sdk.httpx2.AsyncClient", _Client)
+    client = SDKMCPClient(
+        config,
+        SecretValue('{"client_id":"id","client_secret":"secret"}'),
+        {},
+    )
+    assert await client._exchange_client_token() == "fixture-access-token"
+    assert observed["follow_redirects"] is False
+    assert observed["url"] == "https://allowed.test/token"
+
+
 async def test_prepare_closes_all_clients_after_unexpected_discovery_failure() -> None:
     factory = _TrackedFactory()
     with pytest.raises(RuntimeError, match="unexpected discovery failure"):
@@ -250,6 +311,87 @@ async def test_prepare_closes_all_clients_after_unexpected_discovery_failure() -
             await composition.sessions.create()
     assert len(factory.clients) == 2
     assert all(client.closed and not client.entered for client in factory.clients)
+
+
+async def test_dynamic_registrations_are_owned_by_live_sessions() -> None:
+    config = _server("owned")
+    scripted = ScriptedMCPServer(name="owned", discovery=_discovery())
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(config,),
+        mcp_client_factory=ScriptedMCPClientFactory({"owned": scripted}),
+    ) as composition:
+        first = await composition.sessions.create()
+        second = await composition.sessions.create()
+        name = "mcp.owned.echo"
+        assert composition.tool_pipeline._registry.get(name, tenant_id="local")
+        await composition.services.sessions.close(composition.principal, first)
+        assert composition.tool_pipeline._registry.get(name, tenant_id="local")
+        await composition.services.sessions.close(composition.principal, second)
+        with pytest.raises(NotFoundError):
+            composition.tool_pipeline._registry.get(name, tenant_id="local")
+
+
+async def test_mcp_close_isolates_connection_failures() -> None:
+    factory = _TrackedFactory(
+        fail_discovery=frozenset(),
+        fail_close=frozenset({"first"}),
+    )
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(_server("first"), _server("second")),
+        mcp_client_factory=factory,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        await composition.mcp.close_session(session_id)
+        for name in ("mcp.first.echo", "mcp.second.echo"):
+            with pytest.raises(NotFoundError):
+                composition.tool_pipeline._registry.get(name, tenant_id="local")
+    assert len(factory.clients) == 2
+    assert all(client.closed for client in factory.clients)
+
+
+async def test_session_transaction_rollback_discards_ephemeral_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _server("rollback")
+    scripted = ScriptedMCPServer(name="rollback", discovery=_discovery())
+    async with build(
+        settings=_settings(),
+        sequential_ids=True,
+        mcp_servers=(config,),
+        mcp_client_factory=ScriptedMCPClientFactory({"rollback": scripted}),
+    ) as composition:
+        internal_session_id = None
+        with pytest.raises(RuntimeError, match="force internal rollback"):
+            async with composition.uow_factory() as uow:
+                internal_session_id = await composition.sessions.create_in(uow)
+                assert composition.skill_catalogs.current(internal_session_id)
+                raise RuntimeError("force internal rollback")
+        assert internal_session_id is not None
+        with pytest.raises(NotFoundError):
+            composition.skill_catalogs.current(internal_session_id)
+        with pytest.raises(NotFoundError):
+            composition.tool_pipeline._registry.get("mcp.rollback.echo", tenant_id="local")
+
+        async with composition.uow_factory() as uow:
+            event_repository = uow.events
+
+        async def fail_session_event(_event: object) -> None:
+            raise RuntimeError("force public rollback")
+
+        monkeypatch.setattr(event_repository, "append", fail_session_event)
+        with pytest.raises(RuntimeError, match="force public rollback"):
+            await composition.services.sessions.create(
+                composition.principal,
+                "general",
+                {},
+            )
+        assert not composition.skill_catalogs._catalogs
+        with pytest.raises(NotFoundError):
+            composition.tool_pipeline._registry.get("mcp.rollback.echo", tenant_id="local")
 
 
 async def test_mcp_pipeline_parity() -> None:
@@ -318,9 +460,16 @@ async def test_mcp_disconnect() -> None:
     assert result.run.final_message == "Continued after the server became unavailable."
 
 
-def test_mcp_sdk_confined() -> None:
+def test_mcp_sdk_confined(tmp_path: Path) -> None:
     errors = architecture_errors(ROOT)
     assert not [error for error in errors if "MCP SDK" in error]
+    violating = tmp_path / "src" / "agent_core" / "runtime" / "violation.py"
+    violating.parent.mkdir(parents=True)
+    violating.write_text("import mcp\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'fixture'\n", encoding="utf-8")
+    assert any(
+        "MCP SDK mcp crosses adapter boundary" in error for error in architecture_errors(tmp_path)
+    )
 
 
 def test_mcp_auth_config() -> None:
@@ -363,6 +512,18 @@ def test_mcp_auth_config() -> None:
     for row in invalid_rows:
         with pytest.raises(ValidationError):
             MCPServerConfig.model_validate({**base, **row})
+    for endpoint in ("http://allowed.test/mcp", "/relative/mcp"):
+        with pytest.raises(ValidationError, match="HTTPS"):
+            MCPServerConfig.model_validate(
+                {
+                    **base,
+                    "transport": MCPTransport.HTTP,
+                    "endpoint": endpoint,
+                    "operator_configured": False,
+                    "auth_scheme": MCPAuthScheme.BEARER,
+                    "credential_ref": "ref",
+                }
+            )
     tier_zero = MCPServerConfig.model_validate(
         {
             **base,
@@ -381,13 +542,20 @@ def test_mcp_auth_config() -> None:
             "endpoint": "https://allowed.test/mcp",
             "auth_scheme": MCPAuthScheme.OAUTH2_CLIENT,
             "credential_ref": "oauth-ref",
-            "token_" + "endpoint": "https://denied.test/token",
+            "token_endpoint": "https://denied.test/token",
         }
     )
     with pytest.raises(ValueError, match="token endpoint"):
         validate_mcp_config(
             oauth,
             destination_allowed=lambda url: url.startswith("https://allowed.test/"),
+        )
+    with pytest.raises(ValidationError, match="HTTPS"):
+        MCPServerConfig.model_validate(
+            {
+                **oauth.model_dump(mode="python"),
+                "token_endpoint": "http://allowed.test/token",
+            }
         )
 
 
@@ -453,6 +621,42 @@ async def test_mcp_reauth_bounded() -> None:
     assert [client.reauthentication_count for client in factory.created] == [1, 1]
     assert [client.call_count for client in factory.created] == [3, 1]
 
+    run_server = _server("run_read", credential_ref="run-read-ref")
+    run_script = ScriptedMCPServer(
+        name="run_read",
+        discovery=_discovery(),
+        responses=(
+            ScriptedMCPResponse(name="echo", outcome="unauthorized"),
+            ScriptedMCPResponse(name="echo", result=MCPCallResult(content=("recovered",))),
+        ),
+    )
+    run_factory = ScriptedMCPClientFactory({"run_read": run_script})
+    async with build(
+        settings=_settings(),
+        script=FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    tool_calls=[
+                        ScriptedToolCall(
+                            name="mcp.run_read.echo",
+                            arguments={"value": "continue"},
+                        )
+                    ]
+                ),
+                ScriptedTurn(text="continued after reauthentication"),
+            ]
+        ),
+        sequential_ids=True,
+        enabled_tools=["mcp.run_read.echo"],
+        mcp_servers=(run_server,),
+        mcp_client_factory=run_factory,
+        credential_resolver=_RotatingCredentials(),
+    ) as composition:
+        run_id = await composition.runs.submit("recover and continue")
+        completed = await composition.runs.wait_terminal(run_id)
+    assert completed.final_message == "continued after reauthentication"
+    assert run_factory.created[0].reauthentication_count == 1
+
 
 async def test_mcp_stdio_env_built(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel_name = "M8_WORKER_SENTINEL"
@@ -490,7 +694,7 @@ async def test_mcp_stdio_env_built(monkeypatch: pytest.MonkeyPatch) -> None:
     else:
         assert platform_injected is None
     assert echoed == environment
-    assert echoed["MCP_TOKEN"] == "fixture-value"
+    assert echoed["MCP_TOKEN"] == "fixture-value"  # noqa: S105, RUF100
     assert sentinel_name not in echoed
     assert "VEETBOT_OPENAI_KEY" not in echoed
     assert set(echoed) == {"HOME", "PWD", "PATH", "TMPDIR", "LANG", "MCP_TOKEN"}

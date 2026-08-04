@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from urllib.parse import urlsplit
 
 from agent_core.domain.credentials import SecretValue
 from agent_core.domain.mcp import MCPAuthScheme, MCPServerConfig, MCPTransport
@@ -21,6 +22,18 @@ def validate_mcp_config(
 
     if config.auth_scheme is MCPAuthScheme.ENV and config.auth_name in TIER_ZERO_NAMES:
         raise ValueError("MCP env authentication may not name a tier-0 variable")
+    if config.transport is MCPTransport.HTTP and config.auth_scheme in {
+        MCPAuthScheme.BEARER,
+        MCPAuthScheme.HEADER,
+        MCPAuthScheme.OAUTH2_CLIENT,
+    }:
+        endpoint = urlsplit(config.endpoint)
+        if endpoint.scheme != "https" or endpoint.hostname is None:
+            raise ValueError("authenticated MCP endpoints require HTTPS")
+    if config.auth_scheme is MCPAuthScheme.OAUTH2_CLIENT:
+        token_endpoint = urlsplit(config.token_endpoint or "")
+        if token_endpoint.scheme != "https" or token_endpoint.hostname is None:
+            raise ValueError("MCP OAuth token endpoints require HTTPS")
     validate_required_scopes(set(config.required_scopes), mcp_server_id=config.server_id)
     if config.transport is MCPTransport.HTTP and not destination_allowed(config.endpoint):
         raise ValueError("MCP endpoint is not permitted by the egress policy")

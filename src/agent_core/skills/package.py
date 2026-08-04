@@ -197,11 +197,17 @@ def package_from_directory(root: Path) -> SkillPackage:
         for name in [*names, *files]:
             candidate = directory_path / name
             relative = candidate.relative_to(root).as_posix()
-            if len(members) >= MAX_FILES:
-                raise _refuse("package.file_count", f"package must contain 1 to {MAX_FILES} files")
             if candidate.is_symlink():
+                if len(members) >= MAX_FILES:
+                    raise _refuse(
+                        "package.file_count", f"package must contain 1 to {MAX_FILES} files"
+                    )
                 members.append(SkillPackageMember(path=relative, kind="symlink"))
             elif candidate.is_file():
+                if len(members) >= MAX_FILES:
+                    raise _refuse(
+                        "package.file_count", f"package must contain 1 to {MAX_FILES} files"
+                    )
                 remaining = MAX_PACKAGE_BYTES - total_bytes
                 with candidate.open("rb") as source:
                     data = source.read(remaining + 1)
@@ -215,6 +221,11 @@ def package_from_directory(root: Path) -> SkillPackage:
 def read_archive_member(archive_bytes: bytes, path: str) -> bytes:
     requested = str(_safe_member_path(path))
     try:
+        content_size = zstandard.frame_content_size(archive_bytes)
+        if content_size == zstandard.CONTENTSIZE_ERROR:
+            raise _refuse("package.corrupt", "package archive is not valid zstd")
+        if content_size != zstandard.CONTENTSIZE_UNKNOWN and content_size > MAX_PACKAGE_BYTES * 4:
+            raise _refuse("package.archive_bytes", "expanded archive exceeds 4 MiB")
         tar_bytes = zstandard.ZstdDecompressor().decompress(
             archive_bytes,
             max_output_size=MAX_PACKAGE_BYTES * 4,

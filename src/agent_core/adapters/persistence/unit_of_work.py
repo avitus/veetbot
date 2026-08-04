@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
-from contextlib import suppress
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
@@ -36,6 +36,7 @@ from agent_core.ports.repositories import (
 from agent_core.ports.skills import SkillRepository
 
 _UNIT_OF_WORK_DEPTH: ContextVar[int] = ContextVar("unit_of_work_depth", default=0)
+logger = logging.getLogger(__name__)
 
 
 def _enter_unit_of_work() -> Token[int]:
@@ -112,6 +113,10 @@ class MemoryUnitOfWork:
         self.mcp_servers = repositories.mcp_servers
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
+        self._rollback_callbacks: list[TransactionCallback] = []
+
+    def on_rollback(self, callback: TransactionCallback) -> None:
+        self._rollback_callbacks.append(callback)
 
     async def __aenter__(self) -> MemoryUnitOfWork:
         self._depth_token = _enter_unit_of_work()
@@ -123,9 +128,21 @@ class MemoryUnitOfWork:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        if exc_type is not None:
+            await self._run_rollback_callbacks()
+        else:
+            self._rollback_callbacks.clear()
         if self._depth_token is not None:
             _exit_unit_of_work(self._depth_token)
             self._depth_token = None
+
+    async def _run_rollback_callbacks(self) -> None:
+        callbacks, self._rollback_callbacks = self._rollback_callbacks, []
+        for callback in reversed(callbacks):
+            try:
+                await callback()
+            except BaseException:
+                logger.exception("memory_transaction_rollback_callback_failed")
 
 
 class MemoryUnitOfWorkFactory:
@@ -152,6 +169,9 @@ class PostgresUnitOfWork:
         self._session: AsyncSession | None = None
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
+
+    def on_rollback(self, callback: TransactionCallback) -> None:
+        self._rollback_callbacks.append(callback)
 
     async def __aenter__(self) -> PostgresUnitOfWork:
         session = self._maker()
@@ -215,8 +235,13 @@ class PostgresUnitOfWork:
     async def _run_rollback_callbacks(self) -> None:
         callbacks, self._rollback_callbacks = self._rollback_callbacks, []
         for callback in reversed(callbacks):
-            with suppress(Exception):
+            try:
                 await callback()
+            except BaseException:
+                logger.exception(
+                    "transaction_rollback_callback_failed",
+                    extra={"tenant_id": self._tenant_id},
+                )
 
 
 class PostgresUnitOfWorkFactory:

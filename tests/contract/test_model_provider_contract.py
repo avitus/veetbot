@@ -34,6 +34,23 @@ async def test_model_provider_stream_has_contiguous_sequence_and_one_terminal() 
     await provider.close()
 
 
+def test_repeat_last_uses_the_latest_context_matching_turn() -> None:
+    provider = FakeModelProvider(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(text="fallback"),
+                ScriptedTurn(text="gated", context_contains="required marker"),
+            ],
+            on_exhausted="repeat_last",
+        ),
+        FixedClock(NOW),
+    )
+    provider._index = 2
+    request = ModelRequest(model_policy="fake", conversation=[UserMessage(content=[])], tools=[])
+
+    assert provider._next_turn(request).text == "fallback"
+
+
 def test_failed_event_round_trip_preserves_error_subtype_fields() -> None:
     event = ModelFailedEvent(
         attempt_id=RUN_ID,

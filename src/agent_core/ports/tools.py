@@ -21,6 +21,10 @@ class ToolRegistry(Protocol):
         """Register an MCP-discovered implementation for one tenant."""
         ...
 
+    def unregister_dynamic(self, name: str, version: str, *, tenant_id: str) -> None:
+        """Remove one tenant-scoped MCP registration when its last session closes."""
+        ...
+
     def get(
         self,
         name: str,

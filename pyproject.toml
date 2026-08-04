@@ -28,7 +28,7 @@ dependencies = [
   "tzdata>=2025.2",
   "uvicorn>=0.34,<1",
   "mcp>=2.0,<3",
-  "zstandard>=0.23,<1",
+  "zstandard==0.25.0",
 ]
 
 [project.scripts]

@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
 from types import TracebackType
 from typing import Any, Self
+from urllib.parse import urlsplit
 
 import anyio
 import httpx2
@@ -145,6 +146,9 @@ class SDKMCPClient:
             return {}
         if self._credential is None:
             raise MCPUnauthorizedError
+        endpoint = urlsplit(self._config.endpoint)
+        if endpoint.scheme != "https" or endpoint.hostname is None:
+            raise MCPTransportError
         if self._config.auth_scheme is MCPAuthScheme.BEARER:
             return {"Authorization": f"Bearer {self._credential.reveal()}"}
         if self._config.auth_scheme is MCPAuthScheme.HEADER:
@@ -158,6 +162,9 @@ class SDKMCPClient:
     async def _exchange_client_token(self) -> str:
         if self._credential is None or self._config.token_endpoint is None:
             raise MCPUnauthorizedError
+        token_endpoint = urlsplit(self._config.token_endpoint)
+        if token_endpoint.scheme != "https" or token_endpoint.hostname is None:
+            raise MCPTransportError
         try:
             parsed = json.loads(self._credential.reveal())
             if not isinstance(parsed, dict):
@@ -169,7 +176,10 @@ class SDKMCPClient:
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             raise MCPUnauthorizedError from exc
         try:
-            async with httpx2.AsyncClient(proxy=self._http_proxy_url) as client:
+            async with httpx2.AsyncClient(
+                proxy=self._http_proxy_url,
+                follow_redirects=False,
+            ) as client:
                 response = await client.post(
                     self._config.token_endpoint,
                     data={
@@ -210,6 +220,7 @@ class SDKMCPClient:
                     httpx2.AsyncClient(
                         headers=await self._headers(),
                         proxy=self._http_proxy_url,
+                        follow_redirects=False,
                     )
                 )
                 transport = streamable_http_client(

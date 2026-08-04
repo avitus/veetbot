@@ -97,6 +97,7 @@ class PostgresMCPServerRepository:
         catalog_hash: str,
         records: tuple[MCPToolCatalogRecord, ...],
     ) -> None:
+        normalized: dict[str, MCPToolCatalogRecord] = {}
         for record in records:
             if (
                 record.tenant_id != tenant_id
@@ -104,7 +105,28 @@ class PostgresMCPServerRepository:
                 or record.catalog_hash != catalog_hash
             ):
                 raise ValueError("MCP catalog record does not match its generation")
-        names = {record.remote_name for record in records}
+            duplicate = normalized.get(record.remote_name)
+            if duplicate is not None and not self._same_discovery(duplicate, record):
+                raise ValueError("MCP catalog generation is immutable")
+            normalized.setdefault(record.remote_name, record)
+        names = set(normalized)
+        existing_rows = (
+            await self._session.scalars(
+                select(MCPToolCatalogRow).where(
+                    MCPToolCatalogRow.tenant_id == tenant_id,
+                    MCPToolCatalogRow.server_id == server_id,
+                    MCPToolCatalogRow.catalog_hash == catalog_hash,
+                    MCPToolCatalogRow.remote_name.in_(names),
+                )
+            )
+        ).all()
+        existing = {row.remote_name: row for row in existing_rows}
+        for remote_name, record in normalized.items():
+            row = existing.get(remote_name)
+            if row is not None and (
+                row.registry_name != record.registry_name or row.input_schema != record.input_schema
+            ):
+                raise ValueError("MCP catalog generation is immutable")
         await self._session.execute(
             update(MCPToolCatalogRow)
             .where(
@@ -115,9 +137,35 @@ class PostgresMCPServerRepository:
             )
             .values(withdrawn_at=self._clock.now())
         )
-        for record in records:
+        for record in normalized.values():
             await self._session.execute(
                 pg_insert(MCPToolCatalogRow)
                 .values(**record.model_dump(mode="python"))
                 .on_conflict_do_nothing(constraint="uq_mcp_catalog_generation_tool")
             )
+        if normalized:
+            persisted_rows = (
+                await self._session.scalars(
+                    select(MCPToolCatalogRow).where(
+                        MCPToolCatalogRow.tenant_id == tenant_id,
+                        MCPToolCatalogRow.server_id == server_id,
+                        MCPToolCatalogRow.catalog_hash == catalog_hash,
+                        MCPToolCatalogRow.remote_name.in_(names),
+                    )
+                )
+            ).all()
+            persisted = {row.remote_name: row for row in persisted_rows}
+            for remote_name, record in normalized.items():
+                row = persisted[remote_name]
+                if (
+                    row.registry_name != record.registry_name
+                    or row.input_schema != record.input_schema
+                ):
+                    raise ValueError("MCP catalog generation is immutable")
+
+    @staticmethod
+    def _same_discovery(
+        left: MCPToolCatalogRecord,
+        right: MCPToolCatalogRecord,
+    ) -> bool:
+        return left.registry_name == right.registry_name and left.input_schema == right.input_schema

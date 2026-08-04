@@ -173,8 +173,10 @@ class FakeModelProvider:
             self._index += 1
             if turn.context_contains is None or turn.context_contains in rendered_request:
                 return turn
-        if self._script.on_exhausted == "repeat_last" and self._script.turns:
-            return self._script.turns[-1]
+        if self._script.on_exhausted == "repeat_last":
+            for turn in reversed(self._script.turns):
+                if turn.context_contains is None or turn.context_contains in rendered_request:
+                    return turn
         raise ModelScriptExhaustedError("fake model script exhausted")
 
     @staticmethod

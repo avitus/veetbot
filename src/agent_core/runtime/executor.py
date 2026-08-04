@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.context import ContextPlan
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
@@ -268,6 +269,42 @@ class RunExecutor:
         if self._on_token_complete is not None:
             self._on_token_complete(run_id)
 
+    @staticmethod
+    def _apply_tool_pins(
+        checkpoint_state: RunCheckpoint,
+        context_plan: ContextPlan,
+        *,
+        restored: bool,
+    ) -> None:
+        planned_versions = {spec.name: spec.version for spec in context_plan.tool_specs}
+        planned_specs = {spec.name: spec.model_copy(deep=True) for spec in context_plan.tool_specs}
+        pins_are_persisted = checkpoint_state.tool_pins_initialized or bool(
+            checkpoint_state.pinned_tool_names
+            or checkpoint_state.pinned_tool_versions
+            or checkpoint_state.pinned_tool_specs
+        )
+        if restored and pins_are_persisted:
+            if (
+                checkpoint_state.pinned_tool_names != list(context_plan.tool_names)
+                or checkpoint_state.pinned_tool_versions != planned_versions
+                or checkpoint_state.pinned_tool_specs != planned_specs
+            ):
+                raise ConflictError(
+                    "the current context plan does not match the run's persisted tool pins",
+                    reason="tool_pin_mismatch",
+                )
+            checkpoint_state.tool_pins_initialized = True
+            return
+        if restored and checkpoint_state.pending_tool_calls:
+            raise ConflictError(
+                "a restored run has pending calls without persisted tool pins",
+                reason="tool_pin_mismatch",
+            )
+        checkpoint_state.pinned_tool_names = list(context_plan.tool_names)
+        checkpoint_state.pinned_tool_versions = planned_versions
+        checkpoint_state.pinned_tool_specs = planned_specs
+        checkpoint_state.tool_pins_initialized = True
+
     async def _execute_running(
         self,
         run: Run,
@@ -352,13 +389,11 @@ class RunExecutor:
                 principal,
                 resolved_model,
             )
-            checkpoint_state.pinned_tool_names = list(context_plan.tool_names)
-            checkpoint_state.pinned_tool_versions = {
-                spec.name: spec.version for spec in context_plan.tool_specs
-            }
-            checkpoint_state.pinned_tool_specs = {
-                spec.name: spec.model_copy(deep=True) for spec in context_plan.tool_specs
-            }
+            self._apply_tool_pins(
+                checkpoint_state,
+                context_plan,
+                restored=persisted_checkpoint is not None,
+            )
             callback = on_token or self._on_token
             if callback is not None:
                 callback(run.id, token)

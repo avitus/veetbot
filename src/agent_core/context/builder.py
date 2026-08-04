@@ -36,6 +36,8 @@ from agent_core.ports.context import ContextPlanner, TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.tools import ToolRegistry
 
+MAX_LOADED_SKILL_BODIES = 2
+
 
 def _canonical_json(value: object) -> bytes:
     return canonical_json_bytes(value)
@@ -242,10 +244,10 @@ class BudgetedContextBuilder:
                     principal_id=None,
                 )
             )
-        if len(checkpoint.loaded_skills) > 2:
-            raise ContextOverflow("loaded skill bodies exceed the two-skill cap")
-        if sum(body.tokens for body in checkpoint.loaded_skills) > plan.budget.skill_body_tokens:
-            raise ContextOverflow("loaded skill bodies exceed their token cap")
+        skill_bodies_over_cap = (
+            len(checkpoint.loaded_skills) > MAX_LOADED_SKILL_BODIES
+            or sum(body.tokens for body in checkpoint.loaded_skills) > plan.budget.skill_body_tokens
+        )
         skill_items = [
             UserMessage(
                 content=[
@@ -323,9 +325,15 @@ class BudgetedContextBuilder:
         ]
         over_capacity = total_tokens > capacity
         fixed_body_over_capacity = fixed_total > capacity
-        fits = not working_state_over_cap and not excluded_unsummarized and not over_capacity
+        fits = (
+            not skill_bodies_over_cap
+            and not working_state_over_cap
+            and not excluded_unsummarized
+            and not over_capacity
+        )
         compactable = (
-            not working_state_over_cap
+            not skill_bodies_over_cap
+            and not working_state_over_cap
             and not fixed_body_over_capacity
             and (
                 bool(excluded_unsummarized)
@@ -341,6 +349,8 @@ class BudgetedContextBuilder:
         )
         if fits:
             reason = "fits"
+        elif skill_bodies_over_cap:
+            reason = "skill_bodies_exceed_cap"
         elif working_state_over_cap:
             reason = "working_state_exceeds_cap"
         elif fixed_body_over_capacity:

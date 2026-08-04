@@ -5,9 +5,15 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
+from uuid import UUID
 
 import pytest
+from sqlalchemy import delete
+from sqlalchemy.exc import IntegrityError
 
+from agent_core.adapters.persistence.sqlalchemy_models import RunRow
+from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.mcp import (
@@ -15,6 +21,7 @@ from agent_core.domain.mcp import (
     MCPDiscovery,
     MCPRemoteTool,
     MCPServerConfig,
+    MCPToolCatalogRecord,
     MCPTransport,
     ScriptedMCPResponse,
     ScriptedMCPServer,
@@ -22,6 +29,7 @@ from agent_core.domain.mcp import (
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.skills import (
+    AuthoringContext,
     SkillPackage,
     SkillPackageMember,
     SkillRef,
@@ -119,6 +127,40 @@ async def test_postgres_skill_and_mcp_round_trip(tmp_path: Path) -> None:
         mcp_servers=(config,),
         mcp_scripts={"durable": server},
     ) as composition:
+        catalog_record = MCPToolCatalogRecord(
+            id=UUID("00000000-0000-0000-0000-000000008101"),
+            tenant_id="local",
+            server_id="durable",
+            catalog_hash="b" * 64,
+            remote_name="contract",
+            registry_name="mcp.durable.contract",
+            input_schema={"type": "object"},
+            discovered_at=composition.clock.now(),
+        )
+        async with composition.uow_factory() as uow:
+            await uow.mcp_servers.record_catalog("local", "durable", "b" * 64, (catalog_record,))
+        async with composition.uow_factory() as uow:
+            await uow.mcp_servers.record_catalog(
+                "local",
+                "durable",
+                "b" * 64,
+                (catalog_record.model_copy(update={"id": UUID(int=8102)}),),
+            )
+        with pytest.raises(ValueError, match="immutable"):
+            async with composition.uow_factory() as uow:
+                await uow.mcp_servers.record_catalog(
+                    "local",
+                    "durable",
+                    "b" * 64,
+                    (
+                        catalog_record.model_copy(
+                            update={
+                                "id": UUID(int=8103),
+                                "input_schema": {"type": "string"},
+                            }
+                        ),
+                    ),
+                )
         rollback_key = ""
         with pytest.raises(RuntimeError, match="force outer rollback"):
             async with composition.uow_factory() as uow:
@@ -130,6 +172,7 @@ async def test_postgres_skill_and_mcp_round_trip(tmp_path: Path) -> None:
                     None,
                 )
                 rollback_key = rolled_back.package_key
+                assert (tmp_path / "skill-packages" / rollback_key).exists()
                 raise RuntimeError("force outer rollback")
         assert rollback_key
         assert not (tmp_path / "skill-packages" / rollback_key).exists()
@@ -164,6 +207,39 @@ async def test_postgres_skill_and_mcp_round_trip(tmp_path: Path) -> None:
         )
         assert await worker.run_once()
         completed = await composition.runs.get(run_id)
+        provenance_run = completed.model_copy(
+            update={
+                "id": UUID("00000000-0000-0000-0000-000000008008"),
+                "final_message": "authoring provenance fixture",
+            }
+        )
+        async with composition.uow_factory() as uow:
+            await uow.runs.create(provenance_run)
+            authored = await uow.skills.install(
+                "local",
+                _package("agent-authored-m8", "AGENT_AUTHORED_BODY"),
+                SkillSource.AGENT,
+                None,
+                AuthoringContext(
+                    run_id=provenance_run.id,
+                    principal_id=composition.principal.principal_id,
+                ),
+            )
+        with pytest.raises(IntegrityError):
+            async with composition.uow_factory() as uow:
+                postgres = cast(PostgresUnitOfWork, uow)
+                assert postgres._session is not None
+                await postgres._session.execute(
+                    delete(RunRow).where(RunRow.id == provenance_run.id)
+                )
+        async with composition.uow_factory() as uow:
+            preserved = await uow.skills.resolve("local", SkillRef.parse("agent-authored-m8"))
+        assert (preserved.skill_id, preserved.revision) == (
+            authored.skill_id,
+            authored.revision,
+        )
+        assert preserved.authored_by_run_id == provenance_run.id
+        assert preserved.authored_by_principal_id == composition.principal.principal_id
         async with composition.uow_factory() as uow:
             checkpoint = await uow.checkpoints.latest(run_id)
             revision = await uow.skills.resolve("local", SkillRef.parse("persist-m8"))

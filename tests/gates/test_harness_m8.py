@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Never
 
+import anyio
 import pytest
 
 from agent_core.evals.cases import load_cases
@@ -55,8 +56,10 @@ async def test_mcp_no_socket(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("deterministic MCP evaluation attempted external I/O")
 
     monkeypatch.setattr(socket, "socket", guarded_socket)
+    monkeypatch.setattr(socket, "getaddrinfo", blocked)
     monkeypatch.setattr(subprocess, "Popen", blocked)
     monkeypatch.setattr(asyncio, "open_connection", blocked_async)
+    monkeypatch.setattr(anyio, "open_process", blocked_async)
     results = await run_selected(ROOT, current_milestone=8, tag="mcp")
     assert len(results) == 2
     assert all(result.run.final_message for result in results)

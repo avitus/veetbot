@@ -512,6 +512,12 @@ class SkillRevisionRow(Base):
     __tablename__ = "skill_revisions"
     __table_args__ = (
         UniqueConstraint("skill_id", "revision", name="uq_skill_revisions_skill_revision"),
+        Index(
+            "ix_skill_revisions_skill_status_revision_desc",
+            "skill_id",
+            "status",
+            text("revision DESC"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -531,7 +537,7 @@ class SkillRevisionRow(Base):
     trust: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text)
     authored_by_run_id: Mapped[UUID | None] = mapped_column(
-        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL")
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="RESTRICT")
     )
     authored_by_principal_id: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

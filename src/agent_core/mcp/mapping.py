@@ -76,35 +76,37 @@ def map_discovered_tools(
     schema_maximum_depth: int = 16,
     schema_maximum_bytes: int = 32_768,
 ) -> MCPMappingReport:
+    indexed_tools = tuple(enumerate(remote_tools))
     schema_inspections = {
-        id(tool): _inspect_schema(tool.input_schema, schema_maximum_depth) for tool in remote_tools
+        index: _inspect_schema(tool.input_schema, schema_maximum_depth)
+        for index, tool in indexed_tools
     }
     declarations = sorted(
         (
             tool.model_dump(mode="json")
-            for tool in remote_tools
-            if schema_inspections[id(tool)][0] <= schema_maximum_depth
+            for index, tool in indexed_tools
+            if schema_inspections[index][0] <= schema_maximum_depth
         ),
         key=lambda item: (str(item["name"]), canonical_json_bytes(item)),
     )
     catalog_hash = hashlib.sha256(canonical_json_bytes(declarations)).hexdigest()
-    by_registry_name: dict[str, list[MCPRemoteTool]] = {}
-    for remote in remote_tools:
+    by_registry_name: dict[str, list[tuple[int, MCPRemoteTool]]] = {}
+    for index, remote in indexed_tools:
         registry_name = f"mcp.{config.server_id}.{normalize_remote_name(remote.name)}"
-        by_registry_name.setdefault(registry_name, []).append(remote)
+        by_registry_name.setdefault(registry_name, []).append((index, remote))
     conflicts = tuple(
-        tuple(sorted(item.name for item in colliding))
+        tuple(sorted(item.name for _index, item in colliding))
         for _name, colliding in sorted(by_registry_name.items())
         if len(colliding) > 1
     )
     colliding_names = {name for group in conflicts for name in group}
     accepted: list[MappedRemoteTool] = []
     rejected: list[str] = []
-    for remote in sorted(remote_tools, key=lambda item: item.name):
+    for index, remote in sorted(indexed_tools, key=lambda item: item[1].name):
         if remote.name in colliding_names:
             continue
         try:
-            depth, contains_ref = schema_inspections[id(remote)]
+            depth, contains_ref = schema_inspections[index]
             if depth > schema_maximum_depth:
                 raise ToolValidationError("MCP input schema exceeds depth 16")
             encoded = json.dumps(remote.input_schema, ensure_ascii=False, sort_keys=True).encode()

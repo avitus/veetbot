@@ -156,13 +156,12 @@ class PostgresSkillRepository:
                     SkillRow.tenant_id == tenant_id,
                     SkillRevisionRow.status == SkillStatus.ACTIVE.value,
                 )
+                .distinct(SkillRow.name)
                 .order_by(SkillRow.name, SkillRevisionRow.revision.desc())
+                .limit(limit)
             )
         ).all()
-        latest: dict[str, SkillRevision] = {}
-        for identity, revision in rows:
-            latest.setdefault(identity.name, self._to_domain(identity, revision))
-        return list(latest.values())[:limit]
+        return [self._to_domain(identity, revision) for identity, revision in rows]
 
     async def archive(self, tenant_id: str, name: str, revision: int) -> None:
         identity_id = await self._session.scalar(

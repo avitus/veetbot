@@ -10,6 +10,7 @@ from uuid import UUID
 
 import pytest
 import yaml
+import zstandard
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
@@ -49,10 +50,17 @@ from agent_core.domain.skills import (
     SkillManifest,
     SkillPackage,
     SkillPackageMember,
+    SkillRef,
+    SkillRevision,
     SkillSource,
 )
 from agent_core.skills.catalog import SkillCatalogService
-from agent_core.skills.package import SkillPackageValidator
+from agent_core.skills.package import (
+    MAX_PACKAGE_BYTES,
+    SkillPackageValidator,
+    package_from_directory,
+    read_archive_member,
+)
 from tests.contract.support import NOW, agent, memory_stack, principal
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -270,7 +278,7 @@ async def test_catalog_pinned() -> None:
 
 
 async def test_no_tool_from_skill() -> None:
-    for path in (ROOT / "src" / "agent_core" / "skills").glob("*.py"):
+    for path in (ROOT / "src" / "agent_core" / "skills").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         assert not [
             node
@@ -460,6 +468,30 @@ async def test_catalog_capped() -> None:
     ]
 
 
+async def test_catalog_deduplicates_and_caps_refs_before_resolution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalogs, repository, _store, _factory = await _catalog_stack(
+        [_package("one", "one"), _package("two", "two")],
+        maximum_entries=1,
+    )
+    resolved: list[str] = []
+    original_resolve = repository.resolve
+
+    async def counted_resolve(tenant_id: str, ref: SkillRef) -> SkillRevision:
+        resolved.append(str(ref))
+        return await original_resolve(tenant_id, ref)
+
+    monkeypatch.setattr(repository, "resolve", counted_resolve)
+    configured = agent().model_copy(update={"enabled_skills": ["one", "one@1", "two"]})
+
+    catalog = await catalogs.open(UUID(int=504), configured, principal())
+
+    assert [entry.manifest.name for entry in catalog.entries] == ["one"]
+    assert catalog.dropped_names == ("one", "two")
+    assert resolved == ["one"]
+
+
 @settings(max_examples=100)
 @given(
     directory=st.text(min_size=0, max_size=70),
@@ -514,6 +546,31 @@ def test_validation_total(
         assert hashlib.sha256(validated.archive).hexdigest() == validated.content_sha256
 
 
+def test_package_directory_count_applies_only_to_members(tmp_path: Path) -> None:
+    root = tmp_path / "directory-count"
+    root.mkdir()
+    (root / "SKILL.md").write_text(
+        "---\nname: directory-count\nversion: 1.0.0\n"
+        "description: Directory count.\nrequired_tools: []\n---\nbody",
+        encoding="utf-8",
+    )
+    for index in range(63):
+        (root / f"member-{index}.txt").write_text("member", encoding="utf-8")
+    for index in range(100):
+        (root / f"empty-{index}").mkdir()
+
+    package = package_from_directory(root)
+
+    assert len(package.members) == 64
+
+
+def test_archive_declared_size_is_rejected_before_decompression() -> None:
+    oversized = zstandard.ZstdCompressor().compress(b"x" * (MAX_PACKAGE_BYTES * 4 + 1))
+
+    with pytest.raises(SkillValidationError, match="expanded archive"):
+        read_archive_member(oversized, "SKILL.md")
+
+
 async def test_body_cap() -> None:
     catalogs, _repository, _store, _factory = await _catalog_stack(
         [_package(name, name) for name in ("one", "two", "three")]
@@ -536,7 +593,7 @@ async def test_body_cap() -> None:
     assert replacement.name == "three"
     loaded = (*loaded, replacement)
     assert len(loaded) <= 2
-    assert sum(body.tokens for body in loaded) <= 6_000
+    assert sum(body.tokens for body in loaded) <= catalogs.maximum_body_tokens
 
 
 async def test_mcp_read_only() -> None:

@@ -54,6 +54,10 @@ class RepositoryUnitOfWork(Protocol):
     mcp_servers: MCPServerRepository
     queue: RunQueue | None
 
+    def on_rollback(self, callback: TransactionCallback) -> None:
+        """Register best-effort cleanup when the surrounding transaction rolls back."""
+        ...
+
     async def __aenter__(self) -> Self: ...
 
     async def __aexit__(

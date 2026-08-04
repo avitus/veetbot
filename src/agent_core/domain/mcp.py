@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -75,6 +76,18 @@ class MCPServerConfig(BaseModel):
             raise ValueError("MCP header authentication may not name Authorization")
         if self.auth_scheme is MCPAuthScheme.OAUTH2_CLIENT and not self.token_endpoint:
             raise ValueError("MCP OAuth client authentication requires a token endpoint")
+        if self.transport is MCPTransport.HTTP and self.auth_scheme in {
+            MCPAuthScheme.BEARER,
+            MCPAuthScheme.HEADER,
+            MCPAuthScheme.OAUTH2_CLIENT,
+        }:
+            endpoint = urlsplit(self.endpoint)
+            if endpoint.scheme != "https" or endpoint.hostname is None:
+                raise ValueError("authenticated MCP HTTP endpoints require absolute HTTPS URLs")
+        if self.auth_scheme is MCPAuthScheme.OAUTH2_CLIENT:
+            token_endpoint = urlsplit(self.token_endpoint or "")
+            if token_endpoint.scheme != "https" or token_endpoint.hostname is None:
+                raise ValueError("MCP OAuth token endpoints require absolute HTTPS URLs")
         if self.transport is MCPTransport.HTTP and self.auth_scheme is MCPAuthScheme.ENV:
             raise ValueError("MCP env authentication is valid only for stdio")
         if self.transport is MCPTransport.STDIO and self.auth_scheme in {

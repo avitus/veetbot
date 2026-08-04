@@ -144,7 +144,11 @@ class SkillRevisionConflict(ConflictError):  # noqa: N818 - normative taxonomy n
     """Optimistic skill revision assignment observed a newer winner."""
 
     def __init__(self, current_revision: int) -> None:
-        super().__init__("skill revision changed during installation")
+        super().__init__(
+            "skill revision changed during installation",
+            reason="skill_revision_conflict",
+            details={"current_revision": current_revision},
+        )
         self.current_revision = current_revision
 
 

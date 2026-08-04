@@ -202,6 +202,7 @@ class PublicSessionService:
         default_agent: AgentSpec,
         catalogs: SkillCatalog | None = None,
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
+        close_session: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -209,6 +210,7 @@ class PublicSessionService:
         self._default_agent = default_agent
         self._catalogs = catalogs
         self._activate_session = activate_session
+        self._close_session = close_session
 
     async def _resolve_agent(self, uow: RepositoryUnitOfWork, agent_id: str) -> AgentSpec:
         if agent_id in {"general", str(self._default_agent.id)}:
@@ -233,6 +235,12 @@ class PublicSessionService:
         async with self._uow_factory() as uow:
             agent = await self._resolve_agent(uow, agent_id)
             session_id = self._ids.new_id()
+            catalogs = self._catalogs
+            if catalogs is not None:
+                uow.on_rollback(lambda: catalogs.discard(session_id))
+            close_session = self._close_session
+            if close_session is not None:
+                uow.on_rollback(lambda: close_session(session_id))
             catalog = (
                 None
                 if self._catalogs is None
@@ -294,6 +302,8 @@ class PublicSessionService:
                 )
             if session.status is SessionStatus.ACTIVE:
                 session = await uow.sessions.close(session_id, principal, self._clock.now())
+        if self._close_session is not None:
+            await self._close_session(session_id)
         return _session_view(session, None)
 
     async def ready(self) -> bool:
