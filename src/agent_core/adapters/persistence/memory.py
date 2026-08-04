@@ -504,6 +504,12 @@ class InMemoryApprovalRepository:
         limit: int = 50,
         cursor: str | None = None,
     ) -> list[ApprovalRequest]:
+        cursor_id: UUID | None = None
+        if cursor is not None:
+            try:
+                cursor_id = UUID(cursor)
+            except ValueError as exc:
+                raise ValueError("approval cursor must be a UUID") from exc
         async with self._lock:
             rows = [
                 request.model_copy(deep=True)
@@ -511,7 +517,7 @@ class InMemoryApprovalRepository:
                 if request.status is ApprovalStatus.PENDING
                 and self._visible(request, principal)
                 and (run_id is None or request.run_id == run_id)
-                and (cursor is None or str(request.id) > cursor)
+                and (cursor_id is None or request.id > cursor_id)
             ]
         return sorted(rows, key=lambda row: row.id.int)[:limit]
 

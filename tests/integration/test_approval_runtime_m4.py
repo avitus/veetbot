@@ -11,7 +11,16 @@ from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, Script
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.tools import ToolInvocationStatus
 from agent_core.runtime.worker import DurableWorker
+from tests.contract.test_approval_repository_contract import assert_rejects_invalid_cursor
 from tests.integration.m2_support import database_settings
+
+
+async def test_postgres_approval_repository_rejects_invalid_cursor() -> None:
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        composition.uow_factory() as uow,
+    ):
+        await assert_rejects_invalid_cursor(uow.approvals)
 
 
 async def test_approval_resumes_after_worker_and_composition_restart() -> None:

@@ -1,6 +1,8 @@
 from datetime import timedelta
 from uuid import UUID
 
+import pytest
+
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.memory import InMemoryApprovalRepository
 from agent_core.domain.approvals import (
@@ -15,6 +17,7 @@ from agent_core.domain.policies import (
     PolicyDecisionType,
     RiskLevel,
 )
+from agent_core.ports.repositories import ApprovalRepository
 from tests.contract.support import NOW, PRINCIPAL_ID, RUN_ID, SESSION_ID, TENANT, principal
 
 
@@ -46,6 +49,11 @@ def request() -> ApprovalRequest:
         policy_version="default@profile+hline",
         created_at=NOW,
     )
+
+
+async def assert_rejects_invalid_cursor(repository: ApprovalRepository) -> None:
+    with pytest.raises(ValueError, match="approval cursor must be a UUID"):
+        await repository.list_pending(principal(), cursor="not-a-uuid")
 
 
 async def test_approval_repository_first_resolution_wins_idempotently() -> None:
@@ -104,3 +112,7 @@ async def test_approval_repository_paginates_by_its_cursor_and_expires_one_tenan
     assert (
         await repository.get(foreign.id, principal().model_copy(update={"tenant_id": "tenant-b"}))
     ).status is ApprovalStatus.PENDING
+
+
+async def test_approval_repository_rejects_invalid_cursor() -> None:
+    await assert_rejects_invalid_cursor(InMemoryApprovalRepository(FixedClock(NOW)))
