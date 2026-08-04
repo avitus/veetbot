@@ -16,6 +16,10 @@ class RunDispatcher(Protocol):
         """Guarantee that the committed run will be executed exactly once."""
         ...
 
+    async def resume(self, run_id: UUID) -> None:
+        """Dispatch a new queued generation of a previously parked run."""
+        ...
+
 
 class RunQueue(Protocol):
     async def enqueue(self, run: Run, *, priority: int, scheduled_for: datetime | None) -> None: ...

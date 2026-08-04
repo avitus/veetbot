@@ -58,34 +58,34 @@
   kind: structural
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "The three `workspace.` modules import no `os`, `os.path`, `pathlib`, `shutil`, or `glob`, call no `open`, and name no attribute of `ToolExecutionContext` other than `workspace` when they touch a file. Asserted over the import graph and the call graph, in the same walk the import-boundary check already performs."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m4.py::test_handle_only
 - id: gate.builtin.text_only
   milestone: 4
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "`workspace.read_text` over a file whose bytes are `61 00 62` returns `not_text`, and over a file whose bytes are a valid UTF-8 sequence split across the reader's chunk boundary returns the decoded text. The second half is the one that regresses."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m4.py::test_text_only
 - id: gate.builtin.write_idempotent
   milestone: 4
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "`workspace.write_text` called twice with identical `path` and `content` returns the identical `checksum` and `byte_count` both times, `created` true then false, and leaves one file."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m4.py::test_write_idempotent
 - id: gate.builtin.listing_stable
   milestone: 4
   kind: property
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "A property test over generated workspaces asserts that a listing is bytewise ascending on `path`, that a truncated listing is a prefix of the untruncated one, and that no entry names a symlink."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m4.py::test_listing_stable
 - id: gate.builtin.provenance
   milestone: 4
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "A run writes `a.md` through `workspace.write_text` and reads both `a.md` and a `b.md` placed in the workspace by the fixture. The first read returns `output_trust = INTERNAL_TOOL`, the second `EXTERNAL_UNTRUSTED`, and a `list_files` that returns both is `EXTERNAL_UNTRUSTED`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m4.py::test_provenance
 - id: gate.builtin.demo_records
   milestone: 4
   kind: case
   spec: docs/plan/builtin-tools.md#hard-gates
   statement: "An approved `demo.external_write` persists its record as the `structured` result on `tool_invocations` and writes to no other table, asserted by a row count over the schema before and after."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_builtin_m4.py::test_demo_records

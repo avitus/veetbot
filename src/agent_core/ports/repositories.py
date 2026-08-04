@@ -7,6 +7,11 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import (
+    ApprovalRequest,
+    ApprovalResolutionOutcome,
+    ApprovalResolutionType,
+)
 from agent_core.domain.messages import (
     ModelAttempt,
     ModelRequest,
@@ -25,6 +30,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
+from agent_core.domain.policies import PolicyProfileRecord
 from agent_core.domain.runs import BudgetScope, Run, RunCheckpoint, RunStatus, RunUsage, Step
 from agent_core.domain.sessions import Session
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
@@ -87,6 +93,44 @@ class ToolInvocationRepository(Protocol):
     ) -> ToolInvocation: ...
 
     async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ToolInvocation]: ...
+
+
+class ApprovalRepository(Protocol):
+    async def create(self, request: ApprovalRequest) -> ApprovalRequest: ...
+
+    async def get(self, approval_id: UUID, principal: Principal) -> ApprovalRequest: ...
+
+    async def get_by_action(self, action_id: UUID) -> ApprovalRequest | None: ...
+
+    async def record_revalidation(
+        self, action_id: UUID, policy_version: str
+    ) -> ApprovalRequest: ...
+
+    async def list_pending(
+        self,
+        principal: Principal,
+        run_id: UUID | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> list[ApprovalRequest]: ...
+
+    async def resolve(
+        self,
+        approval_id: UUID,
+        principal: Principal,
+        resolution: ApprovalResolutionType,
+        reason: str | None,
+    ) -> ApprovalResolutionOutcome: ...
+
+    async def expire_due(self, now: datetime, limit: int) -> list[ApprovalRequest]: ...
+
+    async def cancel_for_run(self, run_id: UUID) -> int: ...
+
+
+class PolicyProfileRepository(Protocol):
+    async def record(self, profile: PolicyProfileRecord) -> PolicyProfileRecord: ...
+
+    async def get(self, policy_version: str) -> PolicyProfileRecord | None: ...
 
 
 class PrincipalResolver(Protocol):

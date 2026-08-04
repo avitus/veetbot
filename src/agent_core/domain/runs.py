@@ -123,6 +123,7 @@ class Run(BaseModel):
     session_id: UUID
     parent_run_id: UUID | None = None
     tenant_id: str
+    principal_scopes: set[str] = Field(default_factory=set)
     agent_id: UUID
     agent_version: str
     status: RunStatus

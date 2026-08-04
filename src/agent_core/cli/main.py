@@ -20,7 +20,9 @@ from typer.core import TyperGroup
 from agent_core import __version__
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError
+from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import (
+    ConflictError,
     EvalExpectationError,
     ExportConsentError,
     ExportRedactionError,
@@ -62,9 +64,11 @@ app = typer.Typer(
 run_app = typer.Typer(name="run", cls=ReservedRunGroup, no_args_is_help=True)
 session_app = typer.Typer(name="session", no_args_is_help=True)
 eval_app = typer.Typer(name="eval", no_args_is_help=True)
+approval_app = typer.Typer(name="approval", no_args_is_help=True)
 app.add_typer(run_app)
 app.add_typer(session_app)
 app.add_typer(eval_app)
+app.add_typer(approval_app)
 
 
 class _EvalRunnerModule(Protocol):
@@ -144,7 +148,17 @@ async def _submit(
             )
             try:
                 async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS):
-                    run = await composition.runs.wait_terminal(run_id)
+                    while True:
+                        run = await composition.runs.get(run_id)
+                        if run.status in {
+                            RunStatus.COMPLETED,
+                            RunStatus.FAILED,
+                            RunStatus.CANCELLED,
+                            RunStatus.WAITING_FOR_APPROVAL,
+                            RunStatus.WAITING_FOR_USER,
+                        }:
+                            break
+                        await composition.clock.sleep(0.05)
             except TimeoutError as exc:
                 raise QueuedRunTimeoutError(run_id) from exc
             events = await composition.runs.events(run_id)
@@ -190,6 +204,9 @@ def run_command(
         typer.echo(run.model_dump_json())
     elif run.status is RunStatus.COMPLETED and run.final_message is not None:
         typer.echo(run.final_message)
+    elif run.status in {RunStatus.WAITING_FOR_APPROVAL, RunStatus.WAITING_FOR_USER}:
+        typer.echo(str(run.id))
+        raise typer.Exit(3)
     else:
         typer.echo(str(run.id), err=True)
         raise typer.Exit(1)
@@ -323,6 +340,54 @@ def session_export_consent(
     typer.echo(consent.model_dump_json())
 
 
+async def _approval_list() -> list[Any]:
+    async with build(storage="postgres") as composition:
+        return await composition.approvals.list_pending()
+
+
+@approval_app.command("list")
+def approval_list() -> None:
+    """List tenant-scoped pending approvals."""
+
+    try:
+        rows = asyncio.run(_approval_list())
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(json.dumps([row.model_dump(mode="json") for row in rows], default=str))
+
+
+async def _resolve_approval(approval_id: UUID, resolution: ApprovalResolutionType) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.approvals.resolve(approval_id, resolution)
+
+
+def _approval_resolution_command(approval_id: UUID, resolution: ApprovalResolutionType) -> None:
+    try:
+        resolved = asyncio.run(_resolve_approval(approval_id, resolution))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except (ConflictError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(resolved.model_dump_json())
+
+
+@approval_app.command("approve")
+def approval_approve(approval_id: UUID) -> None:
+    """Approve one pending action and resume its run."""
+
+    _approval_resolution_command(approval_id, ApprovalResolutionType.APPROVE_ONCE)
+
+
+@approval_app.command("deny")
+def approval_deny(approval_id: UUID) -> None:
+    """Deny one pending action and resume its run with a denial result."""
+
+    _approval_resolution_command(approval_id, ApprovalResolutionType.DENY)
+
+
 @eval_app.command("run")
 def eval_run(
     suite: Annotated[str, typer.Argument(help="Evaluation suite to run.")] = "deterministic",
@@ -336,7 +401,7 @@ def eval_run(
     try:
         module = cast(_EvalRunnerModule, importlib.import_module("agent_core.evals.runner"))
         results = module.run_selected_sync(
-            Path.cwd(), current_milestone=3, tag=tag, case_name=case_name
+            Path.cwd(), current_milestone=4, tag=tag, case_name=case_name
         )
     except (EvalExpectationError, ImportError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)

@@ -12,10 +12,12 @@ from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
+    ApprovalRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
     MaintenanceRepository,
+    PolicyProfileRepository,
     RunRepository,
     SessionHistoryRepository,
     SessionRepository,
@@ -28,6 +30,8 @@ from agent_core.ports.repositories import (
 
 class RepositoryUnitOfWork(Protocol):
     agents: AgentRepository
+    approvals: ApprovalRepository
+    policy_profiles: PolicyProfileRepository
     sessions: SessionRepository
     runs: RunRepository
     events: EventRepository

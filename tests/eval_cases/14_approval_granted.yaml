@@ -1,0 +1,15 @@
+name: approval_granted_resumed
+milestone: 4
+tags: [approval, resume]
+input: {text: "Record a demo external write and continue after approval."}
+model_fixture: approval_then_final
+approval_resolution: approve_once
+fixtures:
+  tools: [demo.external_write]
+expected:
+  terminal_status: COMPLETED
+  final_text: The approved write was recorded.
+  model_calls: 2
+  tool_started_count: 1
+  pending_approvals: 0
+  event_order: [approval.requested, approval.resolved, tool.call.started, run.completed]

@@ -11,11 +11,13 @@ from typing import Any
 
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
+from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope
-from agent_core.domain.runs import Run, RunLimits
+from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.evals.cases import EvalCase, load_cases
 from agent_core.evals.fixtures import resolve_model_fixture
+from agent_core.policy.scopes import PLATFORM_SCOPES
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,6 +25,7 @@ class EvalResult:
     case: EvalCase
     run: Run
     events: list[EventEnvelope]
+    pending_approvals: int = 0
 
 
 def _settings() -> Settings:
@@ -76,6 +79,14 @@ def assert_expected(result: EvalResult) -> None:
         raise EvalExpectationError(
             f"expected at most {expected.maximum_steps} steps, got {run.step_count}"
         )
+    if (
+        expected.pending_approvals is not None
+        and result.pending_approvals != expected.pending_approvals
+    ):
+        raise EvalExpectationError(
+            f"expected {expected.pending_approvals} pending approvals, "
+            f"got {result.pending_approvals}"
+        )
     event_types = [event.event_type for event in result.events]
     _assert_subsequence(event_types, expected.event_order)
     if expected.tool_started_count is not None:
@@ -103,7 +114,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         tenant_id="tenant_eval",
         principal_id=case.principal,
         roles={"user"},
-        scopes=set(),
+        scopes=set(PLATFORM_SCOPES),
     )
     bootstrap: Any = importlib.import_module("agent_core.bootstrap")
     async with bootstrap.build(
@@ -117,9 +128,26 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         policy_profile=case.policy_profile,
     ) as composition:
         run_id = await composition.runs.submit(case.input.text)
-        run = await composition.runs.wait_terminal(run_id)
+        if case.cancel_after_submission:
+            await composition.runs.cancel(run_id)
+        if case.approval_resolution is not None:
+            resolution = ApprovalResolutionType(case.approval_resolution)
+            while pending := await composition.approvals.list_pending(run_id=run_id):
+                await composition.approvals.resolve(pending[0].id, resolution)
+        run = await composition.runs.get(run_id)
+        if run.status not in {
+            RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.WAITING_FOR_USER,
+        }:
+            run = await composition.runs.wait_terminal(run_id)
+        pending_count = len(await composition.approvals.list_pending(run_id=run_id))
         events = await composition.runs.events(run_id)
-    result = EvalResult(case=case, run=run, events=events)
+    result = EvalResult(
+        case=case,
+        run=run,
+        events=events,
+        pending_approvals=pending_count,
+    )
     assert_expected(result)
     return result
 

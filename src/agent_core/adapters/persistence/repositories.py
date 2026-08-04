@@ -16,6 +16,8 @@ from sqlalchemy.sql import cast as sql_cast
 from agent_core.adapters.persistence.mappers import (
     agent_to_domain,
     agent_values,
+    approval_to_domain,
+    approval_values,
     artifact_to_domain,
     artifact_values,
     event_to_domain,
@@ -34,6 +36,7 @@ from agent_core.adapters.persistence.mappers import (
 )
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
+    ApprovalRow,
     ArtifactRow,
     CheckpointRow,
     DerivedEventKeyRow,
@@ -41,6 +44,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ExportConsentRow,
     IdempotencyKeyRow,
     ModelCallRow,
+    PolicyProfileRow,
     ProjectionWatermarkRow,
     RunRow,
     SessionRow,
@@ -49,6 +53,13 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import (
+    ApprovalRequest,
+    ApprovalResolutionOutcome,
+    ApprovalResolutionState,
+    ApprovalResolutionType,
+    ApprovalStatus,
+)
 from agent_core.domain.errors import ConflictError, NotFoundError, WorkerFencedError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import ProviderPin
@@ -59,6 +70,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
+from agent_core.domain.policies import PolicyProfileRecord
 from agent_core.domain.runs import Run, RunCheckpoint, RunFailure, RunStatus, RunUsage
 from agent_core.domain.sessions import Session
 from agent_core.domain.tools import (
@@ -698,6 +710,11 @@ class PostgresToolInvocationRepository:
             update={
                 "status": invocation.status,
                 "effect_sent_at": invocation.effect_sent_at,
+                "effective_arguments_hash": invocation.effective_arguments_hash,
+                "suspended_kind": invocation.suspended_kind,
+                "suspended_ref": invocation.suspended_ref,
+                "policy_decision": invocation.policy_decision,
+                "structured_result": invocation.structured_result,
                 "outcome": invocation.outcome,
                 "result_item": invocation.result_item,
                 "updated_at": invocation.updated_at,
@@ -715,6 +732,15 @@ class PostgresToolInvocationRepository:
             .values(
                 status=invocation.status.value,
                 effect_sent_at=invocation.effect_sent_at,
+                effective_arguments_hash=invocation.effective_arguments_hash,
+                suspended_kind=invocation.suspended_kind,
+                suspended_ref=invocation.suspended_ref,
+                policy_decision=(
+                    None
+                    if invocation.policy_decision is None
+                    else invocation.policy_decision.model_dump(mode="json")
+                ),
+                structured_result=invocation.structured_result,
                 outcome=(
                     None
                     if invocation.outcome is None
@@ -754,6 +780,210 @@ class PostgresToolInvocationRepository:
             )
         ).all()
         return [invocation_to_domain(row) for row in rows]
+
+
+class PostgresApprovalRepository:
+    def __init__(self, session: AsyncSession, clock: Clock) -> None:
+        self._session = session
+        self._clock = clock
+
+    async def create(self, request: ApprovalRequest) -> ApprovalRequest:
+        statement = (
+            pg_insert(ApprovalRow)
+            .values(**approval_values(request))
+            .on_conflict_do_nothing(index_elements=[ApprovalRow.action_id])
+            .returning(ApprovalRow)
+        )
+        row = (await self._session.scalars(statement)).one_or_none()
+        if row is None:
+            raise ConflictError("approval already exists for action")
+        return approval_to_domain(row)
+
+    async def get(self, approval_id: UUID, principal: Principal) -> ApprovalRequest:
+        row = (
+            await self._session.scalars(
+                select(ApprovalRow).where(
+                    ApprovalRow.id == approval_id,
+                    ApprovalRow.tenant_id == principal.tenant_id,
+                    ApprovalRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("approval not found")
+        return approval_to_domain(row)
+
+    async def get_by_action(self, action_id: UUID) -> ApprovalRequest | None:
+        row = (
+            await self._session.scalars(
+                select(ApprovalRow).where(ApprovalRow.action_id == action_id)
+            )
+        ).one_or_none()
+        return None if row is None else approval_to_domain(row)
+
+    async def record_revalidation(self, action_id: UUID, policy_version: str) -> ApprovalRequest:
+        row = (
+            await self._session.scalars(
+                update(ApprovalRow)
+                .where(ApprovalRow.action_id == action_id)
+                .values(revalidated_policy_version=policy_version)
+                .returning(ApprovalRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("approval not found")
+        return approval_to_domain(row)
+
+    async def list_pending(
+        self,
+        principal: Principal,
+        run_id: UUID | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> list[ApprovalRequest]:
+        predicates: list[Any] = [
+            ApprovalRow.tenant_id == principal.tenant_id,
+            ApprovalRow.principal_id == principal.principal_id,
+            ApprovalRow.status == ApprovalStatus.PENDING.value,
+        ]
+        if run_id is not None:
+            predicates.append(ApprovalRow.run_id == run_id)
+        if cursor is not None:
+            try:
+                predicates.append(ApprovalRow.id > UUID(cursor))
+            except ValueError as exc:
+                raise ValueError("approval cursor must be a UUID") from exc
+        rows = (
+            await self._session.scalars(
+                select(ApprovalRow)
+                .where(*predicates)
+                .order_by(ApprovalRow.created_at, ApprovalRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return [approval_to_domain(row) for row in rows]
+
+    async def resolve(
+        self,
+        approval_id: UUID,
+        principal: Principal,
+        resolution: ApprovalResolutionType,
+        reason: str | None,
+    ) -> ApprovalResolutionOutcome:
+        row = (
+            await self._session.scalars(
+                select(ApprovalRow)
+                .where(
+                    ApprovalRow.id == approval_id,
+                    ApprovalRow.tenant_id == principal.tenant_id,
+                    ApprovalRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("approval not found")
+        current = approval_to_domain(row)
+        if current.status is not ApprovalStatus.PENDING:
+            state = (
+                ApprovalResolutionState.ALREADY_RESOLVED_IDENTICALLY
+                if current.resolution is resolution
+                else ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY
+            )
+            return ApprovalResolutionOutcome(state=state, approval=current)
+        status = (
+            ApprovalStatus.APPROVED
+            if resolution is ApprovalResolutionType.APPROVE_ONCE
+            else ApprovalStatus.DENIED
+        )
+        updated_row = (
+            await self._session.scalars(
+                update(ApprovalRow)
+                .where(
+                    ApprovalRow.id == approval_id,
+                    ApprovalRow.status == ApprovalStatus.PENDING.value,
+                )
+                .values(
+                    status=status.value,
+                    resolution={"resolution": resolution.value, "reason": reason},
+                    resolved_at=self._clock.now(),
+                    resolved_by=principal.principal_id,
+                )
+                .returning(ApprovalRow)
+            )
+        ).one_or_none()
+        if updated_row is None:
+            raise ConflictError("approval resolution lost a concurrency race")
+        return ApprovalResolutionOutcome(
+            state=ApprovalResolutionState.APPLIED,
+            approval=approval_to_domain(updated_row),
+        )
+
+    async def expire_due(self, now: datetime, limit: int) -> list[ApprovalRequest]:
+        rows = (
+            await self._session.scalars(
+                select(ApprovalRow)
+                .where(
+                    ApprovalRow.status == ApprovalStatus.PENDING.value,
+                    ApprovalRow.expires_at.is_not(None),
+                    ApprovalRow.expires_at <= now,
+                )
+                .order_by(ApprovalRow.expires_at, ApprovalRow.id)
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+        ).all()
+        result: list[ApprovalRequest] = []
+        for row in rows:
+            row.status = ApprovalStatus.EXPIRED.value
+            row.resolved_at = now
+            result.append(approval_to_domain(row))
+        return result
+
+    async def cancel_for_run(self, run_id: UUID) -> int:
+        result = await self._session.execute(
+            update(ApprovalRow)
+            .where(
+                ApprovalRow.run_id == run_id,
+                ApprovalRow.status == ApprovalStatus.PENDING.value,
+            )
+            .values(status=ApprovalStatus.CANCELLED.value, resolved_at=self._clock.now())
+        )
+        return _rowcount(result)
+
+
+class PostgresPolicyProfileRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def record(self, profile: PolicyProfileRecord) -> PolicyProfileRecord:
+        values = profile.model_dump()
+        await self._session.execute(
+            pg_insert(PolicyProfileRow)
+            .values(**values)
+            .on_conflict_do_nothing(index_elements=[PolicyProfileRow.policy_version])
+        )
+        stored = await self.get(profile.policy_version)
+        if stored is None:
+            raise NotFoundError("policy profile audit record was not persisted")
+        immutable = {"loaded_at", "loaded_by"}
+        if stored.model_dump(exclude=immutable) != profile.model_dump(exclude=immutable):
+            raise ConflictError("policy version identifies different rules")
+        return stored
+
+    async def get(self, policy_version: str) -> PolicyProfileRecord | None:
+        row = await self._session.get(PolicyProfileRow, policy_version)
+        if row is None:
+            return None
+        return PolicyProfileRecord(
+            policy_version=row.policy_version,
+            profile_name=row.profile_name,
+            profile_sha256=row.profile_sha256,
+            hardline_sha256=row.hardline_sha256,
+            rule_count=row.rule_count,
+            loaded_at=row.loaded_at,
+            loaded_by=row.loaded_by,
+        )
 
 
 class PostgresIdempotencyRepository:

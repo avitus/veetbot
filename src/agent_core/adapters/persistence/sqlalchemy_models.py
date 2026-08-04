@@ -119,6 +119,7 @@ class RunRow(Base):
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL")
     )
     tenant_id: Mapped[str] = mapped_column(Text)
+    principal_scopes: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     agent_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     agent_version: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))
@@ -210,15 +211,20 @@ class ToolInvocationRow(Base):
     tool_source: Mapped[str] = mapped_column(Text, server_default=text("'builtin'"))
     server_id: Mapped[str | None] = mapped_column(Text)
     idempotency_class: Mapped[str] = mapped_column(Text)
+    side_effect: Mapped[str] = mapped_column(Text, server_default=text("'none'"))
+    risk: Mapped[str] = mapped_column(Text, server_default=text("'low'"))
     attempt_number: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     raw_arguments: Mapped[str] = mapped_column(Text)
     arguments: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     normalized_arguments_hash: Mapped[str | None] = mapped_column(Text)
+    effective_arguments_hash: Mapped[str | None] = mapped_column(Text)
     idempotency_key: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))
     effect_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     outcome: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     result_item: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    structured_result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    policy_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     suspended_kind: Mapped[str | None] = mapped_column(Text)
     suspended_ref: Mapped[str | None] = mapped_column(Text)
     output_bytes: Mapped[int | None] = mapped_column(BigInteger)
@@ -234,11 +240,30 @@ class ToolInvocationRow(Base):
 
 class ApprovalRow(Base):
     __tablename__ = "approvals"
+    __table_args__ = (
+        Index("ix_approvals_tenant_status_created", "tenant_id", "status", "created_at"),
+        Index("ix_approvals_run_id", "run_id"),
+        Index(
+            "ix_approvals_pending_expiry",
+            "status",
+            "expires_at",
+            postgresql_where=text("status = 'pending'"),
+        ),
+        Index("uq_approvals_action_id", "action_id", unique=True),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
     run_id: Mapped[UUID] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
     )
+    action_kind: Mapped[str] = mapped_column(Text)
+    action_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    risk: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(Text)
+    revalidated_policy_version: Mapped[str | None] = mapped_column(Text)
     tool_invocation_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("tool_invocations.id", ondelete="SET NULL")
     )
@@ -249,6 +274,18 @@ class ApprovalRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_by: Mapped[str | None] = mapped_column(Text)
+
+
+class PolicyProfileRow(Base):
+    __tablename__ = "policy_profiles"
+
+    policy_version: Mapped[str] = mapped_column(Text, primary_key=True)
+    profile_name: Mapped[str] = mapped_column(Text)
+    profile_sha256: Mapped[str] = mapped_column(Text)
+    hardline_sha256: Mapped[str] = mapped_column(Text)
+    rule_count: Mapped[int] = mapped_column(Integer)
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    loaded_by: Mapped[str] = mapped_column(Text)
 
 
 class ArtifactRow(Base):

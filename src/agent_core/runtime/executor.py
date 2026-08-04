@@ -10,6 +10,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import (
+    ApprovalRequiredError,
     BudgetExceededError,
     ConflictError,
     RunCancelledError,
@@ -33,7 +34,11 @@ from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.models import ModelProvider, ModelRouter
-from agent_core.ports.persistence import CheckpointSeeder, UnitOfWorkFactory
+from agent_core.ports.persistence import (
+    CheckpointSeeder,
+    RepositoryUnitOfWork,
+    UnitOfWorkFactory,
+)
 from agent_core.ports.repositories import BudgetLedger, PrincipalResolver
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.loop import RunContext, ToolDispatch, checkpoint, run_loop
@@ -73,6 +78,7 @@ class RunExecutor:
         on_token: TokenCallback | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
+        identical_denial_threshold: int = 3,
     ) -> None:
         self._principal = principal
         self._principals = principals
@@ -90,6 +96,39 @@ class RunExecutor:
         self._on_token = on_token
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
+        self._identical_denial_threshold = identical_denial_threshold
+
+    async def requeue_after_approval(self, uow: RepositoryUnitOfWork, run: Run) -> Run:
+        """Apply the guarded approval-resume edge in the sole run-state writer."""
+
+        return await uow.runs.transition(
+            run.id,
+            RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.QUEUED,
+        )
+
+    async def cancel_parked_run(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+        principal_id: str,
+    ) -> Run:
+        """Cancel a queued or approval-waiting run and reap its approval."""
+
+        if run.status is RunStatus.WAITING_FOR_APPROVAL:
+            await uow.approvals.cancel_for_run(run.id)
+        cancelled = await uow.runs.transition(run.id, run.status, RunStatus.CANCELLED)
+        await uow.events.append(
+            NewEvent(
+                session_id=run.session_id,
+                run_id=run.id,
+                event_type="run.cancelled",
+                actor_type="principal",
+                actor_id=principal_id,
+                payload={"reason": "requested"},
+            )
+        )
+        return cancelled
 
     async def execute(self, run_id: UUID) -> None:
         """Execute an in-process queued run after its creating commit."""
@@ -198,11 +237,25 @@ class RunExecutor:
                 dispatch_tools=self._dispatch_tools,
                 max_internal_attempts=self._max_internal_attempts,
                 identical_call_threshold=self._identical_call_threshold,
+                identical_denial_threshold=self._identical_denial_threshold,
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")
-            await self._resume_pending_tools(context)
-            outcome = await run_loop(context)
+            try:
+                await self._resume_pending_tools(context)
+            except ApprovalRequiredError as exc:
+                if exc.approval_id not in context.checkpoint.pending_approval_ids:
+                    context.checkpoint.pending_approval_ids.append(exc.approval_id)
+                await checkpoint(context, "suspended")
+                outcome = RunOutcome(
+                    kind=OutcomeKind.SUSPENDED,
+                    suspension={
+                        "kind": "approval",
+                        "approval_id": str(exc.approval_id),
+                    },
+                )
+            else:
+                outcome = await run_loop(context)
         except RunCancelledError:
             outcome = RunOutcome(
                 kind=(
@@ -254,6 +307,9 @@ class RunExecutor:
             step_number=max(1, context.run.step_count),
             started_at=self._clock.now(),
         )
+        # The queued generation is revalidating the persisted calls. Any approval
+        # raised below becomes the sole pending suspension for the next generation.
+        context.checkpoint.pending_approval_ids = []
         results = await context.dispatch_tools(
             run=context.run,
             checkpoint=context.checkpoint,
@@ -321,6 +377,38 @@ async def finalize(context: RunContext | _FinalizationContext, outcome: RunOutco
             context,
             RunOutcome(kind=OutcomeKind.FAILED, failure=failure),
         )
+        return
+    if outcome.kind is OutcomeKind.SUSPENDED:
+        try:
+            await _emit_approval_requested(context)
+        except Exception as exc:
+            logger.exception(
+                "approval_event_emit_failed",
+                extra={
+                    "run_id": str(context.run.id),
+                    "error_class": type(exc).__name__,
+                },
+            )
+
+
+async def _emit_approval_requested(context: RunContext | _FinalizationContext) -> None:
+    approval_id = (
+        context.checkpoint.pending_approval_ids[0]
+        if context.checkpoint.pending_approval_ids
+        else None
+    )
+    if approval_id is None:
+        raise RuntimeError("approval suspension has no pending approval id")
+    async with context.uow_factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=context.run.session_id,
+                run_id=context.run.id,
+                event_type="approval.requested",
+                actor_type="runtime",
+                payload={"approval_id": str(approval_id)},
+            )
+        )
 
 
 async def _finalize_once(context: RunContext | _FinalizationContext, outcome: RunOutcome) -> None:
@@ -348,6 +436,12 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
         event_type = "run.failed"
         payload = {"failure": outcome.failure.model_dump(mode="json")}
         failure = outcome.failure
+        final_message = None
+    elif outcome.kind is OutcomeKind.SUSPENDED:
+        status = RunStatus.WAITING_FOR_APPROVAL
+        event_type = "run.waiting_for_approval"
+        payload = {"suspension": outcome.suspension}
+        failure = None
         final_message = None
     else:
         raise RuntimeError(f"Milestone 2 cannot finalize outcome {outcome.kind.value}")

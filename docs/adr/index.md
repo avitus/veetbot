@@ -48,3 +48,4 @@ implementation without one.
 - [ADR-0037 — Milestone 1 in-memory seam decisions](0037-milestone-1-in-memory-seams.md)
 - [ADR-0038 — Milestone 2 durable-runtime seam decisions](0038-milestone-2-durable-runtime-seams.md)
 - [ADR-0039 — Milestone 3 provider and trajectory-export seams (Proposed)](0039-milestone-3-provider-and-export-seams.md)
+- [ADR-0040 — Milestone 4 policy, approval, and workspace seams (Proposed)](0040-milestone-4-policy-and-tool-seams.md)

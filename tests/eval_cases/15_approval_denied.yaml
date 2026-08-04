@@ -1,0 +1,16 @@
+name: approval_denied
+milestone: 4
+tags: [approval, denial]
+input: {text: "Attempt a demo external write, then handle a denial."}
+model_fixture: approval_denied_then_final
+approval_resolution: deny
+fixtures:
+  tools: [demo.external_write]
+expected:
+  terminal_status: COMPLETED
+  final_text: The write was denied and was not performed.
+  model_calls: 2
+  tool_started_count: 0
+  pending_approvals: 0
+  reason_codes: [approval.denied]
+  event_order: [approval.requested, approval.resolved, tool.call.denied, run.completed]

@@ -13,10 +13,12 @@ from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
+    ApprovalRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
     MaintenanceRepository,
+    PolicyProfileRepository,
     RunRepository,
     SessionHistoryRepository,
     SessionRepository,
@@ -44,6 +46,8 @@ def _unit_of_work_is_open() -> bool:
 @dataclass(frozen=True, slots=True)
 class UnitOfWorkRepositories:
     agents: AgentRepository
+    approvals: ApprovalRepository
+    policy_profiles: PolicyProfileRepository
     sessions: SessionRepository
     runs: RunRepository
     events: EventRepository
@@ -75,6 +79,8 @@ class MemoryUnitOfWork:
         repositories: UnitOfWorkRepositories,
     ) -> None:
         self.agents = repositories.agents
+        self.approvals = repositories.approvals
+        self.policy_profiles = repositories.policy_profiles
         self.sessions = repositories.sessions
         self.runs = repositories.runs
         self.events = repositories.events
@@ -132,6 +138,8 @@ class PostgresUnitOfWork:
         self._session = session
         repositories = self._repository_factory(session)
         self.agents = repositories.agents
+        self.approvals = repositories.approvals
+        self.policy_profiles = repositories.policy_profiles
         self.sessions = repositories.sessions
         self.runs = repositories.runs
         self.events = repositories.events

@@ -74,6 +74,7 @@ def _spec(
         kind=ToolKind.CAPABILITY,
         output_trust=trust,
         source=source,
+        server_id="docs" if source is ToolSource.MCP else None,
     )
 
 

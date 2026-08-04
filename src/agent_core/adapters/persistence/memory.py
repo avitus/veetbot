@@ -10,6 +10,13 @@ from uuid import UUID
 
 from agent_core.adapters.persistence.conversation import conversation_items
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.approvals import (
+    ApprovalRequest,
+    ApprovalResolutionOutcome,
+    ApprovalResolutionState,
+    ApprovalResolutionType,
+    ApprovalStatus,
+)
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import ProviderPin
@@ -21,6 +28,7 @@ from agent_core.domain.persistence import (
     UsageRollup,
     WorkerLease,
 )
+from agent_core.domain.policies import PolicyProfileRecord
 from agent_core.domain.runs import (
     TERMINAL_RUN_STATUSES,
     Run,
@@ -343,6 +351,19 @@ class InMemoryToolInvocationRepository:
                 update={
                     "status": invocation.status,
                     "effect_sent_at": invocation.effect_sent_at,
+                    "effective_arguments_hash": invocation.effective_arguments_hash,
+                    "suspended_kind": invocation.suspended_kind,
+                    "suspended_ref": invocation.suspended_ref,
+                    "policy_decision": (
+                        None
+                        if invocation.policy_decision is None
+                        else invocation.policy_decision.model_copy(deep=True)
+                    ),
+                    "structured_result": (
+                        None
+                        if invocation.structured_result is None
+                        else dict(invocation.structured_result)
+                    ),
                     "outcome": (
                         None
                         if invocation.outcome is None
@@ -371,6 +392,172 @@ class InMemoryToolInvocationRepository:
                 if invocation.run_id == run_id
             ]
             return sorted(rows, key=lambda row: (row.step_number, row.created_at, row.id.int))
+
+
+class InMemoryApprovalRepository:
+    def __init__(self, clock: Clock) -> None:
+        self._clock = clock
+        self._approvals: dict[UUID, ApprovalRequest] = {}
+        self._actions: dict[UUID, UUID] = {}
+        self._lock = asyncio.Lock()
+
+    async def create(self, request: ApprovalRequest) -> ApprovalRequest:
+        async with self._lock:
+            if request.id in self._approvals or request.action_id in self._actions:
+                raise ConflictError("approval already exists for action")
+            self._approvals[request.id] = request.model_copy(deep=True)
+            self._actions[request.action_id] = request.id
+            return request.model_copy(deep=True)
+
+    @staticmethod
+    def _visible(request: ApprovalRequest, principal: Principal) -> bool:
+        return (
+            request.tenant_id == principal.tenant_id
+            and request.principal_id == principal.principal_id
+        )
+
+    async def get(self, approval_id: UUID, principal: Principal) -> ApprovalRequest:
+        async with self._lock:
+            request = self._approvals.get(approval_id)
+            if request is None or not self._visible(request, principal):
+                raise NotFoundError("approval not found")
+            return request.model_copy(deep=True)
+
+    async def get_by_action(self, action_id: UUID) -> ApprovalRequest | None:
+        async with self._lock:
+            approval_id = self._actions.get(action_id)
+            if approval_id is None:
+                return None
+            return self._approvals[approval_id].model_copy(deep=True)
+
+    async def record_revalidation(self, action_id: UUID, policy_version: str) -> ApprovalRequest:
+        async with self._lock:
+            approval_id = self._actions.get(action_id)
+            if approval_id is None:
+                raise NotFoundError("approval not found")
+            request = self._approvals[approval_id]
+            updated = request.model_copy(
+                update={"revalidated_policy_version": policy_version}, deep=True
+            )
+            self._approvals[approval_id] = updated
+            return updated.model_copy(deep=True)
+
+    async def list_pending(
+        self,
+        principal: Principal,
+        run_id: UUID | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> list[ApprovalRequest]:
+        async with self._lock:
+            rows = [
+                request.model_copy(deep=True)
+                for request in self._approvals.values()
+                if request.status is ApprovalStatus.PENDING
+                and self._visible(request, principal)
+                and (run_id is None or request.run_id == run_id)
+                and (cursor is None or str(request.id) > cursor)
+            ]
+        return sorted(rows, key=lambda row: (row.created_at, row.id.int))[:limit]
+
+    async def resolve(
+        self,
+        approval_id: UUID,
+        principal: Principal,
+        resolution: ApprovalResolutionType,
+        reason: str | None,
+    ) -> ApprovalResolutionOutcome:
+        async with self._lock:
+            request = self._approvals.get(approval_id)
+            if request is None or not self._visible(request, principal):
+                raise NotFoundError("approval not found")
+            if request.status is not ApprovalStatus.PENDING:
+                state = (
+                    ApprovalResolutionState.ALREADY_RESOLVED_IDENTICALLY
+                    if request.resolution is resolution
+                    else ApprovalResolutionState.ALREADY_RESOLVED_DIFFERENTLY
+                )
+                return ApprovalResolutionOutcome(
+                    state=state, approval=request.model_copy(deep=True)
+                )
+            status = (
+                ApprovalStatus.APPROVED
+                if resolution is ApprovalResolutionType.APPROVE_ONCE
+                else ApprovalStatus.DENIED
+            )
+            updated = request.model_copy(
+                update={
+                    "status": status,
+                    "resolution": resolution,
+                    "resolution_reason": reason,
+                    "resolved_at": self._clock.now(),
+                    "resolved_by": principal.principal_id,
+                },
+                deep=True,
+            )
+            self._approvals[approval_id] = updated
+            return ApprovalResolutionOutcome(
+                state=ApprovalResolutionState.APPLIED,
+                approval=updated.model_copy(deep=True),
+            )
+
+    async def expire_due(self, now: datetime, limit: int) -> list[ApprovalRequest]:
+        async with self._lock:
+            due = sorted(
+                (
+                    request
+                    for request in self._approvals.values()
+                    if request.status is ApprovalStatus.PENDING
+                    and request.expires_at is not None
+                    and request.expires_at <= now
+                ),
+                key=lambda row: (row.expires_at or row.created_at, row.id.int),
+            )[:limit]
+            result: list[ApprovalRequest] = []
+            for request in due:
+                updated = request.model_copy(
+                    update={"status": ApprovalStatus.EXPIRED, "resolved_at": now}, deep=True
+                )
+                self._approvals[request.id] = updated
+                result.append(updated.model_copy(deep=True))
+            return result
+
+    async def cancel_for_run(self, run_id: UUID) -> int:
+        async with self._lock:
+            count = 0
+            for approval_id, request in tuple(self._approvals.items()):
+                if request.run_id == run_id and request.status is ApprovalStatus.PENDING:
+                    self._approvals[approval_id] = request.model_copy(
+                        update={
+                            "status": ApprovalStatus.CANCELLED,
+                            "resolved_at": self._clock.now(),
+                        },
+                        deep=True,
+                    )
+                    count += 1
+            return count
+
+
+class InMemoryPolicyProfileRepository:
+    def __init__(self) -> None:
+        self._profiles: dict[str, PolicyProfileRecord] = {}
+        self._lock = asyncio.Lock()
+
+    async def record(self, profile: PolicyProfileRecord) -> PolicyProfileRecord:
+        async with self._lock:
+            existing = self._profiles.get(profile.policy_version)
+            if existing is not None and existing != profile:
+                immutable = {"loaded_at", "loaded_by"}
+                if existing.model_dump(exclude=immutable) != profile.model_dump(exclude=immutable):
+                    raise ConflictError("policy version identifies different rules")
+                return existing.model_copy(deep=True)
+            self._profiles[profile.policy_version] = profile.model_copy(deep=True)
+            return profile.model_copy(deep=True)
+
+    async def get(self, policy_version: str) -> PolicyProfileRecord | None:
+        async with self._lock:
+            profile = self._profiles.get(policy_version)
+            return None if profile is None else profile.model_copy(deep=True)
 
 
 class InMemoryCheckpointRepository:

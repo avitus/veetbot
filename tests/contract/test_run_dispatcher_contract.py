@@ -14,3 +14,5 @@ async def test_inline_dispatcher_executes_a_committed_run_exactly_once() -> None
     await dispatcher.dispatch(RUN_ID)
     await dispatcher.dispatch(RUN_ID)
     assert executed == [RUN_ID]
+    await dispatcher.resume(RUN_ID)
+    assert executed == [RUN_ID, RUN_ID]

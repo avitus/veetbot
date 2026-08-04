@@ -1,0 +1,11 @@
+turns:
+  - tool_calls:
+      - name: demo.external_write
+        arguments: {destination: first, content: one}
+        call_id: external-one
+      - name: demo.external_write
+        arguments: {destination: second, content: two}
+        call_id: external-two
+    stop_reason: tool_use
+  - text: Both approved writes completed sequentially.
+    stop_reason: end_turn

@@ -71,3 +71,5 @@
   spec: docs/plan/model-gateway.md#hard-gates
   statement: "Every provider profile in the repository loads, and every member of a corpus of intentionally invalid profiles is rejected naming the rule it broke. The corpus carries one member per row of the loader's rule table. Registered as `gate.model.profile_valid`."
   check: tests/gates/test_model_profiles_m3.py::test_every_invalid_profile_corpus_member_names_the_rule_it_broke
+  corpus: tests/fixtures/models/
+  minimum_members: 1

@@ -19,6 +19,35 @@ schema that has not been written yet, so they are cheap now and expensive after
 Milestone 2 ships. Items marked **expensive** would require rewriting a
 committed spec and its dependents.
 
+## Milestone 4 implementation decisions
+
+ADR-0040 records the policy, approval, and workspace choices made during the
+autonomous implementation. The highest-value review points are:
+
+- **Process-wide policy audit without a session event (moderate):** the ruleset
+  is durably recorded in `policy_profiles`, but the specified
+  `policy.profile.loaded` event is not synthesized because the current event
+  model requires a real session before one exists. A global operational event
+  stream or an explicit specification amendment is still needed.
+- **Approval HTTP binding waits for Milestone 5 (cheap):** Milestone 4 exposes
+  the complete transport-neutral application service and CLI. The HTTP route
+  will bind that service when the plan's server, authentication, request IDs,
+  and error envelope land together.
+- **Root listing uses the empty-path exception (cheap):** containment rejects
+  empty path components, but `workspace.list_files` interprets the schema's
+  default empty string as the workspace root.
+- **Restart lowers unproven file provenance (moderate):** a local handle labels
+  only paths written through that live handle as internal. Files recovered in a
+  later process are external-untrusted until durable provenance is designed.
+- **Effect watermarks favor uncertainty over replay (cheap):** every declared
+  side effect is marked sent before tool code begins, even if a particular
+  execution could finish without an external change.
+- **Mixed batches remain sequential (cheap):** concurrency is admitted only
+  when every call in the batch is an authorized, parallel-safe read.
+
+The complete rationale, consequences, and rejected alternatives are in
+[ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md).
+
 ## Milestone 3 implementation decisions
 
 ADR-0039 records the provider and trajectory-export choices made while the

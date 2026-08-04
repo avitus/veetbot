@@ -1,0 +1,13 @@
+name: parallel_read_only_admission
+milestone: 4
+tags: [parallel, tools]
+input: {text: "Use two independent read-only tools."}
+model_fixture: parallel_reads_then_final
+fixtures:
+  tools: [math.calculate, system.current_time]
+expected:
+  terminal_status: COMPLETED
+  final_text: Both read-only calls completed.
+  model_calls: 2
+  tool_started_count: 2
+  event_order: [tool.call.started, tool.call.completed, run.completed]

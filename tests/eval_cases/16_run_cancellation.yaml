@@ -1,0 +1,14 @@
+name: approval_wait_run_cancellation
+milestone: 4
+tags: [approval, cancellation]
+input: {text: "Request a demo external write."}
+model_fixture: approval_then_final
+cancel_after_submission: true
+fixtures:
+  tools: [demo.external_write]
+expected:
+  terminal_status: CANCELLED
+  model_calls: 1
+  tool_started_count: 0
+  pending_approvals: 0
+  event_order: [run.waiting_for_approval, approval.requested, run.cancelled]
