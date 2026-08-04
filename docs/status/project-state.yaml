@@ -257,8 +257,8 @@ verification:
           Every actionable finding and follow-up finding was fixed and covered
           by regression tests. The final incremental review of commit ce09048
           completed without new findings, all review threads are resolved, and
-          CodeRabbit explicitly withdrew its incorrect stale-citation report
-          after verifying the repository's citation ledger.
+          CodeRabbit confirmed the cited historical line and the repository's
+          citation-ledger entry were correct.
       - check: hosted CircleCI for pull request 5 commit ce09048
         outcome: passed
         detail: >-
