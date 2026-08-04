@@ -28,8 +28,36 @@ from agent_core.domain.execution import (
 )
 from agent_core.execution.egress_core import address_is_public
 from agent_core.execution.environment import build_sandbox_environment
+from agent_core.ports.execution import WorkspaceHandle
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _docker_workspace(clock: FixedClock) -> WorkspaceHandle:
+    adapter = DockerExecutionEnvironment(clock, SequenceIdFactory())
+    run_id = UUID(int=93)
+    handle = EnvironmentHandle(
+        "environment",
+        "tenant-a",
+        run_id,
+        1,
+        clock.now(),
+        clock.now() + timedelta(minutes=1),
+    )
+    adapter._states[handle.environment_id] = docker_adapter._DockerState(
+        EnvironmentSpec(
+            "tenant-a",
+            run_id,
+            1,
+            "sha256:" + "0" * 64,
+            ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30),
+            EgressPolicy(),
+            {},
+        ),
+        "container",
+        "volume",
+    )
+    return adapter.workspace(handle)
 
 
 def test_no_runtime_in_worker() -> None:
@@ -144,6 +172,7 @@ async def test_docker_commands_are_bounded_and_reaped(
         def kill(self) -> None:
             self.killed = True
             self.returncode = -9
+            raise ProcessLookupError
 
         async def wait(self) -> int:
             self.waited = True
@@ -181,6 +210,7 @@ async def test_docker_workspace_stream_is_bounded_and_reaped(
         def kill(self) -> None:
             self.killed = True
             self.returncode = -9
+            raise ProcessLookupError
 
         async def wait(self) -> int:
             self.waited = True
@@ -193,35 +223,59 @@ async def test_docker_workspace_stream_is_bounded_and_reaped(
         del args, kwargs
         return process
 
-    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
-    adapter = DockerExecutionEnvironment(clock, SequenceIdFactory())
-    run_id = UUID(int=93)
-    handle = EnvironmentHandle(
-        "environment",
-        "tenant-a",
-        run_id,
-        1,
-        clock.now(),
-        clock.now() + timedelta(minutes=1),
-    )
-    adapter._states[handle.environment_id] = docker_adapter._DockerState(
-        EnvironmentSpec(
-            "tenant-a",
-            run_id,
-            1,
-            "sha256:" + "0" * 64,
-            ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30),
-            EgressPolicy(),
-            {},
-        ),
-        "container",
-        "volume",
-    )
     monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
     monkeypatch.setattr(docker_adapter, "_DOCKER_COMMAND_TIMEOUT_SECONDS", 0.001)
-    stream = adapter.workspace(handle).stream("file", 1024)
+    workspace = _docker_workspace(FixedClock(datetime(2026, 1, 1, tzinfo=UTC)))
+    stream = workspace.stream("file", 1024)
     with pytest.raises(ExecutionUnavailable, match="stream timed out"):
         await anext(stream)
+    assert process.killed is True
+    assert process.waited is True
+
+
+async def test_docker_workspace_stream_uses_one_total_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PeriodicReader:
+        reads = 0
+
+        async def read(self, maximum_bytes: int) -> bytes:
+            del maximum_bytes
+            await asyncio.sleep(0.006)
+            self.reads += 1
+            return b"x"
+
+    class PeriodicProcess:
+        stdout = PeriodicReader()
+        returncode: int | None = None
+        killed = False
+        waited = False
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            self.waited = True
+            assert self.returncode is not None
+            return self.returncode
+
+    process = PeriodicProcess()
+
+    async def spawn(*args: object, **kwargs: object) -> PeriodicProcess:
+        del args, kwargs
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(docker_adapter, "_DOCKER_COMMAND_TIMEOUT_SECONDS", 0.03)
+    workspace = _docker_workspace(FixedClock(datetime(2026, 1, 1, tzinfo=UTC)))
+
+    async def consume() -> list[bytes]:
+        return [chunk async for chunk in workspace.stream("file", 1024)]
+
+    with pytest.raises(ExecutionUnavailable, match="stream timed out"):
+        await asyncio.wait_for(consume(), timeout=0.2)
+    assert process.stdout.reads >= 1
     assert process.killed is True
     assert process.waited is True
 

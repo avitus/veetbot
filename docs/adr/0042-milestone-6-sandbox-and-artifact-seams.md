@@ -121,9 +121,10 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
     plan's bearer-token boundary remains enforced without making the bearer
     available to the least-trusted process.
 15. **Operational waits have bounded cleanup.** Control-plane Docker CLI calls
-    have a 60-second adapter timeout, and direct workspace stream reads have the
-    same stall bound; their processes are killed and waited when the timeout or
-    caller cancellation wins. Tool execution remains bounded by its declared
+    have a 60-second adapter timeout, and a direct workspace stream has one
+    60-second deadline across all reads and process exit; their processes are
+    killed and waited when the timeout or caller cancellation wins. Tool
+    execution remains bounded by its declared
     command and lease limits. Execution monitor tasks are cancelled and joined
     on every path. Release waits up to five seconds for abandoned workspace
     streams before forcing teardown, but it still reconciles an in-flight

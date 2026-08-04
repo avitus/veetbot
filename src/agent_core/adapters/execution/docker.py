@@ -245,11 +245,13 @@ async def _docker(
     try:
         stdout, stderr = await asyncio.wait_for(process.communicate(stdin), timeout_seconds)
     except TimeoutError as exc:
-        process.kill()
+        with suppress(ProcessLookupError):
+            process.kill()
         await asyncio.gather(process.wait(), return_exceptions=True)
         raise ExecutionUnavailable("container runtime operation timed out") from exc
     except asyncio.CancelledError:
-        process.kill()
+        with suppress(ProcessLookupError):
+            process.kill()
         await asyncio.gather(process.wait(), return_exceptions=True)
         raise
     if process.returncode != 0:
@@ -359,21 +361,23 @@ class DockerWorkspaceHandle:
             stderr=asyncio.subprocess.DEVNULL,
         )
         if process.stdout is None:
-            process.kill()
+            with suppress(ProcessLookupError):
+                process.kill()
             await asyncio.gather(process.wait(), return_exceptions=True)
             raise ExecutionUnavailable("container runtime did not provide an output pipe")
         observed = 0
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _DOCKER_COMMAND_TIMEOUT_SECONDS
         try:
             while chunk := await asyncio.wait_for(
-                process.stdout.read(64 * 1024), _DOCKER_COMMAND_TIMEOUT_SECONDS
+                process.stdout.read(64 * 1024),
+                max(0.0, deadline - loop.time()),
             ):
                 observed += len(chunk)
                 if observed > maximum_bytes:
-                    process.kill()
-                    await process.wait()
                     raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
                 yield chunk
-            return_code = await asyncio.wait_for(process.wait(), _DOCKER_COMMAND_TIMEOUT_SECONDS)
+            return_code = await asyncio.wait_for(process.wait(), max(0.0, deadline - loop.time()))
             if return_code == 44:
                 raise FileNotFoundError(path)
             if return_code == 45:
@@ -390,8 +394,9 @@ class DockerWorkspaceHandle:
             raise ExecutionUnavailable("container workspace stream timed out") from exc
         finally:
             if process.returncode is None:
-                process.kill()
-                await asyncio.gather(process.wait(), return_exceptions=True)
+                with suppress(ProcessLookupError):
+                    process.kill()
+            await asyncio.gather(process.wait(), return_exceptions=True)
 
     async def write(self, path: str, data: bytes) -> None:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
@@ -755,8 +760,9 @@ class DockerExecutionEnvironment:
             limit=64 * 1024 + 1,
         )
         if relay.stdin is None:
-            relay.terminate()
-            await relay.wait()
+            with suppress(ProcessLookupError):
+                relay.terminate()
+            await asyncio.gather(relay.wait(), return_exceptions=True)
             raise ExecutionUnavailable("bridge relay did not provide an input pipe")
         relay.stdin.write(endpoint.token.encode("utf-8") + b"\n")
         await relay.stdin.drain()
@@ -777,12 +783,14 @@ class DockerExecutionEnvironment:
             with suppress(asyncio.TimeoutError):
                 await asyncio.wait_for(relay.wait(), timeout=1)
             if relay.returncode is None:
-                relay.terminate()
+                with suppress(ProcessLookupError):
+                    relay.terminate()
                 try:
                     await asyncio.wait_for(relay.wait(), timeout=1)
                 except TimeoutError:
-                    relay.kill()
-                    await asyncio.gather(relay.wait(), return_exceptions=True)
+                    with suppress(ProcessLookupError):
+                        relay.kill()
+            await asyncio.gather(relay.wait(), return_exceptions=True)
             pump.cancel()
             await asyncio.gather(pump, return_exceptions=True)
 
