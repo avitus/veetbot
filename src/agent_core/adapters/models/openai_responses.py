@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
-from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
+from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, AsyncOpenAI
 
 from agent_core.adapters.models.common import (
     RawEventSource,
@@ -135,6 +135,17 @@ class OpenAIResponsesProvider:
                     category="transient" if transient else "permanent",
                     provider_code=f"http_{exc.status_code}",
                     http_status=exc.status_code,
+                    stream_had_output=emitted_count > 0,
+                )
+                return
+            except APIError:
+                yield failed_event(
+                    attempt=attempt,
+                    provider=self.name,
+                    model=resolved.model,
+                    sequence=emitted_count,
+                    category="permanent",
+                    provider_code="sdk_error",
                     stream_had_output=emitted_count > 0,
                 )
                 return

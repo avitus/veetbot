@@ -160,6 +160,21 @@ def test_alias_cannot_collide_with_a_model_id(tmp_path: Path) -> None:
         ProviderRegistry.load(case_root, adapters=ADAPTER_DEFINITIONS)
 
 
+def test_catalog_change_updates_the_registry_version(tmp_path: Path) -> None:
+    baseline = ProviderRegistry.load(MODELS, adapters=ADAPTER_DEFINITIONS)
+    case_root = tmp_path / "catalog-version"
+    shutil.copytree(MODELS, case_root)
+    catalog_path = case_root / "catalog.yaml"
+    catalog = load_yaml(catalog_path)
+    catalog["entries"]["open-local-8b"]["limits"]["context_window_tokens"] = 65536
+    write_yaml(catalog_path, catalog)
+
+    changed = ProviderRegistry.load(case_root, adapters=ADAPTER_DEFINITIONS)
+    assert (
+        changed.profiles["ollama"].registry_version != baseline.profiles["ollama"].registry_version
+    )
+
+
 async def test_provider_pin_resolves_identically_after_router_reconstruction() -> None:
     registry = ProviderRegistry.load(MODELS, adapters=ADAPTER_DEFINITIONS)
     first = StaticModelRouter(registry, FixedClock(NOW))

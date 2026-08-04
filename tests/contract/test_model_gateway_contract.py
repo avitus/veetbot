@@ -11,6 +11,7 @@ import httpx
 import pytest
 from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError
 from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import APIResponseValidationError as OpenAIAPIResponseValidationError
 from pydantic import ValidationError
 
 from agent_core.adapters.determinism import FixedClock
@@ -360,6 +361,32 @@ async def test_openai_midstream_transport_failure_uses_the_next_sequence() -> No
     assert events[-1].error.kind == "transient"
 
 
+async def test_openai_midstream_sdk_error_is_normalized_without_losing_sequence() -> None:
+    async def invalid_response(_request: dict[str, Any]) -> Any:
+        yield {
+            "type": "response.output_text.delta",
+            "output_index": 0,
+            "delta": "partial",
+        }
+        request_value = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        response = httpx.Response(200, request=request_value)
+        raise OpenAIAPIResponseValidationError(response, {"bad": "body"})
+
+    provider = OpenAIResponsesProvider(event_source=invalid_response)
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("openai"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+    assert [event.sequence for event in events] == [0, 1]
+    assert isinstance(events[-1], ModelFailedEvent)
+    assert events[-1].error.kind == "permanent"
+    assert events[-1].error.provider_code == "sdk_error"
+
+
 def test_provider_usage_counters_are_clamped_to_their_totals() -> None:
     openai_usage = OpenAIResponsesProvider._usage(
         {
@@ -404,6 +431,16 @@ async def test_recorded_fixture_fails_after_its_declared_streams_are_exhausted()
             await collect_turn(provider.stream(request(), resolved("openai"), ATTEMPT))
     finally:
         await provider.close()
+
+
+def test_recorded_fixture_rejects_legacy_openai_credential_shapes() -> None:
+    fixture = RecordedFixture(
+        schema_version=1,
+        provider_api="responses",
+        events=[{"type": "response.completed", "credential": "sk-" + "synthetic123456"}],
+    )
+    with pytest.raises(ValueError, match="credential-shaped"):
+        RecordedEventSource(fixture)
 
 
 async def test_midstream_chat_transport_failure_keeps_a_gapless_terminal_sequence() -> None:

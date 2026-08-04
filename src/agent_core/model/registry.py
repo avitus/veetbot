@@ -312,7 +312,11 @@ class ProviderRegistry:
             profile_hashes[name] = _canonical_hash(raw)
 
         registry_hash = _canonical_hash(
-            {"policies": _canonical_hash(policy_raw), "profiles": profile_hashes}
+            {
+                "policies": _canonical_hash(policy_raw),
+                "catalog": _canonical_hash(catalog),
+                "profiles": profile_hashes,
+            }
         )
         loaded: dict[str, LoadedProfile] = {}
         aliases: dict[str, RegistryModel] = {}

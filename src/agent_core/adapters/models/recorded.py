@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -11,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from agent_core.domain.messages import ModelAttempt, ModelEvent, ModelRequest, ResolvedModel
 from agent_core.ports.models import ModelProvider
+
+OPENAI_KEY_SHAPE = re.compile(r"\bsk-[a-z0-9_-]{12,}")
 
 
 class RecordedFixture(BaseModel):
@@ -44,7 +47,7 @@ class RecordedEventSource:
     def __init__(self, fixture: RecordedFixture) -> None:
         serialized = fixture.model_dump_json()
         lowered = serialized.lower()
-        if "authorization" in lowered or "sk-ant-" in lowered or "sk-proj-" in lowered:
+        if "authorization" in lowered or OPENAI_KEY_SHAPE.search(lowered) is not None:
             raise ValueError("recorded fixture contains credential-shaped content")
         self._streams = fixture.streams or [fixture.events or []]
         self._stream_index = 0
