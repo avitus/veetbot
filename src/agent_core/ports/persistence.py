@@ -13,6 +13,7 @@ from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
+    ArtifactRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
@@ -44,6 +45,7 @@ class RepositoryUnitOfWork(Protocol):
     trajectory: TrajectoryProjectionRepository
     export_consent: ExportConsentRepository
     trajectory_exports: TrajectoryExportRepository
+    artifacts: ArtifactRepository
     maintenance: MaintenanceRepository
     queue: RunQueue | None
 

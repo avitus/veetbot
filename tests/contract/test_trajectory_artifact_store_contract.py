@@ -6,6 +6,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
+from agent_core.domain.errors import ArtifactIntegrityError
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from tests.contract.support import NOW, PRINCIPAL_ID, RUN_ID, SESSION_ID, TENANT
@@ -43,7 +44,7 @@ async def test_trajectory_artifact_store_round_trip_and_delete(tmp_path: Path) -
 async def test_trajectory_artifact_store_rejects_integrity_drift(tmp_path: Path) -> None:
     store = LocalTrajectoryArtifactStore(tmp_path)
     content = b'{"schema_version":1}'
-    with pytest.raises(ValueError, match="digest and size"):
+    with pytest.raises(ArtifactIntegrityError, match="digest and size"):
         await store.write(
             artifact(content).model_copy(update={"sha256": "0" * 64}),
             content,
@@ -51,7 +52,9 @@ async def test_trajectory_artifact_store_rejects_integrity_drift(tmp_path: Path)
 
     stored = await store.write(artifact(content), content)
     (tmp_path / stored.storage_uri).write_bytes(content + b" ")
-    with pytest.raises(ValueError, match="digest or size"):
+    with pytest.raises(ArtifactIntegrityError, match="digest or size"):
         await store.read(stored)
-    with pytest.raises(ValueError, match="digest or size"):
+    with pytest.raises(ArtifactIntegrityError, match="digest or size"):
         _ = [chunk async for chunk in store.stream(stored)]
+    with pytest.raises(ArtifactIntegrityError, match="digest or size"):
+        await store.open_verified(stored)

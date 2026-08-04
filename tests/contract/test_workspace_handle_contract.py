@@ -1,3 +1,4 @@
+import os
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -21,3 +22,25 @@ async def test_workspace_handle_contains_paths_and_records_provenance(tmp_path: 
     for invalid in ("../outside", "/etc/passwd", "a//b", "a/./b", "nul\x00path"):
         with pytest.raises(WorkspaceEscape):
             handle.resolve(invalid)
+
+
+async def test_workspace_stream_refuses_symlinks_and_special_files(tmp_path: Path) -> None:
+    root = tmp_path / "workspace"
+    handle = LocalWorkspaceHandle(root)
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"secret")
+    (root / "link.txt").symlink_to(outside)
+    with pytest.raises(WorkspaceEscape):
+        await anext(handle.stream("link.txt", 1024))
+
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+    (outside_directory / "secret.txt").write_bytes(b"secret")
+    (root / "linked-directory").symlink_to(outside_directory, target_is_directory=True)
+    with pytest.raises(WorkspaceEscape):
+        await handle.read("linked-directory/secret.txt")
+
+    fifo = root / "pipe"
+    os.mkfifo(fifo)
+    with pytest.raises(IsADirectoryError):
+        await anext(handle.stream("pipe", 1024))

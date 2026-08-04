@@ -232,6 +232,29 @@ def test_token_auth_requires_a_configured_principal() -> None:
         load_settings(values)
 
 
+@pytest.mark.parametrize(
+    ("overlay", "message"),
+    [
+        ("resources:\n  memory_bytes: 0\n", "positive integer"),
+        ("egress:\n  mode: unrestricted\n", "deny or allowlist"),
+        (
+            "egress:\n  mode: allowlist\n  destinations:\n"
+            "    - host: 127.0.0.1\n      ports: [80]\n",
+            "destinations.0 is invalid",
+        ),
+        ("artifacts:\n  retention_days: -1\n", "positive integer"),
+    ],
+)
+def test_sandbox_overlay_values_are_semantically_validated(
+    tmp_path: Path, overlay: str, message: str
+) -> None:
+    path = tmp_path / "sandbox" / "limits.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(overlay, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match=message):
+        load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
+
+
 def test_all_106_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths

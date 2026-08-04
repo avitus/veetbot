@@ -10,67 +10,67 @@
   kind: structural
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**The worker imports no container runtime.** The import-boundary walk is extended: no module under the runtime, tool, or worker packages may import a container or hypervisor client, directly or transitively, and none may spawn one as a subprocess. Only the execution-service adapter package may. `gate.sandbox.no_runtime_in_worker`, structural."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_sandbox_m6.py::test_no_runtime_in_worker
 - id: gate.sandbox.spec_has_no_host_path
   milestone: 6
   kind: structural
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**No host path crosses the port.** A structural check over the declared types asserts that `EnvironmentSpec`, `EnvironmentHandle`, `ExecutionResult`, and `FileChange` carry no field holding a host filesystem path, and that no adapter returns one in an error message. The workspace's host path exists in exactly one module. `gate.sandbox.spec_has_no_host_path`, structural."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_sandbox_m6.py::test_spec_has_no_host_path
 - id: gate.sandbox.no_credential_reaches
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**No credential reaches a sandbox.** A run executes a command that dumps its entire environment, reads every file it can reach, and returns the lot. The result is asserted to contain no tier-0 name, no value from the worker's environment, and no string matching the secret-scanner patterns. Run with the worker's environment deliberately full of realistic-looking credentials, because an empty control environment proves nothing. `gate.sandbox.no_credential_reaches`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_no_credential_reaches
 - id: gate.sandbox.network_denied
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**Network is denied by default.** With no egress configuration, a command attempting TCP to a public address, a DNS query, and a request to `169.254.169.254` all fail, and they fail at the network namespace rather than at a proxy refusal — asserted by the absence of a proxy log line for the attempt. `gate.sandbox.network_denied`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_network_denied
 - id: gate.sandbox.egress_allowlisted
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**Egress reaches the allowlist and nothing else.** With `mode: allowlist` and one destination, a request to that destination succeeds and requests to a second public host, to a private address, to `169.254.169.254`, to a name resolving to a private address, and to the allowed host on an unlisted port all fail. Every outcome appears in the proxy log with its reason. `gate.sandbox.egress_allowlisted`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_egress_allowlisted
 - id: gate.sandbox.limits_enforced
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**Every limit is enforced and reported.** Five commands — a spin loop, an allocator, a fork bomb, a disk filler, and a file-count filler — are each killed, and each returns the matching `KillReason`. A command exceeding the effective timeout sets both `timed_out` and `killed_by = TIMEOUT`. Partial output is returned in every case. `gate.sandbox.limits_enforced`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_limits_enforced
 - id: gate.sandbox.escape_denied
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**A container escape reaches nothing.** The red-team test. A command deliberately attempting the known escape paths for the configured runtime — the Docker socket, `/proc/self/exe`, a privileged mount, a host PID namespace, kernel modules — reaches no secret, no database, no other tenant's workspace, and no host process. This is harness case 26 and it runs against the real runtime, never against `fake`. `gate.sandbox.escape_denied`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_escape_denied
 - id: gate.sandbox.workspace_isolated
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**Workspaces do not see each other.** Two runs in two tenants execute concurrently. Neither can read, write, list, or stat the other's workspace by any path, including by inode, by `/proc/*/root`, and by a symlink planted before the second run started. Repeated with two runs in the same tenant, which must also be isolated. `gate.sandbox.workspace_isolated`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_workspace_isolated
 - id: gate.sandbox.no_orphans
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**Nothing outlives its lease.** A worker is killed mid-execution without cleanup. Every sandbox it created is destroyed within two reaper intervals, and no sandbox is live with a `lease_epoch` older than its run's current one. Repeated for a worker fenced by a supervisor rather than killed. `gate.sandbox.no_orphans`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/security/test_sandbox_runtime_m6.py::test_no_orphans
 - id: gate.sandbox.artifact_checksum
   milestone: 6
   kind: case
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**An artifact's bytes are the bytes that were exported.** A file exported from a workspace has the same SHA-256 when fetched through the API as it had in the workspace, byte for byte, for a file larger than the streaming buffer. A digest mismatch injected at the store boundary raises `ArtifactIntegrityError` and stores nothing. `gate.sandbox.artifact_checksum`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_artifact_m6.py::test_artifact_checksum
 - id: gate.sandbox.artifact_key_opaque
   milestone: 6
   kind: structural
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**The storage key is derived from platform values only.** A structural check asserts the key function's parameters are exactly `(tenant_id, artifact_id)` and that its module performs no path join with a value reachable from `ArtifactMetadata`'s caller-supplied fields. A filename is metadata and never a path. `gate.sandbox.artifact_key_opaque`, structural."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_sandbox_m6.py::test_artifact_key_opaque
 - id: gate.sandbox.workspace_containment
   milestone: 4
   kind: property

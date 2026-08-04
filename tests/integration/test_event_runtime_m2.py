@@ -407,6 +407,38 @@ async def test_worker_crash_after_checkpoint_resumes_to_terminal_state() -> None
     assert await _crash_after_checkpoint(delete_checkpoint=False) is RunStatus.COMPLETED
 
 
+async def test_artifact_orphan_reconciliation_uses_a_coarse_independent_cadence() -> None:
+    clock = FixedClock(NOW)
+    expiry_calls = 0
+    orphan_calls = 0
+
+    async def sweep_expired() -> int:
+        nonlocal expiry_calls
+        expiry_calls += 1
+        return 0
+
+    async def reconcile_orphans() -> int:
+        nonlocal orphan_calls
+        orphan_calls += 1
+        return 0
+
+    async with build(settings=database_settings(), storage="postgres", clock=clock) as composition:
+        maintenance = MaintenanceWorker(
+            uow_factory=composition.uow_factory,
+            clock=clock,
+            sweep_artifacts=sweep_expired,
+            sweep_artifact_orphans=reconcile_orphans,
+            artifact_orphan_interval_seconds=60,
+        )
+        await maintenance.run_once()
+        await maintenance.run_once()
+        assert (expiry_calls, orphan_calls) == (2, 1)
+        clock.advance(timedelta(seconds=61))
+        await maintenance.run_once()
+
+    assert (expiry_calls, orphan_calls) == (3, 2)
+
+
 async def test_nonterminal_checkpoints_are_dispensible() -> None:
     assert await _crash_after_checkpoint(delete_checkpoint=True) is RunStatus.COMPLETED
 

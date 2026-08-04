@@ -168,8 +168,20 @@ class SandboxExecutionError(AgentCoreError):
     """An isolated execution environment failed during execution."""
 
 
+class ExecutionUnavailable(SandboxExecutionError):  # noqa: N818
+    """The execution service cannot provision or reach a sandbox."""
+
+
+class ExecutionRejected(SandboxExecutionError):  # noqa: N818
+    """A sandbox command or handle was rejected before execution."""
+
+
 class ArtifactStorageError(AgentCoreError):
     """Artifact storage could not satisfy an operation."""
+
+
+class ArtifactIntegrityError(ArtifactStorageError):
+    """Artifact bytes did not match their declared checksum or size."""
 
 
 class ExportConsentError(AgentCoreError):

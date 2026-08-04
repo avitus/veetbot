@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from uuid import UUID
@@ -126,12 +127,13 @@ class _RecordingTool:
 
     def __init__(self) -> None:
         self.observed: dict[str, object] | None = None
+        self.observed_timeout: float | None = None
 
     async def execute(
         self, arguments: dict[str, object], context: ToolExecutionContext
     ) -> ToolResult:
-        del context
         self.observed = arguments
+        self.observed_timeout = context.timeout_seconds
         return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
 
 
@@ -327,9 +329,17 @@ async def test_modification_rekeys_before_persistence(tmp_path: Path) -> None:
     tool = _RecordingTool()
     registry = StaticToolRegistry()
     registry.register(tool)
-    async with build(settings=_settings(tmp_path), script=script) as app:
+    async with build(
+        settings=_settings(tmp_path),
+        script=script,
+        fixed_clock_at=datetime(2026, 1, 1, tzinfo=UTC),
+    ) as app:
         run_id = await app.runs.submit("prepare a modification test")
         active_run = await app.runs.get(run_id)
+        active_run = active_run.model_copy(
+            update={"deadline_at": app.clock.now() + timedelta(milliseconds=250)},
+            deep=True,
+        )
         async with app.uow_factory() as uow:
             active_agent = await uow.agents.get_version(
                 active_run.agent_id, active_run.agent_version
@@ -369,6 +379,8 @@ async def test_modification_rekeys_before_persistence(tmp_path: Path) -> None:
     proposed_hash = validate_and_normalize({"value": "proposed"}, tool.spec.input_schema)[2]
     effective_hash = validate_and_normalize({"value": "effective"}, tool.spec.input_schema)[2]
     assert tool.observed == {"value": "effective"}
+    assert tool.observed_timeout is not None
+    assert 0 < tool.observed_timeout <= 0.25
     assert invocation.normalized_arguments_hash == proposed_hash
     assert invocation.effective_arguments_hash == effective_hash
     assert invocation.idempotency_key == _idempotency_key(

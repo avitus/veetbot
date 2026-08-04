@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import datetime, timedelta
+from uuid import UUID
 
 from agent_core.domain.errors import ArtifactSweepError
 from agent_core.domain.events import NewEvent
@@ -16,6 +18,9 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.executor import RunExecutor
 
 logger = logging.getLogger(__name__)
+
+type LeaseLiveCheck = Callable[[UUID, int], Awaitable[bool]]
+type SandboxSweep = Callable[[frozenset[tuple[UUID, int]], LeaseLiveCheck], Awaitable[int]]
 
 
 class DurableWorker:
@@ -161,12 +166,23 @@ class MaintenanceWorker:
         poll_interval_seconds: float = 5,
         reclaim_limit: int = 100,
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
+        sweep_artifacts: Callable[[], Awaitable[int]] | None = None,
+        sweep_sandboxes: SandboxSweep | None = None,
+        sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
+        artifact_orphan_interval_seconds: float = 3600,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._poll_interval = poll_interval_seconds
         self._reclaim_limit = reclaim_limit
         self._sweep_exports = sweep_exports
+        self._sweep_artifacts = sweep_artifacts
+        self._sweep_sandboxes = sweep_sandboxes
+        self._sweep_artifact_orphans = sweep_artifact_orphans
+        if artifact_orphan_interval_seconds <= 0:
+            raise ValueError("artifact orphan interval must be positive")
+        self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
+        self._last_artifact_orphan_sweep_at: datetime | None = None
         self._stopping = False
 
     def stop(self) -> None:
@@ -177,6 +193,17 @@ class MaintenanceWorker:
             if uow.queue is None:
                 raise RuntimeError("maintenance worker requires a queue repository")
             reclaimed = await uow.queue.reclaim_expired(self._reclaim_limit)
+            live_run_leases = await uow.maintenance.live_run_leases()
+        if self._sweep_sandboxes is not None:
+
+            async def lease_is_live(run_id: UUID, lease_epoch: int) -> bool:
+                async with self._uow_factory() as uow:
+                    return await uow.maintenance.is_live_run_lease(run_id, lease_epoch)
+
+            try:
+                await self._sweep_sandboxes(live_run_leases, lease_is_live)
+            except Exception:
+                logger.exception("sandbox reaper failed")
         async with self._uow_factory() as uow:
             sessions = await uow.maintenance.projection_sessions(self._reclaim_limit)
         for session_id in sessions:
@@ -197,6 +224,22 @@ class MaintenanceWorker:
                 await self._sweep_exports()
             except ArtifactSweepError:
                 logger.exception("trajectory artifact sweep failed")
+        if self._sweep_artifacts is not None:
+            try:
+                await self._sweep_artifacts()
+            except Exception:
+                logger.exception("general artifact expiry sweep failed")
+        orphan_sweep_due = (
+            self._last_artifact_orphan_sweep_at is None
+            or self._clock.now() - self._last_artifact_orphan_sweep_at
+            >= self._artifact_orphan_interval
+        )
+        if self._sweep_artifact_orphans is not None and orphan_sweep_due:
+            self._last_artifact_orphan_sweep_at = self._clock.now()
+            try:
+                await self._sweep_artifact_orphans()
+            except Exception:
+                logger.exception("artifact orphan reconciliation failed")
         return reclaimed
 
     async def run_forever(self) -> None:

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -26,7 +28,11 @@ from agent_core.adapters.determinism import (
 )
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
-from agent_core.adapters.execution.local_workspace import LocalWorkspaceFactory
+from agent_core.adapters.execution.docker import (
+    DockerExecutionEnvironment,
+    resolve_local_image_digest,
+)
+from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
 from agent_core.adapters.identity import StaticPrincipalResolver
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
@@ -46,6 +52,7 @@ from agent_core.adapters.persistence.database import (
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
+    InMemoryArtifactRepository,
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
     InMemoryExportConsentRepository,
@@ -69,6 +76,7 @@ from agent_core.adapters.persistence.queue import PostgresRunQueue
 from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
+    PostgresArtifactRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
     PostgresExportConsentRepository,
@@ -90,6 +98,7 @@ from agent_core.adapters.persistence.unit_of_work import (
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.application.approval_service import ApprovalService
+from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -126,6 +135,12 @@ from agent_core.config import (
 from agent_core.context.builder import MinimalContextBuilder
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.events import ProcessEvent
+from agent_core.domain.execution import (
+    EgressDestination,
+    EgressMode,
+    EgressPolicy,
+    ResourceLimits,
+)
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelEvent,
@@ -139,6 +154,8 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import CancelReason, RunLimits
+from agent_core.execution.egress import validate_destination
+from agent_core.execution.manager import SandboxManager
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
@@ -153,12 +170,14 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
+from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.registry import StaticToolRegistry
+from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
@@ -192,6 +211,7 @@ class Composition:
     clock: Clock
     worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
+    sandbox: SandboxManager
 
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
@@ -304,6 +324,7 @@ def _memory_uow_repositories(
         trajectory=InMemoryTrajectoryProjectionRepository(events),
         export_consent=InMemoryExportConsentRepository(),
         trajectory_exports=InMemoryTrajectoryExportRepository(),
+        artifacts=InMemoryArtifactRepository(),
         maintenance=InMemoryMaintenanceRepository(),
         queue=None,
     )
@@ -341,6 +362,7 @@ def _postgres_repository_factory(
             trajectory=trajectory,
             export_consent=PostgresExportConsentRepository(session),
             trajectory_exports=PostgresTrajectoryExportRepository(session),
+            artifacts=PostgresArtifactRepository(session),
             maintenance=PostgresMaintenanceRepository(session),
             queue=PostgresRunQueue(
                 session,
@@ -374,13 +396,74 @@ async def _compose(
     identical_call_threshold: int,
     identical_denial_threshold: int,
     max_parallel_calls: int,
+    hard_ceiling_multiplier: int,
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
-    workspace_root: Path,
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
 ) -> tuple[Composition, list[ModelProvider]]:
+    sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
+    raw_resources = sandbox_config["resources"]
+    sandbox_limits = ResourceLimits(
+        cpu_millicores=int(raw_resources["cpu_millicores"]),
+        memory_bytes=int(raw_resources["memory_bytes"]),
+        pids_max=int(raw_resources["pids_max"]),
+        workspace_bytes=int(raw_resources["workspace_bytes"]),
+        inodes_max=int(raw_resources["inodes_max"]),
+        wall_clock_seconds=int(raw_resources["wall_clock_seconds"]),
+    )
+    raw_egress = sandbox_config["egress"]
+    destinations = tuple(
+        EgressDestination(
+            host=str(item["host"]),
+            ports=frozenset(int(port) for port in item["ports"]),
+        )
+        for item in raw_egress["destinations"]
+    )
+    for destination in destinations:
+        validate_destination(destination)
+    egress = EgressPolicy(mode=EgressMode(str(raw_egress["mode"])), destinations=destinations)
+    raw_artifacts = sandbox_config["artifacts"]
+    artifact_retention_days = int(raw_artifacts["retention_days"])
+    artifact_maximum_bytes = int(raw_artifacts["maximum_bytes"])
+    if storage == "memory" and settings.sandbox.value != "fake":
+        raise ConfigurationError(
+            "in-memory storage requires SANDBOX_MECHANISM=fake; configured "
+            f"SANDBOX_MECHANISM={settings.sandbox.value}"
+        )
+    if storage == "memory" or settings.sandbox.value == "fake":
+        fake_environment = FakeExecutionEnvironment(clock, ids)
+        sandbox_manager = SandboxManager(
+            fake_environment,
+            image_digest=fake_image_digest(),
+            limits=sandbox_limits,
+            egress=egress,
+            parent_environment=os.environ,
+            passthrough_names=settings.sandbox_passthrough,
+        )
+    elif settings.sandbox.value in {"docker", "gvisor"}:
+        sandbox_image_digest = await resolve_local_image_digest(settings.sandbox_image)
+        logger.info(
+            "sandbox_image_resolved",
+            extra={
+                "sandbox_mechanism": settings.sandbox.value,
+                "sandbox_image_digest": sandbox_image_digest,
+            },
+        )
+        docker_environment = DockerExecutionEnvironment(
+            clock, ids, runtime="runsc" if settings.sandbox.value == "gvisor" else None
+        )
+        sandbox_manager = SandboxManager(
+            docker_environment,
+            image_digest=sandbox_image_digest,
+            limits=sandbox_limits,
+            egress=egress,
+            parent_environment=os.environ,
+            passthrough_names=settings.sandbox_passthrough,
+        )
+    else:
+        raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
@@ -389,6 +472,10 @@ async def _compose(
     registry.register(WorkspaceWriteTextTool())
     registry.register(WorkspaceListFilesTool())
     registry.register(DemoExternalWriteTool())
+    registry.register(
+        SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
+    )
+    registry.register(ArtifactExportTool())
     async with uow_factory() as uow:
         await uow.agents.put(agent)
         await uow.policy_profiles.record(
@@ -427,15 +514,37 @@ async def _compose(
             resolved_at=clock.now(),
         )
         context_builder = MinimalContextBuilder(registry, clock, maximum_tools=maximum_tools)
+        trajectory_artifact_store = LocalTrajectoryArtifactStore(artifact_root)
+        general_artifact_store = FilesystemArtifactStore(
+            artifact_root, maximum_bytes=artifact_maximum_bytes
+        )
+        artifact_writers = ArtifactWriterFactory(
+            uow_factory,
+            general_artifact_store,
+            clock,
+            ids,
+            retention_days=artifact_retention_days,
+            maximum_bytes=artifact_maximum_bytes,
+        )
+
+        async def reconcile_artifact_orphans() -> int:
+            async def metadata_exists(artifact_id: UUID) -> bool:
+                async with uow_factory() as uow:
+                    return await uow.artifacts.exists(artifact_id)
+
+            return await general_artifact_store.reconcile_orphans(metadata_exists, now=clock.now())
+
         pipeline = ToolPipeline(
             registry,
             uow_factory,
             clock,
             ids,
             policy=DeterministicPolicyEngine(ruleset),
-            workspace_factory=LocalWorkspaceFactory(workspace_root),
+            workspace_factory=sandbox_manager,
+            artifact_writers=artifact_writers,
             current_principal=principal,
             max_parallel_calls=max_parallel_calls,
+            hard_ceiling_multiplier=hard_ceiling_multiplier,
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
         )
         token_slot = _ActiveToken()
@@ -457,6 +566,7 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
             on_token_complete=token_slot.discard,
+            on_run_complete=sandbox_manager.release_run,
             on_model_event=lambda run, event: _publish_model_event(
                 live_events, run.session_id, run.id, event
             ),
@@ -470,14 +580,13 @@ async def _compose(
             else PostgresRunDispatcher()
         )
         session_service = SessionService(uow_factory, clock, ids, principal, agent)
-        artifact_store = LocalTrajectoryArtifactStore(artifact_root)
         trajectory_service = TrajectoryExportService(
             uow_factory=uow_factory,
             principal=principal,
             clock=clock,
             ids=ids,
             tools=registry,
-            artifacts=artifact_store,
+            artifacts=trajectory_artifact_store,
             tenant_enabled=trajectory_export_enabled,
             redactor=trajectory_redactor,
         )
@@ -524,7 +633,8 @@ async def _compose(
             ),
             artifacts=PublicArtifactService(
                 uow_factory=uow_factory,
-                artifacts=artifact_store,
+                artifacts=trajectory_artifact_store,
+                general_artifacts=general_artifact_store,
                 clock=clock,
             ),
         )
@@ -557,11 +667,16 @@ async def _compose(
                     uow_factory=uow_factory,
                     clock=clock,
                     sweep_exports=trajectory_service.sweep_once,
+                    sweep_artifacts=artifact_writers.sweep_expired,
+                    sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
+                    sweep_artifact_orphans=reconcile_artifact_orphans,
                 ),
+                sandbox=sandbox_manager,
             ),
             list(effective_providers.values()),
         )
     except BaseException:
+        await sandbox_manager.close()
         for provider in effective_providers.values():
             await provider.close()
         raise
@@ -688,6 +803,7 @@ async def build(
     worker_config = runtime_config["worker"]
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
+    output_config = tool_config["output"]
     tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
@@ -711,7 +827,7 @@ async def build(
             if model_policy is None
             else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
         ),
-        name="Milestone 4 Agent",
+        name="Milestone 6 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
         model_policy=effective_model_policy,
         enabled_tools=(
@@ -725,6 +841,8 @@ async def build(
                 "workspace.write_text",
                 "workspace.list_files",
                 "demo.external_write",
+                "sandbox.run_command",
+                "artifact.export",
             ]
         ),
         policy_profile=policy_profile,
@@ -746,6 +864,7 @@ async def build(
         if storage == "memory"
         else PostgresLiveEventBroadcaster(effective_settings.database_url)
     )
+    composition: Composition | None = None
     try:
         if storage == "memory":
             agent_repository = InMemoryAgentRepository()
@@ -808,15 +927,20 @@ async def build(
             identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
             identical_denial_threshold=int(circuit_breaker["identical_denied_threshold"]),
             max_parallel_calls=int(parallel["maximum_calls"]),
+            hard_ceiling_multiplier=int(output_config["hard_ceiling_multiplier"]),
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
-            workspace_root=effective_settings.artifact_root.parent / "workspaces",
             ruleset=ruleset,
             live_events=live_events,
         )
         yield composition
     finally:
+        if composition is not None:
+            try:
+                await composition.sandbox.close()
+            except Exception as exc:
+                logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
         for model_provider in model_providers:
             try:
                 await model_provider.close()

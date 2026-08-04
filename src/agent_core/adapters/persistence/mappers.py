@@ -464,7 +464,7 @@ def model_call_values(call: ModelCallRecord) -> dict[str, Any]:
 
 def artifact_to_domain(row: ArtifactRow) -> ArtifactRef:
     if row.expires_at is None:
-        raise ValueError("trajectory export artifact has no expiry")
+        raise ValueError("artifact has no expiry in the Milestone 6 storage tier")
     return ArtifactRef(
         id=row.id,
         tenant_id=row.tenant_id,
@@ -476,7 +476,7 @@ def artifact_to_domain(row: ArtifactRow) -> ArtifactRef:
         storage_uri=row.storage_uri,
         sha256=row.sha256,
         size_bytes=row.size_bytes,
-        origin="trajectory_export",
+        origin=cast(Any, row.origin),
         trust=TrustLevel(row.trust),
         expires_at=row.expires_at,
         created_at=row.created_at,

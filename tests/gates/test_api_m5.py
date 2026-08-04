@@ -8,6 +8,7 @@ import hashlib
 import itertools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
@@ -95,12 +96,13 @@ async def _composition(
     auth_mode: AuthMode = AuthMode.DEV,
     script: FakeModelScript | None = None,
 ) -> Any:
+    composition_settings = _settings(tmp_path, auth_mode=AuthMode.DEV)
     async with build(
-        settings=_settings(tmp_path, auth_mode=auth_mode),
+        settings=composition_settings,
         sequential_ids=True,
         script=script,
     ) as composition:
-        yield composition
+        yield replace(composition, settings=_settings(tmp_path, auth_mode=auth_mode))
 
 
 @asynccontextmanager

@@ -14,6 +14,7 @@ from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
+    ArtifactRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
@@ -60,6 +61,7 @@ class UnitOfWorkRepositories:
     trajectory: TrajectoryProjectionRepository
     export_consent: ExportConsentRepository
     trajectory_exports: TrajectoryExportRepository
+    artifacts: ArtifactRepository
     maintenance: MaintenanceRepository
     queue: RunQueue | None
 
@@ -94,6 +96,7 @@ class MemoryUnitOfWork:
         self.trajectory = repositories.trajectory
         self.export_consent = repositories.export_consent
         self.trajectory_exports = repositories.trajectory_exports
+        self.artifacts = repositories.artifacts
         self.maintenance = repositories.maintenance
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
@@ -154,6 +157,7 @@ class PostgresUnitOfWork:
         self.usage = repositories.usage
         self.export_consent = repositories.export_consent
         self.trajectory_exports = repositories.trajectory_exports
+        self.artifacts = repositories.artifacts
         self.maintenance = repositories.maintenance
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()

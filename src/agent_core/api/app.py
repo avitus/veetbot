@@ -437,15 +437,20 @@ def create_app(
     ) -> Response:
         content = await services.artifacts.open_content(authenticated, artifact_id)
         artifact = content.artifact
+        private_cache_headers = {
+            "Cache-Control": "private, no-store",
+            "ETag": f'"{artifact.sha256}"',
+        }
         if _matches_etag(if_none_match, artifact.sha256):
-            return Response(status_code=304, headers={"ETag": f'"{artifact.sha256}"'})
+            return Response(status_code=304, headers=private_cache_headers)
+        stream = await content.open()
         return StreamingResponse(
-            content.open(),
+            stream,
             media_type=artifact.media_type,
             headers={
                 "Content-Length": str(artifact.size_bytes),
                 "Content-Disposition": _content_disposition(artifact.name),
-                "ETag": f'"{artifact.sha256}"',
+                **private_cache_headers,
             },
         )
 

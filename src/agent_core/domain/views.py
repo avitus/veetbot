@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Any, Literal
@@ -169,4 +169,4 @@ class ArtifactContent:
     """A reopenable content handle; API code never needs a storage URI."""
 
     artifact: ArtifactView
-    open: Callable[[], AsyncIterator[bytes]]
+    open: Callable[[], Awaitable[AsyncIterator[bytes]]]

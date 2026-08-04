@@ -113,6 +113,7 @@ def tool_context() -> ToolExecutionContext:
         principal=principal(),
         step_number=1,
         attempt_number=1,
+        lease_epoch=0,
         idempotency_key="contract-key",
         deadline_at=NOW,
         timeout_seconds=2,
@@ -121,6 +122,7 @@ def tool_context() -> ToolExecutionContext:
         workspace=None,
         artifacts=object(),
         credentials=object(),
+        bridge_dispatch=None,
         cancellation=NeverCancelled(),
         mark_effect_sent=no_effect,
     )

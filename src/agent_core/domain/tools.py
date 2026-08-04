@@ -102,6 +102,7 @@ class ToolExecutionContext:
     principal: Principal
     step_number: int
     attempt_number: int
+    lease_epoch: int
     idempotency_key: str
     deadline_at: datetime
     timeout_seconds: float
@@ -110,6 +111,7 @@ class ToolExecutionContext:
     workspace: object | None
     artifacts: object
     credentials: object
+    bridge_dispatch: object | None
     # Kept structural here to preserve the domain-to-ports dependency boundary;
     # runtime construction supplies an object satisfying CancellationToken.
     cancellation: object

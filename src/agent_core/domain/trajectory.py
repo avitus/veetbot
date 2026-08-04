@@ -33,7 +33,14 @@ class ArtifactRef(BaseModel):
     storage_uri: str
     sha256: str
     size_bytes: int
-    origin: Literal["trajectory_export"] = "trajectory_export"
+    origin: Literal[
+        "trajectory_export",
+        "sandbox_export",
+        "tool_output",
+        "model_output",
+        "upload",
+        "knowledge_source",
+    ] = "trajectory_export"
     trust: TrustLevel
     expires_at: datetime
     created_at: datetime

@@ -18,3 +18,17 @@ async def test_workspace_factory_returns_a_stable_run_scoped_handle(tmp_path: Pa
     assert await hostile.read("probe.txt") == b"probe"
     assert not (tmp_path.parent / "outside" / str(run_id) / "probe.txt").exists()
     assert not (tmp_path.parent / "outside").exists()
+
+
+async def test_workspace_factory_fences_reclaimed_run_leases(tmp_path: Path) -> None:
+    factory = LocalWorkspaceFactory(tmp_path)
+    run_id = UUID(int=3)
+    first = factory.for_run("tenant-a", run_id, lease_epoch=1)
+    reclaimed = factory.for_run("tenant-a", run_id, lease_epoch=2)
+
+    await first.write("lease.txt", b"first")
+    await reclaimed.write("lease.txt", b"second")
+
+    assert first is not reclaimed
+    assert await first.read("lease.txt") == b"first"
+    assert await reclaimed.read("lease.txt") == b"second"

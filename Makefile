@@ -2,6 +2,7 @@ PYTHON ?= python
 
 .PHONY: install format lint typecheck test check db-up migrate \
 	test-static test-contract test-fast test-integration test-live \
+	test-sandbox sandbox-image \
 	docs docs-serve docs-check citations-fix
 
 install:
@@ -31,7 +32,14 @@ test-contract:
 test-fast: test-static test-contract
 
 test-integration:
-	@uv run pytest -m integration; status=$$?; test $$status -eq 0 -o $$status -eq 5
+	@uv run pytest -m "integration and not sandbox"; \
+	status=$$?; test $$status -eq 0 -o $$status -eq 5
+
+sandbox-image:
+	docker build -f execution/sandbox.Dockerfile -t agent-core-sandbox:dev .
+
+test-sandbox: sandbox-image
+	uv run pytest -m sandbox
 
 test-live:
 	@RUN_LIVE_MODEL_TESTS=1 uv run pytest -m live; \

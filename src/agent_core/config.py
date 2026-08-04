@@ -58,6 +58,8 @@ class Settings:
     auth_principal_id: str = ""
     auth_roles: frozenset[str] = frozenset()
     auth_scopes: frozenset[str] = frozenset()
+    sandbox_image: str = "agent-core-sandbox:dev"
+    sandbox_passthrough: tuple[str, ...] = ()
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -72,6 +74,7 @@ SHIPPED_CONFIGS = (
     "context/plan.yaml",
     "tools/limits.yaml",
     "runtime/limits.yaml",
+    "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
 # The design corpus declares 106 operator-reviewable knobs. Metadata such as
@@ -318,6 +321,46 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "sandbox/limits.yaml":
+        resources = merged["resources"]
+        for name, value in resources.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:resources.{name} must be a positive integer"
+                )
+        artifacts = merged["artifacts"]
+        for name, value in artifacts.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:artifacts.{name} must be a positive integer"
+                )
+        egress = merged["egress"]
+        if egress["mode"] not in {"deny", "allowlist"}:
+            raise ConfigurationError("sandbox/limits.yaml:egress.mode must be deny or allowlist")
+        destinations = egress["destinations"]
+        if not isinstance(destinations, list):
+            raise ConfigurationError("sandbox/limits.yaml:egress.destinations must be a list")
+        from agent_core.execution.egress_core import validate_host_and_ports
+
+        for index, destination in enumerate(destinations):
+            if not isinstance(destination, Mapping):
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:egress.destinations.{index} must be a mapping"
+                )
+            try:
+                host = destination["host"]
+                ports = destination["ports"]
+                if (
+                    not isinstance(host, str)
+                    or not isinstance(ports, list)
+                    or any(not isinstance(port, int) or isinstance(port, bool) for port in ports)
+                ):
+                    raise TypeError
+                validate_host_and_ports(host, frozenset(ports))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:egress.destinations.{index} is invalid"
+                ) from exc
     _validate_interpolation(relative, merged, interpolation)
 
 
@@ -471,6 +514,14 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         if raw_auth_scopes
         else frozenset()
     )
+    sandbox_image = values.get("AGENT_SANDBOX_IMAGE", "agent-core-sandbox:dev").strip()
+    if not sandbox_image:
+        raise ConfigurationError("AGENT_SANDBOX_IMAGE must not be empty")
+    sandbox_passthrough = tuple(
+        name.strip()
+        for name in values.get("AGENT_SANDBOX_PASSTHROUGH", "").split(",")
+        if name.strip()
+    )
     if auth_mode is AuthMode.DEV:
         auth_tenant_id = "local"
         auth_principal_id = "local-user"
@@ -493,6 +544,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         auth_principal_id=auth_principal_id,
         auth_roles=auth_roles,
         auth_scopes=auth_scopes,
+        sandbox_image=sandbox_image,
+        sandbox_passthrough=sandbox_passthrough,
     )
     validate_settings(settings)
     return settings

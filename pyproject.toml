@@ -85,4 +85,5 @@ markers = [
   "static: tests that need no runtime, database, or network",
   "integration: tests that require PostgreSQL or another local service",
   "live: tests that call a real model provider and may incur cost",
+  "sandbox: tests that require a real container or kernel-isolating runtime",
 ]

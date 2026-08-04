@@ -19,6 +19,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
+from agent_core.domain.artifacts import StoredArtifactRef
 from agent_core.domain.canonical import canonical_json
 from agent_core.domain.errors import (
     AuthorizationError,
@@ -60,7 +61,7 @@ from agent_core.domain.views import (
     TextContentBlock,
     TransientStreamFrame,
 )
-from agent_core.ports.artifacts import TrajectoryArtifactStore
+from agent_core.ports.artifacts import ArtifactStore, TrajectoryArtifactStore
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import RunDispatcher
 from agent_core.ports.live_events import LiveEventBroadcaster
@@ -827,29 +828,50 @@ class PublicArtifactService:
         *,
         uow_factory: UnitOfWorkFactory,
         artifacts: TrajectoryArtifactStore,
+        general_artifacts: ArtifactStore,
         clock: Clock,
     ) -> None:
         self._uow_factory = uow_factory
         self._artifacts = artifacts
+        self._general_artifacts = general_artifacts
         self._clock = clock
 
-    async def _get_ref(self, principal: Principal, artifact_id: UUID) -> ArtifactRef:
+    async def _get_ref(self, principal: Principal, artifact_id: UUID) -> tuple[ArtifactRef, bool]:
         async with self._uow_factory() as uow:
-            artifact = await uow.trajectory_exports.get_artifact(artifact_id, principal)
+            try:
+                artifact = await uow.trajectory_exports.get_artifact(artifact_id, principal)
+                is_trajectory = True
+            except NotFoundError:
+                artifact = await uow.artifacts.get(artifact_id, principal)
+                is_trajectory = False
+        # ArtifactRef requires an expiry, and persistence mapping rejects legacy null rows.
         if artifact.expires_at <= self._clock.now():
             raise NotFoundError("artifact not found")
-        return artifact
+        return artifact, is_trajectory
 
     async def get(self, principal: Principal, artifact_id: UUID) -> ArtifactView:
         require_scope(principal, "artifact.read")
-        return _artifact_view(await self._get_ref(principal, artifact_id))
+        artifact, _is_trajectory = await self._get_ref(principal, artifact_id)
+        return _artifact_view(artifact)
 
     async def open_content(self, principal: Principal, artifact_id: UUID) -> ArtifactContent:
         require_scope(principal, "artifact.read")
-        artifact = await self._get_ref(principal, artifact_id)
+        artifact, is_trajectory = await self._get_ref(principal, artifact_id)
 
         async def open_stream() -> AsyncIterator[bytes]:
-            async for chunk in self._artifacts.stream(artifact):
-                yield chunk
+            try:
+                if is_trajectory:
+                    return await self._artifacts.open_verified(artifact)
+                ref = StoredArtifactRef(
+                    artifact_id=artifact.id,
+                    sha256=artifact.sha256,
+                    size_bytes=artifact.size_bytes,
+                    media_type=artifact.media_type,
+                )
+                return await self._general_artifacts.open_verified(
+                    ref, tenant_id=artifact.tenant_id
+                )
+            except FileNotFoundError as exc:
+                raise NotFoundError("artifact not found") from exc
 
         return ArtifactContent(artifact=_artifact_view(artifact), open=open_stream)

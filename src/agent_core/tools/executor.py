@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 from collections.abc import AsyncIterator, Mapping
@@ -16,6 +17,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import ApprovalRequest, ApprovalStatus
+from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
@@ -27,7 +29,13 @@ from agent_core.domain.errors import (
     WorkspaceEscape,
 )
 from agent_core.domain.events import NewEvent
-from agent_core.domain.messages import ContentPart, TextPart, ToolCallItem, ToolResultItem
+from agent_core.domain.messages import (
+    ContentPart,
+    FileReferencePart,
+    TextPart,
+    ToolCallItem,
+    ToolResultItem,
+)
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.policies import (
     ActionKind,
@@ -52,6 +60,8 @@ from agent_core.domain.tools import (
     ToolResult,
 )
 from agent_core.policy.revalidation import revalidation_denial_reason
+from agent_core.ports.artifacts import ArtifactWriterProvider
+from agent_core.ports.credentials import CredentialResolver, UnavailableCredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
 from agent_core.ports.execution import WorkspaceFactory
@@ -186,6 +196,21 @@ def _outcome_item(
     )
 
 
+def _effective_output_trust(result: ToolResult, tool: Tool) -> TrustLevel:
+    trust = result.output_trust or tool.spec.output_trust
+    if tool.spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED:
+        return TrustLevel.EXTERNAL_UNTRUSTED
+    return trust
+
+
+def _writer_origin(tool: Tool) -> ArtifactOrigin:
+    # artifact.export is intentionally an in-process capability over a sandbox
+    # workspace; its persisted object is nevertheless a sandbox export.
+    if tool.spec.name == "artifact.export":
+        return ArtifactOrigin.SANDBOX_EXPORT
+    return ArtifactOrigin.TOOL_OUTPUT
+
+
 async def authorize_tool_invocation(
     repository: ToolInvocationRepository,
     invocation: ToolInvocation,
@@ -217,8 +242,11 @@ class ToolPipeline:
         *,
         policy: PolicyEngine | None = None,
         workspace_factory: WorkspaceFactory | None = None,
+        artifact_writers: ArtifactWriterProvider | None = None,
+        credentials: CredentialResolver | None = None,
         current_principal: Principal | None = None,
         max_parallel_calls: int = 8,
+        hard_ceiling_multiplier: int = 4,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
     ) -> None:
         self._registry = registry
@@ -232,8 +260,13 @@ class ToolPipeline:
             policy = DeterministicPolicyEngine(DEFAULT_RULESET)
         self._policy = policy
         self._workspace_factory = workspace_factory
+        self._artifact_writers = artifact_writers
+        self._credentials = credentials or UnavailableCredentialResolver()
         self._current_principal = current_principal
         self._max_parallel_calls = max_parallel_calls
+        if hard_ceiling_multiplier < 1:
+            raise ValueError("hard ceiling multiplier must be positive")
+        self._hard_ceiling_multiplier = hard_ceiling_multiplier
         self._approval_expiry_seconds = dict(
             approval_expiry_seconds
             or {
@@ -649,9 +682,63 @@ class ToolPipeline:
                         lease=lease,
                     )
 
+        async def bridge_dispatch(
+            name: str, bridge_arguments: dict[str, Any], bridge_call_id: str
+        ) -> dict[str, Any]:
+            bridge_call = ToolCallItem(
+                call_id=bridge_call_id,
+                item_index=0,
+                name=name,
+                arguments=bridge_arguments,
+                raw_arguments=json.dumps(
+                    bridge_arguments, ensure_ascii=False, separators=(",", ":")
+                ),
+            )
+            approval_poll_seconds = 0.2
+            while True:
+                token.raise_if_cancelled()
+                try:
+                    item = await self._dispatch_one(
+                        run=run,
+                        call=bridge_call,
+                        principal=principal,
+                        step=step,
+                        agent=agent,
+                        token=token,
+                        lease=lease,
+                        parallel_group=None,
+                    )
+                    break
+                except ApprovalRequiredError:
+                    await asyncio.sleep(approval_poll_seconds)
+                    approval_poll_seconds = min(2.0, approval_poll_seconds * 2)
+            if not item.is_error:
+                return {
+                    "status": "succeeded",
+                    "result": [part.model_dump(mode="json") for part in item.content],
+                    "retryable": False,
+                }
+            if item.content and isinstance(item.content[0], TextPart):
+                try:
+                    outcome = ToolOutcome.model_validate_json(item.content[0].text)
+                except ValueError:
+                    pass
+                else:
+                    return {
+                        "status": outcome.status.value,
+                        "reason_code": outcome.reason_code,
+                        "retryable": outcome.retryable,
+                    }
+            return {
+                "status": "failed",
+                "reason_code": "bridge.invalid_tool_result",
+                "retryable": False,
+            }
+
         deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
         if run.deadline_at is not None:
             deadline = min(deadline, run.deadline_at)
+        effective_timeout = max(0.0, (deadline - self._clock.now()).total_seconds())
         execution_context = ToolExecutionContext(
             invocation_id=invocation.id,
             call_id=call.call_id,
@@ -661,9 +748,10 @@ class ToolPipeline:
             principal=principal,
             step_number=step.step_number,
             attempt_number=1,
+            lease_epoch=0 if lease is None else lease.lease_epoch,
             idempotency_key=key,
             deadline_at=deadline,
-            timeout_seconds=tool.spec.timeout_seconds,
+            timeout_seconds=effective_timeout,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
@@ -673,43 +761,55 @@ class ToolPipeline:
             workspace=(
                 None
                 if self._workspace_factory is None
-                or tool.spec.side_effect
-                not in {SideEffectClass.WORKSPACE_READ, SideEffectClass.WORKSPACE_WRITE}
-                else self._workspace_factory.for_run(run.tenant_id, run.id)
+                or (
+                    tool.spec.target_kind != "sandbox"
+                    and tool.spec.side_effect
+                    not in {SideEffectClass.WORKSPACE_READ, SideEffectClass.WORKSPACE_WRITE}
+                )
+                else self._workspace_factory.for_run(
+                    run.tenant_id, run.id, 0 if lease is None else lease.lease_epoch
+                )
             ),
-            artifacts=_UnavailableCollaborator(),
-            credentials=_UnavailableCollaborator(),
+            artifacts=(
+                _UnavailableCollaborator()
+                if self._artifact_writers is None
+                else self._artifact_writers.for_run(
+                    tenant_id=run.tenant_id,
+                    principal_id=principal.principal_id,
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    origin=_writer_origin(tool),
+                )
+            ),
+            credentials=(
+                UnavailableCredentialResolver()
+                if tool.spec.target_kind == "sandbox"
+                else self._credentials
+            ),
+            bridge_dispatch=(bridge_dispatch if tool.spec.target_kind == "sandbox" else None),
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
         if self._uow_factory.is_open():
             raise RuntimeError("tool execution cannot begin while a unit of work is open")
         try:
+            if effective_timeout <= 0:
+                raise TimeoutError
             if tool.spec.side_effect is not SideEffectClass.NONE:
                 await mark_effect_sent()
-            async with asyncio.timeout(tool.spec.timeout_seconds):
+            async with asyncio.timeout(effective_timeout):
                 result = await tool.execute(arguments, execution_context)
             if result.ok:
                 validate_output(result.structured, tool.spec.output_schema)
-            if (
-                result.ok
-                and sum(
-                    len(part.text.encode("utf-8"))
-                    for part in result.content
-                    if isinstance(part, TextPart)
+            if result.ok:
+                result = await self._artifactize_large_output(
+                    result=result,
+                    tool=tool,
+                    run=run,
+                    principal=principal,
                 )
-                > tool.spec.maximum_output_bytes
-            ):
-                result = ToolResult(
-                    ok=False,
-                    content=[],
-                    failure=ToolFailure(
-                        kind=ToolFailureKind.OUTPUT_TOO_LARGE,
-                        reason_code="tool.output_invalid",
-                        detail="tool output exceeded its declared byte limit",
-                        retryable=False,
-                    ),
-                )
+            if result.ok:
+                validate_output(result.structured, tool.spec.output_schema)
         except TimeoutError:
             result = ToolResult(
                 ok=False,
@@ -765,6 +865,121 @@ class ToolPipeline:
                 ),
             )
         return await self._finish(run, call, tool, invocation, result, lease)
+
+    async def _artifactize_large_output(
+        self,
+        *,
+        result: ToolResult,
+        tool: Tool,
+        run: Run,
+        principal: Principal,
+    ) -> ToolResult:
+        rendered = json.dumps(
+            [part.model_dump(mode="json") for part in result.content],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(rendered) <= tool.spec.maximum_output_bytes:
+            result.metrics["output_bytes"] = len(rendered)
+            return result
+        if self._artifact_writers is None:
+            return ToolResult(
+                ok=False,
+                content=[],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.OUTPUT_TOO_LARGE,
+                    reason_code="tool.output_invalid",
+                    detail="tool output exceeded its declared byte limit",
+                    retryable=False,
+                ),
+            )
+        hard_ceiling = tool.spec.maximum_output_bytes * self._hard_ceiling_multiplier
+        artifact_bytes = rendered[:hard_ceiling]
+        partial_capture = len(artifact_bytes) < len(rendered)
+        budget = tool.spec.maximum_output_bytes
+        structured = None if result.structured is None else dict(result.structured)
+        if structured is not None:
+            for key in ("stdout", "stderr"):
+                value = structured.get(key)
+                if isinstance(value, str) and len(value.encode("utf-8")) > budget // 2:
+                    structured[key] = (
+                        value.encode("utf-8")[: budget // 4].decode("utf-8", errors="ignore")
+                        + "\n[TRUNCATED]"
+                    )
+        # Validate the bounded structured candidate before creating a durable
+        # artifact, so a schema failure cannot leave an unreferenced object.
+        validate_output(structured, tool.spec.output_schema)
+
+        async def stream() -> AsyncIterator[bytes]:
+            yield artifact_bytes
+
+        trust = _effective_output_trust(result, tool)
+        writer = self._artifact_writers.for_run(
+            tenant_id=run.tenant_id,
+            principal_id=principal.principal_id,
+            session_id=run.session_id,
+            run_id=run.id,
+            origin=ArtifactOrigin.TOOL_OUTPUT,
+        )
+        filename = f"{tool.spec.name.replace('.', '-')}-output"
+        filename += ".partial.json" if partial_capture else ".json"
+        media_type = "application/octet-stream" if partial_capture else "application/json"
+        ref = await writer.create(stream(), filename, media_type, trust)
+        capture_label = (
+            f"captured first {len(artifact_bytes):,} of {len(rendered):,} bytes"
+            if partial_capture
+            else "full output"
+        )
+        provisional_marker = (
+            f"\n[... {len(rendered):,} bytes elided; {capture_label}: "
+            f"artifact:{ref.artifact_id} ...]\n"
+        ).encode()
+        excerpt_budget = max(0, budget - len(provisional_marker))
+        head_bytes = int(excerpt_budget * 0.75)
+        tail_bytes = excerpt_budget - head_bytes
+        elided = max(0, len(rendered) - head_bytes - tail_bytes)
+        marker = (
+            f"\n[... {elided:,} bytes elided; {capture_label}: artifact:{ref.artifact_id} ...]\n"
+        ).encode()
+        if len(marker) > budget:
+            excerpt = marker[:budget]
+        else:
+            remaining = budget - len(marker)
+            head_bytes = min(head_bytes, remaining)
+            tail_bytes = min(tail_bytes, remaining - head_bytes)
+            excerpt = (
+                rendered[:head_bytes] + marker + (rendered[-tail_bytes:] if tail_bytes else b"")
+            )
+        return result.model_copy(
+            update={
+                "content": [
+                    TextPart(text=excerpt.decode("utf-8", errors="ignore")),
+                    FileReferencePart(
+                        artifact_id=ref.artifact_id,
+                        media_type=ref.media_type,
+                        filename=filename,
+                    ),
+                ],
+                "structured": structured,
+                "artifacts": [
+                    *result.artifacts,
+                    {
+                        "artifact_id": str(ref.artifact_id),
+                        "sha256": ref.sha256,
+                        "size_bytes": ref.size_bytes,
+                        "media_type": ref.media_type,
+                        "role": "truncated_output",
+                    },
+                ],
+                "metrics": {
+                    "output_bytes": len(rendered),
+                    "captured_bytes": len(artifact_bytes),
+                    "discarded_bytes": len(rendered) - len(artifact_bytes),
+                    "truncated": 1,
+                },
+            },
+            deep=True,
+        )
 
     def _proposed_action(
         self,
@@ -1083,9 +1298,7 @@ class ToolPipeline:
             status = ToolInvocationStatus.FAILED
             event_type = "tool.call.failed"
         if result.ok:
-            trust = result.output_trust or tool.spec.output_trust
-            if tool.spec.output_trust is TrustLevel.EXTERNAL_UNTRUSTED:
-                trust = TrustLevel.EXTERNAL_UNTRUSTED
+            trust = _effective_output_trust(result, tool)
             result_item = ToolResultItem(call_id=call.call_id, content=result.content, trust=trust)
         else:
             result_item = _outcome_item(
@@ -1094,12 +1307,36 @@ class ToolPipeline:
                 tool.spec.output_trust,
                 result.failure.external_text if result.failure is not None else None,
             )
+        artifact_id: UUID | None = None
+        artifact_record = next(
+            (
+                candidate
+                for candidate in reversed(result.artifacts)
+                if isinstance(candidate, dict) and candidate.get("role") == "truncated_output"
+            ),
+            next(
+                (candidate for candidate in result.artifacts if isinstance(candidate, dict)),
+                None,
+            ),
+        )
+        if artifact_record is not None:
+            raw_artifact_id = artifact_record.get("artifact_id")
+            if isinstance(raw_artifact_id, str):
+                try:
+                    artifact_id = UUID(raw_artifact_id)
+                except ValueError:
+                    logger.warning(
+                        "tool_artifact_id_malformed", extra={"tool_name": tool.spec.name}
+                    )
         finished = invocation.model_copy(
             update={
                 "status": status,
                 "outcome": outcome,
                 "result_item": result_item,
                 "structured_result": result.structured,
+                "output_bytes": result.metrics.get("output_bytes"),
+                "truncated": bool(result.metrics.get("truncated", 0)),
+                "artifact_id": artifact_id,
                 "updated_at": self._clock.now(),
             },
             deep=True,
