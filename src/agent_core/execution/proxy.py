@@ -9,10 +9,13 @@ import socket
 import sys
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from agent_core.domain.execution import EgressPolicy
 from agent_core.execution.egress_core import evaluate_core, validate_host_and_ports
+
+if TYPE_CHECKING:
+    from agent_core.domain.execution import EgressPolicy
 
 _MAX_HEADER_BYTES = 64 * 1024
 
