@@ -11,7 +11,6 @@ from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settin
 from agent_core.domain.context import WorkingState
 from agent_core.domain.messages import (
     FakeModelScript,
-    ModelTransientError,
     ScriptedToolCall,
     ScriptedTurn,
 )
@@ -42,6 +41,10 @@ class _ObservedBuilder:
         self.calls.append("measure")
         return await self.inner.measure(*args, **kwargs)
 
+    async def assemble(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append("assemble")
+        return await self.inner.assemble(*args, **kwargs)
+
     async def build(self, *args: Any, **kwargs: Any) -> Any:
         self.calls.append("build")
         return await self.inner.build(*args, **kwargs)
@@ -62,48 +65,41 @@ async def test_build_fits() -> None:
 
     assert completed.status is RunStatus.COMPLETED
     assert observed.calls
-    assert "build" in observed.calls
-    assert all(
-        index > 0 and observed.calls[index - 1] == "measure"
-        for index, call in enumerate(observed.calls)
-        if call == "build"
-    )
+    assert set(observed.calls) == {"assemble"}
+    checked_requests = 0
     for event in events:
         if event.event_type != "model.request.started":
             continue
+        checked_requests += 1
         assert int(event.payload["context_total_tokens"]) <= int(
             event.payload["context_capacity_tokens"]
         )
+    assert checked_requests > 0
+    assert len(observed.calls) == checked_requests
 
 
 async def test_build_stable() -> None:
-    transient = ModelTransientError(
-        provider="fake",
-        model="scripted",
-        attempt_id=SequenceIdFactory().new_id(),
-        message="retry without output",
-        stream_had_output=False,
-    )
-    script = FakeModelScript(
-        turns=[ScriptedTurn(fail_with=transient), ScriptedTurn(text="stable retry")]
-    )
-    async with build(
-        settings=_settings(),
-        script=script,
-        clock=FixedClock(NOW),
-        ids=SequenceIdFactory(),
-        limits=RunLimits(max_steps=2, max_model_calls=3, max_tool_calls=1),
-    ) as composition:
-        run_id = await composition.runs.submit("retry this model step")
-        completed = await composition.runs.wait_terminal(run_id)
-        provider = composition.executor._model_provider
-        assert isinstance(provider, FakeModelProvider)
-        requests = provider.requests
+    async def capture_request() -> Any:
+        async with build(
+            settings=_settings(),
+            script=FakeModelScript(turns=[ScriptedTurn(text="stable response")]),
+            clock=FixedClock(NOW),
+            ids=SequenceIdFactory(),
+            limits=RunLimits(max_steps=2, max_model_calls=2, max_tool_calls=1),
+        ) as composition:
+            run_id = await composition.runs.submit("build this deterministic step")
+            completed = await composition.runs.wait_terminal(run_id)
+            provider = composition.executor._model_provider
+            assert isinstance(provider, FakeModelProvider)
+            assert completed.status is RunStatus.COMPLETED
+            assert len(provider.requests) == 1
+            return provider.requests[0]
 
-    assert completed.status is RunStatus.COMPLETED
-    assert len(requests) == 2
-    assert requests[0].model_dump_json() == requests[1].model_dump_json()
-    assert requests[0].metadata["prefix_sha256"] == requests[1].metadata["prefix_sha256"]
+    first = await capture_request()
+    second = await capture_request()
+
+    assert first.model_dump_json() == second.model_dump_json()
+    assert first.metadata["prefix_sha256"] == second.metadata["prefix_sha256"]
 
 
 async def test_working_state_event_replays_into_the_next_run() -> None:

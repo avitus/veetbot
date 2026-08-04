@@ -60,6 +60,10 @@ async def test_event_repository_reads_the_latest_typed_event_before_a_sequence()
 
     assert latest is not None
     assert latest.sequence == 3
+    assert await repository.existing_sequences(SESSION_ID, {1, 3, 99}, principal()) == {
+        1,
+        3,
+    }
     assert (
         await repository.latest_before(
             SESSION_ID,

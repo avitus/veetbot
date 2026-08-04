@@ -43,7 +43,7 @@ acceptance criteria.
 ## Completion rule
 
 Milestone 7 is ready for review: every canonical acceptance criterion and all 123
-cumulative gates pass locally. Completion still requires hosted CircleCI to pass
-and CodeRabbit to have no unaddressed actionable review comments on the milestone
-pull request. Proposed ADR-0043 records the implementation decisions that require
-owner review before they become accepted architecture.
+cumulative gates pass locally. Completion still requires the hosted CircleCI
+checks to pass and CodeRabbit to have no unaddressed actionable review comments
+on the milestone pull request. Proposed ADR-0043 records the implementation
+decisions that require owner review before they become accepted architecture.

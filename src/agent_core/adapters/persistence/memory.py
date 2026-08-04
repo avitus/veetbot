@@ -341,6 +341,18 @@ class InMemoryEventRepository:
             ]
             return None if not matching else matching[-1].model_copy(deep=True)
 
+    async def existing_sequences(
+        self,
+        session_id: UUID,
+        sequences: set[int],
+        principal: Principal,
+    ) -> set[int]:
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            return {
+                event.sequence for event in self._events[session_id] if event.sequence in sequences
+            }
+
     async def get_by_derivation(
         self, derivation_key: str, principal: Principal
     ) -> EventEnvelope | None:

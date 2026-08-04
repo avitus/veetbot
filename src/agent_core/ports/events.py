@@ -28,6 +28,13 @@ class EventRepository(Protocol):
         principal: Principal,
     ) -> EventEnvelope | None: ...
 
+    async def existing_sequences(
+        self,
+        session_id: UUID,
+        sequences: set[int],
+        principal: Principal,
+    ) -> set[int]: ...
+
     async def get_by_derivation(
         self, derivation_key: str, principal: Principal
     ) -> EventEnvelope | None: ...

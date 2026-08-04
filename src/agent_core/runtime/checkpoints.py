@@ -29,7 +29,7 @@ class DurableCheckpointSeeder:
         state = WorkingState()
         event = await uow.events.latest_before(
             run.session_id,
-            through,
+            through + 1,
             "context.working_state.updated",
             principal,
         )

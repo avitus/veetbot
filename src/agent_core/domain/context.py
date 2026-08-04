@@ -9,8 +9,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
 
-from agent_core.domain.messages import CacheBreakpoint
+from agent_core.domain.messages import CacheBreakpoint, ModelRequest
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.provenance import ElidedSpan
 from agent_core.domain.tools import ToolSpec
 
 
@@ -125,6 +126,13 @@ class ContextPressure(BaseModel):
     yield_steps: tuple[str, ...] = ()
 
 
+class ContextAssembly(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    request: ModelRequest
+    pressure: ContextPressure
+
+
 class TaskStatus(StrEnum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
@@ -161,16 +169,6 @@ class WorkingState(BaseModel):
     established_facts: list[Fact] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     next_action: str | None = Field(default=None, max_length=4096)
-
-
-class ElidedSpan(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    item_id: str
-    trust_level: TrustLevel
-    byte_length: int = Field(ge=0)
-    artifact_ref: str | None = None
-    event_id: int = Field(gt=0)
 
 
 class CompactionResult(BaseModel):

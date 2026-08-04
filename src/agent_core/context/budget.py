@@ -53,9 +53,17 @@ class ContextBudgetAllocator:
         history_floor = self._integer(class_config("history"), "floor_tokens")
         raw_tool_ratio = class_config("tool_results").get("max_body_ratio")
         raw_margin = estimator.get("safety_margin_ratio")
-        if not isinstance(raw_tool_ratio, (int, float)) or not 0 <= raw_tool_ratio < 1:
+        if (
+            not isinstance(raw_tool_ratio, (int, float))
+            or isinstance(raw_tool_ratio, bool)
+            or not 0 <= raw_tool_ratio < 1
+        ):
             raise ValueError("tool-result body ratio must be in [0, 1)")
-        if not isinstance(raw_margin, (int, float)) or not 0 <= raw_margin < 1:
+        if (
+            not isinstance(raw_margin, (int, float))
+            or isinstance(raw_margin, bool)
+            or not 0 <= raw_margin < 1
+        ):
             raise ValueError("context safety margin must be in [0, 1)")
 
         body_capacity = total - reserve - prefix_tokens

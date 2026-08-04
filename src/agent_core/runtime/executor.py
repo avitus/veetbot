@@ -9,7 +9,6 @@ from typing import Any
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
@@ -62,6 +61,7 @@ from agent_core.runtime.loop import (
     ModelEventCallback,
     RunContext,
     ToolDispatch,
+    _record_open_question,
     checkpoint,
     run_loop,
 )
@@ -407,13 +407,11 @@ class RunExecutor:
                     ),
                     "The run is waiting for user input.",
                 )
-                raw_state = context.checkpoint.working_state.get("context")
-                state = (
-                    WorkingState() if raw_state is None else WorkingState.model_validate(raw_state)
+                state = _record_open_question(
+                    context.checkpoint,
+                    question,
+                    self._add_open_question,
                 )
-                state = self._add_open_question(state, question)
-                context.checkpoint.working_state["context"] = state.model_dump(mode="json")
-                context.checkpoint.working_state["outstanding_question_text"] = question
                 context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
                 async with context.uow_factory() as uow:
                     await uow.events.append(

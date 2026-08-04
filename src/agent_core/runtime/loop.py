@@ -129,19 +129,15 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         context.checkpoint.budget_state["context_seed_event_sequence"] = (
             context.run.seed_event_sequence
         )
-        pressure = await context.context_builder.measure(
+        assembled = await context.context_builder.assemble(
             context.run,
             context.checkpoint,
             context.agent,
             context.principal,
         )
+        pressure = assembled.pressure
         if pressure.fits:
-            return await context.context_builder.build(
-                context.run,
-                context.checkpoint,
-                context.agent,
-                context.principal,
-            )
+            return assembled.request
         await _append_event(
             context,
             "context.budget.pressure",
@@ -189,7 +185,7 @@ async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
         await checkpoint(context, "compaction")
 
 
-async def checkpoint(context: CheckpointContext, trigger: str) -> None:
+async def checkpoint(context: RunContext, trigger: str) -> None:
     """Advance the materialized M1 checkpoint and record the checkpoint event."""
 
     previous = context.checkpoint.model_copy(deep=True)
@@ -198,6 +194,8 @@ async def checkpoint(context: CheckpointContext, trigger: str) -> None:
         "model_call_count": context.run.model_call_count,
         "tool_call_count": context.run.tool_call_count,
         "usage": context.run.usage.model_dump(mode="json"),
+        "context_model_id": (f"{context.resolved_model.provider}:{context.resolved_model.model}"),
+        "context_seed_event_sequence": context.run.seed_event_sequence,
     }
     context.checkpoint.version += 1
     context.checkpoint.status = context.run.status

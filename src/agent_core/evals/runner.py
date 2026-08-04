@@ -134,6 +134,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         roles={"user"},
         scopes=set(PLATFORM_SCOPES),
     )
+    event_reader_principal = principal.model_copy(deep=True)
     bootstrap: Any = importlib.import_module("agent_core.bootstrap")
     async with bootstrap.build(
         settings=_settings(),
@@ -208,7 +209,11 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         if case.session is not None:
             assert session_id is not None
             async with composition.uow_factory() as uow:
-                all_events = await uow.events.list_after(session_id, 0, principal)
+                all_events = await uow.events.list_after(
+                    session_id,
+                    0,
+                    event_reader_principal,
+                )
         run = completed_runs[-1]
     result = EvalResult(
         case=case,

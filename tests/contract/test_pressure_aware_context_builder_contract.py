@@ -63,6 +63,7 @@ async def test_pressure_aware_builder_measures_before_building() -> None:
                 "max_open_questions": 20,
                 "block_ceiling_tokens": 1000,
             },
+            ConservativeTokenEstimator(),
         ),
     )
     checkpoint = RunCheckpoint(
@@ -74,8 +75,9 @@ async def test_pressure_aware_builder_measures_before_building() -> None:
     )
 
     active_run = run(status=RunStatus.RUNNING)
-    pressure = await builder.measure(active_run, checkpoint, configured_agent, principal())
-    request = await builder.build(active_run, checkpoint, configured_agent, principal())
+    assembled = await builder.assemble(active_run, checkpoint, configured_agent, principal())
+    pressure = assembled.pressure
+    request = assembled.request
 
     assert pressure.fits is True
     assert request.metadata["context_total_tokens"] == str(pressure.total_tokens)

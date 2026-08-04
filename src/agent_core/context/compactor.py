@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import assert_never
 
 from agent_core.context.history import select_history
-from agent_core.domain.context import CompactionResult, ContextBudget, ElidedSpan
+from agent_core.domain.context import CompactionResult, ContextBudget
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -19,6 +19,7 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
+from agent_core.domain.provenance import ElidedSpan
 from agent_core.domain.runs import RunCheckpoint
 from agent_core.ports.context import TokenEstimator
 
@@ -72,10 +73,15 @@ class StructuredCompactor:
         items = checkpoint.conversation
         if not items:
             raise ContextOverflow("context pressure has no history to compact")
-        model_id = str(checkpoint.budget_state.get("context_model_id", "context"))
+        raw_model_id = checkpoint.budget_state.get("context_model_id")
+        if not isinstance(raw_model_id, str) or not raw_model_id:
+            raise ContextOverflow("checkpoint has no context model identifier")
+        model_id = raw_model_id
         tokens_before = self._estimator.estimate(items, model_id)
         raw_seed = checkpoint.budget_state.get("context_seed_event_sequence")
-        seed_sequence = raw_seed if isinstance(raw_seed, int) and raw_seed > 0 else None
+        if not isinstance(raw_seed, int) or isinstance(raw_seed, bool) or raw_seed <= 0:
+            raise ContextOverflow("checkpoint has no context seed event sequence")
+        seed_sequence = raw_seed
 
         def is_boundary(item: ConversationItem) -> bool:
             sequence = _sequence(item)
@@ -103,7 +109,7 @@ class StructuredCompactor:
         assert all(_sequence(item) is not None for item in compacted)
 
         source_ids = set(checkpoint.summary_source_event_ids)
-        elided = [ElidedSpan.model_validate(item) for item in checkpoint.summary_elided]
+        elided = [item.model_copy(deep=True) for item in checkpoint.summary_elided]
         lines: list[str] = []
         if checkpoint.compacted_summary:
             lines.append(checkpoint.compacted_summary)
@@ -159,7 +165,7 @@ class StructuredCompactor:
                 "conversation": [item.model_copy(deep=True) for item in items[cut:]],
                 "compacted_summary": summary,
                 "summary_source_event_ids": list(result.source_event_ids),
-                "summary_elided": [item.model_dump(mode="json") for item in result.elided],
+                "summary_elided": [item.model_copy(deep=True) for item in result.elided],
                 "replaced_through_sequence": result.replaced_through_sequence,
                 "summary_depth": result.depth,
                 "compactor_version": result.compactor_version,

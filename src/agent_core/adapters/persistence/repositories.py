@@ -512,6 +512,36 @@ class PostgresEventRepository:
             return None
         return event_to_domain(row, self._upcasters)
 
+    async def existing_sequences(
+        self,
+        session_id: UUID,
+        sequences: set[int],
+        principal: Principal,
+    ) -> set[int]:
+        rows = (
+            await self._session.scalars(
+                select(EventRow.sequence)
+                .join(SessionRow, SessionRow.id == EventRow.session_id)
+                .where(
+                    EventRow.session_id == session_id,
+                    EventRow.sequence.in_(sequences),
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+            )
+        ).all()
+        if rows or sequences:
+            allowed = await self._session.scalar(
+                select(SessionRow.id).where(
+                    SessionRow.id == session_id,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+            )
+            if allowed is None:
+                raise NotFoundError("session not found")
+        return set(rows)
+
     async def get_by_derivation(
         self, derivation_key: str, principal: Principal
     ) -> EventEnvelope | None:

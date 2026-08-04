@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt
 
+from agent_core.context.rendering import envelope_items, working_state_items
 from agent_core.domain.context import Fact, TaskState, TaskStatus, WorkingState
 from agent_core.domain.policies import TrustLevel
+from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 
 STRUCTURED_STATE_KEY = "context"
@@ -55,9 +56,15 @@ class WorkingStateLimitError(ValueError):
 
 
 class WorkingStateManager:
-    def __init__(self, clock: Clock, config: Mapping[str, object]) -> None:
+    def __init__(
+        self,
+        clock: Clock,
+        config: Mapping[str, object],
+        estimator: TokenEstimator,
+    ) -> None:
         self._clock = clock
         self._limits = WorkingStateLimits.model_validate(config)
+        self._estimator = estimator
 
     @staticmethod
     def load(container: Mapping[str, Any]) -> WorkingState:
@@ -83,8 +90,11 @@ class WorkingStateManager:
         )
 
     def _ensure_block_ceiling(self, state: WorkingState) -> WorkingState:
-        rendered = json.dumps(state.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
-        if (len(rendered.encode("utf-8")) + 2) // 3 > self._limits.block_ceiling_tokens:
+        tokens = self._estimator.estimate(
+            envelope_items(working_state_items(state)),
+            "working-state",
+        )
+        if tokens > self._limits.block_ceiling_tokens:
             raise WorkingStateLimitError("working-state token ceiling reached")
         return state
 

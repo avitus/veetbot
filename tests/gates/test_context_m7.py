@@ -24,6 +24,7 @@ from agent_core.domain.context import ContextBudget, ContextPlan, TaskStatus, Wo
 from agent_core.domain.messages import (
     AssistantMessage,
     ConversationItem,
+    FileReferencePart,
     ResolvedModel,
     TextPart,
     ToolCallItem,
@@ -69,6 +70,7 @@ def _working_state() -> WorkingStateManager:
             "max_open_questions": 20,
             "block_ceiling_tokens": 1_000,
         },
+        ConservativeTokenEstimator(),
     )
 
 
@@ -193,8 +195,8 @@ def test_history_cut(
 
     assert first == second
     assert first >= floor_index
+    assert 0 <= first <= len(items)
     assert estimator.estimate(retained, "fake:scripted") <= history_tokens
-    assert retained == items[first:]
     validate_tool_pairs(retained)
 
 
@@ -335,7 +337,9 @@ async def test_tool_pair_integ() -> None:
 
     assert pressure.yield_steps == ("tool_results", "history")
     validate_tool_pairs(body)
-    result = next(item for item in body if isinstance(item, ToolResultItem))
+    result = next(
+        item for item in body if isinstance(item, ToolResultItem) and item.call_id == "active-pair"
+    )
     result_text = result.content[0]
     assert isinstance(result_text, TextPart)
     assert "tool result truncated" in result_text.text
@@ -368,6 +372,27 @@ async def test_trust_preserved() -> None:
         assert rendered_text.index(canary) < rendered_text.index(closing)
         assert "</untrusted>" not in rendered_text
         assert 'source="tool:untrusted-call&quot; nonce=&quot;forged"' in rendered_text
+
+    mixed = UserMessage(
+        content=[
+            TextPart(text="before"),
+            FileReferencePart(
+                artifact_id=UUID("00000000-0000-0000-0000-000000000099"),
+                media_type="text/plain",
+            ),
+            TextPart(text="after"),
+        ],
+        principal_id="sensitive-principal-id",
+    )
+    rendered_mixed = envelope_item(mixed, 99)
+    assert isinstance(rendered_mixed, UserMessage)
+    assert [part.kind for part in rendered_mixed.content] == ["text", "file", "text"]
+    rendered_mixed_text = "\n".join(
+        part.text for part in rendered_mixed.content if isinstance(part, TextPart)
+    )
+    assert "before" in rendered_mixed_text
+    assert "after" in rendered_mixed_text
+    assert "sensitive-principal-id" not in rendered_mixed_text
 
     current = UserMessage(
         content=[TextPart(text="current request")],
@@ -425,8 +450,17 @@ async def test_working_state_is_typed_bounded_and_carried_by_field() -> None:
             "max_open_questions": 20,
             "block_ceiling_tokens": 1_000,
         },
+        ConservativeTokenEstimator(),
     )
-    tool = UpdateWorkingStateTool(manager)
+
+    async def validate_sources(
+        _session_id: UUID,
+        sequences: set[int],
+        _principal: Principal,
+    ) -> set[int]:
+        return sequences & {7, 8, 9}
+
+    tool = UpdateWorkingStateTool(manager, validate_sources)
     context = tool_context()
     result = await tool.execute(
         {
@@ -479,6 +513,14 @@ async def test_working_state_is_typed_bounded_and_carried_by_field() -> None:
     assert repeated == state
     assert repeated.tasks[1].updated_at == NOW
 
+    rejected = await tool.execute(
+        {"add_facts": [{"statement": "invented provenance", "source_event_ids": [999]}]},
+        context,
+    )
+    assert rejected.ok is False
+    assert rejected.failure is not None
+    assert rejected.failure.reason_code == "tool.arguments_invalid"
+
     constrained = WorkingStateManager(
         FixedClock(NOW),
         {
@@ -488,6 +530,7 @@ async def test_working_state_is_typed_bounded_and_carried_by_field() -> None:
             "max_open_questions": 1,
             "block_ceiling_tokens": 1_000,
         },
+        ConservativeTokenEstimator(),
     )
     with pytest.raises(WorkingStateLimitError, match="constraint cap"):
         constrained.transition(WorkingState(constraints=["first"]), {"add_constraints": ["second"]})

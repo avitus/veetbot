@@ -9,6 +9,7 @@ from uuid import UUID
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import (
     CompactionResult,
+    ContextAssembly,
     ContextBudget,
     ContextPlan,
     ContextPressure,
@@ -44,6 +45,8 @@ class ContextPlanner(Protocol):
 
 
 class TokenEstimator(Protocol):
+    """A stable estimator whose contiguous-suffix estimates are monotonic."""
+
     def estimate(self, items: Sequence[ConversationItem], model_id: str) -> int: ...
 
     def estimate_tools(self, tools: Sequence[ToolSpec], model_id: str) -> int: ...
@@ -61,6 +64,14 @@ class Compactor(Protocol):
 
 
 class PressureAwareContextBuilder(ContextBuilder, Protocol):
+    async def assemble(
+        self,
+        run: Run,
+        checkpoint: RunCheckpoint,
+        agent: AgentSpec,
+        principal: Principal,
+    ) -> ContextAssembly: ...
+
     async def measure(
         self,
         run: Run,

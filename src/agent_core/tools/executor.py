@@ -70,6 +70,7 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.policies import PolicyEngine
 from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
+from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
 from agent_core.tools.messages import message_for
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
@@ -1290,7 +1291,7 @@ class ToolPipeline:
         tool_name: str,
         structured: dict[str, Any] | None,
     ) -> None:
-        if tool_name != "context.update_working_state" or structured is None:
+        if tool_name != WORKING_STATE_TOOL_NAME or structured is None:
             return
         if structured.get("updated") is not True:
             return
@@ -1396,7 +1397,7 @@ class ToolPipeline:
                 lease,
             )
             if (
-                tool.spec.name == "context.update_working_state"
+                tool.spec.name == WORKING_STATE_TOOL_NAME
                 and result.ok
                 and result.structured is not None
                 and result.structured.get("updated") is True
@@ -1404,7 +1405,7 @@ class ToolPipeline:
                 structured = result.structured
                 state = structured.get("working_state")
                 if not isinstance(state, dict):
-                    raise RuntimeError("working-state control result has no state mapping")
+                    raise ConflictError("working-state control result has no state mapping")
                 await self._event_in(
                     uow,
                     run,

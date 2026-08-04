@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 from html import escape
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.domain.agents import AgentSpec
+from agent_core.domain.context import WorkingState
 from agent_core.domain.messages import (
     AssistantMessage,
     ContentPart,
@@ -56,20 +58,48 @@ def _escaped(text: str) -> str:
     return text.replace("<untrusted", "&lt;untrusted").replace("</untrusted", "&lt;/untrusted")
 
 
-def _text_content(parts: Sequence[ContentPart]) -> tuple[str, list[ContentPart]]:
-    text = "\n".join(part.text for part in parts if isinstance(part, TextPart))
-    non_text: list[ContentPart] = [
-        part.model_copy(deep=True) for part in parts if not isinstance(part, TextPart)
-    ]
-    return text, non_text
-
-
 def _source(item: ConversationItem) -> str:
     if isinstance(item, ToolResultItem):
         return f"tool:{item.call_id}"
     if isinstance(item, UserMessage):
-        return f"principal:{item.principal_id or 'unknown'}"
+        return "principal"
     return item.kind
+
+
+def working_state_items(state: WorkingState) -> list[ConversationItem]:
+    """Render typed state into the same attributed items used by the builder."""
+
+    if state == WorkingState():
+        return []
+    stable = state.model_dump(mode="json", exclude={"established_facts"})
+    items: list[ConversationItem] = [
+        UserMessage(
+            content=[
+                TextPart(
+                    text=(
+                        "Structured working state (typed data): "
+                        + json.dumps(stable, ensure_ascii=False, sort_keys=True)
+                    )
+                )
+            ],
+            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+        )
+    ]
+    for fact in state.established_facts:
+        items.append(
+            UserMessage(
+                content=[
+                    TextPart(
+                        text=(
+                            f"Established claim from events {fact.source_event_ids}: "
+                            f"{fact.statement}"
+                        )
+                    )
+                ],
+                trust=fact.trust_level,
+            )
+        )
+    return items
 
 
 def envelope_item(item: ConversationItem, index: int) -> ConversationItem:
@@ -81,14 +111,22 @@ def envelope_item(item: ConversationItem, index: int) -> ConversationItem:
     if not isinstance(item, (UserMessage, AssistantMessage, ToolResultItem)):
         # Provider-native tool calls and opaque reasoning must retain their wire shape.
         return item.model_copy(deep=True)
-    text, non_text = _text_content(item.content)
     canonical = canonical_json_bytes(item.model_dump(mode="json"))
-    nonce = hashlib.sha256(str(index).encode("ascii") + b":" + canonical).hexdigest()[:12]
     source = escape(_source(item), quote=True)
-    opening = f'<untrusted trust="{trust.value}" source="{source}" nonce="{nonce}">'
-    rendered = f"{opening}\n{_escaped(text)}\n</untrusted:{nonce}>"
+    rendered_content: list[ContentPart] = []
+    for part_index, part in enumerate(item.content):
+        if not isinstance(part, TextPart):
+            rendered_content.append(part.model_copy(deep=True))
+            continue
+        nonce = hashlib.sha256(f"{index}:{part_index}:".encode("ascii") + canonical).hexdigest()[
+            :12
+        ]
+        opening = f'<untrusted trust="{trust.value}" source="{source}" nonce="{nonce}">'
+        rendered_content.append(
+            TextPart(text=f"{opening}\n{_escaped(part.text)}\n</untrusted:{nonce}>")
+        )
     return item.model_copy(
-        update={"content": [TextPart(text=rendered), *non_text]},
+        update={"content": rendered_content},
         deep=True,
     )
 

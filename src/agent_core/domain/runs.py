@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, PositiveInt, model_validator
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
+from agent_core.domain.provenance import ElidedSpan
 
 
 class RunStatus(StrEnum):
@@ -112,8 +113,8 @@ class RunCheckpoint(BaseModel):
     working_state: dict[str, Any] = Field(default_factory=dict)
     compacted_summary: str | None = None
     summary_source_event_ids: list[PositiveInt] = Field(default_factory=list)
-    summary_elided: list[dict[str, Any]] = Field(default_factory=list)
-    replaced_through_sequence: int = 0
+    summary_elided: list[ElidedSpan] = Field(default_factory=list)
+    replaced_through_sequence: int = Field(default=0, ge=0)
     summary_depth: int = Field(default=0, ge=0, le=2)
     compactor_version: str | None = None
     budget_state: dict[str, Any] = Field(default_factory=dict)

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
-from dataclasses import dataclass
-from typing import Any
 
 from agent_core.context.estimator import canonical_json_bytes
 from agent_core.context.history import select_history, validate_tool_pairs
@@ -13,10 +10,11 @@ from agent_core.context.rendering import (
     build_prefix,
     envelope_items,
     prefix_bytes,
+    working_state_items,
 )
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.context import ContextPlan, ContextPressure, WorkingState
+from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure
 from agent_core.domain.errors import ContextOverflow
 from agent_core.domain.messages import (
     CacheBreakpoint,
@@ -161,12 +159,6 @@ class MinimalContextBuilder:
         return build_prefix(agent, tools)
 
 
-@dataclass(frozen=True, slots=True)
-class _Assembly:
-    request: ModelRequest
-    pressure: ContextPressure
-
-
 class BudgetedContextBuilder:
     """Milestone 7 context engine with deterministic pressure measurement."""
 
@@ -189,7 +181,16 @@ class BudgetedContextBuilder:
         agent: AgentSpec,
         principal: Principal,
     ) -> ContextPressure:
-        return (await self._assemble(run, checkpoint, agent, principal)).pressure
+        return (await self.assemble(run, checkpoint, agent, principal)).pressure
+
+    async def assemble(
+        self,
+        run: Run,
+        checkpoint: RunCheckpoint,
+        agent: AgentSpec,
+        principal: Principal,
+    ) -> ContextAssembly:
+        return await self._assemble(run, checkpoint, agent, principal)
 
     async def build(
         self,
@@ -198,7 +199,7 @@ class BudgetedContextBuilder:
         agent: AgentSpec,
         principal: Principal,
     ) -> ModelRequest:
-        assembled = await self._assemble(run, checkpoint, agent, principal)
+        assembled = await self.assemble(run, checkpoint, agent, principal)
         if not assembled.pressure.fits:
             raise ContextOverflow(assembled.pressure.reason)
         return assembled.request
@@ -209,7 +210,7 @@ class BudgetedContextBuilder:
         checkpoint: RunCheckpoint,
         agent: AgentSpec,
         principal: Principal,
-    ) -> _Assembly:
+    ) -> ContextAssembly:
         plan = await self._planner.current(run.session_id)
         if plan is None:
             raise ContextOverflow("the session has no durable context plan")
@@ -241,7 +242,7 @@ class BudgetedContextBuilder:
                     principal_id=None,
                 )
             )
-        working_items = self._working_items(checkpoint.working_state)
+        working_items = working_state_items(self._working_state.load(checkpoint.working_state))
         working_tokens = self._estimator.estimate(envelope_items(working_items), plan.model_id)
         working_state_over_cap = working_tokens > plan.budget.working_state_tokens
         runtime_item = UserMessage(
@@ -362,7 +363,7 @@ class BudgetedContextBuilder:
                 breakpoints=[item.model_copy(deep=True) for item in plan.cache_breakpoints]
             ),
         )
-        return _Assembly(request=request, pressure=pressure)
+        return ContextAssembly(request=request, pressure=pressure)
 
     def _truncate_tool_results(
         self,
@@ -406,37 +407,3 @@ class BudgetedContextBuilder:
             )
             truncated = True
         return result, truncated
-
-    def _working_items(self, container: dict[str, Any]) -> list[ConversationItem]:
-        state = self._working_state.load(container)
-        if state == WorkingState():
-            return []
-        stable = state.model_dump(mode="json", exclude={"established_facts"})
-        items: list[ConversationItem] = [
-            UserMessage(
-                content=[
-                    TextPart(
-                        text=(
-                            "Structured working state (typed data): "
-                            + json.dumps(stable, ensure_ascii=False, sort_keys=True)
-                        )
-                    )
-                ],
-                trust=TrustLevel.EXTERNAL_UNTRUSTED,
-            )
-        ]
-        for fact in state.established_facts:
-            items.append(
-                UserMessage(
-                    content=[
-                        TextPart(
-                            text=(
-                                f"Established claim from events {fact.source_event_ids}: "
-                                f"{fact.statement}"
-                            )
-                        )
-                    ],
-                    trust=fact.trust_level,
-                )
-            )
-        return items

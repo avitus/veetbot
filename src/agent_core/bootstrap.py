@@ -177,7 +177,7 @@ from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.calculator import CalculatorTool
-from agent_core.tools.context_update import UpdateWorkingStateTool
+from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
@@ -438,6 +438,12 @@ async def _compose(
             "in-memory storage requires SANDBOX_MECHANISM=fake; configured "
             f"SANDBOX_MECHANISM={settings.sandbox.value}"
         )
+    working_config = context_config.get("working_state")
+    if not isinstance(working_config, dict):
+        raise ConfigurationError("context working_state configuration must be a mapping")
+    summary_config = context_config.get("summary")
+    if not isinstance(summary_config, dict):
+        raise ConfigurationError("context summary configuration must be a mapping")
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -470,11 +476,8 @@ async def _compose(
         )
     else:
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
-    working_config = context_config.get("working_state")
-    if not isinstance(working_config, dict):
-        raise ConfigurationError("context working_state configuration must be a mapping")
     estimator = ConservativeTokenEstimator()
-    working_state = WorkingStateManager(clock, working_config)
+    working_state = WorkingStateManager(clock, working_config, estimator)
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
@@ -487,7 +490,20 @@ async def _compose(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
     registry.register(ArtifactExportTool())
-    registry.register(UpdateWorkingStateTool(working_state))
+
+    async def validate_source_events(
+        session_id: UUID,
+        sequences: set[int],
+        source_principal: Principal,
+    ) -> set[int]:
+        async with uow_factory() as uow:
+            return await uow.events.existing_sequences(
+                session_id,
+                sequences,
+                source_principal,
+            )
+
+    registry.register(UpdateWorkingStateTool(working_state, validate_source_events))
     async with uow_factory() as uow:
         await uow.agents.put(agent)
         await uow.policy_profiles.record(
@@ -540,9 +556,6 @@ async def _compose(
             clock,
             working_state,
         )
-        summary_config = context_config.get("summary")
-        if not isinstance(summary_config, dict):
-            raise ConfigurationError("context summary configuration must be a mapping")
         compactor = StructuredCompactor(
             estimator,
             maximum_depth=int(summary_config["max_depth"]),
@@ -881,7 +894,7 @@ async def build(
                 "demo.external_write",
                 "sandbox.run_command",
                 "artifact.export",
-                "context.update_working_state",
+                WORKING_STATE_TOOL_NAME,
             ]
         ),
         policy_profile=policy_profile,

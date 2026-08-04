@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import UUID
 
-from agent_core.context.working_state import WorkingStateLimitError, WorkingStateManager
+from pydantic import ValidationError
+
+from agent_core.context.working_state import (
+    WorkingStateLimitError,
+    WorkingStateManager,
+    WorkingStateUpdate,
+)
+from agent_core.domain.agents import Principal
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
     IdempotencyClass,
@@ -21,10 +30,13 @@ from agent_core.domain.tools import (
     ToolSpec,
 )
 
+type SourceEventValidator = Callable[[UUID, set[int], Principal], Awaitable[set[int]]]
+WORKING_STATE_TOOL_NAME = "context.update_working_state"
+
 
 class UpdateWorkingStateTool:
     spec = ToolSpec(
-        name="context.update_working_state",
+        name=WORKING_STATE_TOOL_NAME,
         version="1.0.0",
         description=(
             "Update the run's typed objective, constraints, tasks, facts, questions, and next "
@@ -116,14 +128,20 @@ class UpdateWorkingStateTool:
         output_trust=TrustLevel.PLATFORM,
     )
 
-    def __init__(self, manager: WorkingStateManager) -> None:
+    def __init__(
+        self,
+        manager: WorkingStateManager,
+        validate_source_events: SourceEventValidator,
+    ) -> None:
         self._manager = manager
+        self._validate_source_events = validate_source_events
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         current = self._manager.load(context.working_state)
         try:
+            parsed = WorkingStateUpdate.model_validate(arguments)
             updated = self._manager.transition(current, arguments)
-        except WorkingStateLimitError as exc:
+        except (ValidationError, WorkingStateLimitError) as exc:
             return ToolResult(
                 ok=False,
                 content=[TextPart(text=str(exc))],
@@ -134,6 +152,28 @@ class UpdateWorkingStateTool:
                     retryable=False,
                 ),
             )
+        source_event_ids = {
+            int(event_id) for task in parsed.upsert_tasks for event_id in task.source_event_ids
+        } | {int(event_id) for fact in parsed.add_facts for event_id in fact.source_event_ids}
+        if source_event_ids:
+            existing = await self._validate_source_events(
+                context.session_id,
+                source_event_ids,
+                context.principal,
+            )
+            missing = sorted(source_event_ids - existing)
+            if missing:
+                detail = f"source events are not visible in this session: {missing}"
+                return ToolResult(
+                    ok=False,
+                    content=[TextPart(text=detail)],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.INVALID_ARGUMENTS,
+                        reason_code="tool.arguments_invalid",
+                        detail=detail,
+                        retryable=False,
+                    ),
+                )
         changed = updated != current
         return ToolResult(
             ok=True,

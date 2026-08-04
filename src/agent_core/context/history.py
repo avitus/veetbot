@@ -50,14 +50,20 @@ def select_history(
         if sequence is not None and sequence <= summary_floor:
             floor_index = index + 1
 
-    cut = len(items)
-    for candidate in range(len(items) - 1, floor_index - 1, -1):
-        if estimator.estimate(items[candidate:], model_id) > history_tokens:
-            break
-        cut = candidate
+    # TokenEstimator estimates are required to be monotonic for contiguous
+    # suffixes: removing a leading item cannot increase the estimate. Binary
+    # search therefore finds the earliest fitting suffix without quadratic
+    # reserialization of every candidate.
+    low = floor_index
+    high = len(items)
+    while low < high:
+        candidate = (low + high) // 2
+        if estimator.estimate(items[candidate:], model_id) <= history_tokens:
+            high = candidate
+        else:
+            low = candidate + 1
+    cut = low
     cut = _pair_safe_cut(items, cut)
-    while cut < len(items) and estimator.estimate(items[cut:], model_id) > history_tokens:
-        cut = _pair_safe_cut(items, cut + 1)
     return max(cut, floor_index)
 
 

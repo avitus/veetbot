@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from collections import OrderedDict
 from collections.abc import Sequence
 
 from agent_core.domain.messages import ConversationItem
@@ -23,10 +24,13 @@ def canonical_json_bytes(value: object) -> bytes:
 class ConservativeTokenEstimator:
     """Estimate high, while keeping repeated estimates byte-for-byte stable."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, memo_capacity: int = 4_096) -> None:
+        if memo_capacity <= 0:
+            raise ValueError("token-estimator memo capacity must be positive")
         self._correction: dict[str, float] = {}
         self._observations: dict[str, tuple[int, int]] = {}
-        self._memo: dict[tuple[str, str, str], int] = {}
+        self._memo_capacity = memo_capacity
+        self._memo: OrderedDict[tuple[str, str], int] = OrderedDict()
 
     @staticmethod
     def _base(payload: bytes, item_count: int) -> int:
@@ -38,11 +42,15 @@ class ConservativeTokenEstimator:
 
     def _estimate(self, kind: str, payload: bytes, item_count: int, model_id: str) -> int:
         digest = hashlib.sha256(payload).hexdigest()
-        key = (kind, model_id, digest)
+        key = (kind, digest)
         base = self._memo.get(key)
         if base is None:
             base = self._base(payload, item_count)
             self._memo[key] = base
+            if len(self._memo) > self._memo_capacity:
+                self._memo.popitem(last=False)
+        else:
+            self._memo.move_to_end(key)
         factor = max(1.0, self._correction.get(model_id, 1.0))
         return math.ceil(base * factor)
 

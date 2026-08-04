@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections import OrderedDict
 from collections.abc import Mapping
 from uuid import UUID
+from weakref import WeakValueDictionary
 
 from agent_core.context.budget import ContextBudgetAllocator
 from agent_core.context.estimator import canonical_json_bytes
@@ -23,6 +25,8 @@ from agent_core.ports.tools import ToolRegistry
 
 BUILDER_VERSION = "context-builder@2"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
+LATEST_EVENT_BOUNDARY = (1 << 63) - 1
+MAX_PLAN_APPEND_ATTEMPTS = 16
 
 
 class EventContextPlanner:
@@ -36,7 +40,10 @@ class EventContextPlanner:
         config: Mapping[str, object],
         *,
         policy_version: str,
+        cache_capacity: int = 1_024,
     ) -> None:
+        if cache_capacity <= 0:
+            raise ValueError("context-plan cache capacity must be positive")
         self._uow_factory = uow_factory
         self._registry = registry
         self._estimator = estimator
@@ -45,24 +52,51 @@ class EventContextPlanner:
         self._config = config
         self._policy_version = policy_version
         self._allocator = ContextBudgetAllocator(config)
-        self._cache: dict[UUID, ContextPlan] = {}
-        self._lock = asyncio.Lock()
+        self._cache_capacity = cache_capacity
+        self._cache: OrderedDict[UUID, ContextPlan] = OrderedDict()
+        self._locks: WeakValueDictionary[UUID, asyncio.Lock] = WeakValueDictionary()
+
+    def _session_lock(self, session_id: UUID) -> asyncio.Lock:
+        lock = self._locks.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._locks[session_id] = lock
+        return lock
+
+    def _remember(self, plan: ContextPlan) -> None:
+        self._cache[plan.session_id] = plan.model_copy(deep=True)
+        self._cache.move_to_end(plan.session_id)
+        if len(self._cache) > self._cache_capacity:
+            self._cache.popitem(last=False)
 
     async def current(self, session_id: UUID) -> ContextPlan | None:
         cached = self._cache.get(session_id)
         if cached is not None:
+            self._cache.move_to_end(session_id)
             return cached.model_copy(deep=True)
         async with self._uow_factory() as uow:
-            events = await uow.events.list_after(session_id, 0, self._principal)
+            events = [
+                event
+                for event_type in sorted(PLAN_EVENT_TYPES)
+                if (
+                    event := await uow.events.latest_before(
+                        session_id,
+                        LATEST_EVENT_BOUNDARY,
+                        event_type,
+                        self._principal,
+                    )
+                )
+                is not None
+            ]
         plans = [
             ContextPlan.model_validate(event.payload.get("plan"))
             for event in events
-            if event.event_type in PLAN_EVENT_TYPES and isinstance(event.payload.get("plan"), dict)
+            if isinstance(event.payload.get("plan"), dict)
         ]
         if not plans:
             return None
         plan = max(plans, key=lambda candidate: candidate.epoch)
-        self._cache[session_id] = plan.model_copy(deep=True)
+        self._remember(plan)
         return plan.model_copy(deep=True)
 
     async def plan(
@@ -72,7 +106,7 @@ class EventContextPlanner:
         principal: Principal,
         model: ResolvedModel,
     ) -> ContextPlan:
-        async with self._lock:
+        async with self._session_lock(session.id):
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
@@ -115,7 +149,7 @@ class EventContextPlanner:
             )
 
     async def rotate(self, session_id: UUID, reason: str) -> ContextPlan:
-        async with self._lock:
+        async with self._session_lock(session_id):
             current = await self.current(session_id)
             if current is None:
                 raise ConflictError("cannot rotate a context plan that does not exist")
@@ -192,44 +226,49 @@ class EventContextPlanner:
         return await self._append(plan, event_type, reason)
 
     async def _append(self, plan: ContextPlan, event_type: str, reason: str) -> ContextPlan:
-        derivation_key = f"context.plan:{plan.session_id}:{plan.epoch}"
-        async with self._uow_factory() as uow:
-            event = await uow.events.append(
-                NewEvent(
-                    session_id=plan.session_id,
-                    run_id=None,
-                    event_type=event_type,
-                    actor_type="runtime",
-                    payload={"plan": plan.model_dump(mode="json"), "reason": reason},
-                    derivation_key=derivation_key,
+        candidate = plan
+        candidate_event_type = event_type
+        candidate_reason = reason
+        for _attempt in range(MAX_PLAN_APPEND_ATTEMPTS):
+            derivation_key = f"context.plan:{candidate.session_id}:{candidate.epoch}"
+            async with self._uow_factory() as uow:
+                event = await uow.events.append(
+                    NewEvent(
+                        session_id=candidate.session_id,
+                        run_id=None,
+                        event_type=candidate_event_type,
+                        actor_type="runtime",
+                        payload={
+                            "plan": candidate.model_dump(mode="json"),
+                            "reason": candidate_reason,
+                        },
+                        derivation_key=derivation_key,
+                    )
                 )
+            persisted = ContextPlan.model_validate(event.payload.get("plan"))
+            if persisted.session_id != candidate.session_id or persisted.epoch != candidate.epoch:
+                raise ConflictError("context-plan derivation resolved to a different plan")
+            requested_identity = (
+                candidate.model_id,
+                candidate.policy_version,
+                candidate.builder_version,
+                candidate.prefix_sha256,
+                candidate.tool_schema_sha256,
             )
-        persisted = ContextPlan.model_validate(event.payload.get("plan"))
-        if persisted.session_id != plan.session_id or persisted.epoch != plan.epoch:
-            raise ConflictError("context-plan derivation resolved to a different plan")
-        requested_identity = (
-            plan.model_id,
-            plan.policy_version,
-            plan.builder_version,
-            plan.prefix_sha256,
-            plan.tool_schema_sha256,
-        )
-        persisted_identity = (
-            persisted.model_id,
-            persisted.policy_version,
-            persisted.builder_version,
-            persisted.prefix_sha256,
-            persisted.tool_schema_sha256,
-        )
-        if persisted_identity != requested_identity:
-            rotated = plan.model_copy(
-                update={"epoch": plan.epoch + 1, "created_at": self._clock.now()},
+            persisted_identity = (
+                persisted.model_id,
+                persisted.policy_version,
+                persisted.builder_version,
+                persisted.prefix_sha256,
+                persisted.tool_schema_sha256,
+            )
+            if persisted_identity == requested_identity:
+                self._remember(persisted)
+                return persisted.model_copy(deep=True)
+            candidate = candidate.model_copy(
+                update={"epoch": candidate.epoch + 1, "created_at": self._clock.now()},
                 deep=True,
             )
-            return await self._append(
-                rotated,
-                "context.epoch.rotated",
-                "idempotent_plan_identity_conflict",
-            )
-        self._cache[plan.session_id] = persisted.model_copy(deep=True)
-        return persisted.model_copy(deep=True)
+            candidate_event_type = "context.epoch.rotated"
+            candidate_reason = "idempotent_plan_identity_conflict"
+        raise ConflictError("context-plan identity contention exceeded the retry limit")
