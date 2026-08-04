@@ -137,7 +137,8 @@ class MemoryUnitOfWork:
             self._depth_token = None
 
     async def _run_rollback_callbacks(self) -> None:
-        callbacks, self._rollback_callbacks = self._rollback_callbacks, []
+        callbacks = list(self._rollback_callbacks)
+        self._rollback_callbacks.clear()
         for callback in reversed(callbacks):
             try:
                 await callback()
@@ -233,7 +234,8 @@ class PostgresUnitOfWork:
                     self._depth_token = None
 
     async def _run_rollback_callbacks(self) -> None:
-        callbacks, self._rollback_callbacks = self._rollback_callbacks, []
+        callbacks = list(self._rollback_callbacks)
+        self._rollback_callbacks.clear()
         for callback in reversed(callbacks):
             try:
                 await callback()

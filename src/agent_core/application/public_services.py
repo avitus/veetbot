@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
     ApprovalCursor,
@@ -234,17 +235,13 @@ class PublicSessionService:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             agent = await self._resolve_agent(uow, agent_id)
-            session_id = self._ids.new_id()
-            catalogs = self._catalogs
-            if catalogs is not None:
-                uow.on_rollback(lambda: catalogs.discard(session_id))
-            close_session = self._close_session
-            if close_session is not None:
-                uow.on_rollback(lambda: close_session(session_id))
-            catalog = (
-                None
-                if self._catalogs is None
-                else await self._catalogs.open(session_id, agent, principal)
+            session_id, catalog = await bootstrap_session(
+                uow,
+                self._ids,
+                self._catalogs,
+                self._close_session,
+                agent,
+                principal,
             )
             session = Session(
                 id=session_id,

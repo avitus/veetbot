@@ -109,6 +109,8 @@ async def _catalog_stack(
     *,
     mcp_entries: list[CatalogEntry] | None = None,
     maximum_entries: int = 20,
+    maximum_loaded: int = 2,
+    maximum_body_tokens: int = 6_000,
 ) -> tuple[
     SkillCatalogService,
     InMemorySkillRepository,
@@ -146,6 +148,8 @@ async def _catalog_stack(
         ConservativeTokenEstimator(),
         mcp_prompts=prompts,
         maximum_entries=maximum_entries,
+        maximum_loaded=maximum_loaded,
+        maximum_body_tokens=maximum_body_tokens,
     )
     return catalogs, repository, store, factory
 
@@ -594,6 +598,36 @@ async def test_body_cap() -> None:
     loaded = (*loaded, replacement)
     assert len(loaded) <= 2
     assert sum(body.tokens for body in loaded) <= catalogs.maximum_body_tokens
+
+    estimator = ConservativeTokenEstimator()
+    token_limit = sum(estimator.estimate_text(name, "skill-validation") for name in ("one", "two"))
+    token_catalogs, _repository, _store, _factory = await _catalog_stack(
+        [_package(name, name) for name in ("one", "two", "three")],
+        maximum_loaded=3,
+        maximum_body_tokens=token_limit,
+    )
+    token_session_id = UUID(int=505)
+    await token_catalogs.open(token_session_id, configured, principal())
+    token_loaded: tuple[LoadedSkillBody, ...] = ()
+    for name in ("one", "two"):
+        body, _missing = await token_catalogs.load(
+            token_session_id,
+            principal(),
+            name,
+            None,
+            token_loaded,
+            frozenset(),
+        )
+        token_loaded = (*token_loaded, body)
+    with pytest.raises(ConflictError, match="token cap"):
+        await token_catalogs.load(
+            token_session_id,
+            principal(),
+            "three",
+            None,
+            token_loaded,
+            frozenset(),
+        )
 
 
 async def test_mcp_read_only() -> None:

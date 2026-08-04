@@ -8,9 +8,39 @@ from uuid import UUID
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.events import NewEvent
 from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.skills import SessionSkillCatalog
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
+
+type CloseSession = Callable[[UUID], Awaitable[None]]
+
+
+async def bootstrap_session(
+    uow: RepositoryUnitOfWork,
+    ids: IdFactory,
+    catalogs: SkillCatalog | None,
+    close_session: CloseSession | None,
+    agent: AgentSpec,
+    principal: Principal,
+) -> tuple[UUID, SessionSkillCatalog | None]:
+    """Open rollback-safe ephemeral state before persisting a new session."""
+
+    session_id = ids.new_id()
+    if catalogs is not None:
+        uow.on_rollback(lambda: catalogs.discard(session_id))
+    if close_session is not None:
+        uow.on_rollback(lambda: close_session(session_id))
+    catalog = (
+        None
+        if catalogs is None
+        else await catalogs.open(
+            session_id,
+            agent,
+            principal,
+        )
+    )
+    return session_id, catalog
 
 
 class SessionService:
@@ -23,7 +53,7 @@ class SessionService:
         default_agent: AgentSpec,
         catalogs: SkillCatalog | None = None,
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
-        close_session: Callable[[UUID], Awaitable[None]] | None = None,
+        close_session: CloseSession | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -48,21 +78,13 @@ class SessionService:
         """Create inside a caller-owned transaction; activate after it commits."""
 
         now = self._clock.now()
-        session_id = self._ids.new_id()
-        catalogs = self._catalogs
-        if catalogs is not None:
-            uow.on_rollback(lambda: catalogs.discard(session_id))
-        close_session = self._close_session
-        if close_session is not None:
-            uow.on_rollback(lambda: close_session(session_id))
-        catalog = (
-            None
-            if self._catalogs is None
-            else await self._catalogs.open(
-                session_id,
-                self._default_agent,
-                self._principal,
-            )
+        session_id, catalog = await bootstrap_session(
+            uow,
+            self._ids,
+            self._catalogs,
+            self._close_session,
+            self._default_agent,
+            self._principal,
         )
         session = Session(
             id=session_id,
