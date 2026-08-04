@@ -16,3 +16,19 @@ async def test_event_repository_assigns_gapless_per_session_sequences() -> None:
     events = await repository.list_after(SESSION_ID, 0, principal())
     assert [event.sequence for event in events] == [1, 2]
     assert [event.event_type for event in events] == ["first", "second"]
+
+
+async def test_event_repository_reads_an_idempotent_derivation_key() -> None:
+    _clock, _sessions, _runs, repository = await memory_stack()
+    event = NewEvent(
+        session_id=SESSION_ID,
+        run_id=None,
+        event_type="derived",
+        actor_type="contract",
+        derivation_key="contract:derived",
+    )
+    first = await repository.append(event)
+    second = await repository.append(event)
+    loaded = await repository.get_by_derivation("contract:derived", principal())
+    assert loaded == first == second
+    assert await repository.get_by_derivation("contract:missing", principal()) is None

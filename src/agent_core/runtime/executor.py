@@ -14,11 +14,19 @@ from agent_core.domain.errors import (
     BudgetExceededError,
     ConflictError,
     RunCancelledError,
+    UserInputRequiredError,
     WorkerFencedError,
 )
 from agent_core.domain.events import NewEvent
-from agent_core.domain.messages import AssistantMessage, ResolvedModel, TextPart, ToolCallItem
+from agent_core.domain.messages import (
+    AssistantMessage,
+    ResolvedModel,
+    TextPart,
+    ToolCallItem,
+    ToolResultItem,
+)
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import (
     CancelReason,
     FailureReason,
@@ -30,6 +38,7 @@ from agent_core.domain.runs import (
     RunStatus,
     Step,
 )
+from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
@@ -41,7 +50,13 @@ from agent_core.ports.persistence import (
 )
 from agent_core.ports.repositories import BudgetLedger, PrincipalResolver
 from agent_core.runtime.cancellation import RunCancellationToken
-from agent_core.runtime.loop import RunContext, ToolDispatch, checkpoint, run_loop
+from agent_core.runtime.loop import (
+    ModelEventCallback,
+    RunContext,
+    ToolDispatch,
+    checkpoint,
+    run_loop,
+)
 
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
@@ -78,6 +93,7 @@ class RunExecutor:
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
         on_token_complete: TokenCompleteCallback | None = None,
+        on_model_event: ModelEventCallback | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
@@ -97,6 +113,7 @@ class RunExecutor:
         self._seed_checkpoint = seed_checkpoint
         self._on_token = on_token
         self._on_token_complete = on_token_complete
+        self._on_model_event = on_model_event
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
@@ -110,6 +127,15 @@ class RunExecutor:
             RunStatus.QUEUED,
         )
 
+    async def requeue_after_input(self, uow: RepositoryUnitOfWork, run: Run) -> Run:
+        """Apply the guarded user-input resume edge in the sole state writer."""
+
+        return await uow.runs.transition(
+            run.id,
+            RunStatus.WAITING_FOR_USER,
+            RunStatus.QUEUED,
+        )
+
     async def cancel_parked_run(
         self,
         uow: RepositoryUnitOfWork,
@@ -120,6 +146,48 @@ class RunExecutor:
 
         if run.status is RunStatus.WAITING_FOR_APPROVAL:
             await uow.approvals.cancel_for_run(run.id)
+        if run.status is RunStatus.WAITING_FOR_USER:
+            owner = Principal(
+                tenant_id=run.tenant_id,
+                principal_id=principal_id,
+            )
+            invocations = await uow.invocations.list_for_run(run.id, owner)
+            for invocation in invocations:
+                if (
+                    invocation.status is not ToolInvocationStatus.RUNNING
+                    or invocation.suspended_kind != "user_input"
+                ):
+                    continue
+                outcome = ToolOutcome(
+                    status=ToolOutcomeStatus.FAILED,
+                    action=invocation.tool_name,
+                    reason_code="tool.run_cancelled",
+                    message="The run was cancelled while waiting for user input.",
+                    retryable=False,
+                    remediation="none",
+                )
+                result_item = ToolResultItem(
+                    call_id=invocation.call_id,
+                    content=[TextPart(text=outcome.message)],
+                    is_error=True,
+                    trust=TrustLevel.PLATFORM,
+                )
+                failed = invocation.model_copy(
+                    update={
+                        "status": ToolInvocationStatus.FAILED,
+                        "suspended_kind": None,
+                        "suspended_ref": None,
+                        "outcome": outcome,
+                        "result_item": result_item,
+                        "updated_at": self._clock.now(),
+                    },
+                    deep=True,
+                )
+                await uow.invocations.transition(
+                    invocation.id,
+                    ToolInvocationStatus.RUNNING,
+                    failed,
+                )
         cancelled = await uow.runs.transition(run.id, run.status, RunStatus.CANCELLED)
         await uow.events.append(
             NewEvent(
@@ -248,6 +316,7 @@ class RunExecutor:
                 ids=self._ids,
                 token=token,
                 dispatch_tools=self._dispatch_tools,
+                on_model_event=self._on_model_event,
                 max_internal_attempts=self._max_internal_attempts,
                 identical_call_threshold=self._identical_call_threshold,
                 identical_denial_threshold=self._identical_denial_threshold,
@@ -265,6 +334,17 @@ class RunExecutor:
                     suspension={
                         "kind": "approval",
                         "approval_id": str(exc.approval_id),
+                    },
+                )
+            except UserInputRequiredError as exc:
+                context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
+                await checkpoint(context, "suspended")
+                outcome = RunOutcome(
+                    kind=OutcomeKind.SUSPENDED,
+                    suspension={
+                        "kind": "user",
+                        "question_id": str(exc.question_id),
+                        "invocation_id": str(exc.invocation_id),
                     },
                 )
             else:
@@ -422,9 +502,16 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
         failure = outcome.failure
         final_message = None
     elif outcome.kind is OutcomeKind.SUSPENDED:
-        status = RunStatus.WAITING_FOR_APPROVAL
-        event_type = "run.waiting_for_approval"
+        suspension = outcome.suspension if isinstance(outcome.suspension, dict) else {}
+        if suspension.get("kind") == "user":
+            status = RunStatus.WAITING_FOR_USER
+            event_type = "run.waiting_for_user"
+        else:
+            status = RunStatus.WAITING_FOR_APPROVAL
+            event_type = "run.waiting_for_approval"
         payload = {"suspension": outcome.suspension}
+        if status is RunStatus.WAITING_FOR_USER:
+            payload["question_id"] = suspension.get("question_id")
         failure = None
         final_message = None
     else:
@@ -445,7 +532,7 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             lease=context.lease,
         )
         last_event = terminal_event
-        if outcome.kind is OutcomeKind.SUSPENDED:
+        if outcome.kind is OutcomeKind.SUSPENDED and status is RunStatus.WAITING_FOR_APPROVAL:
             approval_id = (
                 context.checkpoint.pending_approval_ids[0]
                 if context.checkpoint.pending_approval_ids

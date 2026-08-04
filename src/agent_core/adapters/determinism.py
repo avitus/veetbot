@@ -7,6 +7,8 @@ from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from agent_core.ports.determinism import Clock, IdFactory
+
 
 class SystemClock:
     """Aware-UTC wall clock used by real entry points."""
@@ -42,6 +44,24 @@ class RandomIdFactory:
 
     def new_id(self) -> UUID:
         return uuid4()
+
+
+class UUID7RequestIdFactory:
+    """Produce RFC 9562 UUIDv7 request identifiers from injected sources."""
+
+    def __init__(self, clock: Clock, random_ids: IdFactory) -> None:
+        self._clock = clock
+        self._random_ids = random_ids
+
+    def new_id(self) -> UUID:
+        milliseconds = int(self._clock.now().timestamp() * 1000) & ((1 << 48) - 1)
+        random_bits = self._random_ids.new_id().int & ((1 << 80) - 1)
+        value = (milliseconds << 80) | random_bits
+        value &= ~(0xF << 76)
+        value |= 0x7 << 76
+        value &= ~(0b11 << 62)
+        value |= 0b10 << 62
+        return UUID(int=value)
 
 
 class SequenceIdFactory:

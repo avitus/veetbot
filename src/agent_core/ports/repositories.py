@@ -8,6 +8,7 @@ from uuid import UUID
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
+    ApprovalCursor,
     ApprovalRequest,
     ApprovalResolutionOutcome,
     ApprovalResolutionType,
@@ -50,11 +51,17 @@ class SessionRepository(Protocol):
 
     async def get(self, session_id: UUID, principal: Principal) -> Session: ...
 
+    async def close(
+        self, session_id: UUID, principal: Principal, closed_at: datetime
+    ) -> Session: ...
+
 
 class RunRepository(Protocol):
     async def create(self, run: Run) -> None: ...
 
     async def get(self, run_id: UUID, principal: Principal) -> Run: ...
+
+    async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None: ...
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run: ...
 
@@ -114,8 +121,9 @@ class ApprovalRepository(Protocol):
         self,
         principal: Principal,
         run_id: UUID | None = None,
+        session_id: UUID | None = None,
         limit: int = 50,
-        cursor: str | None = None,
+        cursor: ApprovalCursor | None = None,
     ) -> list[ApprovalRequest]: ...
 
     async def resolve(
@@ -235,6 +243,8 @@ class TrajectoryExportRepository(Protocol):
     async def get_for_run(self, run_id: UUID) -> TrajectoryExport | None: ...
 
     async def create(self, export: TrajectoryExport) -> TrajectoryExport: ...
+
+    async def get_artifact(self, artifact_id: UUID, principal: Principal) -> ArtifactRef: ...
 
     async def expire_for_principal(
         self, tenant_id: str, principal_id: str, expired_at: datetime

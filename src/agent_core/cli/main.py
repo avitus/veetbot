@@ -8,16 +8,20 @@ import json
 import os
 import signal
 import socket
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import aclosing
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any, Protocol, cast
 from uuid import UUID
 
 import typer
+import uvicorn
+from pydantic import ValidationError
 from typer.core import TyperGroup
 
 from agent_core import __version__
+from agent_core.api import create_app
 from agent_core.bootstrap import build
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
@@ -30,7 +34,15 @@ from agent_core.domain.errors import (
     NotFoundError,
 )
 from agent_core.domain.events import EventEnvelope
-from agent_core.domain.runs import Run, RunStatus
+from agent_core.domain.messages import AssistantMessage, TextPart
+from agent_core.domain.runs import RunStatus
+from agent_core.domain.views import (
+    ApprovalFilters,
+    PersistedStreamFrame,
+    RunView,
+    StreamFrame,
+    TextContentBlock,
+)
 
 RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
 RUN_WAIT_TIMEOUT_SECONDS = 30.0
@@ -105,28 +117,30 @@ def main(
     del version
 
 
-def _progress_lines(events: Sequence[EventEnvelope]) -> list[str]:
+def _progress_lines(events: Sequence[EventEnvelope | PersistedStreamFrame]) -> list[str]:
     lines: list[str] = []
     requested_tool = False
     final_model_turn = False
     for event in events:
-        if event.event_type == "run.queued" and "run created" not in lines:
+        event_type = event.event_type if isinstance(event, EventEnvelope) else event.event
+        payload = event.payload if isinstance(event, EventEnvelope) else event.data
+        if event_type == "run.queued" and "run created" not in lines:
             lines.append("run created")
-        elif event.event_type == "model.response.completed":
-            names = event.payload.get("tool_names")
+        elif event_type == "model.response.completed":
+            names = payload.get("tool_names")
             if isinstance(names, list) and names and not requested_tool:
                 lines.append(f"model requests {names[0]}")
                 requested_tool = True
             elif not names and not final_model_turn:
                 lines.append("model produces final response")
                 final_model_turn = True
-        elif event.event_type == "tool.call.started" and "tool executes" not in lines:
+        elif event_type == "tool.call.started" and "tool executes" not in lines:
             lines.append("tool executes")
-        elif event.event_type in {"tool.call.completed", "tool.call.failed"} and (
+        elif event_type in {"tool.call.completed", "tool.call.failed"} and (
             "tool result returned to model" not in lines
         ):
             lines.append("tool result returned to model")
-        elif event.event_type == "run.completed" and "run completes" not in lines:
+        elif event_type == "run.completed" and "run completes" not in lines:
             lines.append("run completes")
     return lines
 
@@ -136,20 +150,30 @@ async def _submit(
     session_id: UUID | None,
     idempotency_key: str | None,
     model_policy: str | None,
-) -> tuple[Run, list[EventEnvelope]]:
+) -> tuple[RunView, list[PersistedStreamFrame]]:
     async with build(storage="postgres", model_policy=model_policy) as composition:
         previous_handler = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, lambda _signum, _frame: composition.runs.interrupt())
         try:
-            run_id = await composition.runs.submit(
-                prompt,
-                session_id=session_id,
-                idempotency_key=idempotency_key,
+            if session_id is None:
+                session = await composition.services.sessions.create(
+                    composition.principal,
+                    "general",
+                    {},
+                )
+                session_id = session.id
+            submitted = await composition.services.runs.submit(
+                composition.principal,
+                session_id,
+                [TextContentBlock(text=prompt)],
+                idempotency_key,
+                None,
             )
+            run_id = submitted.run_id
             try:
                 async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS):
                     while True:
-                        run = await composition.runs.get(run_id)
+                        run = await composition.services.runs.get(composition.principal, run_id)
                         if run.status in {
                             RunStatus.COMPLETED,
                             RunStatus.FAILED,
@@ -161,7 +185,24 @@ async def _submit(
                         await composition.clock.sleep(0.05)
             except TimeoutError as exc:
                 raise QueuedRunTimeoutError(run_id) from exc
-            events = await composition.runs.events(run_id)
+            events: list[PersistedStreamFrame] = []
+            stream = cast(
+                AsyncGenerator[StreamFrame, None],
+                composition.services.runs.stream(composition.principal, run_id, None),
+            )
+            try:
+                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS), aclosing(stream):
+                    async for frame in stream:
+                        if not isinstance(frame, PersistedStreamFrame):
+                            continue
+                        events.append(frame)
+                        if frame.event in {
+                            "run.waiting_for_approval",
+                            "run.waiting_for_user",
+                        }:
+                            break
+            except TimeoutError as exc:
+                raise QueuedRunTimeoutError(run_id) from exc
             return run, events
         finally:
             signal.signal(signal.SIGINT, previous_handler)
@@ -202,8 +243,22 @@ def run_command(
         typer.echo(line, err=True)
     if json_output:
         typer.echo(run.model_dump_json())
-    elif run.status is RunStatus.COMPLETED and run.final_message is not None:
-        typer.echo(run.final_message)
+    elif run.status is RunStatus.COMPLETED:
+        completed = next(
+            (event for event in reversed(events) if event.event == "run.completed"),
+            None,
+        )
+        raw_message = None if completed is None else completed.data.get("final_message")
+        try:
+            message = None if raw_message is None else AssistantMessage.model_validate(raw_message)
+        except ValidationError:
+            message = None
+        text = (
+            None
+            if message is None
+            else "\n".join(part.text for part in message.content if isinstance(part, TextPart))
+        )
+        typer.echo(text or str(run.id))
     elif run.status in {RunStatus.WAITING_FOR_APPROVAL, RunStatus.WAITING_FOR_USER}:
         typer.echo(str(run.id))
         raise typer.Exit(3)
@@ -215,10 +270,38 @@ def run_command(
 async def _ephemeral_read(run_id: UUID, *, events: bool) -> str:
     async with build(storage="postgres") as composition:
         if events:
-            rows = await composition.runs.events(run_id)
+            rows: list[PersistedStreamFrame] = []
+            stream = cast(
+                AsyncGenerator[StreamFrame, None],
+                composition.services.runs.stream(composition.principal, run_id, None),
+            )
+            try:
+                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS), aclosing(stream):
+                    async for frame in stream:
+                        if isinstance(frame, PersistedStreamFrame):
+                            rows.append(frame)
+            except TimeoutError:
+                pass
             return json.dumps([row.model_dump(mode="json") for row in rows], default=str)
-        run = await composition.runs.get(run_id)
+        run = await composition.services.runs.get(composition.principal, run_id)
         return run.model_dump_json()
+
+
+async def _cancel_run(run_id: UUID) -> RunView:
+    async with build(storage="postgres") as composition:
+        result = await composition.services.runs.cancel(composition.principal, run_id)
+        return result.run
+
+
+@run_app.command("cancel")
+def run_cancel(run_id: UUID) -> None:
+    """Request cooperative cancellation through the shared RunService."""
+
+    try:
+        typer.echo(asyncio.run(_cancel_run(run_id)).model_dump_json())
+    except (ConfigurationError, ConflictError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
 
 
 @run_app.command("get")
@@ -275,7 +358,12 @@ def run_export(
 
 async def _create_session() -> UUID:
     async with build(storage="postgres") as composition:
-        return await composition.sessions.create()
+        session = await composition.services.sessions.create(
+            composition.principal,
+            "general",
+            {},
+        )
+        return session.id
 
 
 async def _serve_worker(role: WorkerRole) -> None:
@@ -301,6 +389,31 @@ def worker_command(
 
     try:
         asyncio.run(_serve_worker(role))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+
+
+async def _serve_api() -> None:
+    async with build(storage="postgres") as composition:
+        host = "127.0.0.1" if composition.settings.auth_mode.value == "dev" else "0.0.0.0"
+        api = create_app(
+            composition.services,
+            composition.settings,
+            composition.principal,
+            composition.new_request_id,
+            composition.readiness_probe,
+        )
+        server = uvicorn.Server(uvicorn.Config(api, host=host, port=8000, log_config=None))
+        await server.serve()
+
+
+@app.command("api")
+def api_command() -> None:
+    """Serve the shared application services over the versioned HTTP API."""
+
+    try:
+        asyncio.run(_serve_api())
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -342,7 +455,19 @@ def session_export_consent(
 
 async def _approval_list() -> list[Any]:
     async with build(storage="postgres") as composition:
-        return await composition.approvals.list_pending()
+        rows: list[Any] = []
+        cursor: str | None = None
+        while True:
+            page = await composition.services.approvals.list(
+                composition.principal,
+                ApprovalFilters(),
+                200,
+                cursor,
+            )
+            rows.extend(page.items)
+            cursor = page.next_cursor
+            if cursor is None:
+                return rows
 
 
 @approval_app.command("list")
@@ -363,7 +488,12 @@ async def _resolve_approval(
     reason: str | None,
 ) -> Any:
     async with build(storage="postgres") as composition:
-        return await composition.approvals.resolve(approval_id, resolution, reason=reason)
+        return await composition.services.approvals.resolve(
+            composition.principal,
+            approval_id,
+            resolution,
+            reason,
+        )
 
 
 def _approval_resolution_command(
@@ -415,7 +545,7 @@ def eval_run(
     try:
         module = cast(_EvalRunnerModule, importlib.import_module("agent_core.evals.runner"))
         results = module.run_selected_sync(
-            Path.cwd(), current_milestone=4, tag=tag, case_name=case_name
+            Path.cwd(), current_milestone=5, tag=tag, case_name=case_name
         )
     except (EvalExpectationError, ImportError, OSError, ValueError) as exc:
         typer.echo(f"evaluation failed: {exc}", err=True)

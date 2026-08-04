@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_4_complete
+  status: milestone_5_review_pending
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 4
+  current_milestone: 5
   authorized_milestones:
     - 0
     - 1
@@ -13,6 +13,10 @@ project:
     - 3
     - 4
     - 5
+    - 6
+    - 7
+    - 8
+    - 9
 
 milestones:
   "0":
@@ -32,7 +36,7 @@ milestones:
     status: complete
   "5":
     title: HTTP API and SSE
-    status: not_started
+    status: review_pending
   "6":
     title: Isolated execution and artifacts
     status: not_started
@@ -266,6 +270,39 @@ verification:
           and static partitions respectively; all three GitHub commit status
           contexts completed successfully.
     remaining: []
+  milestone_5:
+    recorded_at: 2026-08-04T04:19:25Z
+    status: review_pending
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 210 source and test
+          files, 194 static tests, 67 port contracts, 123 citation checks,
+          strict documentation builds, and all 105 hard gates active through
+          Milestone 5 passed.
+      - check: complete non-live suite against PostgreSQL 16
+        outcome: passed
+        detail: >-
+          All 328 non-live tests passed with the two credentialed provider
+          tests deselected. The suite included clean migration round trips,
+          concurrent HTTP idempotency, SSE reconnect, cross-composition live
+          deltas, and cross-composition cancellation polling.
+      - check: Alembic revision and metadata
+        outcome: passed
+        detail: >-
+          PostgreSQL upgraded through revision b8d7f46291ac, each migration
+          round-tripped from its predecessor, and alembic check reported no
+          schema drift.
+      - check: deterministic evaluation corpus
+        outcome: passed
+        detail: >-
+          All 20 active cases passed without network access, including approval,
+          workspace, parallel admission, and cancellation cases inherited from
+          the earlier milestones.
+    remaining:
+      - Hosted CircleCI must pass on the Milestone 5 pull request.
+      - CodeRabbit findings must be addressed and the final review must be clean.
 
 documentation:
   canonical_format: markdown

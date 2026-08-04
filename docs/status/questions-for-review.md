@@ -6223,3 +6223,52 @@ surface exists at Milestone 1, not that independent CLI invocations share state.
 
 **Reversal cost:** cheap before Milestone 2; that milestone resolves the
 limitation without changing the commands.
+
+## Milestone 5 implementation review
+
+### HTTP idempotency is database-scoped, not globally keyed
+
+**Decided:** changed the `idempotency_keys` primary key from the client string
+alone to `(tenant_id, principal_id, key)`.
+
+**Why:** the detailed API design requires two tenants using the same string not
+to collide and requires the concurrent insert to wait within that scope. A
+global primary key makes the first property impossible even when every query
+contains the tenant predicate. ADR-0041 records why the behavioral requirement
+and hard gate take precedence over the leftover table-key sentence.
+
+**Question for you:** confirm that the composite key is the intended correction
+to the detailed design's contradictory primary-key wording.
+
+**Reversal cost:** high after clients depend on cross-tenant key reuse; it would
+also weaken a tested isolation property.
+
+### Static token identity uses four explicit environment variables
+
+**Decided:** token mode requires `AUTH_TENANT_ID`, `AUTH_PRINCIPAL_ID`, and
+`AUTH_SCOPES`, and accepts optional `AUTH_ROLES`. Development mode retains its
+fixed local principal.
+
+**Why:** the design requires the matching token to bind one configured
+principal but does not name the environment variables. Defaulting token mode to
+the development identity and every platform scope would make a missing
+deployment setting silently over-privileged.
+
+**Question for you:** confirm these environment names before external operators
+script them.
+
+**Reversal cost:** cheap before the first token-mode deployment, moderate after.
+
+### The live stream buffer holds 256 notifications
+
+**Decided:** each SSE subscription has a 256-notification application buffer;
+overflow produces the specified unnumbered frame and closes the stream.
+
+**Why:** the design requires a finite bound and deliberately declines to make a
+number part of the public contract. This value is large enough to absorb short
+replay handoffs while remaining small and predictable per connection.
+
+**Question for you:** none unless deployment measurements justify making the
+bound configurable in a later milestone.
+
+**Reversal cost:** cheap; reconnect semantics do not depend on the number.

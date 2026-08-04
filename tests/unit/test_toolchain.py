@@ -14,7 +14,9 @@ from typer.testing import CliRunner
 import agent_core.cli.main as cli_main
 from agent_core.cli.main import app
 from agent_core.domain.events import EventEnvelope
+from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
+from agent_core.domain.views import PersistedStreamFrame
 from tests.conftest import NETWORK_MODE, _integration_endpoints
 from tests.contract.support import run
 
@@ -200,13 +202,22 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
         session_id: UUID | None,
         idempotency_key: str | None,
         model_policy: str | None,
-    ) -> tuple[Run, list[EventEnvelope]]:
+    ) -> tuple[Run, list[PersistedStreamFrame]]:
         del idempotency_key, model_policy
         seen.append((prompt, session_id))
         completed = run(status=RunStatus.COMPLETED).model_copy(
             update={"final_message": "answer"}, deep=True
         )
-        return completed, []
+        event = PersistedStreamFrame(
+            sequence=1,
+            event="run.completed",
+            data={
+                "final_message": AssistantMessage(content=[TextPart(text="answer")]).model_dump(
+                    mode="json"
+                )
+            },
+        )
+        return completed, [event]
 
     async def fake_read(run_id: UUID, *, events: bool) -> str:
         seen.append(("events" if events else "get", run_id))

@@ -63,3 +63,10 @@ class ApprovalRequest(BaseModel):
 class ApprovalResolutionOutcome(BaseModel):
     state: ApprovalResolutionState
     approval: ApprovalRequest
+
+
+class ApprovalCursor(BaseModel):
+    """Repository-level keyset cursor after API decoding."""
+
+    created_at: datetime
+    id: UUID

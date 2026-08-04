@@ -9,12 +9,35 @@ class AgentCoreError(Exception):
     """Base class for typed platform failures."""
 
 
+class AuthenticationError(AgentCoreError):
+    """Authentication did not produce a principal."""
+
+
 class NotFoundError(AgentCoreError):
     """A tenant-scoped object does not exist or is not visible."""
 
 
 class ConflictError(AgentCoreError):
     """The requested guarded state change is not valid."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.details = details or {}
+
+
+class InvalidStateTransition(ConflictError):  # noqa: N818 - normative taxonomy name
+    """A resource exists but cannot accept the requested state change."""
+
+
+class ConcurrencyConflict(ConflictError):  # noqa: N818 - normative taxonomy name
+    """A concurrent guarded operation won the race."""
 
 
 class WorkerFencedError(ConflictError):
@@ -29,12 +52,39 @@ class BudgetExceededError(AgentCoreError):
         self.reason = reason
 
 
+class DeadlineExceeded(AgentCoreError):  # noqa: N818 - normative taxonomy name
+    """An operation exceeded its deadline."""
+
+
+class RunDeadlineExceeded(DeadlineExceeded):
+    """A run exceeded its configured deadline."""
+
+
 class ToolValidationError(AgentCoreError):
     """A tool schema or invocation argument failed validation."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        tool_name: str | None = None,
+        errors: list[dict[str, object]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.tool_name = tool_name
+        self.errors = errors or []
+
+
+class ToolNotFoundError(AgentCoreError):
+    """A requested tool is not registered."""
 
 
 class AuthorizationError(AgentCoreError):
     """The authenticated principal lacks authority for an action."""
+
+
+class ToolPolicyDenied(AuthorizationError):  # noqa: N818 - normative taxonomy name
+    """Policy denied a requested tool action."""
 
 
 class ApprovalRequiredError(AgentCoreError):
@@ -43,6 +93,23 @@ class ApprovalRequiredError(AgentCoreError):
     def __init__(self, approval_id: UUID) -> None:
         super().__init__(f"approval {approval_id} is pending")
         self.approval_id = approval_id
+
+
+class UserInputRequiredError(AgentCoreError):
+    """Normal control flow indicating a run is waiting for a user's answer."""
+
+    def __init__(self, question_id: UUID, invocation_id: UUID) -> None:
+        super().__init__(f"question {question_id} is waiting for input")
+        self.question_id = question_id
+        self.invocation_id = invocation_id
+
+
+class ApprovalDenied(ConflictError):  # noqa: N818 - normative taxonomy name
+    """A required approval was denied."""
+
+
+class ApprovalExpired(ConflictError):  # noqa: N818 - normative taxonomy name
+    """A required approval expired before resolution."""
 
 
 class WorkspaceEscape(ToolValidationError):  # noqa: N818 - normative domain name
@@ -59,6 +126,50 @@ class ModelScriptExhaustedError(AgentCoreError):
 
 class RunCancelledError(AgentCoreError):
     """The run cancellation token was observed at a safe boundary."""
+
+
+class ContextOverflow(AgentCoreError):  # noqa: N818 - normative taxonomy name
+    """The request cannot fit the configured context window."""
+
+
+class ToolLoopDetected(ConflictError):  # noqa: N818 - normative taxonomy name
+    """The runtime detected a repeated tool-call loop."""
+
+
+class ModelTransientError(AgentCoreError):
+    """A model provider reported a retryable failure."""
+
+
+class ModelPermanentError(AgentCoreError):
+    """A model provider reported a permanent failure."""
+
+
+class ModelProtocolError(AgentCoreError):
+    """A model provider response violated its protocol."""
+
+
+class ToolTimeoutError(AgentCoreError):
+    """A tool call exceeded its deadline."""
+
+
+class ToolExecutionError(AgentCoreError):
+    """A tool failed while executing."""
+
+
+class ToolResultValidationError(AgentCoreError):
+    """A tool returned a result outside its declared schema."""
+
+
+class SandboxProvisionError(AgentCoreError):
+    """An isolated execution environment could not be created."""
+
+
+class SandboxExecutionError(AgentCoreError):
+    """An isolated execution environment failed during execution."""
+
+
+class ArtifactStorageError(AgentCoreError):
+    """Artifact storage could not satisfy an operation."""
 
 
 class ExportConsentError(AgentCoreError):
@@ -99,3 +210,25 @@ class ArtifactSweepError(AgentCoreError):
 
 class EvalExpectationError(AgentCoreError):
     """A deterministic evaluation result did not match its authored expectation."""
+
+
+# Canonical API taxonomy names. The earlier ``*Error`` spellings remain for
+# compatibility with the runtime while the wire vocabulary stays stable.
+class WorkerFenced(WorkerFencedError):  # noqa: N818 - normative taxonomy name
+    """Internal lease-fencing signal; never returned by the API."""
+
+
+class BudgetExceeded(BudgetExceededError):  # noqa: N818 - normative taxonomy name
+    """Canonical boundary name for a budget failure."""
+
+
+class ApprovalRequired(ApprovalRequiredError):  # noqa: N818 - normative taxonomy name
+    """Canonical boundary name for a parked approval."""
+
+
+class RunCancelled(RunCancelledError):  # noqa: N818 - normative taxonomy name
+    """Canonical boundary name for cooperative cancellation."""
+
+
+class EmptyModelTurn(AgentCoreError):  # noqa: N818 - normative taxonomy name
+    """Internal retry signal; never returned by the API."""

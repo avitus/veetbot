@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
-import unicodedata
 from copy import deepcopy
 from typing import Any
 
 from jsonschema import Draft202012Validator, ValidationError
 
+from agent_core.domain.canonical import canonical_json, canonical_value
 from agent_core.domain.errors import ToolValidationError
 
 MAX_SCHEMA_BYTES = 4 * 1024 * 1024
@@ -70,26 +69,6 @@ def _apply_defaults(instance: object, schema: dict[str, Any]) -> object:
     return instance
 
 
-def _canonical(value: object) -> object:
-    if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
-    if isinstance(value, float):
-        if not math.isfinite(value) or (value == 0.0 and math.copysign(1.0, value) < 0):
-            raise ToolValidationError("non-finite and negative-zero numbers are forbidden")
-        return value
-    if isinstance(value, list):
-        return [_canonical(item) for item in value]
-    if isinstance(value, dict):
-        normalized: dict[str, object] = {}
-        for key, child in sorted(value.items(), key=lambda item: str(item[0]).encode()):
-            normalized_key = unicodedata.normalize("NFC", str(key))
-            if normalized_key in normalized:
-                raise ToolValidationError("tool arguments contain colliding normalized keys")
-            normalized[normalized_key] = _canonical(child)
-        return normalized
-    return value
-
-
 def validate_and_normalize(
     arguments: dict[str, Any], schema: dict[str, Any]
 ) -> tuple[dict[str, Any], str, str]:
@@ -97,20 +76,14 @@ def validate_and_normalize(
 
     candidate = deepcopy(arguments)
     _apply_defaults(candidate, schema)
-    normalized = _canonical(candidate)
+    normalized = canonical_value(candidate)
     if not isinstance(normalized, dict):
         raise ToolValidationError("tool arguments must normalize to an object")
     try:
         Draft202012Validator(schema).validate(normalized)
     except ValidationError as exc:
         raise ToolValidationError("tool arguments do not match the declared schema") from exc
-    rendered = json.dumps(
-        normalized,
-        ensure_ascii=False,
-        allow_nan=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
+    rendered = canonical_json(normalized)
     digest = hashlib.sha256(rendered.encode("utf-8")).hexdigest()
     return normalized, rendered, digest
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
@@ -192,6 +193,9 @@ class _FailFirstDeleteStore:
 
     async def read(self, artifact: ArtifactRef) -> bytes:
         return await self.delegate.read(artifact)
+
+    def stream(self, artifact: ArtifactRef) -> AsyncIterator[bytes]:
+        return self.delegate.stream(artifact)
 
     async def delete(self, artifact: ArtifactRef) -> None:
         self.attempts += 1

@@ -16,6 +16,8 @@ import yaml
 from dotenv import dotenv_values
 from pydantic import SecretStr
 
+from agent_core.policy.scopes import PLATFORM_SCOPES
+
 
 class ConfigurationError(ValueError):
     """Raised when deployment configuration is incomplete or unsafe."""
@@ -52,6 +54,10 @@ class Settings:
     interpolation: Mapping[str, str]
     trajectory_export_enabled: bool = False
     artifact_root: Path = Path(".agent/artifacts")
+    auth_tenant_id: str = ""
+    auth_principal_id: str = ""
+    auth_roles: frozenset[str] = frozenset()
+    auth_scopes: frozenset[str] = frozenset()
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -393,6 +399,17 @@ def validate_settings(settings: Settings) -> None:
         raise ConfigurationError(
             "unsafe authentication configuration: DEPLOYMENT_MODE=production refuses AUTH_MODE=dev"
         )
+    if settings.auth_mode is AuthMode.TOKEN:
+        required_identity = {
+            "AUTH_TENANT_ID": settings.auth_tenant_id,
+            "AUTH_PRINCIPAL_ID": settings.auth_principal_id,
+            "AUTH_SCOPES": settings.auth_scopes,
+        }
+        missing = [name for name, value in required_identity.items() if not value]
+        if missing:
+            raise ConfigurationError(
+                "token authentication requires a configured principal: " + ", ".join(missing)
+            )
 
 
 def validate_runtime_identity(
@@ -443,6 +460,22 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         raise ConfigurationError("AGENT_TRAJECTORY_EXPORT_ENABLED must be 0 or 1")
     trajectory_export_enabled = raw_export_enabled == "1"
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
+    auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
+    auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
+    auth_roles = frozenset(
+        value.strip() for value in values.get("AUTH_ROLES", "").split(",") if value.strip()
+    )
+    raw_auth_scopes = values.get("AUTH_SCOPES", "").strip()
+    auth_scopes = (
+        frozenset(value.strip() for value in raw_auth_scopes.split(",") if value.strip())
+        if raw_auth_scopes
+        else frozenset()
+    )
+    if auth_mode is AuthMode.DEV:
+        auth_tenant_id = "local"
+        auth_principal_id = "local-user"
+        auth_roles = frozenset({"user"})
+        auth_scopes = PLATFORM_SCOPES
     _validate_documents(config_dir, interpolation)
 
     settings = Settings(
@@ -456,6 +489,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         interpolation=MappingProxyType(interpolation),
         trajectory_export_enabled=trajectory_export_enabled,
         artifact_root=artifact_root,
+        auth_tenant_id=auth_tenant_id,
+        auth_principal_id=auth_principal_id,
+        auth_roles=auth_roles,
+        auth_scopes=auth_scopes,
     )
     validate_settings(settings)
     return settings

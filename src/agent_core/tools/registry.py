@@ -39,6 +39,14 @@ BUILTIN_DOMAINS = frozenset(
 )
 RESERVED_DOMAINS = frozenset({"mcp", "device"})
 GLOBAL_MAXIMUM_OUTPUT_BYTES = 4 * 1024 * 1024
+CONTROL_TOOL_NAMES = frozenset(
+    {
+        "conversation.ask_user",
+        "delegate.run",
+        "context.update_working_state",
+        "skill.load",
+    }
+)
 
 
 @dataclass(slots=True)
@@ -83,11 +91,14 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
     if spec.maximum_output_bytes > GLOBAL_MAXIMUM_OUTPUT_BYTES:
         raise ToolValidationError("tool output limit exceeds the global ceiling")
     if spec.kind is ToolKind.CONTROL and (
-        spec.side_effect is not SideEffectClass.NONE
+        spec.name not in CONTROL_TOOL_NAMES
+        or spec.side_effect is not SideEffectClass.NONE
         or spec.idempotency not in {IdempotencyClass.READ_ONLY, IdempotencyClass.IDEMPOTENT}
         or spec.target_kind != "in_process"
     ):
         raise ToolValidationError("control tool classification is invalid")
+    if spec.name in CONTROL_TOOL_NAMES and spec.kind is not ToolKind.CONTROL:
+        raise ToolValidationError("declared control tool must use the control kind")
     if spec.source in {ToolSource.MCP, ToolSource.DEVICE, ToolSource.SANDBOX} or (
         spec.target_kind == "sandbox"
     ):
