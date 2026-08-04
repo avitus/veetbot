@@ -126,15 +126,29 @@ class LocalWorkspaceHandle:
             | getattr(os, "O_NOFOLLOW", 0)
         )
         directory = os.open(self._host_root, directory_flags)
+        current_component = components[-1]
         try:
-            for component in components[:-1]:
-                next_directory = os.open(component, directory_flags, dir_fd=directory)
-                os.close(directory)
-                directory = next_directory
             try:
+                for component in components[:-1]:
+                    current_component = component
+                    next_directory = os.open(component, directory_flags, dir_fd=directory)
+                    os.close(directory)
+                    directory = next_directory
+                current_component = components[-1]
                 descriptor = os.open(components[-1], file_flags, dir_fd=directory)
             except OSError as exc:
-                if exc.errno == errno.ELOOP:
+                symlink_component = exc.errno == errno.ELOOP
+                if exc.errno == errno.ENOTDIR:
+                    try:
+                        metadata = os.stat(
+                            current_component,
+                            dir_fd=directory,
+                            follow_symlinks=False,
+                        )
+                    except OSError:
+                        metadata = None
+                    symlink_component = metadata is not None and stat.S_ISLNK(metadata.st_mode)
+                if symlink_component:
                     raise WorkspaceEscape("workspace path resolves through a symlink") from exc
                 raise
         finally:

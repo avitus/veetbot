@@ -62,9 +62,13 @@ class ArtifactExportTool:
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         raw_workspace = context.workspace
         raw_writer = context.artifacts
-        if not callable(getattr(raw_workspace, "stream", None)) or not callable(
-            getattr(raw_writer, "create", None)
-        ):
+        try:
+            available = callable(getattr(raw_workspace, "stream", None)) and callable(
+                getattr(raw_writer, "create", None)
+            )
+        except RuntimeError:
+            available = False
+        if not available:
             return ToolResult(
                 ok=False,
                 content=[],
@@ -87,6 +91,7 @@ class ArtifactExportTool:
         except (
             FileNotFoundError,
             IsADirectoryError,
+            NotADirectoryError,
             WorkspaceEscape,
         ) as exc:
             return ToolResult(

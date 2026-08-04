@@ -17,6 +17,7 @@ from agent_core.adapters.execution.docker import (
     DockerExecutionEnvironment,
     resolve_local_image_digest,
 )
+from agent_core.domain.errors import WorkspaceEscape
 from agent_core.domain.execution import (
     BridgeEndpoint,
     EgressDestination,
@@ -202,6 +203,43 @@ print(client.makefile('rb').readline().decode().strip())
     assert [(name, arguments) for name, arguments, _call_id in observed] == [
         ("math.calculate", {"expression": "6*7"})
     ]
+
+
+async def test_programmatic_bridge_bounds_large_responses(
+    runtime: tuple[DockerExecutionEnvironment, str],
+) -> None:
+    async def dispatch(call: str, arguments: dict[str, object], call_id: str) -> dict[str, object]:
+        del arguments, call_id
+        if call == "demo.large":
+            return {"status": "succeeded", "result": {"value": "x" * (70 * 1024)}}
+        return {"status": "succeeded", "result": {"value": 42}}
+
+    source = r"""
+import json,os,socket
+client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+client.connect(os.environ['AGENT_TOOL_BRIDGE_SOCKET'])
+stream=client.makefile('rwb')
+for ordinal,call in enumerate(('demo.large','demo.small')):
+  stream.write(json.dumps({'call':call,'arguments':{},'ordinal':ordinal}).encode()+b'\n')
+  stream.flush()
+  print(stream.readline().decode().strip())
+"""
+    session = ProgrammaticBridgeSession(
+        script_hash=hashlib.sha256(source.encode()).hexdigest(),
+        token="test",
+        dispatch=dispatch,
+    )
+    endpoint = BridgeEndpoint(PurePosixPath("/workspace/.agent/large-bridge.sock"), session.token)
+    async with _environment(runtime, run_id=104) as (adapter, handle):
+        result = await adapter.execute_with_bridge(
+            handle,
+            ExecutionCommand(("python", "-c", source), PurePosixPath("."), 8, None, 4096),
+            endpoint,
+            session,
+        )
+    responses = [json.loads(line) for line in result.stdout.splitlines()]
+    assert responses[0]["reason_code"] == "bridge.response_too_large"
+    assert responses[1] == {"status": "succeeded", "result": {"value": 42}}
 
 
 async def test_egress_allowlisted(runtime: tuple[DockerExecutionEnvironment, str]) -> None:
@@ -406,6 +444,34 @@ async def test_workspace_isolated(runtime: tuple[DockerExecutionEnvironment, str
             assert observed == {"exists": False, "roots": []}
         finally:
             await asyncio.gather(adapter.destroy(first), adapter.destroy(second))
+
+
+async def test_workspace_rejects_symlinks_and_preserves_filesystem_errors(
+    runtime: tuple[DockerExecutionEnvironment, str],
+) -> None:
+    setup = r"""
+import os,pathlib
+root=pathlib.Path('/workspace')
+(root/'ancestor').write_bytes(b'file')
+(root/'linked-directory').symlink_to('/etc',target_is_directory=True)
+(root/'linked-file').symlink_to('/etc/passwd')
+os.mkfifo(root/'pipe')
+"""
+    async with _environment(runtime, run_id=145) as (adapter, handle):
+        assert (await _execute(adapter, handle, setup)).exit_code == 0
+        workspace = adapter.workspace(handle)
+        with pytest.raises(WorkspaceEscape):
+            await workspace.read("linked-directory/passwd")
+        with pytest.raises(WorkspaceEscape):
+            await anext(workspace.stream("linked-file", 1024))
+        with pytest.raises(WorkspaceEscape):
+            await workspace.write("linked-directory/new", b"blocked")
+        with pytest.raises(WorkspaceEscape):
+            await workspace.listdir("linked-directory")
+        with pytest.raises(NotADirectoryError):
+            await workspace.listdir("ancestor/child")
+        with pytest.raises(IsADirectoryError):
+            await anext(workspace.stream("pipe", 1024))
 
 
 async def test_no_orphans(runtime: tuple[DockerExecutionEnvironment, str]) -> None:

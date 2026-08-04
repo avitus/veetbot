@@ -22,10 +22,12 @@ async def _run() -> None:
     protocol = asyncio.StreamReaderProtocol(responses)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
     response_lock = asyncio.Lock()
+    response_overrun = asyncio.Event()
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             while True:
+                fatal_response = False
                 try:
                     request = await reader.readline()
                 except ValueError:
@@ -56,10 +58,14 @@ async def _run() -> None:
                                     response = await responses.readline()
                                 except ValueError:
                                     response = _denied("bridge.response_too_large")
+                                    fatal_response = True
                                 if not response:
                                     return
                 writer.write(response.rstrip(b"\n") + b"\n")
                 await writer.drain()
+                if fatal_response:
+                    response_overrun.set()
+                    return
         finally:
             writer.close()
             with suppress(ConnectionError):
@@ -68,7 +74,7 @@ async def _run() -> None:
     server = await asyncio.start_unix_server(handle, path=socket_path, limit=_MAX_REQUEST_BYTES + 1)
     os.chmod(socket_path, 0o600)
     async with server:
-        await server.serve_forever()
+        await response_overrun.wait()
 
 
 def _denied(reason_code: str) -> bytes:

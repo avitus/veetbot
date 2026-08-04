@@ -18,7 +18,12 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.adapters.execution.local_workspace import validated_workspace_components
-from agent_core.domain.errors import ExecutionRejected, ExecutionUnavailable
+from agent_core.domain.errors import (
+    ExecutionRejected,
+    ExecutionUnavailable,
+    WorkspaceEscape,
+    WorkspaceReadLimitExceededError,
+)
 from agent_core.domain.execution import (
     BridgeEndpoint,
     ChangeKind,
@@ -87,6 +92,123 @@ for entry in os.listdir('/proc'):
 try: os.unlink(sys.argv[1])
 except FileNotFoundError: pass
 """
+_WORKSPACE_READ_SCRIPT = r"""
+import errno,os,stat,sys
+parts=[] if sys.argv[1] in ('','.') else sys.argv[1].split('/')
+limit=int(sys.argv[2])
+directory_flags=os.O_RDONLY|getattr(os,'O_CLOEXEC',0)|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0)
+file_flags=os.O_RDONLY|getattr(os,'O_CLOEXEC',0)|getattr(os,'O_NONBLOCK',0)|getattr(os,'O_NOFOLLOW',0)
+def fail(exc,parent,name):
+  if exc.errno==errno.ENOENT: raise SystemExit(44)
+  if exc.errno==errno.ELOOP: raise SystemExit(47)
+  if exc.errno==errno.ENOTDIR:
+    try: mode=os.stat(name,dir_fd=parent,follow_symlinks=False).st_mode
+    except OSError: raise SystemExit(48)
+    raise SystemExit(47 if stat.S_ISLNK(mode) else 48)
+  raise exc
+directory=os.open('/workspace',directory_flags)
+descriptor=None
+try:
+  if not parts: raise SystemExit(45)
+  for component in parts[:-1]:
+    try: next_directory=os.open(component,directory_flags,dir_fd=directory)
+    except OSError as exc: fail(exc,directory,component)
+    os.close(directory); directory=next_directory
+  try: descriptor=os.open(parts[-1],file_flags,dir_fd=directory)
+  except OSError as exc: fail(exc,directory,parts[-1])
+  metadata=os.fstat(descriptor)
+  if not stat.S_ISREG(metadata.st_mode): raise SystemExit(45)
+  if limit>=0 and metadata.st_size>limit: raise SystemExit(46)
+  observed=0
+  while True:
+    chunk=os.read(descriptor,65536)
+    if not chunk: break
+    observed+=len(chunk)
+    if limit>=0 and observed>limit: raise SystemExit(46)
+    sys.stdout.buffer.write(chunk)
+finally:
+  if descriptor is not None: os.close(descriptor)
+  os.close(directory)
+"""
+_WORKSPACE_WRITE_SCRIPT = r"""
+import errno,os,stat,sys
+parts=[] if sys.argv[1] in ('','.') else sys.argv[1].split('/')
+directory_flags=os.O_RDONLY|getattr(os,'O_CLOEXEC',0)|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0)
+file_flags=os.O_RDWR|os.O_CREAT|getattr(os,'O_CLOEXEC',0)|getattr(os,'O_NONBLOCK',0)|getattr(os,'O_NOFOLLOW',0)
+def fail(exc,parent,name):
+  if exc.errno==errno.ENOENT: raise SystemExit(44)
+  if exc.errno==errno.ELOOP: raise SystemExit(47)
+  if exc.errno in (errno.EISDIR,errno.ENXIO): raise SystemExit(45)
+  if exc.errno==errno.ENOTDIR:
+    try: mode=os.stat(name,dir_fd=parent,follow_symlinks=False).st_mode
+    except OSError: raise SystemExit(48)
+    raise SystemExit(47 if stat.S_ISLNK(mode) else 48)
+  raise exc
+directory=os.open('/workspace',directory_flags)
+descriptor=None
+try:
+  if not parts: raise SystemExit(45)
+  for component in parts[:-1]:
+    try: next_directory=os.open(component,directory_flags,dir_fd=directory)
+    except OSError as exc:
+      if exc.errno==errno.ENOENT:
+        try: os.mkdir(component,0o700,dir_fd=directory)
+        except FileExistsError: pass
+        try: next_directory=os.open(component,directory_flags,dir_fd=directory)
+        except OSError as retry_exc: fail(retry_exc,directory,component)
+      else: fail(exc,directory,component)
+    os.close(directory); directory=next_directory
+  try: descriptor=os.open(parts[-1],file_flags,0o600,dir_fd=directory)
+  except OSError as exc: fail(exc,directory,parts[-1])
+  if not stat.S_ISREG(os.fstat(descriptor).st_mode): raise SystemExit(45)
+  os.ftruncate(descriptor,0)
+  data=sys.stdin.buffer.read()
+  offset=0
+  while offset<len(data): offset+=os.write(descriptor,data[offset:])
+finally:
+  if descriptor is not None: os.close(descriptor)
+  os.close(directory)
+"""
+_WORKSPACE_LIST_SCRIPT = r"""
+import errno,json,os,stat,sys
+parts=[] if sys.argv[1] in ('','.') else sys.argv[1].split('/')
+recursive=sys.argv[2]=='1'
+directory_flags=os.O_RDONLY|getattr(os,'O_CLOEXEC',0)|getattr(os,'O_DIRECTORY',0)|getattr(os,'O_NOFOLLOW',0)
+def fail(exc,parent,name):
+  if exc.errno==errno.ENOENT: raise SystemExit(44)
+  if exc.errno==errno.ELOOP: raise SystemExit(47)
+  if exc.errno==errno.ENOTDIR:
+    try: mode=os.stat(name,dir_fd=parent,follow_symlinks=False).st_mode
+    except OSError: raise SystemExit(48)
+    raise SystemExit(47 if stat.S_ISLNK(mode) else 48)
+  raise exc
+directory=os.open('/workspace',directory_flags)
+try:
+  for component in parts:
+    try: next_directory=os.open(component,directory_flags,dir_fd=directory)
+    except OSError as exc: fail(exc,directory,component)
+    os.close(directory); directory=next_directory
+  result=[]
+  def walk(parent,prefix):
+    for name in sorted(os.listdir(parent)):
+      try: metadata=os.stat(name,dir_fd=parent,follow_symlinks=False)
+      except OSError: continue
+      if stat.S_ISLNK(metadata.st_mode): continue
+      relative='/'.join((*prefix,name))
+      if stat.S_ISDIR(metadata.st_mode):
+        result.append({'path':relative,'kind':'directory','size_bytes':0})
+        if recursive:
+          try: child=os.open(name,directory_flags,dir_fd=parent)
+          except OSError: continue
+          try: walk(child,(*prefix,name))
+          finally: os.close(child)
+      else:
+        result.append({'path':relative,'kind':'file','size_bytes':metadata.st_size})
+  walk(directory,tuple(parts))
+  print(json.dumps(result,separators=(',',':')))
+finally: os.close(directory)
+"""
+_MAX_BRIDGE_MESSAGE_BYTES = 64 * 1024
 
 
 class _BridgeHandler(Protocol):
@@ -175,53 +297,17 @@ class DockerWorkspaceHandle:
 
     async def _read(self, path: str, maximum_bytes: int | None) -> bytes:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
-        script = r"""
-import pathlib,sys
-p=pathlib.Path('/workspace')/sys.argv[1]
-if not p.exists(): raise SystemExit(44)
-if not p.is_file(): raise SystemExit(45)
-n=int(sys.argv[2])
-if n>=0 and p.stat().st_size>n: raise SystemExit(46)
-sys.stdout.buffer.write(p.read_bytes())
-"""
         state = self._owner._state(self._handle)
         limit = -1 if maximum_bytes is None else maximum_bytes
         try:
             return await _docker(
-                "exec", state.container_id, "python", "-c", script, relative, str(limit)
-            )
-        except _DockerCommandError as exc:
-            if exc.return_code == 44:
-                raise FileNotFoundError(path) from exc
-            if exc.return_code == 45:
-                raise IsADirectoryError(path) from exc
-            if exc.return_code == 46 and maximum_bytes is not None:
-                from agent_core.domain.errors import WorkspaceReadLimitExceededError
-
-                raise WorkspaceReadLimitExceededError("workspace file exceeds read limit") from exc
-            raise
-
-    async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
-        if maximum_bytes < 0:
-            raise ValueError("maximum_bytes must not be negative")
-        relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
-        state = self._owner._state(self._handle)
-        validation = r"""
-import pathlib,sys
-p=pathlib.Path('/workspace')/sys.argv[1]
-if not p.exists(): raise SystemExit(44)
-if not p.is_file(): raise SystemExit(45)
-if p.stat().st_size>int(sys.argv[2]): raise SystemExit(46)
-"""
-        try:
-            await _docker(
                 "exec",
                 state.container_id,
                 "python",
                 "-c",
-                validation,
+                _WORKSPACE_READ_SCRIPT,
                 relative,
-                str(maximum_bytes),
+                str(limit),
             )
         except _DockerCommandError as exc:
             if exc.return_code == 44:
@@ -229,26 +315,29 @@ if p.stat().st_size>int(sys.argv[2]): raise SystemExit(46)
             if exc.return_code == 45:
                 raise IsADirectoryError(path) from exc
             if exc.return_code == 46:
-                from agent_core.domain.errors import WorkspaceReadLimitExceededError
-
                 raise WorkspaceReadLimitExceededError("workspace file exceeds read limit") from exc
+            if exc.return_code == 47:
+                raise WorkspaceEscape("workspace path resolves through a symlink") from exc
+            if exc.return_code == 48:
+                raise NotADirectoryError(path) from exc
             raise
-        script = r"""
-import pathlib,sys
-p=pathlib.Path('/workspace')/sys.argv[1]
-with p.open('rb') as source:
-  while chunk:=source.read(65536): sys.stdout.buffer.write(chunk)
-"""
+
+    async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
+        if maximum_bytes < 0:
+            raise ValueError("maximum_bytes must not be negative")
+        relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
+        state = self._owner._state(self._handle)
         process = await asyncio.create_subprocess_exec(
             "docker",
             "exec",
             state.container_id,
             "python",
             "-c",
-            script,
+            _WORKSPACE_READ_SCRIPT,
             relative,
+            str(maximum_bytes),
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
         if process.stdout is None:
             raise ExecutionUnavailable("container runtime did not provide an output pipe")
@@ -259,11 +348,20 @@ with p.open('rb') as source:
                 if observed > maximum_bytes:
                     process.kill()
                     await process.wait()
-                    from agent_core.domain.errors import WorkspaceReadLimitExceededError
-
                     raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
                 yield chunk
-            if await process.wait() != 0:
+            return_code = await process.wait()
+            if return_code == 44:
+                raise FileNotFoundError(path)
+            if return_code == 45:
+                raise IsADirectoryError(path)
+            if return_code == 46:
+                raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
+            if return_code == 47:
+                raise WorkspaceEscape("workspace path resolves through a symlink")
+            if return_code == 48:
+                raise NotADirectoryError(path)
+            if return_code != 0:
                 raise ExecutionUnavailable("container workspace stream failed")
         finally:
             if process.returncode is None:
@@ -272,13 +370,6 @@ with p.open('rb') as source:
 
     async def write(self, path: str, data: bytes) -> None:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
-        script = r"""
-import pathlib,sys
-p=pathlib.Path('/workspace')/sys.argv[1]
-if p.is_dir(): raise SystemExit(45)
-p.parent.mkdir(parents=True,exist_ok=True)
-p.write_bytes(sys.stdin.buffer.read())
-"""
         state = self._owner._state(self._handle)
         try:
             await _docker(
@@ -287,33 +378,22 @@ p.write_bytes(sys.stdin.buffer.read())
                 state.container_id,
                 "python",
                 "-c",
-                script,
+                _WORKSPACE_WRITE_SCRIPT,
                 relative,
                 stdin=data,
             )
         except _DockerCommandError as exc:
             if exc.return_code == 45:
                 raise IsADirectoryError(path) from exc
+            if exc.return_code == 47:
+                raise WorkspaceEscape("workspace path resolves through a symlink") from exc
+            if exc.return_code == 48:
+                raise NotADirectoryError(path) from exc
             raise
         state.provenance[PurePosixPath(relative)] = WorkspaceProvenance.TOOL_WRITTEN
 
     async def listdir(self, path: str, *, recursive: bool = False) -> tuple[WorkspaceEntry, ...]:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
-        script = r"""
-import json,pathlib,sys
-root=pathlib.Path('/workspace')
-base=root/sys.argv[1]
-if not base.exists(): raise SystemExit(44)
-if not base.is_dir(): raise SystemExit(45)
-items=base.rglob('*') if sys.argv[2]=='1' else base.iterdir()
-result=[]
-for p in items:
-  if not p.is_symlink():
-    result.append({'path':str(p.relative_to(root)),
-                   'kind':'directory' if p.is_dir() else 'file',
-                   'size_bytes':0 if p.is_dir() else p.stat().st_size})
-print(json.dumps(result))
-"""
         state = self._owner._state(self._handle)
         try:
             raw_payload = await _docker(
@@ -321,15 +401,17 @@ print(json.dumps(result))
                 state.container_id,
                 "python",
                 "-c",
-                script,
+                _WORKSPACE_LIST_SCRIPT,
                 relative,
                 "1" if recursive else "0",
             )
         except _DockerCommandError as exc:
             if exc.return_code == 44:
                 raise FileNotFoundError(path) from exc
-            if exc.return_code == 45:
+            if exc.return_code in {45, 48}:
                 raise NotADirectoryError(path) from exc
+            if exc.return_code == 47:
+                raise WorkspaceEscape("workspace path resolves through a symlink") from exc
             raise
         payload = json.loads(raw_payload.decode("utf-8"))
         return tuple(
@@ -579,6 +661,11 @@ class DockerExecutionEnvironment:
             except Exception:
                 response = (
                     b'{"status":"unavailable","reason_code":"bridge.internal_error",'
+                    b'"retryable":false}'
+                )
+            if len(response) > _MAX_BRIDGE_MESSAGE_BYTES:
+                response = (
+                    b'{"status":"denied","reason_code":"bridge.response_too_large",'
                     b'"retryable":false}'
                 )
             process.stdin.write(response + b"\n")
@@ -889,7 +976,9 @@ class DockerExecutionEnvironment:
                 run_id = UUID(raw_run_id)
                 lease_epoch = int(raw_epoch)
                 expired = int(raw_expiry) <= now_epoch
-                old_enough = int(raw_created) + self._reaper_grace_seconds <= now_epoch
+                old_enough = (
+                    not raw_created or int(raw_created) + self._reaper_grace_seconds <= now_epoch
+                )
             except (ValueError, TypeError):
                 continue
             if not expired and (run_id, lease_epoch) in live_leases:

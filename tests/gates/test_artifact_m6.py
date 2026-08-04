@@ -43,6 +43,11 @@ async def _chunks(content: bytes) -> AsyncIterator[bytes]:
         yield content[offset : offset + 4093]
 
 
+class _UnavailableCollaborator:
+    def __getattr__(self, name: str) -> object:
+        raise RuntimeError(f"collaborator {name!r} unavailable")
+
+
 def _settings(tmp_path: Path) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://unused/agent",
@@ -144,6 +149,24 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
         with pytest.raises(ArtifactIntegrityError):
             await store.put(_chunks(content), mismatch)
         assert not list(composition.settings.artifact_root.rglob(str(mismatch.artifact_id)))
+
+
+async def test_artifact_export_normalizes_an_unavailable_writer() -> None:
+    result = await ArtifactExportTool().execute(
+        {
+            "path": "result.bin",
+            "filename": "result.bin",
+            "media_type": "application/octet-stream",
+        },
+        replace(
+            tool_context(),
+            workspace=_UnavailableCollaborator(),
+            artifacts=_UnavailableCollaborator(),
+        ),
+    )
+    assert result.ok is False
+    assert result.failure is not None
+    assert result.failure.reason_code == "tool.internal_error"
 
 
 async def test_generated_workspace_file_exports_as_authorized_artifact(tmp_path: Path) -> None:

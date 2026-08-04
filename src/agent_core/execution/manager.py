@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import asynccontextmanager
 from pathlib import PurePosixPath
 from typing import Protocol, cast
 from uuid import UUID
 
+from agent_core.domain.errors import ExecutionRejected
 from agent_core.domain.execution import (
     BridgeEndpoint,
     EgressPolicy,
@@ -68,28 +70,42 @@ class LeaseWorkspaceHandle:
 
         return self.root.joinpath(*validated_workspace_components(path))
 
-    async def _delegate(self) -> WorkspaceHandle:
-        return await self._manager.workspace_for(self._tenant_id, self._run_id, self._lease_epoch)
-
     async def read(self, path: str) -> bytes:
-        return await (await self._delegate()).read(path)
+        async with self._manager.workspace_operation(
+            self._tenant_id, self._run_id, self._lease_epoch
+        ) as workspace:
+            return await workspace.read(path)
 
     async def read_bounded(self, path: str, maximum_bytes: int) -> bytes:
-        return await (await self._delegate()).read_bounded(path, maximum_bytes)
+        async with self._manager.workspace_operation(
+            self._tenant_id, self._run_id, self._lease_epoch
+        ) as workspace:
+            return await workspace.read_bounded(path, maximum_bytes)
 
     async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
-        delegate = await self._delegate()
-        async for chunk in delegate.stream(path, maximum_bytes):
-            yield chunk
+        async with self._manager.workspace_operation(
+            self._tenant_id, self._run_id, self._lease_epoch
+        ) as workspace:
+            async for chunk in workspace.stream(path, maximum_bytes):
+                yield chunk
 
     async def write(self, path: str, data: bytes) -> None:
-        await (await self._delegate()).write(path, data)
+        async with self._manager.workspace_operation(
+            self._tenant_id, self._run_id, self._lease_epoch
+        ) as workspace:
+            await workspace.write(path, data)
 
     async def listdir(self, path: str, *, recursive: bool = False) -> tuple[WorkspaceEntry, ...]:
-        return tuple(await (await self._delegate()).listdir(path, recursive=recursive))
+        async with self._manager.workspace_operation(
+            self._tenant_id, self._run_id, self._lease_epoch
+        ) as workspace:
+            return tuple(await workspace.listdir(path, recursive=recursive))
 
     async def provenance(self, path: str) -> WorkspaceProvenance:
-        return await (await self._delegate()).provenance(path)
+        async with self._manager.workspace_operation(
+            self._tenant_id, self._run_id, self._lease_epoch
+        ) as workspace:
+            return await workspace.provenance(path)
 
 
 class SandboxManager:
@@ -116,6 +132,11 @@ class SandboxManager:
         self._handles: dict[tuple[str, UUID, int], EnvironmentHandle] = {}
         self._locks: dict[tuple[str, UUID, int], asyncio.Lock] = {}
         self._guard = asyncio.Lock()
+        self._condition = asyncio.Condition(self._guard)
+        self._active: dict[tuple[str, UUID, int], int] = {}
+        self._released_runs: set[UUID] = set()
+        self._closing = False
+        self._teardown_lock = asyncio.Lock()
 
     def for_run(self, tenant_id: str, run_id: object, lease_epoch: int = 0) -> LeaseWorkspaceHandle:
         if not isinstance(run_id, UUID):
@@ -148,14 +169,38 @@ class SandboxManager:
                 ),
             )
             handle = await self._environment.provision(spec)
-            self._handles[key] = handle
+            async with self._guard:
+                self._handles[key] = handle
             return handle
 
-    async def workspace_for(
+    @asynccontextmanager
+    async def _operation(
         self, tenant_id: str, run_id: UUID, lease_epoch: int
-    ) -> WorkspaceHandle:
-        handle = await self._handle_for(tenant_id, run_id, lease_epoch)
-        return self._environment.workspace(handle)
+    ) -> AsyncIterator[EnvironmentHandle]:
+        key = (tenant_id, run_id, lease_epoch)
+        async with self._condition:
+            if self._closing:
+                raise ExecutionRejected("sandbox manager is closing")
+            if run_id in self._released_runs:
+                raise ExecutionRejected("sandbox run has been released")
+            self._active[key] = self._active.get(key, 0) + 1
+        try:
+            yield await self._handle_for(tenant_id, run_id, lease_epoch)
+        finally:
+            async with self._condition:
+                remaining = self._active[key] - 1
+                if remaining:
+                    self._active[key] = remaining
+                else:
+                    self._active.pop(key, None)
+                self._condition.notify_all()
+
+    @asynccontextmanager
+    async def workspace_operation(
+        self, tenant_id: str, run_id: UUID, lease_epoch: int
+    ) -> AsyncIterator[WorkspaceHandle]:
+        async with self._operation(tenant_id, run_id, lease_epoch) as handle:
+            yield self._environment.workspace(handle)
 
     async def execute_for(
         self,
@@ -165,29 +210,53 @@ class SandboxManager:
         command: ExecutionCommand,
         bridge: _BridgeHandler | None = None,
     ) -> ExecutionResult:
-        handle = await self._handle_for(tenant_id, run_id, lease_epoch)
-        if bridge is not None:
-            bridge_environment = cast(_BridgeExecutionEnvironment, self._environment)
-            endpoint = BridgeEndpoint(
-                socket_path=PurePosixPath(f"/workspace/.agent/bridge-{secrets.token_hex(8)}.sock"),
-                token=bridge.token,
-            )
-            return await bridge_environment.execute_with_bridge(handle, command, endpoint, bridge)
-        return await self._environment.execute(handle, command)
+        async with self._operation(tenant_id, run_id, lease_epoch) as handle:
+            if bridge is not None:
+                bridge_environment = cast(_BridgeExecutionEnvironment, self._environment)
+                endpoint = BridgeEndpoint(
+                    socket_path=PurePosixPath(
+                        f"/workspace/.agent/bridge-{secrets.token_hex(8)}.sock"
+                    ),
+                    token=bridge.token,
+                )
+                return await bridge_environment.execute_with_bridge(
+                    handle, command, endpoint, bridge
+                )
+            return await self._environment.execute(handle, command)
 
-    async def release_run(self, run_id: UUID) -> None:
-        matches = [(key, handle) for key, handle in self._handles.items() if key[1] == run_id]
+    async def _destroy_matches(
+        self, matches: tuple[tuple[tuple[str, UUID, int], EnvironmentHandle], ...]
+    ) -> None:
         errors: list[Exception] = []
+        cancelled: asyncio.CancelledError | None = None
         for key, handle in matches:
             try:
                 await self._environment.destroy(handle)
+            except asyncio.CancelledError as exc:
+                cancelled = cancelled or exc
             except Exception as exc:
                 errors.append(exc)
             else:
-                self._handles.pop(key, None)
-                self._locks.pop(key, None)
+                async with self._guard:
+                    if self._handles.get(key) == handle:
+                        self._handles.pop(key, None)
+                        self._locks.pop(key, None)
+        if cancelled is not None:
+            raise cancelled
         if errors:
-            raise ExceptionGroup("one or more sandbox releases failed", errors)
+            raise ExceptionGroup("one or more sandbox teardowns failed", errors)
+
+    async def release_run(self, run_id: UUID) -> None:
+        async with self._teardown_lock:
+            async with self._condition:
+                self._released_runs.add(run_id)
+                await self._condition.wait_for(
+                    lambda: not any(key[1] == run_id for key in self._active)
+                )
+                matches = tuple(
+                    (key, handle) for key, handle in self._handles.items() if key[1] == run_id
+                )
+            await self._destroy_matches(matches)
 
     async def reap(self, live_leases: frozenset[tuple[UUID, int]]) -> int:
         reaper = getattr(self._environment, "reap", None)
@@ -196,17 +265,11 @@ class SandboxManager:
         return int(await reaper(frozenset(live_leases)))
 
     async def close(self) -> None:
-        errors: list[Exception] = []
-        for key, handle in tuple(self._handles.items()):
-            try:
-                await self._environment.destroy(handle)
-            except Exception as exc:
-                errors.append(exc)
-            else:
-                self._handles.pop(key, None)
-                self._locks.pop(key, None)
-        if errors:
-            raise ExceptionGroup("one or more sandbox closes failed", errors)
+        async with self._condition:
+            self._closing = True
+            await self._condition.wait_for(lambda: not self._active)
+        async with self._teardown_lock:
+            await self._destroy_matches(tuple(self._handles.items()))
 
     @property
     def adapter(self) -> ExecutionEnvironment:

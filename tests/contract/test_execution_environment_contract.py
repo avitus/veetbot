@@ -1,5 +1,6 @@
 """Shared execution-environment semantics exercised against the deterministic adapter."""
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from uuid import UUID
@@ -14,6 +15,7 @@ from agent_core.domain.execution import (
     EnvironmentHandle,
     EnvironmentSpec,
     ExecutionCommand,
+    ExecutionResult,
     ResourceLimits,
 )
 from agent_core.execution.manager import SandboxManager
@@ -35,6 +37,29 @@ class _FailingDestroyEnvironment(FakeExecutionEnvironment):
             self.fail_next_destroy = False
             raise RuntimeError("synthetic destroy failure")
         await super().destroy(environment)
+
+
+class _CancellingDestroyEnvironment(_FailingDestroyEnvironment):
+    async def destroy(self, environment: EnvironmentHandle) -> None:
+        self.destroy_attempts.append(environment.environment_id)
+        if self.fail_next_destroy:
+            self.fail_next_destroy = False
+            raise asyncio.CancelledError
+        await FakeExecutionEnvironment.destroy(self, environment)
+
+
+class _BlockingExecutionEnvironment(FakeExecutionEnvironment):
+    def __init__(self, clock: FixedClock, ids: SequenceIdFactory) -> None:
+        super().__init__(clock, ids)
+        self.started = asyncio.Event()
+        self.proceed = asyncio.Event()
+
+    async def execute(
+        self, environment: EnvironmentHandle, command: ExecutionCommand
+    ) -> ExecutionResult:
+        self.started.set()
+        await self.proceed.wait()
+        return await super().execute(environment, command)
 
 
 async def test_execution_environment_lifecycle_stdin_and_output_limit() -> None:
@@ -119,11 +144,88 @@ async def test_sandbox_release_attempts_all_handles_and_retains_failures() -> No
         limits=_limits(),
     )
     run_id = UUID(int=13)
-    await manager.workspace_for("tenant-a", run_id, 1)
-    await manager.workspace_for("tenant-a", run_id, 2)
+    await manager.for_run("tenant-a", run_id, 1).write("one", b"1")
+    await manager.for_run("tenant-a", run_id, 2).write("two", b"2")
     with pytest.raises(ExceptionGroup):
         await manager.release_run(run_id)
     assert len(adapter.destroy_attempts) == 2
     assert len(adapter.live_environment_ids()) == 1
     await manager.release_run(run_id)
+    assert adapter.live_environment_ids() == frozenset()
+
+
+async def test_sandbox_release_attempts_all_handles_before_propagating_cancellation() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _CancellingDestroyEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    run_id = UUID(int=14)
+    await manager.for_run("tenant-a", run_id, 1).write("one", b"1")
+    await manager.for_run("tenant-a", run_id, 2).write("two", b"2")
+    with pytest.raises(asyncio.CancelledError):
+        await manager.release_run(run_id)
+    assert len(adapter.destroy_attempts) == 2
+    assert len(adapter.live_environment_ids()) == 1
+    await manager.release_run(run_id)
+    assert adapter.live_environment_ids() == frozenset()
+
+
+async def test_sandbox_close_attempts_all_handles_before_propagating_cancellation() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _CancellingDestroyEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    await manager.for_run("tenant-a", UUID(int=140), 1).write("one", b"1")
+    await manager.for_run("tenant-a", UUID(int=141), 1).write("two", b"2")
+    with pytest.raises(asyncio.CancelledError):
+        await manager.close()
+    assert len(adapter.destroy_attempts) == 2
+    assert len(adapter.live_environment_ids()) == 1
+    await manager.close()
+    assert adapter.live_environment_ids() == frozenset()
+
+
+async def test_sandbox_release_waits_for_active_operations_and_blocks_new_ones() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _BlockingExecutionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    run_id = UUID(int=15)
+    execution = asyncio.create_task(
+        manager.execute_for(
+            "tenant-a",
+            run_id,
+            1,
+            ExecutionCommand(("true",), PurePosixPath(""), 1, None, 10),
+        )
+    )
+    await adapter.started.wait()
+    release = asyncio.create_task(manager.release_run(run_id))
+    await asyncio.sleep(0)
+    assert release.done() is False
+    with pytest.raises(ExecutionRejected, match="released"):
+        await manager.for_run("tenant-a", run_id, 1).read("new")
+    adapter.proceed.set()
+    await execution
+    await release
+    assert adapter.live_environment_ids() == frozenset()
+
+
+async def test_sandbox_close_waits_for_active_operations_and_blocks_provisioning() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _BlockingExecutionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=_limits())
+    execution = asyncio.create_task(
+        manager.execute_for(
+            "tenant-a",
+            UUID(int=16),
+            1,
+            ExecutionCommand(("true",), PurePosixPath(""), 1, None, 10),
+        )
+    )
+    await adapter.started.wait()
+    closing = asyncio.create_task(manager.close())
+    await asyncio.sleep(0)
+    with pytest.raises(ExecutionRejected, match="closing"):
+        await manager.for_run("tenant-a", UUID(int=17), 1).read("new")
+    adapter.proceed.set()
+    await execution
+    await closing
     assert adapter.live_environment_ids() == frozenset()

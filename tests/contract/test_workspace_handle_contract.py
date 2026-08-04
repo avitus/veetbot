@@ -33,6 +33,13 @@ async def test_workspace_stream_refuses_symlinks_and_special_files(tmp_path: Pat
     with pytest.raises(WorkspaceEscape):
         await anext(handle.stream("link.txt", 1024))
 
+    outside_directory = tmp_path / "outside"
+    outside_directory.mkdir()
+    (outside_directory / "secret.txt").write_bytes(b"secret")
+    (root / "linked-directory").symlink_to(outside_directory, target_is_directory=True)
+    with pytest.raises(WorkspaceEscape):
+        await handle.read("linked-directory/secret.txt")
+
     fifo = root / "pipe"
     os.mkfifo(fifo)
     with pytest.raises(IsADirectoryError):

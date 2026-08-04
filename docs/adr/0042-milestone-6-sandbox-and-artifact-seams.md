@@ -42,7 +42,11 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    path; the reaper destroys anything whose lease epoch is no longer live. A
    newly created, unexpired environment receives a 60-second grace window
    before a missing lease snapshot can reap it, closing the race between lease
-   acquisition and the maintenance worker's database read.
+   acquisition and the maintenance worker's database read. Release and process
+   shutdown first prevent new lease operations, wait for active execution and
+   workspace operations, and then attempt every teardown. Cancellation is
+   re-raised only after those bounded attempts finish, while failed handles
+   remain available to a later cleanup retry.
 5. **Portable workspace quotas use an active service-side monitor.** Docker's
    local volume driver has no portable per-volume byte or inode quota. The
    adapter measures both while a command runs, kills on the first violation,
@@ -61,7 +65,9 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    execution adapter forwards newline-delimited requests over the runtime
    process pipes to a one-turn `ProgrammaticBridgeSession`, which adds the
    bearer token, derives stable call IDs, caps calls at 64, and re-enters the
-   ordinary tool pipeline.
+   ordinary tool pipeline. Both directions have a 64-KiB message ceiling; an
+   unexpected response-stream overrun terminates the relay instead of allowing
+   leftover bytes to be interpreted as a later response.
 8. **General artifacts use store-then-metadata commit order.** The application
    writer spools a bounded stream, computes its digest and size, writes bytes
    under a key derived only from tenant and artifact IDs, and then commits
@@ -96,6 +102,13 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
     container before returning the structured kill result. Task cancellation
     performs the same bounded cleanup and re-raises `CancelledError` instead of
     converting caller cancellation into an ordinary tool result.
+13. **Workspace path containment is descriptor-relative.** Local and Docker
+    workspace reads open every component beneath the workspace directory with
+    no-follow semantics, validate the resulting descriptor as a regular file,
+    and stream from that descriptor. Docker writes and listings use the same
+    component walk. This rejects intermediate and final symlinks without a
+    check/use race and preserves distinct missing-path, non-directory, special
+    file, and read-limit errors across both adapters.
 
 ## Consequences
 

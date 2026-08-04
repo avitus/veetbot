@@ -155,3 +155,26 @@ async def test_reaper_grace_protects_a_new_lease_snapshot(
     clock.advance(timedelta(seconds=61))
     assert await adapter.reap(frozenset()) == 1
     assert "rm" in [operation[0] for operation in operations]
+
+
+async def test_reaper_cleans_legacy_containers_without_creation_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    line = (
+        f"container\tenvironment\t{UUID(int=92)}\t1\t"
+        f"{int((now + timedelta(minutes=5)).timestamp())}\t\n"
+    ).encode()
+    operations: list[tuple[str, ...]] = []
+
+    async def docker(*arguments: str, stdin: bytes | None = None) -> bytes:
+        del stdin
+        operations.append(arguments)
+        return line if arguments[0] == "ps" else b""
+
+    monkeypatch.setattr("agent_core.adapters.execution.docker._docker", docker)
+    adapter = DockerExecutionEnvironment(
+        FixedClock(now), SequenceIdFactory(), reaper_grace_seconds=60
+    )
+    assert await adapter.reap(frozenset()) == 1
+    assert "rm" in [operation[0] for operation in operations]
