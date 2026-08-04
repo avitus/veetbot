@@ -21,7 +21,12 @@ from agent_core.domain.approvals import (
     ApprovalResolutionType,
     ApprovalStatus,
 )
-from agent_core.domain.errors import AuthorizationError, NotFoundError, ToolValidationError
+from agent_core.domain.errors import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ToolValidationError,
+)
 from agent_core.domain.messages import (
     FakeModelScript,
     ScriptedToolCall,
@@ -45,6 +50,7 @@ from agent_core.domain.policies import (
 from agent_core.domain.runs import Run, RunStatus, Step
 from agent_core.domain.tools import (
     ToolExecutionContext,
+    ToolInvocation,
     ToolInvocationStatus,
     ToolOutcome,
     ToolOutcomeStatus,
@@ -449,6 +455,88 @@ async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(
 
     assert parallel_read.peak == 2
     assert external_write.peak == 1
+
+
+async def test_approval_compensation_preserves_the_transition_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _SchedulingTool(
+        name="demo.compensation",
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
+        parallel=False,
+    )
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    async with build(settings=_settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("prepare approval compensation")
+        active_run = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            invocations = uow.invocations
+            approvals = uow.approvals
+        normalized, _canonical, arguments_hash = validate_and_normalize({}, tool.spec.input_schema)
+        invocation = ToolInvocation(
+            id=UUID(int=401),
+            run_id=run_id,
+            session_id=active_run.session_id,
+            step_number=2,
+            call_id="compensation-call",
+            tool_name=tool.spec.name,
+            tool_version=tool.spec.version,
+            idempotency_class=tool.spec.idempotency,
+            side_effect=tool.spec.side_effect,
+            risk=tool.spec.risk,
+            status=ToolInvocationStatus.PROPOSED,
+            raw_arguments="{}",
+            normalized_arguments=normalized,
+            normalized_arguments_hash=arguments_hash,
+            idempotency_key="compensation-key",
+            created_at=app.clock.now(),
+            updated_at=app.clock.now(),
+        )
+
+        async def fail_transition(*args: object, **kwargs: object) -> ToolInvocation:
+            del args, kwargs
+            raise ConflictError("primary transition failure")
+
+        original_discard = approvals.discard_pending
+
+        async def discard_then_cancel(approval_id: UUID) -> None:
+            await original_discard(approval_id)
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(invocations, "transition", fail_transition)
+        monkeypatch.setattr(approvals, "discard_pending", discard_then_cancel)
+        pipeline = ToolPipeline(registry, app.uow_factory, app.clock, ids())
+        decision = PolicyDecision(
+            decision=PolicyDecisionType.REQUIRE_APPROVAL,
+            reason_code="policy.test.approval",
+            explanation="Exercise compensation failure handling.",
+            policy_version="test@approval+h00000000",
+        )
+        with pytest.raises(ConflictError, match="primary transition failure"):
+            await pipeline._request_approval(
+                active_run,
+                ToolCallItem(
+                    call_id=invocation.call_id,
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={},
+                    raw_arguments="{}",
+                ),
+                principal(),
+                active_agent,
+                tool,
+                invocation,
+                decision,
+                None,
+            )
+
+        assert await app.approvals.list_pending(run_id=run_id) == []
 
 
 async def test_operator_policy_overlay_is_hashed_audited_and_evaluated(

@@ -7,7 +7,7 @@ import hashlib
 import logging
 import re
 from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
@@ -831,7 +831,8 @@ class ToolPipeline:
                     invocation.id, invocation.status, waiting, lease=lease
                 )
             except BaseException:
-                await uow.approvals.discard_pending(created.id)
+                with suppress(BaseException):
+                    await uow.approvals.discard_pending(created.id)
                 raise
         return created
 

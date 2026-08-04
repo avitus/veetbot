@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import os
+import stat
 from pathlib import Path, PurePosixPath
 from uuid import UUID
 
@@ -66,10 +67,18 @@ class LocalWorkspaceHandle:
         target = self._host_path(path)
 
         def _read() -> bytes:
-            if target.stat().st_size > maximum_bytes:
-                raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
-            with target.open("rb") as source:
-                data = source.read(maximum_bytes + 1)
+            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+            descriptor = os.open(target, flags)
+            try:
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise IsADirectoryError(str(path))
+                if metadata.st_size > maximum_bytes:
+                    raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
+                with os.fdopen(descriptor, "rb", closefd=False) as source:
+                    data = source.read(maximum_bytes + 1)
+            finally:
+                os.close(descriptor)
             if len(data) > maximum_bytes:
                 raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
             return data

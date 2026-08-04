@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import agent_core.bootstrap as bootstrap_module
 from agent_core.bootstrap import build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
@@ -63,3 +66,17 @@ async def test_three_identical_denials_fail_the_run(tmp_path: Path) -> None:
         assert failed.failure is not None
         assert failed.failure.reason is FailureReason.REPEATED_DENIAL
         assert failed.failure.error_class == "ToolPolicyDenied"
+
+
+async def test_completed_run_releases_its_active_token(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    token_slot = bootstrap_module._ActiveToken()
+    monkeypatch.setattr(bootstrap_module, "_ActiveToken", lambda: token_slot)
+    script = FakeModelScript(turns=[ScriptedTurn(text="done", stop_reason=StopReason.END_TURN)])
+    async with build(settings=settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("complete and release the token")
+        assert (await app.runs.get(run_id)).status is RunStatus.COMPLETED
+
+    assert run_id not in token_slot._tokens

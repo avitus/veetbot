@@ -163,6 +163,9 @@ class _ActiveToken:
     def set(self, run_id: UUID, token: RunCancellationToken) -> None:
         self._tokens[run_id] = token
 
+    def discard(self, run_id: UUID) -> None:
+        self._tokens.pop(run_id, None)
+
     def cancel(self, run_id: UUID | None) -> None:
         tokens = tuple(self._tokens.values()) if run_id is None else (self._tokens.get(run_id),)
         for token in tokens:
@@ -364,6 +367,7 @@ async def _compose(
             dispatch_tools=pipeline.dispatch,
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
+            on_token_complete=token_slot.discard,
             max_internal_attempts=max_internal_attempts,
             identical_call_threshold=identical_call_threshold,
             identical_denial_threshold=identical_denial_threshold,

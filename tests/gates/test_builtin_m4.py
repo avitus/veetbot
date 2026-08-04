@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import asyncio
+import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -84,6 +86,18 @@ async def test_text_only(tmp_path: Path) -> None:
     assert not oversized.ok
     assert oversized.failure is not None
     assert oversized.failure.kind.value == "output_too_large"
+    root = tmp_path / "workspace"
+    (root / "directory").mkdir()
+    directory = await WorkspaceReadTextTool().execute({"path": "directory"}, context)
+    assert directory.failure is not None
+    assert directory.failure.reason_code == "tool.invalid_arguments.not_a_file"
+    os.mkfifo(root / "named-pipe")
+    special = await asyncio.wait_for(
+        WorkspaceReadTextTool().execute({"path": "named-pipe"}, context),
+        timeout=1,
+    )
+    assert special.failure is not None
+    assert special.failure.reason_code == "tool.invalid_arguments.not_a_file"
 
 
 async def test_invalid_workspace_paths_are_structured_failures(tmp_path: Path) -> None:

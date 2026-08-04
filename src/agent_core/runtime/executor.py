@@ -45,6 +45,7 @@ from agent_core.runtime.loop import RunContext, ToolDispatch, checkpoint, run_lo
 
 type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
+type TokenCompleteCallback = Callable[[UUID], None]
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +77,7 @@ class RunExecutor:
         dispatch_tools: ToolDispatch,
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
+        on_token_complete: TokenCompleteCallback | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
@@ -94,6 +96,7 @@ class RunExecutor:
         self._dispatch_tools = dispatch_tools
         self._seed_checkpoint = seed_checkpoint
         self._on_token = on_token
+        self._on_token_complete = on_token_complete
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
@@ -145,7 +148,10 @@ class RunExecutor:
                     payload={"attempt": run.attempts + 1},
                 )
             )
-        await self._execute_running(run, lease=None)
+        try:
+            await self._execute_running(run, lease=None)
+        finally:
+            self._complete_token(run.id)
 
     async def execute_claimed(
         self,
@@ -155,7 +161,14 @@ class RunExecutor:
     ) -> None:
         """Resume a run that a durable worker claimed and already marked running."""
 
-        await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
+        try:
+            await self._execute_running(claimed.run, lease=claimed.lease, on_token=on_token)
+        finally:
+            self._complete_token(claimed.run.id)
+
+    def _complete_token(self, run_id: UUID) -> None:
+        if self._on_token_complete is not None:
+            self._on_token_complete(run_id)
 
     async def _execute_running(
         self,
