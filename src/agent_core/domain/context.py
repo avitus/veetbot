@@ -96,6 +96,7 @@ class ContextPlan(BaseModel):
     tool_schema_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     snapshot_id: UUID | None = None
     snapshot_watermark: int = Field(default=0, ge=0)
+    memory_snapshot: str = ""
     skill_pins: tuple[SkillPin, ...] = ()
     skill_catalog: tuple[CatalogMetadata, ...] = ()
     cache_breakpoints: tuple[CacheBreakpoint, ...] = ()

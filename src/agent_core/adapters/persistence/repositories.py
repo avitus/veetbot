@@ -1527,6 +1527,42 @@ class PostgresArtifactRepository:
             raise NotFoundError("artifact not found")
         return artifact_to_domain(row)
 
+    async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
+        row = (
+            await self._session.scalars(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .values(origin="knowledge_source", expires_at=None)
+                .returning(ArtifactRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return artifact_to_domain(row)
+
+    async def expire(
+        self, artifact_id: UUID, principal: Principal, expired_at: datetime
+    ) -> ArtifactRef:
+        row = (
+            await self._session.scalars(
+                update(ArtifactRow)
+                .where(
+                    ArtifactRow.id == artifact_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .values(expires_at=expired_at)
+                .returning(ArtifactRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("artifact not found")
+        return artifact_to_domain(row)
+
     async def list_expired(self, now: datetime, *, limit: int) -> list[ArtifactRef]:
         rows = list(
             (
@@ -1534,6 +1570,7 @@ class PostgresArtifactRepository:
                     select(ArtifactRow)
                     .where(
                         ArtifactRow.origin != "trajectory_export",
+                        ArtifactRow.expires_at.is_not(None),
                         ArtifactRow.expires_at <= now,
                     )
                     .order_by(ArtifactRow.expires_at, ArtifactRow.id)

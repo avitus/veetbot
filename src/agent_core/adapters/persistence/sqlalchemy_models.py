@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -10,7 +10,9 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
@@ -18,6 +20,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    Sequence,
     SmallInteger,
     String,
     Text,
@@ -27,6 +30,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+MEMORY_POSITION_SEQUENCE = Sequence("memory_store_position_seq")
 
 NAMING_CONVENTION = {
     "ix": "ix_%(table_name)s_%(column_0_name)s",
@@ -597,3 +602,192 @@ class MCPToolCatalogRow(Base):
     input_schema: Mapped[dict[str, Any]] = mapped_column(JSONB)
     discovered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryRow(Base):
+    __tablename__ = "memories"
+    __table_args__ = (
+        Index(
+            "ix_memories_principal_live_position",
+            "tenant_id",
+            "principal_id",
+            "status",
+            text("store_position DESC"),
+        ),
+        Index(
+            "ix_memories_fts",
+            text("to_tsvector('simple'::regconfig, (subject || ' '::text) || statement)"),
+            postgresql_using="gin",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    statement: Mapped[str] = mapped_column(Text)
+    source_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="RESTRICT")
+    )
+    source_event_ids: Mapped[list[int]] = mapped_column(JSONB)
+    confidence: Mapped[float] = mapped_column(Float)
+    sensitivity: Mapped[str] = mapped_column(Text)
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text)
+    belief_type: Mapped[str] = mapped_column(Text)
+    polarity: Mapped[str] = mapped_column(Text)
+    portability: Mapped[str] = mapped_column(Text)
+    origin_scopes: Mapped[list[str]] = mapped_column(JSONB)
+    corroboration_count: Mapped[int] = mapped_column(Integer)
+    last_reinforced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    superseded_by: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("memories.id", ondelete="SET NULL")
+    )
+    conflicts_with: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    flagged_for_review: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    formation_run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    consolidation_policy_version: Mapped[str] = mapped_column(Text)
+    authority: Mapped[str] = mapped_column(Text)
+    utility: Mapped[float] = mapped_column(Float, server_default=text("0"))
+    store_position: Mapped[int] = mapped_column(BigInteger, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MemoryRejectionRow(Base):
+    __tablename__ = "memory_rejections"
+    __table_args__ = (
+        Index("ix_memory_rejections_principal", "tenant_id", "principal_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    belief_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    kind: Mapped[str] = mapped_column(Text)
+    subject: Mapped[str] = mapped_column(Text)
+    statement: Mapped[str | None] = mapped_column(Text)
+    statement_sha256: Mapped[str] = mapped_column(String(64))
+    belief_type: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str] = mapped_column(Text)
+    replacement_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    trace_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ConsolidationRunRow(Base):
+    __tablename__ = "consolidation_runs"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    trigger: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="SET NULL")
+    )
+    watermark_before: Mapped[int] = mapped_column(BigInteger)
+    watermark_after: Mapped[int] = mapped_column(BigInteger)
+    model: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(Text)
+    candidates_proposed: Mapped[int] = mapped_column(Integer)
+    committed: Mapped[int] = mapped_column(Integer)
+    reinforced: Mapped[int] = mapped_column(Integer)
+    superseded: Mapped[int] = mapped_column(Integer)
+    rejected: Mapped[int] = mapped_column(Integer)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConsolidationWatermarkRow(Base):
+    __tablename__ = "consolidation_watermarks"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), primary_key=True
+    )
+    sequence: Mapped[int] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class RecallTraceRow(Base):
+    __tablename__ = "recall_traces"
+    __table_args__ = (Index("ix_recall_traces_turn", "turn_id", "created_at"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    turn_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    trace: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    operator_fields_expire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class KnowledgeDocumentRow(Base):
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "document_id", "version", name="uq_knowledge_document_version"
+        ),
+        Index(
+            "ix_knowledge_documents_live",
+            "tenant_id",
+            "document_id",
+            "valid_to",
+        ),
+    )
+
+    row_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    tenant_id: Mapped[str] = mapped_column(Text)
+    ingested_by_principal_id: Mapped[str] = mapped_column(Text)
+    visibility: Mapped[str] = mapped_column(Text)
+    project_scope: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)
+    source_artifact_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("artifacts.id", ondelete="RESTRICT")
+    )
+    media_type: Mapped[str] = mapped_column(Text)
+    doc_date: Mapped[date | None] = mapped_column(Date)
+    authority: Mapped[str] = mapped_column(Text)
+    version: Mapped[int] = mapped_column(Integer)
+    chunker_version: Mapped[str] = mapped_column(Text)
+    superseded_by: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("knowledge_documents.row_id", ondelete="SET NULL")
+    )
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    valid_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    sensitivity: Mapped[str] = mapped_column(Text)
+
+
+class KnowledgeChunkRow(Base):
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        UniqueConstraint("document_row_id", "ordinal", name="uq_knowledge_chunk_document_ordinal"),
+        Index(
+            "ix_knowledge_chunks_fts",
+            text("to_tsvector('simple'::regconfig, (heading_path::text || ' '::text) || text)"),
+            postgresql_using="gin",
+        ),
+    )
+
+    chunk_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    document_row_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("knowledge_documents.row_id", ondelete="CASCADE")
+    )
+    document_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    version: Mapped[int] = mapped_column(Integer)
+    ordinal: Mapped[int] = mapped_column(Integer)
+    heading_path: Mapped[list[str]] = mapped_column(JSONB)
+    text: Mapped[str] = mapped_column(Text)
+    tokens: Mapped[int] = mapped_column(Integer)
+    contains_instruction_like_text: Mapped[bool] = mapped_column(Boolean)
+    content_sha256: Mapped[str] = mapped_column(String(64))

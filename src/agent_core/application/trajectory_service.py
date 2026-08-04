@@ -192,7 +192,7 @@ class TrajectoryExportService:
                     or existing.principal_id != self._principal.principal_id
                 ):
                     raise ExportConsentError("the run was exported by another principal")
-                if existing.artifact.expires_at > now:
+                if existing.artifact.expires_at is None or existing.artifact.expires_at > now:
                     return existing.artifact
                 raise ExportStateError("the prior export expired and awaits its sweep")
             projection = await uow.trajectory.catch_up(run.id)
@@ -280,7 +280,10 @@ class TrajectoryExportService:
     async def read(self, run_id: UUID) -> bytes:
         async with self._uow_factory() as uow:
             export = await uow.trajectory_exports.get_for_run(run_id)
-        if export is None or export.artifact.expires_at <= self._clock.now():
+        if export is None or (
+            export.artifact.expires_at is not None
+            and export.artifact.expires_at <= self._clock.now()
+        ):
             raise NotFoundError("trajectory export not found")
         if (
             export.tenant_id != self._principal.tenant_id

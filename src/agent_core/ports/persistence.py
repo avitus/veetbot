@@ -11,7 +11,9 @@ from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
+from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
+from agent_core.ports.memory import MemoryStore, TraceStore
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -52,6 +54,9 @@ class RepositoryUnitOfWork(Protocol):
     maintenance: MaintenanceRepository
     skills: SkillRepository
     mcp_servers: MCPServerRepository
+    memories: MemoryStore
+    traces: TraceStore
+    knowledge: KnowledgeStore
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None:

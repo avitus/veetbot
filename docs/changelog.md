@@ -4,6 +4,37 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-04 — Milestone 9 implementation in progress
+
+- Merged the reviewed Milestone 8 pull request after all hosted CircleCI lanes
+  passed and every CodeRabbit thread was resolved.
+- Authorized implementation of long-term memory formation and retrieval,
+  user-managed beliefs, and knowledge-document ingestion and passage retrieval.
+  The 26 Milestone 9 gates bring the cumulative active gate count to 166.
+- Added provenance-bound explicit formation and deterministic consolidation,
+  correction tombstones, reinforcement and supersession, human CLI management,
+  expiry maintenance, hybrid structured/full-text recall, reciprocal-rank
+  fusion, frozen session snapshots, in-turn recall, episodic search, and
+  sensitivity-filtered faithful traces.
+- Added retained knowledge-source artifacts, normalized deterministic chunking,
+  versioned document ingestion, principal/project/tenant visibility, bounded
+  verbatim passage search with citations, and deletion that cascades through
+  chunks, bytes, and historical trace visibility.
+- Added the five memory and knowledge builtins to the centralized policy and
+  approval pipeline. Model-context provenance is checkpointed so snapshot and
+  in-turn memory cannot silently authorize a subsequent persistent write.
+- Added the Milestone 9 PostgreSQL migration and repository adapters, twelve new
+  port-contract suites, four adversarial/retrieval corpora, and deterministic
+  `carry: [memory]` evaluation with fresh source provenance in its isolated
+  second arm.
+- Proposed ADR-0045 for the reversible implementation seams. Passed all 512
+  non-live tests across the static, contract, PostgreSQL, resilience, and real
+  Docker partitions, all 166 cumulative gates, the strict documentation build,
+  and the clean Alembic metadata check.
+- Fixed all three findings from the local CodeRabbit review. The full follow-up
+  review completed with zero findings; hosted CI and review remain before
+  Milestone 9 can be marked complete.
+
 ## 2026-08-04 — Milestone 8 skills and MCP integration completed
 
 - Added validated immutable skill packages, content-addressed deterministic

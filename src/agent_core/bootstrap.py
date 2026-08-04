@@ -44,6 +44,11 @@ from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
 from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
 from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
 from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
+from agent_core.adapters.memory.in_memory import (
+    InMemoryKnowledgeStore,
+    InMemoryMemoryStore,
+    InMemoryTraceStore,
+)
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -73,6 +78,11 @@ from agent_core.adapters.persistence.memory import (
     InMemoryTrajectoryExportRepository,
     InMemoryTrajectoryProjectionRepository,
     InMemoryUsageRepository,
+)
+from agent_core.adapters.persistence.memory_repositories import (
+    PostgresKnowledgeStore,
+    PostgresMemoryStore,
+    PostgresTraceStore,
 )
 from agent_core.adapters.persistence.projections import (
     PostgresSessionHistoryRepository,
@@ -175,8 +185,15 @@ from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
+from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import validate_mcp_config
 from agent_core.mcp.runtime import MCPRuntime
+from agent_core.memory.formation import GovernedMemoryService
+from agent_core.memory.retrieval import (
+    DeterministicQueryFormer,
+    EventEpisodeSearch,
+    HybridMemoryRetriever,
+)
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
@@ -203,6 +220,11 @@ from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorki
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
+from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
+from agent_core.tools.knowledge_search import KnowledgeSearchTool
+from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
+from agent_core.tools.memory_remember import MemoryRememberTool
+from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME, SkillLoadTool
@@ -243,6 +265,9 @@ class Composition:
     mcp: MCPRuntime
     skill_catalogs: SkillCatalogService
     tool_pipeline: ToolPipeline
+    memory: GovernedMemoryService
+    memory_retriever: HybridMemoryRetriever
+    knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
 
 
@@ -340,6 +365,9 @@ def _memory_uow_repositories(
     approvals: InMemoryApprovalRepository | None = None,
     skills: SkillRepository | None = None,
     mcp_servers: MCPServerRepository | None = None,
+    memories: InMemoryMemoryStore | None = None,
+    traces: InMemoryTraceStore | None = None,
+    knowledge: InMemoryKnowledgeStore | None = None,
 ) -> UnitOfWorkRepositories:
     approvals = approvals or InMemoryApprovalRepository(clock)
     skills = skills or InMemorySkillRepository(
@@ -349,6 +377,9 @@ def _memory_uow_repositories(
         RandomIdFactory(),
     )
     mcp_servers = mcp_servers or InMemoryMCPServerRepository()
+    memories = memories or InMemoryMemoryStore(clock)
+    traces = traces or InMemoryTraceStore()
+    knowledge = knowledge or InMemoryKnowledgeStore(clock)
     return UnitOfWorkRepositories(
         agents=agents,
         approvals=approvals,
@@ -369,6 +400,9 @@ def _memory_uow_repositories(
         maintenance=InMemoryMaintenanceRepository(),
         skills=skills,
         mcp_servers=mcp_servers,
+        memories=memories,
+        traces=traces,
+        knowledge=knowledge,
         queue=None,
     )
 
@@ -395,6 +429,9 @@ def _postgres_repository_factory(
         trajectory = PostgresTrajectoryProjectionRepository(session, clock, upcasters)
         checkpoints = PostgresCheckpointRepository(session, clock, history)
         invocations = PostgresToolInvocationRepository(session, runs)
+        memories = PostgresMemoryStore(session, clock)
+        traces = PostgresTraceStore(session)
+        knowledge = PostgresKnowledgeStore(session, clock)
         return UnitOfWorkRepositories(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
@@ -422,6 +459,9 @@ def _postgres_repository_factory(
                 register_rollback,
             ),
             mcp_servers=PostgresMCPServerRepository(session, clock),
+            memories=memories,
+            traces=traces,
+            knowledge=knowledge,
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -572,6 +612,10 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
+    memory_service = GovernedMemoryService(uow_factory, clock, ids, principal)
+    memory_retriever = HybridMemoryRetriever(uow_factory, clock, ids, principal)
+    episode_search = EventEpisodeSearch(uow_factory, principal)
+    query_former = DeterministicQueryFormer(principal)
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
@@ -584,6 +628,9 @@ async def _compose(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
     registry.register(ArtifactExportTool())
+    registry.register(MemoryRememberTool(memory_service))
+    registry.register(MemorySearchTool(memory_retriever))
+    registry.register(MemoryRecallEpisodesTool(episode_search))
 
     async def validate_source_events(
         session_id: UUID,
@@ -677,12 +724,15 @@ async def _compose(
             context_config,
             policy_version=ruleset.policy_version,
             skill_catalogs=skill_catalogs,
+            memory_retriever=memory_retriever,
         )
         context_builder = BudgetedContextBuilder(
             context_planner,
             estimator,
             clock,
             working_state,
+            memory_retriever,
+            query_former,
         )
         compactor = StructuredCompactor(
             estimator,
@@ -692,6 +742,15 @@ async def _compose(
         general_artifact_store = FilesystemArtifactStore(
             artifact_root, maximum_bytes=artifact_maximum_bytes
         )
+        knowledge_service = KnowledgeService(
+            uow_factory,
+            general_artifact_store,
+            clock,
+            ids,
+            principal,
+        )
+        registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
+        registry.register(KnowledgeSearchTool(knowledge_service))
         artifact_writers = ArtifactWriterFactory(
             uow_factory,
             general_artifact_store,
@@ -707,6 +766,9 @@ async def _compose(
                     return await uow.artifacts.exists(artifact_id)
 
             return await general_artifact_store.reconcile_orphans(metadata_exists, now=clock.now())
+
+        async def sweep_memory() -> int:
+            return len(await memory_service.expire())
 
         pipeline = ToolPipeline(
             registry,
@@ -800,6 +862,14 @@ async def _compose(
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
         )
+
+        async def consolidate_closed_session(session_id: UUID) -> None:
+            await memory_service.run(
+                trigger="session_close",
+                scope="general",
+                session_id=session_id,
+            )
+
         public_session_service = PublicSessionService(
             uow_factory,
             clock,
@@ -808,6 +878,7 @@ async def _compose(
             catalogs=skill_catalogs,
             activate_session=mcp_runtime.activate_session,
             close_session=mcp_runtime.close_session,
+            on_session_closed=consolidate_closed_session,
         )
         public_services = ApplicationServices(
             sessions=public_session_service,
@@ -869,11 +940,15 @@ async def _compose(
                     sweep_artifacts=artifact_writers.sweep_expired,
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
+                    sweep_memory=sweep_memory,
                 ),
                 sandbox=sandbox_manager,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
                 tool_pipeline=pipeline,
+                memory=memory_service,
+                memory_retriever=memory_retriever,
+                knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
             ),
             list(effective_providers.values()),
@@ -1043,7 +1118,7 @@ async def build(
             if model_policy is None
             else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
         ),
-        name="Milestone 8 Agent",
+        name="Milestone 9 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
         model_policy=effective_model_policy,
         enabled_tools=(
@@ -1061,6 +1136,11 @@ async def build(
                 "artifact.export",
                 WORKING_STATE_TOOL_NAME,
                 SKILL_LOAD_TOOL_NAME,
+                "memory.remember",
+                "memory.search",
+                "memory.recall_episodes",
+                "knowledge.ingest",
+                "knowledge.search",
             ]
         ),
         enabled_skills=list(enabled_skills or []),

@@ -34,9 +34,36 @@ from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tools import ToolSpec
 from agent_core.ports.context import ContextPlanner, TokenEstimator
 from agent_core.ports.determinism import Clock
+from agent_core.ports.memory import MemoryRetriever, QueryFormer
 from agent_core.ports.tools import ToolRegistry
 
 MAX_LOADED_SKILL_BODIES = 2
+
+
+def _current_user_text(items: list[ConversationItem]) -> str | None:
+    for item in reversed(items):
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
+            text = "\n".join(
+                part.text for part in item.content if isinstance(part, TextPart)
+            ).strip()
+            return text or None
+    return None
+
+
+def _insert_before_current_user(
+    items: list[ConversationItem], additions: list[ConversationItem]
+) -> list[ConversationItem]:
+    if not additions:
+        return [item.model_copy(deep=True) for item in items]
+    for index in range(len(items) - 1, -1, -1):
+        item = items[index]
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.USER:
+            return [
+                *[value.model_copy(deep=True) for value in items[:index]],
+                *[value.model_copy(deep=True) for value in additions],
+                *[value.model_copy(deep=True) for value in items[index:]],
+            ]
+    return [item.model_copy(deep=True) for item in items]
 
 
 def _canonical_json(value: object) -> bytes:
@@ -147,6 +174,7 @@ class MinimalContextBuilder:
                 "prefix_sha256": prefix_sha256,
                 "body_sha256": body_sha256,
                 "region_a_items": str(len(prefix)),
+                "context_origin_trust": TrustLevel.USER.value,
             },
             cache_hints=CacheHints(
                 breakpoints=[
@@ -170,11 +198,15 @@ class BudgetedContextBuilder:
         estimator: TokenEstimator,
         clock: Clock,
         working_state: WorkingStateManager,
+        memory_retriever: MemoryRetriever | None = None,
+        query_former: QueryFormer | None = None,
     ) -> None:
         self._planner = planner
         self._estimator = estimator
         self._clock = clock
         self._working_state = working_state
+        self._memory_retriever = memory_retriever
+        self._query_former = query_former
 
     async def measure(
         self,
@@ -216,7 +248,12 @@ class BudgetedContextBuilder:
         plan = await self._planner.current(run.session_id)
         if plan is None:
             raise ContextOverflow("the session has no durable context plan")
-        prefix = build_prefix(agent, plan.tool_specs, plan.skill_catalog)
+        prefix = build_prefix(
+            agent,
+            plan.tool_specs,
+            plan.skill_catalog,
+            plan.memory_snapshot,
+        )
         actual_prefix_hash = hashlib.sha256(prefix_bytes(prefix, plan.tool_specs)).hexdigest()
         if actual_prefix_hash != plan.prefix_sha256:
             raise ContextOverflow("the frozen context prefix no longer matches its plan")
@@ -264,7 +301,8 @@ class BudgetedContextBuilder:
             )
             for body in checkpoint.loaded_skills
         ]
-        working_items = working_state_items(self._working_state.load(checkpoint.working_state))
+        state = self._working_state.load(checkpoint.working_state)
+        working_items = working_state_items(state)
         working_tokens = self._estimator.estimate(envelope_items(working_items), plan.model_id)
         working_state_over_cap = working_tokens > plan.budget.working_state_tokens
         runtime_item = UserMessage(
@@ -281,9 +319,49 @@ class BudgetedContextBuilder:
             trust=TrustLevel.PLATFORM,
             principal_id=None,
         )
-        fixed_body = [*summary_items, *skill_items, *working_items, runtime_item, *active]
+        recall_items: list[ConversationItem] = []
+        if self._memory_retriever is not None and self._query_former is not None:
+            queries = self._query_former.form(run, state, _current_user_text(active))
+            if queries:
+                recalled = await self._memory_retriever.recall(
+                    queries[0],
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    turn_id=run.id,
+                    moment="in_turn",
+                )
+                if recalled.items:
+                    recall_items = [
+                        UserMessage(
+                            content=[TextPart(text=recalled.rendered)],
+                            trust=TrustLevel.MEMORY,
+                            principal_id=None,
+                        )
+                    ]
+        active_with_recall = _insert_before_current_user(active, recall_items)
+        fixed_body = [
+            *summary_items,
+            *skill_items,
+            *working_items,
+            runtime_item,
+            *active_with_recall,
+        ]
         fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
         fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
+        recall_dropped = False
+        if recall_items and fixed_total > plan.budget.total_tokens:
+            recall_dropped = True
+            recall_items = []
+            active_with_recall = [item.model_copy(deep=True) for item in active]
+            fixed_body = [
+                *summary_items,
+                *skill_items,
+                *working_items,
+                runtime_item,
+                *active_with_recall,
+            ]
+            fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
+            fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         available_history = (
             0 if working_state_over_cap else max(0, plan.budget.total_tokens - fixed_total)
         )
@@ -296,7 +374,7 @@ class BudgetedContextBuilder:
             plan.model_id,
         )
         retained_history = [item.model_copy(deep=True) for item in history[cut:]]
-        retained_conversation = [*retained_history, *active]
+        retained_conversation = [*retained_history, *active_with_recall]
         validate_tool_pairs(retained_conversation)
 
         yield_steps: list[str] = []
@@ -304,6 +382,8 @@ class BudgetedContextBuilder:
             yield_steps.append("tool_results")
         if cut:
             yield_steps.append("history")
+        if recall_dropped:
+            yield_steps.insert(0, "recall")
 
         body = [
             *summary_items,
@@ -311,7 +391,7 @@ class BudgetedContextBuilder:
             *skill_items,
             *working_items,
             runtime_item,
-            *active,
+            *active_with_recall,
         ]
         rendered_body = envelope_items(body)
         body_tokens = self._estimator.estimate(rendered_body, plan.model_id)
@@ -395,6 +475,11 @@ class BudgetedContextBuilder:
                 "context_total_tokens": str(total_tokens),
                 "context_capacity_tokens": str(capacity),
                 "context_reserve_tokens": str(plan.budget.reserve_output_tokens),
+                "context_origin_trust": (
+                    TrustLevel.MEMORY.value
+                    if plan.memory_snapshot or recall_items
+                    else TrustLevel.USER.value
+                ),
             },
             cache_hints=CacheHints(
                 breakpoints=[item.model_copy(deep=True) for item in plan.cache_breakpoints]

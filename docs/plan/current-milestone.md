@@ -4,17 +4,17 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 8 — skills and MCP integration (complete)
-- **Next milestone:** Milestone 9 — long-term memory and knowledge retrieval
+- **Current milestone:** Milestone 9 — long-term memory and knowledge retrieval
+  (in progress)
+- **Next milestone:** None authorized. Milestone 10 remains an open direction.
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 8 are complete. Milestone 9 is
-  authorized but remains sequentially gated until the Milestone 8 pull request
-  is merged.
+- **Project status:** Milestones 0 through 8 are complete. Milestone 9 is in
+  progress on its dedicated development branch.
 
-Milestone 8 adds immutable, content-addressed skill packages; pinned session
-catalogs and selectively loaded bodies; MCP discovery, authentication, and
-transport adapters; and dynamic MCP tools routed through the centralized tool
-pipeline. The
+Milestone 9 adds governed, provenance-linked belief formation; deterministic
+hybrid retrieval with frozen session snapshots and faithful recall traces; a
+human memory-management surface; and separately governed knowledge-document
+ingestion, passage retrieval, citations, versions, and deletion. The
 machine-readable [project state](../status/project-state.yaml) records progress
 and evidence.
 
@@ -36,14 +36,13 @@ substitute.
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Begin Milestone 9 only after the Milestone 8 pull request is reviewed, passes
-hosted CI, and is merged. Milestone 10 is not authorized because the readiness
+Milestone 9 began after the reviewed Milestone 8 pull request passed hosted CI
+and merged into `dev`. Milestone 10 is not authorized because the readiness
 review records that it has no complete acceptance criteria.
 
 ## Completion rule
 
-Milestone 8 is complete. All 467 non-live tests, all four hosted CircleCI lanes,
-all 140 cumulative gates, and the final finding-free CodeRabbit review pass.
-Every prior review thread is resolved. Proposed ADR-0044 records the
-implementation decisions reserved for later owner review. Milestone 9 begins
-only after the reviewed Milestone 8 pull request is merged into `dev`.
+Milestone 9 remains in progress until all 26 new gates and all 166 cumulative
+gates pass; combined local verification passes; all hosted CircleCI lanes pass;
+and every CodeRabbit review finding is addressed and resolved. Its pull request
+must merge into `dev` before the milestone is complete.

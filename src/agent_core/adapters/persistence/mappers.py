@@ -463,8 +463,6 @@ def model_call_values(call: ModelCallRecord) -> dict[str, Any]:
 
 
 def artifact_to_domain(row: ArtifactRow) -> ArtifactRef:
-    if row.expires_at is None:
-        raise ValueError("artifact has no expiry in the Milestone 6 storage tier")
     return ArtifactRef(
         id=row.id,
         tenant_id=row.tenant_id,

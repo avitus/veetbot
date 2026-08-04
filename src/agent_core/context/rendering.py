@@ -35,6 +35,7 @@ def build_prefix(
     agent: AgentSpec,
     tools: Sequence[ToolSpec],
     skill_catalog: Sequence[CatalogMetadata] = (),
+    memory_snapshot: str = "",
 ) -> list[ConversationItem]:
     tool_names = ", ".join(spec.name for spec in tools) or "none"
     base: list[ConversationItem] = [
@@ -66,7 +67,18 @@ def build_prefix(
         )
         for entry in skill_catalog
     ]
-    return [*base, *envelope_items(catalog_items)]
+    memory_items = (
+        []
+        if not memory_snapshot
+        else [
+            UserMessage(
+                content=[TextPart(text=memory_snapshot)],
+                trust=TrustLevel.MEMORY,
+                principal_id=None,
+            )
+        ]
+    )
+    return [*base, *envelope_items([*catalog_items, *memory_items])]
 
 
 def prefix_bytes(prefix: Sequence[ConversationItem], tools: Sequence[ToolSpec]) -> bytes:

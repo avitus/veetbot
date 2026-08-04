@@ -149,6 +149,7 @@ async def test_consent_is_stamped_forward_and_withdrawn_backward(tmp_path: Path)
         async with composition.uow_factory() as uow:
             expired = await uow.trajectory_exports.get_for_run(exportable)
         assert expired is not None
+        assert expired.artifact.expires_at is not None
         assert expired.artifact.expires_at <= composition.clock.now()
         assert await composition.trajectories.sweep_once() == 1
         assert not artifact_path.exists()

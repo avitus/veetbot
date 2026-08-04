@@ -12,7 +12,7 @@ from agent_core.adapters.persistence.memory import (
     InMemorySessionRepository,
 )
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.policies import ExecutionTarget
+from agent_core.domain.policies import ExecutionTarget, TrustLevel
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolExecutionContext
@@ -124,6 +124,7 @@ def tool_context() -> ToolExecutionContext:
         credentials=object(),
         bridge_dispatch=None,
         working_state={},
+        origin_trust=TrustLevel.USER,
         cancellation=NeverCancelled(),
         mark_effect_sent=no_effect,
     )

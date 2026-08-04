@@ -204,6 +204,7 @@ class PublicSessionService:
         catalogs: SkillCatalog | None = None,
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
         close_session: Callable[[UUID], Awaitable[None]] | None = None,
+        on_session_closed: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -212,6 +213,7 @@ class PublicSessionService:
         self._catalogs = catalogs
         self._activate_session = activate_session
         self._close_session = close_session
+        self._on_session_closed = on_session_closed
 
     async def _resolve_agent(self, uow: RepositoryUnitOfWork, agent_id: str) -> AgentSpec:
         if agent_id in {"general", str(self._default_agent.id)}:
@@ -301,6 +303,8 @@ class PublicSessionService:
                 session = await uow.sessions.close(session_id, principal, self._clock.now())
         if self._close_session is not None:
             await self._close_session(session_id)
+        if self._on_session_closed is not None:
+            await self._on_session_closed(session_id)
         return _session_view(session, None)
 
     async def ready(self) -> bool:
@@ -906,7 +910,7 @@ class PublicArtifactService:
                 artifact = await uow.artifacts.get(artifact_id, principal)
                 is_trajectory = False
         # ArtifactRef requires an expiry, and persistence mapping rejects legacy null rows.
-        if artifact.expires_at <= self._clock.now():
+        if artifact.expires_at is not None and artifact.expires_at <= self._clock.now():
             raise NotFoundError("artifact not found")
         return artifact, is_trajectory
 
