@@ -292,7 +292,7 @@ def _validate_document_value(
     if (
         minimum is not None
         and isinstance(value, (int, float))
-        and (not isfinite(value) or value < minimum)
+        and ((isinstance(value, float) and not isfinite(value)) or value < minimum)
     ):
         raise ConfigurationError(f"{location} must be at least {minimum}")
 
