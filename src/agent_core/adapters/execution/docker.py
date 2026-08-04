@@ -368,15 +368,35 @@ class DockerWorkspaceHandle:
         observed = 0
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _DOCKER_COMMAND_TIMEOUT_SECONDS
+        deadline_expired = asyncio.Event()
+
+        async def enforce_deadline() -> None:
+            await asyncio.sleep(_DOCKER_COMMAND_TIMEOUT_SECONDS)
+            deadline_expired.set()
+            if process.returncode is None:
+                with suppress(ProcessLookupError):
+                    process.kill()
+            await asyncio.gather(process.wait(), return_exceptions=True)
+
+        deadline_task = asyncio.create_task(enforce_deadline())
         try:
-            while chunk := await asyncio.wait_for(
-                process.stdout.read(64 * 1024),
-                max(0.0, deadline - loop.time()),
-            ):
+            while True:
+                if deadline_expired.is_set():
+                    raise ExecutionUnavailable("container workspace stream timed out")
+                chunk = await asyncio.wait_for(
+                    process.stdout.read(64 * 1024),
+                    max(0.0, deadline - loop.time()),
+                )
+                if deadline_expired.is_set():
+                    raise ExecutionUnavailable("container workspace stream timed out")
+                if not chunk:
+                    break
                 observed += len(chunk)
                 if observed > maximum_bytes:
                     raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
                 yield chunk
+            if deadline_expired.is_set():
+                raise ExecutionUnavailable("container workspace stream timed out")
             return_code = await asyncio.wait_for(process.wait(), max(0.0, deadline - loop.time()))
             if return_code == 44:
                 raise FileNotFoundError(path)
@@ -391,8 +411,11 @@ class DockerWorkspaceHandle:
             if return_code != 0:
                 raise ExecutionUnavailable("container workspace stream failed")
         except TimeoutError as exc:
+            deadline_expired.set()
             raise ExecutionUnavailable("container workspace stream timed out") from exc
         finally:
+            deadline_task.cancel()
+            await asyncio.gather(deadline_task, return_exceptions=True)
             if process.returncode is None:
                 with suppress(ProcessLookupError):
                     process.kill()

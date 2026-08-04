@@ -280,6 +280,52 @@ async def test_docker_workspace_stream_uses_one_total_deadline(
     assert process.waited is True
 
 
+async def test_docker_workspace_deadline_runs_while_iterator_is_suspended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class OneChunkReader:
+        delivered = False
+
+        async def read(self, maximum_bytes: int) -> bytes:
+            del maximum_bytes
+            if not self.delivered:
+                self.delivered = True
+                return b"chunk"
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    class SuspendedProcess:
+        stdout = OneChunkReader()
+        returncode: int | None = None
+        killed = asyncio.Event()
+        reaped = asyncio.Event()
+
+        def kill(self) -> None:
+            self.returncode = -9
+            self.killed.set()
+
+        async def wait(self) -> int:
+            self.reaped.set()
+            assert self.returncode is not None
+            return self.returncode
+
+    process = SuspendedProcess()
+
+    async def spawn(*args: object, **kwargs: object) -> SuspendedProcess:
+        del args, kwargs
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(docker_adapter, "_DOCKER_COMMAND_TIMEOUT_SECONDS", 0.01)
+    workspace = _docker_workspace(FixedClock(datetime(2026, 1, 1, tzinfo=UTC)))
+    stream = workspace.stream("file", 1024)
+    assert await anext(stream) == b"chunk"
+    await asyncio.wait_for(process.killed.wait(), timeout=0.1)
+    await asyncio.wait_for(process.reaped.wait(), timeout=0.1)
+    with pytest.raises(ExecutionUnavailable, match="stream timed out"):
+        await anext(stream)
+
+
 @pytest.mark.parametrize(
     "address",
     ("198.18.0.1", "224.0.0.1", "255.255.255.255", "::", "ff02::1", "::ffff:127.0.0.1"),
