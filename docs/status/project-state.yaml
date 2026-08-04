@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_7_in_review
+  status: milestone_7_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 7
   authorized_milestones:
@@ -42,7 +42,7 @@ milestones:
     status: complete
   "7":
     title: Context budgeting and structured working state
-    status: in_review
+    status: complete
   "8":
     title: Skills and MCP integration
     status: not_started
@@ -384,14 +384,14 @@ verification:
           259ad4373e793f2205ffe39078c056bf55ad348f.
     remaining: []
   milestone_7:
-    recorded_at: 2026-08-04T13:18:00Z
-    status: in_review
+    recorded_at: 2026-08-04T14:29:18Z
+    status: complete
     evidence:
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over source and tests, 236
-          static tests, 106 port contracts, strict documentation builds, and all
+          static tests, 107 port contracts, strict documentation builds, and all
           123 hard gates active through Milestone 7 passed.
       - check: PostgreSQL 16 integration partition
         outcome: passed
@@ -403,7 +403,7 @@ verification:
       - check: complete non-live suite against PostgreSQL 16 and Docker
         outcome: passed
         detail: >-
-          All 422 non-live tests passed with only the two credentialed provider
+          All 423 non-live tests passed with only the two credentialed provider
           smoke tests deselected. This included all static and contract coverage,
           70 PostgreSQL integration and resilience tests, and ten real-Docker
           sandbox security tests inherited from Milestone 6.
@@ -437,12 +437,20 @@ verification:
           first-request plan pinning, conservative plan-time prefix measurement,
           provider-valid in-turn chronology, runtime-owned checkpoint writes, and
           the deterministic extractive first compactor.
-    remaining:
-      - Hosted CircleCI must pass for the Milestone 7 pull request.
-      - CodeRabbit review must have no unaddressed actionable comments.
-      - >-
-        Owner review is requested for proposed ADR-0043, especially the three
-        explicitly identified differences from literal detailed-design language.
+      - check: hosted CircleCI for pull request 8
+        outcome: passed
+        detail: >-
+          The static, contract, PostgreSQL integration, and real-Docker sandbox
+          lanes all passed on remediation commit 1dc15b4.
+      - check: CodeRabbit full-review remediation
+        outcome: passed_with_documented_exception
+        detail: >-
+          Nineteen actionable findings were fixed and verified. All twenty review
+          threads were answered and resolved; the remaining suggestion to refresh
+          tool visibility was rejected because the normative context design pins
+          the advertised tool set and requires authorization changes not to rewrite
+          the stable prefix. Revoked calls remain denied by policy.
+    remaining: []
 
 documentation:
   canonical_format: markdown

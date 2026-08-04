@@ -4,11 +4,10 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 7 — context budgeting and structured working state (review)
+- **Current milestone:** Milestone 7 — context budgeting and structured working state (complete)
 - **Next milestone:** Milestone 8 — skills and MCP integration
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 6 are complete. Milestone 7 is locally
-  implemented and awaits hosted CI and CodeRabbit review. Milestones 8 and 9 are
+- **Project status:** Milestones 0 through 7 are complete. Milestones 8 and 9 are
   explicitly authorized and remain sequentially gated.
 
 Milestone 7 adds durable context plans and prefix epochs, absolute context
@@ -42,8 +41,7 @@ acceptance criteria.
 
 ## Completion rule
 
-Milestone 7 is ready for review: every canonical acceptance criterion and all 123
-cumulative gates pass locally. Completion still requires the hosted CircleCI
-checks to pass and CodeRabbit to have no unaddressed actionable review comments
-on the milestone pull request. Proposed ADR-0043 records the implementation
-decisions that require owner review before they become accepted architecture.
+Milestone 7 is complete: every canonical acceptance criterion and all 123
+cumulative gates pass locally, all four hosted CircleCI lanes passed, and every
+CodeRabbit review thread was addressed and resolved. Proposed ADR-0043 records
+the implementation decisions reserved for later owner review.
