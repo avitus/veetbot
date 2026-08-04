@@ -73,6 +73,7 @@ from agent_core.ports.persistence import (
 type CancelParkedRun = Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]]
 type ResumeWaitingRun = Callable[[RepositoryUnitOfWork, Run], Awaitable[Run]]
 logger = logging.getLogger(__name__)
+_IDLE_POLL_SECONDS = 5.0
 
 
 def _session_view(session: Session, active: Run | None) -> SessionView:
@@ -336,6 +337,9 @@ class PublicRunService:
                 if session.status is SessionStatus.CLOSED:
                     raise InvalidStateTransition("closed sessions cannot accept messages")
                 if idempotency_key is not None:
+                    # The PostgreSQL adapter takes a transaction-scoped advisory
+                    # lock here. A concurrent same-key request therefore observes
+                    # the committed record before it can enter either run path.
                     existing = await uow.idempotency.get(
                         idempotency_key, principal.tenant_id, principal.principal_id
                     )
@@ -529,7 +533,7 @@ class PublicRunService:
                         event="stream.overflow", data={"last_sequence": watermark}
                     )
                     return
-                notification = await subscription.receive(0.25)
+                notification = await subscription.receive(_IDLE_POLL_SECONDS)
                 if subscription.overflowed:
                     yield TransientStreamFrame(
                         event="stream.overflow", data={"last_sequence": watermark}

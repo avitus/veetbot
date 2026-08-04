@@ -299,7 +299,10 @@ def run_cancel(run_id: UUID) -> None:
 
     try:
         typer.echo(asyncio.run(_cancel_run(run_id)).model_dump_json())
-    except (ConfigurationError, ConflictError, NotFoundError) as exc:
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except (ConflictError, NotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
 

@@ -623,7 +623,7 @@ async def test_artifact_content_is_always_an_attachment(tmp_path: Path) -> None:
             principal_id=composition.principal.principal_id,
             session_id=svg_session,
             run_id=svg_run_id,
-            name="résumé.svg",
+            name="../résumé.svg",
             media_type="image/svg+xml",
             storage_uri="pending",
             sha256=__import__("hashlib").sha256(svg).hexdigest(),
@@ -651,7 +651,8 @@ async def test_artifact_content_is_always_an_attachment(tmp_path: Path) -> None:
         second = await client.get(f"/v1/artifacts/{artifact.id}/content")
         assert second.status_code == 200
         assert second.headers["content-disposition"].startswith("attachment;")
-        assert "filename*=UTF-8''r%C3%A9sum%C3%A9.svg" in second.headers["content-disposition"]
+        assert "filename*=UTF-8''.._r%C3%A9sum%C3%A9.svg" in second.headers["content-disposition"]
+        assert "../" not in second.headers["content-disposition"]
         cached = await client.get(
             f"/v1/artifacts/{artifact.id}/content",
             headers={"If-None-Match": f'W/"other", "{artifact.sha256}"'},
@@ -723,6 +724,31 @@ async def test_auth_request_ids_content_type_and_body_limits(tmp_path: Path) -> 
         assert chunked.status_code == 413, chunked.text
         assert chunked.json()["error"]["code"] == "payload_too_large"
 
+        session_id = authenticated.json()["id"]
+        oversized_key = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "bounded"}]},
+            headers={
+                "Authorization": "Bearer test-bearer-token",
+                "Idempotency-Key": "k" * 256,
+            },
+        )
+        assert oversized_key.status_code == 400
+
+        oversized_reason = await client.post(
+            f"/v1/approvals/{UUID(int=1)}/resolve",
+            json={"decision": "deny", "reason": "r" * 4097},
+            headers={"Authorization": "Bearer test-bearer-token"},
+        )
+        assert oversized_reason.status_code == 400
+
+        clamped_page = await client.get(
+            "/v1/approvals?limit=100000",
+            headers={"Authorization": "Bearer test-bearer-token"},
+        )
+        assert clamped_page.status_code == 200
+        assert clamped_page.json() == {"items": [], "next_cursor": None}
+
 
 async def test_dev_authentication_is_loopback_only(tmp_path: Path) -> None:
     async with (
@@ -731,6 +757,14 @@ async def test_dev_authentication_is_loopback_only(tmp_path: Path) -> None:
     ):
         response = await client.post("/v1/sessions", json={"agent_id": "general", "metadata": {}})
         assert response.status_code == 401
+
+    async with _composition(tmp_path) as composition, _client(composition) as client:
+        proxied = await client.post(
+            "/v1/sessions",
+            json={"agent_id": "general", "metadata": {}},
+            headers={"X-Forwarded-For": "203.0.113.4"},
+        )
+        assert proxied.status_code == 401
 
 
 async def test_cancellation_cannot_mark_an_effect_cancelled(

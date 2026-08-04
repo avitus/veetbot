@@ -275,6 +275,8 @@ async def _invoke_model(
                         )
                     expected_sequence += 1
                     if context.on_model_event is not None:
+                        # This callback is on the provider-consumption path and must
+                        # return promptly; it must never perform unbounded I/O.
                         await context.on_model_event(context.run, event)
                     if isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
                         if terminal is not None:

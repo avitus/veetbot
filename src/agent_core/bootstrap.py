@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -163,6 +164,7 @@ from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
 logger = logging.getLogger(__name__)
+LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS = 0.1
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +251,10 @@ async def _publish_model_event(
     if event_name is None:
         return
     try:
-        await broadcaster.publish(session_id, run_id, event_name, data)
+        await asyncio.wait_for(
+            broadcaster.publish(session_id, run_id, event_name, data),
+            timeout=LIVE_EVENT_PUBLISH_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
         logger.warning("live_event_publish_failed", extra={"error_class": type(exc).__name__})
 

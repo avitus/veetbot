@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import re
 import unicodedata
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
@@ -29,7 +28,7 @@ from agent_core.application.services import (
 from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
-from agent_core.domain.errors import AgentCoreError, ArtifactStorageError
+from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -43,13 +42,23 @@ from agent_core.domain.views import (
 )
 
 logger = logging.getLogger(__name__)
-SAFE_FILENAME = re.compile(r'^[^/\\"\r\n]+$')
+IDEMPOTENCY_KEY_MAX_LENGTH = 255
+APPROVAL_REASON_MAX_LENGTH = 4096
+
+
+class MalformedRequestError(ValueError):
+    """A syntactically invalid value detected at the HTTP boundary."""
 
 
 def _content_disposition(filename: str) -> str:
-    fallback = unicodedata.normalize("NFKD", filename).encode("ascii", "ignore").decode()
+    safe_name = "".join(
+        "_" if character in '/\\"' or unicodedata.category(character) == "Cc" else character
+        for character in filename
+    ).strip()
+    safe_name = safe_name or "artifact"
+    fallback = unicodedata.normalize("NFKD", safe_name).encode("ascii", "ignore").decode()
     fallback = fallback or "artifact"
-    encoded = quote(filename, safe="")
+    encoded = quote(safe_name, safe="")
     return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
 
 
@@ -100,7 +109,7 @@ class ResolveApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     decision: ApprovalResolutionType
-    reason: str | None = None
+    reason: str | None = Field(default=None, max_length=APPROVAL_REASON_MAX_LENGTH)
 
 
 def _request_id(request: Request) -> str:
@@ -144,8 +153,12 @@ def create_app(
         redoc_url=None,
         openapi_url=None,
     )
-    app.add_middleware(RequestBoundaryMiddleware, new_request_id=new_request_id)
     auth = Authenticator(settings, principal)
+    app.add_middleware(
+        RequestBoundaryMiddleware,
+        new_request_id=new_request_id,
+        early_authenticate=auth.authenticate_scope,
+    )
 
     @app.exception_handler(AgentCoreError)
     async def domain_error(request: Request, exc: AgentCoreError) -> JSONResponse:
@@ -170,8 +183,8 @@ def create_app(
             message="The request body or parameters are malformed.",
         )
 
-    @app.exception_handler(ValueError)
-    async def value_error(request: Request, exc: ValueError) -> JSONResponse:
+    @app.exception_handler(MalformedRequestError)
+    async def malformed_request_error(request: Request, exc: MalformedRequestError) -> JSONResponse:
         return _error_response(
             request,
             code="malformed_request",
@@ -247,7 +260,10 @@ def create_app(
         session_id: UUID,
         body: MessageRequest,
         authenticated: Annotated[Principal, secured("run.write")],
-        idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+        idempotency_key: Annotated[
+            str | None,
+            Header(alias="Idempotency-Key", max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ] = None,
     ) -> Response:
         result = await services.runs.submit(
             authenticated,
@@ -283,9 +299,9 @@ def create_app(
         try:
             after = None if last_event_id is None else int(last_event_id)
         except ValueError as exc:
-            raise ValueError("Last-Event-ID must be an integer") from exc
+            raise MalformedRequestError("Last-Event-ID must be an integer") from exc
         if after is not None and after < 0:
-            raise ValueError("Last-Event-ID must not be negative")
+            raise MalformedRequestError("Last-Event-ID must not be negative")
         # Complete all checks before StreamingResponse sends its first byte.
         await services.runs.get(authenticated, run_id)
 
@@ -419,8 +435,6 @@ def create_app(
         artifact = content.artifact
         if _matches_etag(if_none_match, artifact.sha256):
             return Response(status_code=304, headers={"ETag": f'"{artifact.sha256}"'})
-        if SAFE_FILENAME.fullmatch(artifact.name) is None:
-            raise ArtifactStorageError("artifact filename is unsafe")
         return StreamingResponse(
             content.open(),
             media_type=artifact.media_type,

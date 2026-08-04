@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
+from collections import deque
 from collections.abc import Callable
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from agent_core.domain.agents import Principal
+from agent_core.domain.errors import AuthenticationError
+
 MAX_BODY_BYTES = 1024 * 1024
+MAX_CONCURRENT_BUFFERED_BODIES = 16
 REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
@@ -16,9 +22,16 @@ class PayloadTooLargeError(ValueError):
 
 
 class RequestBoundaryMiddleware:
-    def __init__(self, app: ASGIApp, new_request_id: Callable[[], str]) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        new_request_id: Callable[[], str],
+        early_authenticate: Callable[[Scope], Principal],
+    ) -> None:
         self._app = app
         self._new_request_id = new_request_id
+        self._early_authenticate = early_authenticate
+        self._body_slots = asyncio.Semaphore(MAX_CONCURRENT_BUFFERED_BODIES)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -32,6 +45,20 @@ class RequestBoundaryMiddleware:
 
         method = str(scope.get("method", ""))
         path = str(scope.get("path", ""))
+        has_body = method in {"POST", "PUT", "PATCH"}
+        if has_body and path.startswith("/v1/"):
+            try:
+                state["authenticated_principal"] = self._early_authenticate(scope)
+            except AuthenticationError:
+                await _boundary_error(
+                    send,
+                    request_id,
+                    "authentication_failed",
+                    401,
+                    "Authentication failed.",
+                    headers=[(b"www-authenticate", b"Bearer")],
+                )
+                return
         requires_json = method == "POST" and (
             path == "/v1/sessions"
             or path.endswith("/messages")
@@ -76,28 +103,35 @@ class RequestBoundaryMiddleware:
                 return
 
         consumed = 0
-        buffered: list[Message] = []
-        if method in {"POST", "PUT", "PATCH"}:
-            while True:
-                message = await receive()
-                buffered.append(message)
-                if message["type"] != "http.request":
-                    break
-                consumed += len(message.get("body", b""))
-                if consumed > MAX_BODY_BYTES:
-                    await _boundary_error(send, request_id, "payload_too_large", 413)
-                    return
-                if not message.get("more_body", False):
-                    break
-        buffered_index = 0
+        buffered: deque[Message] = deque()
+        body_slot_acquired = False
+        if has_body:
+            await self._body_slots.acquire()
+            body_slot_acquired = True
+            try:
+                while True:
+                    message = await receive()
+                    buffered.append(message)
+                    if message["type"] != "http.request":
+                        break
+                    consumed += len(message.get("body", b""))
+                    if consumed > MAX_BODY_BYTES:
+                        self._body_slots.release()
+                        body_slot_acquired = False
+                        await _boundary_error(send, request_id, "payload_too_large", 413)
+                        return
+                    if not message.get("more_body", False):
+                        break
+            except BaseException:
+                self._body_slots.release()
+                body_slot_acquired = False
+                raise
         response_started = False
 
         async def bounded_receive() -> Message:
-            nonlocal buffered_index, consumed
-            if buffered_index < len(buffered):
-                message = buffered[buffered_index]
-                buffered_index += 1
-                return message
+            nonlocal consumed
+            if buffered:
+                return buffered.popleft()
             message = await receive()
             if message["type"] == "http.request":
                 consumed += len(message.get("body", b""))
@@ -120,6 +154,9 @@ class RequestBoundaryMiddleware:
             if response_started:
                 raise
             await _boundary_error(send, request_id, "payload_too_large", 413)
+        finally:
+            if body_slot_acquired:
+                self._body_slots.release()
 
 
 async def _boundary_error(
@@ -128,6 +165,7 @@ async def _boundary_error(
     code: str,
     status: int,
     message: str = "The request body exceeds the 1 MiB limit.",
+    headers: list[tuple[bytes, bytes]] | None = None,
 ) -> None:
     import json
 
@@ -150,6 +188,7 @@ async def _boundary_error(
                 (b"content-type", b"application/json"),
                 (b"content-length", str(len(body)).encode("ascii")),
                 (b"x-request-id", request_id.encode("ascii")),
+                *(headers or []),
             ],
         }
     )

@@ -7,6 +7,8 @@ import ipaddress
 from collections.abc import Callable
 
 from fastapi import Request
+from starlette.datastructures import Headers
+from starlette.types import Scope
 
 from agent_core.application.authorization import require_scope
 from agent_core.config import AuthMode, Settings
@@ -20,8 +22,21 @@ class Authenticator:
         self._principal = principal
 
     def authenticate(self, request: Request) -> Principal:
+        cached = request.scope.get("state", {}).get("authenticated_principal")
+        if isinstance(cached, Principal):
+            return cached.model_copy(deep=True)
+        return self.authenticate_scope(request.scope)
+
+    def authenticate_scope(self, scope: Scope) -> Principal:
+        headers = Headers(scope=scope)
         if self._settings.auth_mode is AuthMode.DEV:
-            host = "" if request.client is None else request.client.host
+            forwarded = "forwarded" in headers or any(
+                name.lower().startswith("x-forwarded-") for name in headers
+            )
+            if forwarded:
+                raise AuthenticationError("authentication failed")
+            client = scope.get("client")
+            host = "" if client is None else client[0]
             try:
                 loopback = ipaddress.ip_address(host).is_loopback
             except ValueError:
@@ -30,7 +45,7 @@ class Authenticator:
                 raise AuthenticationError("authentication failed")
             return self._principal.model_copy(deep=True)
 
-        authorization = request.headers.get("authorization", "")
+        authorization = headers.get("authorization", "")
         scheme, separator, supplied = authorization.partition(" ")
         expected = self._settings.auth_token
         matches = (

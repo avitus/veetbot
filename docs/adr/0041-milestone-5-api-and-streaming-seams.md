@@ -43,7 +43,7 @@ authorization order, tenant concealment, durable event log, and hard gates.
    sorted JSON. There is no API-to-tool dependency and no second canonicalizer.
 5. **PostgreSQL `LISTEN`/`NOTIFY` is a bounded hint over durable replay.** Each
    session has a channel. A stream subscribes before its first persisted read,
-   discards duplicate wakeups by the durable watermark, and polls every 250 ms
+   discards duplicate wakeups by the durable watermark, and polls every 5 seconds
    as the missed-notification fallback. Transient model, reasoning, and
    provisional-usage frames travel over the same adapter and are never written
    to the event log.
@@ -66,6 +66,23 @@ authorization order, tenant concealment, durable event log, and hard gates.
    artifacts in the shared local content store. The service exposes a reopenable
    handle rather than bytes or a storage URI, so Milestone 6 can add sandbox
    artifacts without changing the HTTP route.
+10. **Body authentication and buffering happen together at the ASGI edge.**
+    Starlette translates an exception raised lazily while it parses a chunked
+    body into a generic 400 response, so preserving the required 413 response
+    needs a bounded pre-read. The boundary authenticates `/v1/` body requests
+    before that read, permits at most 16 concurrent one-MiB buffers per process,
+    and releases each queued chunk as the application consumes it. Route
+    dependencies still apply the exact required scope.
+11. **Live model publication cannot hold the provider-consumption path.** The
+    best-effort callback has a 100 ms deadline and drops a transient event after
+    timeout or transport failure. The durable completed message remains the
+    recovery source, and the runtime callback contract explicitly forbids
+    unbounded I/O.
+12. **Client-controlled persisted strings are bounded at the API boundary.**
+    HTTP idempotency keys retain the specified 255-character maximum and an
+    approval resolution reason is limited to 4,096 characters. Stored artifact
+    names are sanitized for `Content-Disposition` instead of turning permanent
+    legacy metadata into a retryable storage outage.
 
 ## Consequences
 
@@ -78,6 +95,10 @@ authorization order, tenant concealment, durable event log, and hard gates.
   improve latency, while polling proves progress when notifications are lost.
 - Slow consumers fail explicitly and recover from the event log instead of
   consuming unbounded process memory.
+- Unauthenticated requests cannot reserve body buffers, and a worker holds at
+  most 16 MiB of buffered request bodies even under concurrent load.
+- A delayed live notification cannot stall provider stream consumption; the
+  client recovers omitted transient frames from the eventual durable state.
 - The public API can evolve its adapters without moving authorization or state
   transitions into route code.
 
