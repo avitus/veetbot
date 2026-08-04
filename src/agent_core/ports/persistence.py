@@ -11,6 +11,7 @@ from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
+from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -28,6 +29,7 @@ from agent_core.ports.repositories import (
     TrajectoryProjectionRepository,
     UsageRepository,
 )
+from agent_core.ports.skills import SkillRepository
 
 
 class RepositoryUnitOfWork(Protocol):
@@ -48,6 +50,8 @@ class RepositoryUnitOfWork(Protocol):
     trajectory_exports: TrajectoryExportRepository
     artifacts: ArtifactRepository
     maintenance: MaintenanceRepository
+    skills: SkillRepository
+    mcp_servers: MCPServerRepository
     queue: RunQueue | None
 
     async def __aenter__(self) -> Self: ...
@@ -70,3 +74,6 @@ type CheckpointSeeder = Callable[
     [RepositoryUnitOfWork, Run, int | None, WorkerLease | None, Principal],
     Awaitable[RunCheckpoint],
 ]
+
+type TransactionCallback = Callable[[], Awaitable[None]]
+type TransactionCallbackRegistrar = Callable[[TransactionCallback], None]

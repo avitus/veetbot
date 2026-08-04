@@ -112,25 +112,73 @@ class StaticToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[tuple[str, str], RegisteredTool] = {}
         self._latest: dict[str, str] = {}
+        self._dynamic_tools: dict[tuple[str, str, str], RegisteredTool] = {}
+        self._dynamic_latest: dict[tuple[str, str], str] = {}
 
     def register(self, tool: Tool) -> None:
         spec = validate_registration(tool.spec)
         key = (spec.name, spec.version)
-        if key in self._tools:
+        if key in self._tools or any(name == spec.name for _, name, _ in self._dynamic_tools):
             raise ConflictError("duplicate tool name and version")
         self._tools[key] = RegisteredTool(spec=spec, implementation=tool)
         self._latest[spec.name] = spec.version
 
-    def get(self, name: str, version: str | None = None) -> Tool:
+    def register_dynamic(self, tool: Tool, *, tenant_id: str) -> None:
+        spec = validate_registration(tool.spec)
+        if spec.source is not ToolSource.MCP:
+            raise ToolValidationError("only MCP discovery may dynamically register tools")
+        if not tenant_id:
+            raise ToolValidationError("dynamic tool registration requires a tenant")
+        if spec.name in self._latest:
+            raise ConflictError("dynamic tool name is reserved by a static registration")
+        key = (tenant_id, spec.name, spec.version)
+        if key in self._dynamic_tools:
+            raise ConflictError("duplicate dynamic tool name and version")
+        self._dynamic_tools[key] = RegisteredTool(spec=spec, implementation=tool)
+        self._dynamic_latest[(tenant_id, spec.name)] = spec.version
+
+    def get(
+        self,
+        name: str,
+        version: str | None = None,
+        *,
+        tenant_id: str | None = None,
+        source: ToolSource | None = None,
+        server_id: str | None = None,
+    ) -> Tool:
         """Return the selected tool or raise NotFoundError when it is unavailable."""
 
+        if tenant_id is not None:
+            dynamic_version = (
+                self._dynamic_latest.get((tenant_id, name)) if version is None else version
+            )
+            if dynamic_version is not None:
+                dynamic = self._dynamic_tools.get((tenant_id, name, dynamic_version))
+                if dynamic is not None and self._identity_matches(
+                    dynamic.spec, source=source, server_id=server_id
+                ):
+                    return dynamic
         selected_version = self._latest.get(name) if version is None else version
         if selected_version is None:
             raise NotFoundError("tool not found")
         try:
-            return self._tools[(name, selected_version)]
+            tool = self._tools[(name, selected_version)]
         except KeyError as exc:
             raise NotFoundError("tool not found") from exc
+        if not self._identity_matches(tool.spec, source=source, server_id=server_id):
+            raise NotFoundError("tool not found")
+        return tool
+
+    @staticmethod
+    def _identity_matches(
+        spec: ToolSpec,
+        *,
+        source: ToolSource | None,
+        server_id: str | None,
+    ) -> bool:
+        return (source is None or spec.source is source) and (
+            server_id is None or spec.server_id == server_id
+        )
 
     def specs_for_session(
         self,
@@ -141,9 +189,15 @@ class StaticToolRegistry:
     ) -> list[ToolSpec]:
         del profile, environment
         result: list[ToolSpec] = []
-        for name in agent.enabled_tools:
+        names = [
+            *agent.enabled_tools,
+            *sorted(
+                name for tenant_id, name in self._dynamic_latest if tenant_id == principal.tenant_id
+            ),
+        ]
+        for name in dict.fromkeys(names):
             try:
-                spec = self.get(name).spec
+                spec = self.get(name, tenant_id=principal.tenant_id).spec
             except NotFoundError:
                 continue
             if spec.deprecated or not spec.required_scopes.issubset(principal.scopes):

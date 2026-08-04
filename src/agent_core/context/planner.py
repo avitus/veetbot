@@ -21,6 +21,7 @@ from agent_core.domain.sessions import Session
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
 BUILDER_VERSION = "context-builder@2"
@@ -40,6 +41,7 @@ class EventContextPlanner:
         config: Mapping[str, object],
         *,
         policy_version: str,
+        skill_catalogs: SkillCatalog | None = None,
         cache_capacity: int = 1_024,
     ) -> None:
         if cache_capacity <= 0:
@@ -51,6 +53,7 @@ class EventContextPlanner:
         self._principal = principal
         self._config = config
         self._policy_version = policy_version
+        self._skill_catalogs = skill_catalogs
         self._allocator = ContextBudgetAllocator(config)
         self._cache_capacity = cache_capacity
         self._cache: OrderedDict[UUID, ContextPlan] = OrderedDict()
@@ -110,7 +113,9 @@ class EventContextPlanner:
             current = await self.current(session.id)
             model_id = f"{model.provider}:{model.model}"
             if current is not None:
-                current_prefix = build_prefix(agent, current.tool_specs)
+                if self._skill_catalogs is not None:
+                    await self._skill_catalogs.open(session.id, agent, principal)
+                current_prefix = build_prefix(agent, current.tool_specs, current.skill_catalog)
                 current_prefix_sha256 = hashlib.sha256(
                     prefix_bytes(current_prefix, current.tool_specs)
                 ).hexdigest()
@@ -177,27 +182,44 @@ class EventContextPlanner:
         if not isinstance(tool_config, dict):
             raise ValueError("tool-definition context configuration must be a mapping")
         maximum_tools = int(tool_config["max_items"])
+        # Opening the catalog also performs MCP discovery. It must happen before
+        # tool advertisement so the same frozen plan pins both surfaces.
+        catalog = (
+            None
+            if self._skill_catalogs is None
+            else await self._skill_catalogs.open(session.id, agent, principal)
+        )
         tools = self._registry.specs_for_session(
             agent,
             principal,
             profile=self._policy_version,
             environment="runtime",
         )[:maximum_tools]
-        prefix = build_prefix(agent, tools)
+        catalog_metadata = (
+            () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
+        )
+        prefix = build_prefix(agent, tools, catalog_metadata)
+        base_prefix = build_prefix(agent, tools)
         model_id = f"{model.provider}:{model.model}"
         framing_tokens = self._estimator.estimate(prefix[:1], model_id)
         agent_tokens = self._estimator.estimate(prefix[1:2], model_id)
         tool_tokens = self._estimator.estimate(
-            prefix[2:], model_id
+            base_prefix[2:], model_id
         ) + self._estimator.estimate_tools(tools, model_id)
+        skill_catalog_tokens = self._estimator.estimate(prefix[len(base_prefix) :], model_id)
         if framing_tokens > int(classes["platform_policy"]["max_tokens"]):
             raise ContextOverflow("context prefix class platform_policy exceeds its cap")
         if agent_tokens > int(classes["agent_instructions"]["max_tokens"]):
             raise ContextOverflow("context prefix class agent_instructions exceeds its cap")
         if tool_tokens > int(tool_config["max_tokens"]):
             raise ContextOverflow("context prefix class tool_definitions exceeds its cap")
+        skill_config = classes.get("skill_catalog")
+        if not isinstance(skill_config, dict):
+            raise ValueError("skill-catalog context configuration must be a mapping")
+        if skill_catalog_tokens > int(skill_config["max_tokens"]):
+            raise ContextOverflow("context prefix class skill_catalog exceeds its cap")
         encoded_prefix = prefix_bytes(prefix, tools)
-        prefix_tokens = framing_tokens + agent_tokens + tool_tokens
+        prefix_tokens = framing_tokens + agent_tokens + tool_tokens + skill_catalog_tokens
         prefix_config = self._config.get("prefix")
         if not isinstance(prefix_config, dict):
             raise ValueError("context prefix configuration must be a mapping")
@@ -214,6 +236,8 @@ class EventContextPlanner:
             tool_names=tuple(tool.name for tool in tools),
             tool_specs=tuple(tool.model_copy(deep=True) for tool in tools),
             tool_schema_sha256=hashlib.sha256(schema_bytes).hexdigest(),
+            skill_pins=() if catalog is None else catalog.pins,
+            skill_catalog=catalog_metadata,
             cache_breakpoints=(
                 CacheBreakpoint(boundary="after_system"),
                 CacheBreakpoint(boundary="after_tools"),

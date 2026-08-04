@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from types import TracebackType
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.functions import func
 
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
+from agent_core.ports.mcp import MCPServerRepository
+from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
@@ -28,6 +33,7 @@ from agent_core.ports.repositories import (
     TrajectoryProjectionRepository,
     UsageRepository,
 )
+from agent_core.ports.skills import SkillRepository
 
 _UNIT_OF_WORK_DEPTH: ContextVar[int] = ContextVar("unit_of_work_depth", default=0)
 
@@ -63,10 +69,14 @@ class UnitOfWorkRepositories:
     trajectory_exports: TrajectoryExportRepository
     artifacts: ArtifactRepository
     maintenance: MaintenanceRepository
+    skills: SkillRepository
+    mcp_servers: MCPServerRepository
     queue: RunQueue | None
 
 
-type PostgresRepositoryFactory = Callable[[AsyncSession], UnitOfWorkRepositories]
+type PostgresRepositoryFactory = Callable[
+    [AsyncSession, TransactionCallbackRegistrar], UnitOfWorkRepositories
+]
 
 
 class MemoryUnitOfWork:
@@ -98,6 +108,8 @@ class MemoryUnitOfWork:
         self.trajectory_exports = repositories.trajectory_exports
         self.artifacts = repositories.artifacts
         self.maintenance = repositories.maintenance
+        self.skills = repositories.skills
+        self.mcp_servers = repositories.mcp_servers
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
 
@@ -132,16 +144,22 @@ class PostgresUnitOfWork:
         self,
         maker: async_sessionmaker[AsyncSession],
         repository_factory: PostgresRepositoryFactory,
+        tenant_id: str,
     ) -> None:
         self._maker = maker
         self._repository_factory = repository_factory
+        self._tenant_id = tenant_id
         self._session: AsyncSession | None = None
         self._depth_token: Token[int] | None = None
+        self._rollback_callbacks: list[TransactionCallback] = []
 
     async def __aenter__(self) -> PostgresUnitOfWork:
         session = self._maker()
         self._session = session
-        repositories = self._repository_factory(session)
+        await session.execute(
+            select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
+        )
+        repositories = self._repository_factory(session, self._rollback_callbacks.append)
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
@@ -159,6 +177,8 @@ class PostgresUnitOfWork:
         self.trajectory_exports = repositories.trajectory_exports
         self.artifacts = repositories.artifacts
         self.maintenance = repositories.maintenance
+        self.skills = repositories.skills
+        self.mcp_servers = repositories.mcp_servers
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self
@@ -173,8 +193,16 @@ class PostgresUnitOfWork:
             return
         try:
             if exc_type is None:
-                await self._session.commit()
+                try:
+                    await self._session.commit()
+                except BaseException:
+                    await self._run_rollback_callbacks()
+                    await self._session.rollback()
+                    raise
+                else:
+                    self._rollback_callbacks.clear()
             else:
+                await self._run_rollback_callbacks()
                 await self._session.rollback()
         finally:
             try:
@@ -184,20 +212,29 @@ class PostgresUnitOfWork:
                     _exit_unit_of_work(self._depth_token)
                     self._depth_token = None
 
+    async def _run_rollback_callbacks(self) -> None:
+        callbacks, self._rollback_callbacks = self._rollback_callbacks, []
+        for callback in reversed(callbacks):
+            with suppress(Exception):
+                await callback()
+
 
 class PostgresUnitOfWorkFactory:
     def __init__(
         self,
         maker: async_sessionmaker[AsyncSession],
         repository_factory: PostgresRepositoryFactory,
+        tenant_id: str,
     ) -> None:
         self._maker = maker
         self._repository_factory = repository_factory
+        self._tenant_id = tenant_id
 
     def __call__(self) -> PostgresUnitOfWork:
         return PostgresUnitOfWork(
             self._maker,
             self._repository_factory,
+            self._tenant_id,
         )
 
     def is_open(self) -> bool:

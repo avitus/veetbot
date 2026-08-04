@@ -4,61 +4,61 @@
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**Only metadata reaches the prefix.** A session opens with five skills enabled, each carrying a distinctive sentinel string in its body. The rendered prefix contains every `description` and no sentinel. Repeated after `skill.load`, which must place the sentinel in the body and still not in the prefix. `gate.skill.metadata_only`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_metadata_only
 - id: gate.skill.catalog_pinned
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**The catalog is pinned at session open.** A skill is installed mid-session. It does not appear in the catalog, `skill.load` on its name fails, and `prefix_sha256` is unchanged across the installation. Repeated for an archive, which must also not take an entry out of a live session. `gate.skill.catalog_pinned`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_catalog_pinned
 - id: gate.skill.no_tool_from_skill
   milestone: 8
   kind: structural
   spec: docs/plan/skills.md#hard-gates
   statement: "**A skill never becomes a tool.** A structural check asserts that no module in the skills package calls `register_dynamic` or otherwise reaches the tool registry's write path, and that the registry's declared sources remain the build and MCP discovery. A package containing a file named like a tool manifest installs normally and registers nothing. `gate.skill.no_tool_from_skill`, structural."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_no_tool_from_skill
 - id: gate.skill.untrusted_body
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**Untrusted skill content is labelled and stays out of Region A.** An agent-authored and an MCP-sourced skill both render their catalog entries as `EXTERNAL_UNTRUSTED` inside an envelope, and both bodies appear only in Region B when loaded. A region assignment placing either body in A is a build failure, which is the mechanism `context-engine.md` already requires. `gate.skill.untrusted_body`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_untrusted_body
 - id: gate.skill.revision_pinned
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**A pinned skill resolves to the same bytes forever.** A run loads a skill; two newer revisions are installed; replaying the run resolves the original revision and the original `content_sha256`. The same replay with the stored archive corrupted raises rather than proceeding. `gate.skill.revision_pinned`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_revision_pinned
 - id: gate.skill.missing_tool_loads
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**A missing required tool does not fail the load.** A skill naming three tools, one of which the session did not pin, loads; the missing name is in `missing_tools` and in `skill.tool.missing`; and a call to the missing tool is still denied by the pipeline. `gate.skill.missing_tool_loads`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_missing_tool_loads
 - id: gate.skill.catalog_capped
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**The catalog is capped and deterministic.** A tenant with forty active skills and two MCP servers yields exactly twenty entries, configured skills before MCP prompts, in configuration order, and the dropped names are on the session-open event. Opening the same session twice produces byte-identical catalogs. `gate.skill.catalog_capped`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_catalog_capped
 - id: gate.skill.validation_total
   milestone: 8
   kind: property
   spec: docs/plan/skills.md#hard-gates
   statement: "**Package validation is total.** A property test over generated packages — names, versions, descriptions, tool lists, body lengths, file counts, archive members including traversal paths and symlinks — asserts that every package either produces a revision or raises a named `SkillValidationError` subtype, and that no rejected package leaves a row, an archive object, or a partially written revision behind. `gate.skill.validation_total`, property."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_validation_total
 - id: gate.skill.body_cap
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**Loaded bodies are bounded by construction.** A third `skill.load` fails and names the two loaded skills; no context plan in a thousand generated sessions carries more than two bodies or more than 6,000 body tokens; and an unload followed by a load succeeds. `gate.skill.body_cap`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_body_cap
 - id: gate.skill.mcp_read_only
   milestone: 8
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**An MCP skill cannot be written.** `SkillRepository.install` raises for `source: mcp` from every caller, no MCP prompt produces a row that outlives its session, and an MCP skill's pin records revision `0` with the hash of the text as it arrived. `gate.skill.mcp_read_only`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m8.py::test_mcp_read_only
 - id: gate.skill.authoring_trust
   milestone: 10
   kind: corpus

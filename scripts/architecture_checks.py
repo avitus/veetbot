@@ -37,6 +37,7 @@ SECRET_RULES: dict[str, re.Pattern[str]] = {
     ),
 }
 PROVIDER_SDK_ROOTS = frozenset({"anthropic", "openai"})
+MCP_SDK_ROOTS = frozenset({"mcp"})
 MODULE_SCOPE_RESOURCE_FACTORIES = frozenset(
     {
         "AsyncSession",
@@ -359,6 +360,9 @@ def architecture_errors(root: Path) -> list[str]:
         if not module.startswith("agent_core.adapters.models"):
             for provider_sdk in sorted(imported_roots & PROVIDER_SDK_ROOTS):
                 errors.append(f"{relative}: provider SDK {provider_sdk} crosses adapter boundary")
+        if not module.startswith("agent_core.adapters.mcp"):
+            for mcp_sdk in sorted(imported_roots & MCP_SDK_ROOTS):
+                errors.append(f"{relative}: MCP SDK {mcp_sdk} crosses adapter boundary")
 
         if module != "agent_core.bootstrap":
             for node in ast.walk(tree):

@@ -65,6 +65,7 @@ class RunService:
         if not prompt.strip():
             raise ValueError("prompt must not be empty")
         requested_session_id = session_id
+        created_session = False
         now = self._clock.now()
         request_hash = hashlib.sha256(f"v1:{requested_session_id}:{prompt}".encode()).hexdigest()
         try:
@@ -83,6 +84,7 @@ class RunService:
                         return existing.run_id
                 if session_id is None:
                     session_id = await self._sessions.create_in(uow)
+                    created_session = True
                 session = await uow.sessions.get(session_id, self._principal)
                 agent = await uow.agents.get_version(session.agent_id, session.agent_version)
                 consent = await uow.export_consent.get(
@@ -154,6 +156,8 @@ class RunService:
                         raise _ExistingIdempotentRunError(record.run_id)
         except _ExistingIdempotentRunError as duplicate:
             return duplicate.run_id
+        if created_session:
+            await self._sessions.activate(session_id)
         await self._dispatcher.dispatch(run.id)
         return run.id
 

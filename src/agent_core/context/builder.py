@@ -155,7 +155,7 @@ class MinimalContextBuilder:
         )
 
     @staticmethod
-    def _prefix(agent: AgentSpec, tools: list[ToolSpec]) -> list[SystemMessage]:
+    def _prefix(agent: AgentSpec, tools: list[ToolSpec]) -> list[ConversationItem]:
         return build_prefix(agent, tools)
 
 
@@ -214,7 +214,7 @@ class BudgetedContextBuilder:
         plan = await self._planner.current(run.session_id)
         if plan is None:
             raise ContextOverflow("the session has no durable context plan")
-        prefix = build_prefix(agent, plan.tool_specs)
+        prefix = build_prefix(agent, plan.tool_specs, plan.skill_catalog)
         actual_prefix_hash = hashlib.sha256(prefix_bytes(prefix, plan.tool_specs)).hexdigest()
         if actual_prefix_hash != plan.prefix_sha256:
             raise ContextOverflow("the frozen context prefix no longer matches its plan")
@@ -242,6 +242,26 @@ class BudgetedContextBuilder:
                     principal_id=None,
                 )
             )
+        if len(checkpoint.loaded_skills) > 2:
+            raise ContextOverflow("loaded skill bodies exceed the two-skill cap")
+        if sum(body.tokens for body in checkpoint.loaded_skills) > plan.budget.skill_body_tokens:
+            raise ContextOverflow("loaded skill bodies exceed their token cap")
+        skill_items = [
+            UserMessage(
+                content=[
+                    TextPart(
+                        text=(
+                            f"Loaded skill {body.name}@{body.revision}"
+                            f"{'' if body.path is None else f' member {body.path}'}:\n"
+                            f"{body.content}"
+                        )
+                    )
+                ],
+                trust=body.trust,
+                principal_id=None,
+            )
+            for body in checkpoint.loaded_skills
+        ]
         working_items = working_state_items(self._working_state.load(checkpoint.working_state))
         working_tokens = self._estimator.estimate(envelope_items(working_items), plan.model_id)
         working_state_over_cap = working_tokens > plan.budget.working_state_tokens
@@ -259,7 +279,7 @@ class BudgetedContextBuilder:
             trust=TrustLevel.PLATFORM,
             principal_id=None,
         )
-        fixed_body = [*summary_items, *working_items, runtime_item, *active]
+        fixed_body = [*summary_items, *skill_items, *working_items, runtime_item, *active]
         fixed_tokens = self._estimator.estimate(envelope_items(fixed_body), plan.model_id)
         fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         available_history = (
@@ -283,7 +303,14 @@ class BudgetedContextBuilder:
         if cut:
             yield_steps.append("history")
 
-        body = [*summary_items, *retained_history, *working_items, runtime_item, *active]
+        body = [
+            *summary_items,
+            *retained_history,
+            *skill_items,
+            *working_items,
+            runtime_item,
+            *active,
+        ]
         rendered_body = envelope_items(body)
         body_tokens = self._estimator.estimate(rendered_body, plan.model_id)
         total_tokens = plan.prefix_tokens + body_tokens + plan.budget.reserve_output_tokens

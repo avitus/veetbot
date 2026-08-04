@@ -8,11 +8,53 @@ import os
 import socket
 import sys
 from contextlib import suppress
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from agent_core.domain.execution import EgressPolicy
 from agent_core.execution.egress_core import evaluate_core, validate_host_and_ports
 
 _MAX_HEADER_BYTES = 64 * 1024
+
+
+@dataclass(slots=True)
+class WorkerEgressProxy:
+    """Process-local audited proxy used by trusted outbound adapters."""
+
+    server: asyncio.Server
+    url: str
+
+    async def close(self) -> None:
+        self.server.close()
+        await self.server.wait_closed()
+
+
+async def start_worker_egress_proxy(
+    policy: EgressPolicy,
+    *,
+    tenant_id: str,
+) -> WorkerEgressProxy:
+    core_policy = (
+        policy.mode.value,
+        tuple((item.host, item.ports) for item in policy.destinations),
+    )
+
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await _handle(reader, writer, core_policy, tenant_id=tenant_id)
+
+    server = await asyncio.start_server(
+        handle,
+        "127.0.0.1",
+        0,
+        limit=_MAX_HEADER_BYTES + 1,
+    )
+    sockets = server.sockets or ()
+    if len(sockets) != 1:
+        server.close()
+        await server.wait_closed()
+        raise RuntimeError("worker egress proxy did not bind exactly one socket")
+    port = int(sockets[0].getsockname()[1])
+    return WorkerEgressProxy(server=server, url=f"http://127.0.0.1:{port}")
 
 
 def _policy() -> tuple[str, tuple[tuple[str, frozenset[int]], ...]]:
@@ -38,10 +80,18 @@ async def _resolved(host: str, port: int) -> tuple[str, ...]:
     return tuple(dict.fromkeys(str(record[4][0]) for record in records))
 
 
-def _log(host: str, port: int, addresses: tuple[str, ...], reason: str) -> None:
+def _log(
+    host: str,
+    port: int,
+    addresses: tuple[str, ...],
+    reason: str,
+    *,
+    tenant_id: str | None = None,
+    run_id: str | None = None,
+) -> None:
     record = {
-        "tenant_id": os.environ.get("AGENT_TENANT_ID", ""),
-        "run_id": os.environ.get("AGENT_RUN_ID", ""),
+        "tenant_id": tenant_id if tenant_id is not None else os.environ.get("AGENT_TENANT_ID", ""),
+        "run_id": run_id if run_id is not None else os.environ.get("AGENT_RUN_ID", ""),
         "host": host,
         "port": port,
         "resolved_addresses": addresses,
@@ -75,6 +125,9 @@ async def _handle(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     policy: tuple[str, tuple[tuple[str, frozenset[int]], ...]],
+    *,
+    tenant_id: str | None = None,
+    run_id: str | None = None,
 ) -> None:
     upstream_writer: asyncio.StreamWriter | None = None
     try:
@@ -137,7 +190,10 @@ async def _handle(
             upstream_header += b"\r\n"
         addresses = await _resolved(host, port)
         allowed, reason = evaluate_core(policy[0], policy[1], host, port, addresses)
-        _log(host, port, addresses, reason)
+        if tenant_id is None and run_id is None:
+            _log(host, port, addresses, reason)
+        else:
+            _log(host, port, addresses, reason, tenant_id=tenant_id, run_id=run_id)
         if not allowed:
             writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
             await writer.drain()

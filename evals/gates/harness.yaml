@@ -64,7 +64,7 @@
   kind: case
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "Every case naming an MCP server fixture resolves it to a checked-in file, and no MCP case opens a socket or spawns a subprocess, asserted by running the MCP cases with egress blocked rather than by inspection."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m8.py::test_mcp_no_socket
 - id: gate.harness.token_present
   milestone: 0
   kind: structural

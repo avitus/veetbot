@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, PositiveInt, model_validator
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
 from agent_core.domain.provenance import ElidedSpan
+from agent_core.domain.skills import LoadedSkillBody
+from agent_core.domain.tools import ToolSpec
 
 
 class RunStatus(StrEnum):
@@ -110,7 +112,11 @@ class RunCheckpoint(BaseModel):
     conversation: list[ConversationItem] = Field(default_factory=list)
     pending_tool_calls: list[Any] = Field(default_factory=list)
     pending_approval_ids: list[UUID] = Field(default_factory=list)
+    pinned_tool_names: list[str] = Field(default_factory=list)
+    pinned_tool_versions: dict[str, str] = Field(default_factory=dict)
+    pinned_tool_specs: dict[str, ToolSpec] = Field(default_factory=dict)
     working_state: dict[str, Any] = Field(default_factory=dict)
+    loaded_skills: list[LoadedSkillBody] = Field(default_factory=list)
     compacted_summary: str | None = None
     summary_source_event_ids: list[PositiveInt] = Field(default_factory=list)
     summary_elided: list[ElidedSpan] = Field(default_factory=list)

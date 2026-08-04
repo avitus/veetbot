@@ -21,6 +21,7 @@ def test_checked_in_trajectory_case_was_produced_by_the_converter() -> None:
         "converted_trajectory_response"
     ]
     assert checked == converted.case
+    assert checked.expected is not None
     assert converted.model_script.turns[0].text == checked.expected.final_text
     assert converted.tool_results == {}
 

@@ -1,0 +1,15 @@
+name: mcp_tool_round_trip
+milestone: 8
+tags: [mcp, tools]
+input:
+  text: Look up the retention period.
+model_fixture: mcp_round_trip
+fixtures:
+  tools: [mcp.docs.search]
+  mcp_servers: [docs_server]
+expected:
+  terminal_status: COMPLETED
+  final_text: Retention is thirty days.
+  model_calls: 2
+  tool_started_count: 1
+  event_order: [mcp.server.connected, tool.call.proposed, tool.call.completed, run.completed]

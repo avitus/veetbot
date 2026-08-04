@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+from collections import deque
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
@@ -50,15 +51,19 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunCheckpoint, Step
+from agent_core.domain.skills import LoadedSkillBody
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolFailure,
     ToolFailureKind,
     ToolInvocation,
     ToolInvocationStatus,
+    ToolKind,
     ToolOutcome,
     ToolOutcomeStatus,
     ToolResult,
+    ToolSource,
+    ToolSpec,
 )
 from agent_core.policy.revalidation import revalidation_denial_reason
 from agent_core.ports.artifacts import ArtifactWriterProvider
@@ -72,9 +77,12 @@ from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
 from agent_core.tools.messages import message_for
+from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_STEP_SEQUENCE = tuple(range(1, 15))
 
 _SENSITIVE_ARGUMENT_KEY = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential)", re.I
@@ -129,6 +137,21 @@ class ToolRecoveryAction(StrEnum):
 class _KeyLockEntry:
     lock: asyncio.Lock
     users: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineTrace:
+    run_id: UUID
+    call_id: str
+    tool_name: str
+    tool_source: ToolSource
+    steps: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedContextUpdate:
+    loaded_skills: tuple[LoadedSkillBody, ...] | None = None
+    working_state: dict[str, Any] | None = None
 
 
 def tool_recovery_action(invocation: ToolInvocation) -> ToolRecoveryAction:
@@ -249,6 +272,8 @@ class ToolPipeline:
         current_principal: Principal | None = None,
         max_parallel_calls: int = 8,
         hard_ceiling_multiplier: int = 4,
+        maximum_loaded_skills: int = 2,
+        maximum_skill_body_tokens: int = 6_000,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
     ) -> None:
         self._registry = registry
@@ -269,6 +294,10 @@ class ToolPipeline:
         if hard_ceiling_multiplier < 1:
             raise ValueError("hard ceiling multiplier must be positive")
         self._hard_ceiling_multiplier = hard_ceiling_multiplier
+        if maximum_loaded_skills <= 0 or maximum_skill_body_tokens <= 0:
+            raise ValueError("skill body limits must be positive")
+        self._maximum_loaded_skills = maximum_loaded_skills
+        self._maximum_skill_body_tokens = maximum_skill_body_tokens
         self._approval_expiry_seconds = dict(
             approval_expiry_seconds
             or {
@@ -280,6 +309,10 @@ class ToolPipeline:
         )
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
+        self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
+
+    def completed_traces(self, run_id: UUID) -> tuple[PipelineTrace, ...]:
+        return tuple(trace for trace in self._completed_traces if trace.run_id == run_id)
 
     @asynccontextmanager
     async def _key_lock(self, key: str) -> AsyncIterator[None]:
@@ -311,7 +344,7 @@ class ToolPipeline:
         token: CancellationToken,
         lease: WorkerLease | None = None,
     ) -> list[ToolResultItem]:
-        if self._parallel_ok(tool_calls, run, principal, agent):
+        if self._parallel_ok(tool_calls, run, checkpoint, principal, agent):
             token.raise_if_cancelled()
             parallel_group = self._ids.new_id()
             settled = await asyncio.gather(
@@ -368,8 +401,9 @@ class ToolPipeline:
         lease: WorkerLease | None,
         parallel_group: UUID | None,
     ) -> ToolResultItem:
+        progress: list[int] = []
         try:
-            tool = self._registry.get(call.name)
+            tool = self._resolve_pinned_tool(checkpoint, call.name, principal)
         except NotFoundError:
             return await self._refusal(
                 run,
@@ -378,7 +412,13 @@ class ToolPipeline:
                 ToolOutcomeStatus.DENIED,
                 lease,
             )
-        if call.name not in agent.enabled_tools:
+        progress.append(1)
+        enabled_names = (
+            frozenset(checkpoint.pinned_tool_names)
+            if tool.spec.source is ToolSource.MCP and checkpoint.pinned_tool_names
+            else frozenset(agent.enabled_tools)
+        )
+        if call.name not in enabled_names:
             return await self._refusal(
                 run,
                 call,
@@ -386,6 +426,7 @@ class ToolPipeline:
                 ToolOutcomeStatus.DENIED,
                 lease,
             )
+        progress.append(2)
         missing = tool.spec.required_scopes - principal.scopes
         if missing:
             return await self._refusal(
@@ -396,10 +437,12 @@ class ToolPipeline:
                 lease,
                 message=f"Not performed. Missing required scope(s): {', '.join(sorted(missing))}.",
             )
+        progress.append(3)
         if call.parse_error is not None:
             return await self._refusal(
                 run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED, lease
             )
+        progress.append(4)
         try:
             arguments, _rendered, arguments_hash = validate_and_normalize(
                 call.arguments, tool.spec.input_schema
@@ -408,9 +451,10 @@ class ToolPipeline:
             return await self._refusal(
                 run, call, "tool.arguments_invalid", ToolOutcomeStatus.FAILED, lease
             )
+        progress.append(5)
 
         key = _idempotency_key(run, step, call, tool, arguments_hash)
-        return await self._execute_once(
+        result_item = await self._execute_once(
             run=run,
             checkpoint=checkpoint,
             call=call,
@@ -424,7 +468,19 @@ class ToolPipeline:
             token=token,
             lease=lease,
             parallel_group=parallel_group,
+            progress=progress,
         )
+        if not result_item.is_error and tuple(progress) == PIPELINE_STEP_SEQUENCE:
+            self._completed_traces.append(
+                PipelineTrace(
+                    run_id=run.id,
+                    call_id=call.call_id,
+                    tool_name=tool.spec.name,
+                    tool_source=tool.spec.source,
+                    steps=tuple(progress),
+                )
+            )
+        return result_item
 
     async def _execute_once(
         self,
@@ -442,6 +498,7 @@ class ToolPipeline:
         token: CancellationToken,
         lease: WorkerLease | None,
         parallel_group: UUID | None,
+        progress: list[int],
         approval_granted: bool = False,
         prepared_candidate: ToolInvocation | None = None,
         prepared_decision: PolicyDecision | None = None,
@@ -478,6 +535,7 @@ class ToolPipeline:
         if not approval_granted and decision is None:
             action = self._proposed_action(run, step, tool, candidate, arguments, arguments_hash)
             decision = await self._policy.evaluate(action, principal, run)
+            progress.extend((6, 7))
             effective_hash = arguments_hash
             if decision.decision is PolicyDecisionType.ALLOW_WITH_MODIFICATIONS:
                 if decision.modified_arguments is None:
@@ -510,6 +568,7 @@ class ToolPipeline:
                     token=token,
                     lease=lease,
                     parallel_group=parallel_group,
+                    progress=progress,
                     approval_granted=approval_granted,
                     prepared_candidate=candidate,
                     prepared_decision=decision,
@@ -533,8 +592,11 @@ class ToolPipeline:
             if invocation.outcome.status is ToolOutcomeStatus.SUCCEEDED:
                 self._apply_context_update(
                     checkpoint,
-                    tool.spec.name,
-                    invocation.structured_result,
+                    self._prepare_context_update(
+                        checkpoint,
+                        tool.spec,
+                        invocation.structured_result,
+                    ),
                 )
             return invocation.result_item or _outcome_item(
                 call.call_id, invocation.outcome, tool.spec.output_trust
@@ -596,6 +658,7 @@ class ToolPipeline:
                 step=step,
                 key=key,
                 lease=lease,
+                progress=progress,
             )
         if recovery not in {
             ToolRecoveryAction.RESUME_AUTHORIZATION,
@@ -630,6 +693,8 @@ class ToolPipeline:
                     {"name": call.name, "call_id": call.call_id},
                     lease,
                 )
+        if invocation.status is ToolInvocationStatus.AUTHORIZED and progress[-1] == 7:
+            progress.append(8)
         if invocation.status is ToolInvocationStatus.AUTHORIZED:
             running = invocation.model_copy(
                 update={"status": ToolInvocationStatus.RUNNING, "updated_at": self._clock.now()},
@@ -649,6 +714,8 @@ class ToolPipeline:
                     {"name": call.name, "call_id": call.call_id},
                     lease,
                 )
+        if invocation.status is ToolInvocationStatus.RUNNING and progress[-1] == 8:
+            progress.append(9)
         if invocation.status is not ToolInvocationStatus.RUNNING:
             raise ConflictError(f"cannot recover tool invocation in {invocation.status.value}")
 
@@ -803,11 +870,15 @@ class ToolPipeline:
             ),
             bridge_dispatch=(bridge_dispatch if tool.spec.target_kind == "sandbox" else None),
             working_state=deepcopy(checkpoint.working_state),
+            loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
+            available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
         if self._uow_factory.is_open():
             raise RuntimeError("tool execution cannot begin while a unit of work is open")
+        if progress[-1] == 9:
+            progress.append(10)
         try:
             if effective_timeout <= 0:
                 raise TimeoutError
@@ -817,6 +888,8 @@ class ToolPipeline:
                 result = await tool.execute(arguments, execution_context)
             if result.ok:
                 validate_output(result.structured, tool.spec.output_schema)
+                if progress[-1] == 10:
+                    progress.append(11)
             if result.ok:
                 result = await self._artifactize_large_output(
                     result=result,
@@ -824,6 +897,8 @@ class ToolPipeline:
                     run=run,
                     principal=principal,
                 )
+                if progress[-1] == 11:
+                    progress.append(12)
             if result.ok:
                 validate_output(result.structured, tool.spec.output_schema)
         except TimeoutError:
@@ -880,9 +955,30 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        result_item = await self._finish(run, call, tool, invocation, result, lease)
+        prepared_update = _PreparedContextUpdate()
         if result.ok:
-            self._apply_context_update(checkpoint, tool.spec.name, result.structured)
+            try:
+                prepared_update = self._prepare_context_update(
+                    checkpoint,
+                    tool.spec,
+                    result.structured,
+                )
+            except (ConflictError, ValueError):
+                result = ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.OUTPUT_INVALID,
+                        reason_code="tool.output_invalid",
+                        detail="control tool returned an invalid context update",
+                        retryable=False,
+                    ),
+                )
+        result_item = await self._finish(run, call, tool, invocation, result, lease)
+        if progress[-1] == 12:
+            progress.extend((13, 14))
+        if result.ok:
+            self._apply_context_update(checkpoint, prepared_update)
         return result_item
 
     async def _artifactize_large_output(
@@ -1111,6 +1207,7 @@ class ToolPipeline:
         step: Step,
         key: str,
         lease: WorkerLease | None,
+        progress: list[int],
     ) -> ToolResultItem:
         async with self._uow_factory() as uow:
             approval = await uow.approvals.get_by_action(invocation.id)
@@ -1193,6 +1290,7 @@ class ToolPipeline:
             lease=lease,
             approval_granted=True,
             parallel_group=invocation.parallel_group,
+            progress=progress,
             lock_acquired=True,
         )
 
@@ -1200,6 +1298,7 @@ class ToolPipeline:
         self,
         calls: list[ToolCallItem],
         run: Run,
+        checkpoint: RunCheckpoint,
         principal: Principal,
         agent: AgentSpec,
     ) -> bool:
@@ -1214,13 +1313,19 @@ class ToolPipeline:
             SideEffectClass.WORKSPACE_READ,
             SideEffectClass.NETWORK_READ,
         }
+        enabled_names: frozenset[str]
         for call in calls:
             try:
-                tool = self._registry.get(call.name)
+                tool = self._resolve_pinned_tool(checkpoint, call.name, principal)
             except NotFoundError:
                 return False
+            enabled_names = (
+                frozenset(checkpoint.pinned_tool_names)
+                if tool.spec.source is ToolSource.MCP and checkpoint.pinned_tool_names
+                else frozenset(agent.enabled_tools)
+            )
             if (
-                call.name not in agent.enabled_tools
+                call.name not in enabled_names
                 or not tool.spec.required_scopes.issubset(principal.scopes)
                 or tool.spec.side_effect not in read_only_effects
                 or not tool.spec.allow_parallel
@@ -1228,6 +1333,21 @@ class ToolPipeline:
             ):
                 return False
         return True
+
+    def _resolve_pinned_tool(
+        self,
+        checkpoint: RunCheckpoint,
+        name: str,
+        principal: Principal,
+    ) -> Tool:
+        pinned = checkpoint.pinned_tool_specs.get(name)
+        return self._registry.get(
+            name,
+            pinned.version if pinned is not None else checkpoint.pinned_tool_versions.get(name),
+            tenant_id=principal.tenant_id,
+            source=None if pinned is None else pinned.source,
+            server_id=None if pinned is None else pinned.server_id,
+        )
 
     async def _deny_invocation(
         self,
@@ -1285,20 +1405,61 @@ class ToolPipeline:
             )
         return result_item
 
+    def _prepare_context_update(
+        self,
+        checkpoint: RunCheckpoint,
+        tool_spec: ToolSpec,
+        structured: dict[str, Any] | None,
+    ) -> _PreparedContextUpdate:
+        if tool_spec.name not in {WORKING_STATE_TOOL_NAME, SKILL_LOAD_TOOL_NAME}:
+            return _PreparedContextUpdate()
+        if tool_spec.source is not ToolSource.BUILTIN or tool_spec.kind is not ToolKind.CONTROL:
+            raise ConflictError("context updates require a trusted builtin control tool")
+        if tool_spec.name == SKILL_LOAD_TOOL_NAME:
+            if structured is None:
+                raise ConflictError("persisted skill-load result has no structured output")
+            update = structured.get("skill_update")
+            if not isinstance(update, dict):
+                raise ConflictError("persisted skill-load result has no update mapping")
+            operation = update.get("operation")
+            name = update.get("name")
+            if operation == "unload" and isinstance(name, str):
+                return _PreparedContextUpdate(
+                    loaded_skills=tuple(
+                        body for body in checkpoint.loaded_skills if body.name != name
+                    )
+                )
+            raw_body = update.get("body")
+            if operation != "load" or not isinstance(raw_body, dict):
+                raise ConflictError("persisted skill-load update is malformed")
+            body = LoadedSkillBody.model_validate(raw_body)
+            retained = [
+                candidate for candidate in checkpoint.loaded_skills if candidate.name != body.name
+            ]
+            if len(retained) >= self._maximum_loaded_skills:
+                raise ConflictError("persisted skill-load update exceeds the loaded-skill cap")
+            retained.append(body)
+            if sum(candidate.tokens for candidate in retained) > self._maximum_skill_body_tokens:
+                raise ConflictError("persisted skill-load update exceeds the skill-body token cap")
+            return _PreparedContextUpdate(loaded_skills=tuple(retained))
+        if structured is None:
+            return _PreparedContextUpdate()
+        if structured.get("updated") is True:
+            state = structured.get("working_state")
+            if not isinstance(state, dict):
+                raise ConflictError("persisted working-state result has no state mapping")
+            return _PreparedContextUpdate(working_state=dict(state))
+        return _PreparedContextUpdate()
+
     @staticmethod
     def _apply_context_update(
         checkpoint: RunCheckpoint,
-        tool_name: str,
-        structured: dict[str, Any] | None,
+        prepared: _PreparedContextUpdate,
     ) -> None:
-        if tool_name != WORKING_STATE_TOOL_NAME or structured is None:
-            return
-        if structured.get("updated") is not True:
-            return
-        state = structured.get("working_state")
-        if not isinstance(state, dict):
-            raise ConflictError("persisted working-state result has no state mapping")
-        checkpoint.working_state["context"] = dict(state)
+        if prepared.loaded_skills is not None:
+            checkpoint.loaded_skills = list(prepared.loaded_skills)
+        if prepared.working_state is not None:
+            checkpoint.working_state["context"] = dict(prepared.working_state)
 
     async def _finish(
         self,
@@ -1323,16 +1484,24 @@ class ToolPipeline:
         else:
             if result.failure is None:
                 raise RuntimeError("ToolResult contract violation: failed result has no failure")
+            unavailable = result.failure.kind is ToolFailureKind.TRANSPORT
+            uncertain = result.failure.kind is ToolFailureKind.OUTCOME_UNKNOWN
             outcome = ToolOutcome(
-                status=ToolOutcomeStatus.FAILED,
+                status=(
+                    ToolOutcomeStatus.UNCERTAIN
+                    if uncertain
+                    else ToolOutcomeStatus.UNAVAILABLE
+                    if unavailable
+                    else ToolOutcomeStatus.FAILED
+                ),
                 action=call.name,
                 reason_code=result.failure.reason_code,
                 message=message_for(result.failure.reason_code),
                 retryable=result.failure.retryable,
                 remediation="modify_arguments" if result.failure.retryable else "none",
             )
-            status = ToolInvocationStatus.FAILED
-            event_type = "tool.call.failed"
+            status = ToolInvocationStatus.UNCERTAIN if uncertain else ToolInvocationStatus.FAILED
+            event_type = "tool.call.uncertain" if uncertain else "tool.call.failed"
         if result.ok:
             trust = _effective_output_trust(result, tool)
             result_item = ToolResultItem(call_id=call.call_id, content=result.content, trust=trust)

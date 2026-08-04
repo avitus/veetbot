@@ -51,7 +51,7 @@ def test_no_eval_in_prod() -> None:
 
 def test_case_schema() -> None:
     cases = load_cases(ROOT / "tests" / "eval_cases")
-    assert len(cases) == 21
+    assert len(cases) == 24
     assert len({case.name for case in cases}) == len(cases)
     for case in cases:
         script = resolve_model_fixture(ROOT / "evals" / "fixtures" / "models", case.model_fixture)
@@ -65,7 +65,14 @@ async def test_no_egress() -> None:
 
 def test_reason_code_table() -> None:
     cases = load_cases(ROOT / "tests" / "eval_cases")
-    reason_codes = [code for case in cases for code in case.expected.reason_codes]
+    expectations = [
+        expected
+        for case in cases
+        for expected in (
+            [case.expected] if case.expected is not None else [arm.expected for arm in case.arms]
+        )
+    ]
+    reason_codes = [code for expected in expectations for code in expected.reason_codes]
     assert reason_codes
     assert all(code in TOOL_MESSAGES for code in reason_codes)
     assert len({code: TOOL_MESSAGES[code] for code in reason_codes}) == len(set(reason_codes))

@@ -390,6 +390,7 @@ class ScriptedTurn(BaseModel):
     usage: ModelUsage | None = None
     fail_with: ModelFailure | None = None
     delay_ms: int = 0
+    context_contains: str | None = None
 
 
 class FakeModelScript(BaseModel):

@@ -45,6 +45,7 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
             "def leak(row: RunRow) -> None:\n"
             "    del row\n"
         ),
+        "runtime/mcp_leak.py": "from mcp import Client\nVALUE = Client\n",
     }
     for relative, content in fixtures.items():
         path = package / relative
@@ -61,3 +62,4 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
     assert any("ambient nondeterminism call uuid.uuid4" in error for error in errors)
     assert any("module-scope database resource" in error for error in errors)
     assert any("ORM type crosses adapter signature" in error for error in errors)
+    assert any("MCP SDK mcp crosses adapter boundary" in error for error in errors)

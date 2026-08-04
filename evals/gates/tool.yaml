@@ -60,34 +60,34 @@
   kind: case
   spec: docs/plan/tool-system.md#hard-gates
   statement: "An MCP tool call traverses the same fourteen steps in the same order as a builtin call, asserted by comparing the recorded step sequence for an MCP call against the sequence for a builtin call rather than by asserting the steps individually."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_tool_m8.py::test_mcp_pipeline_parity
 - id: gate.tool.mcp_disconnect
   milestone: 8
   kind: case
   spec: docs/plan/tool-system.md#hard-gates
   statement: "A server that disconnects mid-call yields `unavailable` with `tool.server_unreachable` and a run that continues, asserted against a scripted server that drops the connection rather than against a mocked exception."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_tool_m8.py::test_mcp_disconnect
 - id: gate.tool.mcp_sdk_confined
   milestone: 8
   kind: structural
   spec: docs/plan/tool-system.md#hard-gates
   statement: "No module outside `adapters.mcp` imports an MCP SDK type, asserted by the import-graph walk rather than by grep, because the import this catches is transitive through a shared helper."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_tool_m8.py::test_mcp_sdk_confined
 - id: gate.tool.mcp_auth_config
   milestone: 8
   kind: structural
   spec: docs/plan/tool-system.md#hard-gates
   statement: "Configuration validation rejects every invalid authentication row: a scheme outside the closed five, a scheme on the wrong transport, `none` with a credential reference, `header` or `env` without a name, `header` naming `Authorization`, `env` naming a tier-0 variable, and `oauth2_client` whose token endpoint the egress allowlist does not permit. Asserted over the validator, with no server and no broker."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_tool_m8.py::test_mcp_auth_config
 - id: gate.tool.mcp_reauth_bounded
   milestone: 8
   kind: case
   spec: docs/plan/tool-system.md#hard-gates
   statement: "The re-authentication ladder is bounded and routes through recovery. Against a scripted server that returns 401 on demand: exactly one re-authentication per server per session, one retry of an idempotent call, `UNCERTAIN` rather than a retry for a non-idempotent call whose watermark is set, `unavailable` with `tool.server_unauthorized` thereafter, and a run that continues throughout."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_tool_m8.py::test_mcp_reauth_bounded
 - id: gate.tool.mcp_stdio_env_built
   milestone: 8
   kind: case
   spec: docs/plan/tool-system.md#hard-gates
   statement: "A stdio server's child process receives a constructed environment: the synthesized tier plus the one declared credential variable and nothing else, asserted against a server that echoes its environment back, with a sentinel planted in the worker's own environment that must not appear in what comes back."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_tool_m8.py::test_mcp_stdio_env_built

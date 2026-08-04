@@ -352,6 +352,13 @@ class RunExecutor:
                 principal,
                 resolved_model,
             )
+            checkpoint_state.pinned_tool_names = list(context_plan.tool_names)
+            checkpoint_state.pinned_tool_versions = {
+                spec.name: spec.version for spec in context_plan.tool_specs
+            }
+            checkpoint_state.pinned_tool_specs = {
+                spec.name: spec.model_copy(deep=True) for spec in context_plan.tool_specs
+            }
             callback = on_token or self._on_token
             if callback is not None:
                 callback(run.id, token)

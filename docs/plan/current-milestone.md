@@ -4,16 +4,16 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 7 — context budgeting and structured working state (complete)
-- **Next milestone:** Milestone 8 — skills and MCP integration
+- **Current milestone:** Milestone 8 — skills and MCP integration (in progress)
+- **Next milestone:** Milestone 9 — long-term memory and knowledge retrieval
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 7 are complete. Milestones 8 and 9 are
-  explicitly authorized and remain sequentially gated.
+- **Project status:** Milestones 0 through 7 are complete. Milestone 8 is in
+  progress, and Milestone 9 is authorized but remains sequentially gated.
 
-Milestone 7 adds durable context plans and prefix epochs, absolute context
-budgets, deterministic history selection, trust envelopes, structured working
-state and carry, pressure-driven checkpoint compaction, estimator reconciliation,
-and the fifty-turn long-session evaluation. The
+Milestone 8 adds immutable, content-addressed skill packages; pinned session
+catalogs and selectively loaded bodies; MCP discovery, authentication, and
+transport adapters; and dynamic MCP tools routed through the centralized tool
+pipeline. The
 machine-readable [project state](../status/project-state.yaml) records progress
 and evidence.
 
@@ -35,13 +35,14 @@ substitute.
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Begin Milestone 8 only after the Milestone 7 pull request is merged. Milestone 10
-is not authorized because the readiness review records that it has no complete
-acceptance criteria.
+Begin Milestone 9 only after the Milestone 8 pull request is reviewed, passes
+hosted CI, and is merged. Milestone 10 is not authorized because the readiness
+review records that it has no complete acceptance criteria.
 
 ## Completion rule
 
-Milestone 7 is complete: every canonical acceptance criterion and all 123
-cumulative gates pass locally, all four hosted CircleCI lanes passed, and every
-CodeRabbit review thread was addressed and resolved. Proposed ADR-0043 records
-the implementation decisions reserved for later owner review.
+Milestone 8 remains in progress. Its local implementation and all 140 cumulative
+gates pass, but completion requires the combined verification, all hosted
+CircleCI lanes, and every CodeRabbit review thread to be addressed and resolved.
+Proposed ADR-0044 records the implementation decisions reserved for later owner
+review.

@@ -55,7 +55,7 @@ class FakeModelProvider:
         self.attempts.append(attempt.model_copy(deep=True))
         self.requests.append(request.model_copy(deep=True))
         try:
-            turn = self._next_turn()
+            turn = self._next_turn(request)
         except ModelScriptExhaustedError:
             yield ModelFailedEvent(
                 attempt_id=attempt.attempt_id,
@@ -166,11 +166,13 @@ class FakeModelProvider:
             stop_reason=stop_reason,
         )
 
-    def _next_turn(self) -> ScriptedTurn:
-        if self._index < len(self._script.turns):
+    def _next_turn(self, request: ModelRequest) -> ScriptedTurn:
+        rendered_request = request.model_dump_json()
+        while self._index < len(self._script.turns):
             turn = self._script.turns[self._index]
             self._index += 1
-            return turn
+            if turn.context_contains is None or turn.context_contains in rendered_request:
+                return turn
         if self._script.on_exhausted == "repeat_last" and self._script.turns:
             return self._script.turns[-1]
         raise ModelScriptExhaustedError("fake model script exhausted")

@@ -8,17 +8,19 @@ import json
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast
+from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
+from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
     RandomIdFactory,
@@ -38,6 +40,10 @@ from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
 )
+from agent_core.adapters.mcp.memory import InMemoryMCPServerRepository
+from agent_core.adapters.mcp.persistence import PostgresMCPServerRepository
+from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
+from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -90,6 +96,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresTrajectoryExportRepository,
     PostgresUsageRepository,
 )
+from agent_core.adapters.persistence.skills import PostgresSkillRepository
 from agent_core.adapters.persistence.unit_of_work import (
     MemoryUnitOfWorkFactory,
     PostgresRepositoryFactory,
@@ -97,6 +104,11 @@ from agent_core.adapters.persistence.unit_of_work import (
     UnitOfWorkRepositories,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
+from agent_core.adapters.skills.memory import InMemorySkillRepository
+from agent_core.adapters.skills.stores import (
+    FilesystemSkillPackageStore,
+    InMemorySkillPackageStore,
+)
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.public_services import (
@@ -145,6 +157,7 @@ from agent_core.domain.execution import (
     EgressPolicy,
     ResourceLimits,
 )
+from agent_core.domain.mcp import MCPServerConfig, ScriptedMCPServer
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelEvent,
@@ -158,22 +171,31 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import CancelReason, RunLimits
+from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
+from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
+from agent_core.mcp.configuration import validate_mcp_config
+from agent_core.mcp.runtime import MCPRuntime
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
+from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.persistence import TransactionCallbackRegistrar, UnitOfWorkFactory
+from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
+from agent_core.skills.catalog import SkillCatalogService
+from agent_core.skills.package import SkillPackageValidator
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.calculator import CalculatorTool
@@ -183,6 +205,7 @@ from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
+from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME, SkillLoadTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
@@ -217,6 +240,10 @@ class Composition:
     worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
     sandbox: SandboxManager
+    mcp: MCPRuntime
+    skill_catalogs: SkillCatalogService
+    tool_pipeline: ToolPipeline
+    mcp_proxy: WorkerEgressProxy | None
 
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
@@ -311,8 +338,17 @@ def _memory_uow_repositories(
     invocations: InMemoryToolInvocationRepository,
     clock: Clock,
     approvals: InMemoryApprovalRepository | None = None,
+    skills: SkillRepository | None = None,
+    mcp_servers: MCPServerRepository | None = None,
 ) -> UnitOfWorkRepositories:
     approvals = approvals or InMemoryApprovalRepository(clock)
+    skills = skills or InMemorySkillRepository(
+        InMemorySkillPackageStore(),
+        SkillPackageValidator(ConservativeTokenEstimator()),
+        clock,
+        RandomIdFactory(),
+    )
+    mcp_servers = mcp_servers or InMemoryMCPServerRepository()
     return UnitOfWorkRepositories(
         agents=agents,
         approvals=approvals,
@@ -331,6 +367,8 @@ def _memory_uow_repositories(
         trajectory_exports=InMemoryTrajectoryExportRepository(),
         artifacts=InMemoryArtifactRepository(),
         maintenance=InMemoryMaintenanceRepository(),
+        skills=skills,
+        mcp_servers=mcp_servers,
         queue=None,
     )
 
@@ -341,8 +379,14 @@ def _postgres_repository_factory(
     *,
     lease_seconds: float,
     max_attempts: int,
+    skill_store: SkillPackageStore,
+    skill_validator: SkillPackageValidator,
+    ids: IdFactory,
 ) -> PostgresRepositoryFactory:
-    def repositories(session: AsyncSession) -> UnitOfWorkRepositories:
+    def repositories(
+        session: AsyncSession,
+        register_rollback: TransactionCallbackRegistrar,
+    ) -> UnitOfWorkRepositories:
         agents = PostgresAgentRepository(session, clock)
         sessions = PostgresSessionRepository(session)
         runs = PostgresRunRepository(session, clock)
@@ -369,6 +413,15 @@ def _postgres_repository_factory(
             trajectory_exports=PostgresTrajectoryExportRepository(session),
             artifacts=PostgresArtifactRepository(session),
             maintenance=PostgresMaintenanceRepository(session),
+            skills=PostgresSkillRepository(
+                session,
+                skill_store,
+                skill_validator,
+                clock,
+                ids,
+                register_rollback,
+            ),
+            mcp_servers=PostgresMCPServerRepository(session, clock),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -407,7 +460,13 @@ async def _compose(
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
+    mcp_config: Mapping[str, object],
     max_compactions_per_step: int,
+    skill_store: SkillPackageStore,
+    mcp_clients: MCPClientFactory | None,
+    mcp_scripts: Mapping[str, ScriptedMCPServer] | None,
+    credential_resolver: CredentialResolver,
+    mcp_server_configs: tuple[MCPServerConfig, ...],
 ) -> tuple[Composition, list[ModelProvider]]:
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
@@ -430,6 +489,29 @@ async def _compose(
     for destination in destinations:
         validate_destination(destination)
     egress = EgressPolicy(mode=EgressMode(str(raw_egress["mode"])), destinations=destinations)
+    mcp_proxy: WorkerEgressProxy | None = None
+
+    def destination_allowed(url: str) -> bool:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        return egress.mode is EgressMode.ALLOWLIST and any(
+            destination.host == parsed.hostname and port in destination.ports
+            for destination in egress.destinations
+        )
+
+    for config in mcp_server_configs:
+        if config.tenant_id != principal.tenant_id:
+            raise ConfigurationError("MCP server configuration tenant does not match the runtime")
+        validate_mcp_config(config, destination_allowed=destination_allowed)
+    async with uow_factory() as uow:
+        for config in mcp_server_configs:
+            await uow.mcp_servers.put(config)
+    async with uow_factory() as uow:
+        effective_mcp_configs = await uow.mcp_servers.list_enabled(principal.tenant_id)
+    for config in effective_mcp_configs:
+        validate_mcp_config(config, destination_allowed=destination_allowed)
     raw_artifacts = sandbox_config["artifacts"]
     artifact_retention_days = int(raw_artifacts["retention_days"])
     artifact_maximum_bytes = int(raw_artifacts["maximum_bytes"])
@@ -444,6 +526,18 @@ async def _compose(
     summary_config = context_config.get("summary")
     if not isinstance(summary_config, dict):
         raise ConfigurationError("context summary configuration must be a mapping")
+    context_classes = context_config.get("classes")
+    if not isinstance(context_classes, dict):
+        raise ConfigurationError("context classes configuration must be a mapping")
+    skill_catalog_config = context_classes.get("skill_catalog")
+    skill_bodies_config = context_classes.get("skill_bodies")
+    if not isinstance(skill_catalog_config, dict) or not isinstance(skill_bodies_config, dict):
+        raise ConfigurationError("skill context configuration must be a mapping")
+    connect_timeout = mcp_config.get("connect_timeout_seconds")
+    if not isinstance(connect_timeout, (int, float)) or isinstance(connect_timeout, bool):
+        raise ConfigurationError("MCP connect timeout must be numeric")
+    if connect_timeout <= 0:
+        raise ConfigurationError("MCP connect timeout must be positive")
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -533,7 +627,40 @@ async def _compose(
         )
     model_provider = FakeModelProvider(script or default_fake_script(), clock)
     effective_providers = {"fake": model_provider, **model_providers}
+    mcp_runtime: MCPRuntime | None = None
     try:
+        if mcp_clients is None:
+            if mcp_scripts is not None:
+                mcp_clients = ScriptedMCPClientFactory(dict(mcp_scripts))
+            else:
+                if any(config.transport.value == "http" for config in effective_mcp_configs):
+                    mcp_proxy = await start_worker_egress_proxy(
+                        egress,
+                        tenant_id=principal.tenant_id,
+                    )
+                mcp_clients = SDKMCPClientFactory(
+                    http_proxy_url=None if mcp_proxy is None else mcp_proxy.url
+                )
+        mcp_runtime = MCPRuntime(
+            uow_factory,
+            registry,
+            mcp_clients,
+            credential_resolver,
+            clock,
+            ids,
+            connect_timeout_seconds=float(connect_timeout),
+        )
+        skill_catalogs = SkillCatalogService(
+            uow_factory,
+            skill_store,
+            estimator,
+            mcp_prompts=mcp_runtime.prompt_entries,
+            maximum_entries=int(skill_catalog_config["max_items"]),
+            maximum_tokens=int(skill_catalog_config["max_tokens"]),
+            maximum_loaded=int(skill_bodies_config["max_items"]),
+            maximum_body_tokens=int(skill_bodies_config["max_tokens"]),
+        )
+        registry.register(SkillLoadTool(skill_catalogs))
         resolved_model = ResolvedModel(
             provider="fake",
             model="scripted",
@@ -549,6 +676,7 @@ async def _compose(
             principal,
             context_config,
             policy_version=ruleset.policy_version,
+            skill_catalogs=skill_catalogs,
         )
         context_builder = BudgetedContextBuilder(
             context_planner,
@@ -591,6 +719,8 @@ async def _compose(
             current_principal=principal,
             max_parallel_calls=max_parallel_calls,
             hard_ceiling_multiplier=hard_ceiling_multiplier,
+            maximum_loaded_skills=int(skill_bodies_config["max_items"]),
+            maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
         )
         token_slot = _ActiveToken()
@@ -630,7 +760,15 @@ async def _compose(
             if storage == "memory"
             else PostgresRunDispatcher()
         )
-        session_service = SessionService(uow_factory, clock, ids, principal, agent)
+        session_service = SessionService(
+            uow_factory,
+            clock,
+            ids,
+            principal,
+            agent,
+            catalogs=skill_catalogs,
+            activate_session=mcp_runtime.activate_session,
+        )
         trajectory_service = TrajectoryExportService(
             uow_factory=uow_factory,
             principal=principal,
@@ -661,7 +799,14 @@ async def _compose(
             resume_waiting_run=executor.requeue_after_approval,
             self_approval_enabled=ruleset.self_approval_enabled,
         )
-        public_session_service = PublicSessionService(uow_factory, clock, ids, agent)
+        public_session_service = PublicSessionService(
+            uow_factory,
+            clock,
+            ids,
+            agent,
+            catalogs=skill_catalogs,
+            activate_session=mcp_runtime.activate_session,
+        )
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -724,13 +869,25 @@ async def _compose(
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                 ),
                 sandbox=sandbox_manager,
+                mcp=mcp_runtime,
+                skill_catalogs=skill_catalogs,
+                tool_pipeline=pipeline,
+                mcp_proxy=mcp_proxy,
             ),
             list(effective_providers.values()),
         )
     except BaseException:
-        await sandbox_manager.close()
+        if mcp_runtime is not None:
+            with suppress(BaseException):
+                await mcp_runtime.close()
+        if mcp_proxy is not None:
+            with suppress(BaseException):
+                await mcp_proxy.close()
+        with suppress(BaseException):
+            await sandbox_manager.close()
         for provider in effective_providers.values():
-            await provider.close()
+            with suppress(BaseException):
+                await provider.close()
         raise
 
 
@@ -779,6 +936,12 @@ async def build(
     ids: IdFactory | None = None,
     limits: RunLimits | None = None,
     enabled_tools: list[str] | None = None,
+    enabled_skills: list[str] | None = None,
+    skill_packages: tuple[tuple[SkillPackage, SkillSource], ...] = (),
+    mcp_servers: tuple[MCPServerConfig, ...] = (),
+    mcp_client_factory: MCPClientFactory | None = None,
+    mcp_scripts: Mapping[str, ScriptedMCPServer] | None = None,
+    credential_resolver: CredentialResolver | None = None,
     principal: Principal | None = None,
     policy_profile: str = "default",
     fixed_clock_at: datetime | None = None,
@@ -878,7 +1041,7 @@ async def build(
             if model_policy is None
             else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
         ),
-        name="Milestone 7 Agent",
+        name="Milestone 8 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
         model_policy=effective_model_policy,
         enabled_tools=(
@@ -895,8 +1058,10 @@ async def build(
                 "sandbox.run_command",
                 "artifact.export",
                 WORKING_STATE_TOOL_NAME,
+                SKILL_LOAD_TOOL_NAME,
             ]
         ),
+        enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits
         or RunLimits(
@@ -917,6 +1082,10 @@ async def build(
         else PostgresLiveEventBroadcaster(effective_settings.database_url)
     )
     composition: Composition | None = None
+    skill_validator = SkillPackageValidator(ConservativeTokenEstimator())
+    skill_store: SkillPackageStore
+    if mcp_client_factory is not None and mcp_scripts is not None:
+        raise ValueError("mcp_client_factory and mcp_scripts are mutually exclusive")
     try:
         if storage == "memory":
             agent_repository = InMemoryAgentRepository()
@@ -925,6 +1094,14 @@ async def build(
             event_repository = InMemoryEventRepository(session_repository, effective_clock)
             invocation_repository = InMemoryToolInvocationRepository(run_repository)
             approval_repository = InMemoryApprovalRepository(effective_clock)
+            skill_store = InMemorySkillPackageStore()
+            skill_repository = InMemorySkillRepository(
+                skill_store,
+                skill_validator,
+                effective_clock,
+                effective_ids,
+            )
+            mcp_repository = InMemoryMCPServerRepository()
             uow_factory: UnitOfWorkFactory = cast(
                 UnitOfWorkFactory,
                 MemoryUnitOfWorkFactory(
@@ -935,11 +1112,16 @@ async def build(
                         runs=run_repository,
                         events=event_repository,
                         invocations=invocation_repository,
+                        skills=skill_repository,
+                        mcp_servers=mcp_repository,
                         clock=effective_clock,
                     )
                 ),
             )
         else:
+            skill_store = FilesystemSkillPackageStore(
+                effective_settings.artifact_root / "skill-packages"
+            )
             engine = create_engine(effective_settings.database_url)
             await assert_schema_revision(engine)
             uow_factory = cast(
@@ -951,10 +1133,23 @@ async def build(
                         EventUpcasterRegistry(),
                         lease_seconds=float(worker_config["lease_seconds"]),
                         max_attempts=int(queue_config["max_attempts"]),
+                        skill_store=skill_store,
+                        skill_validator=skill_validator,
+                        ids=effective_ids,
                     ),
+                    effective_principal.tenant_id,
                 ),
             )
         provider_adapters = _provider_adapters(effective_settings, provider_registry)
+        for package, source in skill_packages:
+            async with uow_factory() as uow:
+                await uow.skills.install(
+                    effective_principal.tenant_id,
+                    package,
+                    source,
+                    None,
+                    None,
+                )
         for name, override in (model_provider_overrides or {}).items():
             displaced = provider_adapters.get(name)
             if displaced is not None:
@@ -985,15 +1180,39 @@ async def build(
             ruleset=ruleset,
             live_events=live_events,
             context_config=context_config,
+            mcp_config=tool_config["mcp"],
             max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
+            skill_store=skill_store,
+            mcp_clients=mcp_client_factory,
+            mcp_scripts=mcp_scripts,
+            credential_resolver=credential_resolver
+            or MappingCredentialResolver(
+                {
+                    name: secret.get_secret_value()
+                    for name, secret in effective_settings.credentials.items()
+                }
+            ),
+            mcp_server_configs=mcp_servers,
         )
         yield composition
     finally:
         if composition is not None:
             try:
+                await composition.mcp.close()
+            except Exception as exc:
+                logger.warning("mcp_close_failed", extra={"error_class": type(exc).__name__})
+            try:
                 await composition.sandbox.close()
             except Exception as exc:
                 logger.warning("sandbox_close_failed", extra={"error_class": type(exc).__name__})
+            if composition.mcp_proxy is not None:
+                try:
+                    await composition.mcp_proxy.close()
+                except Exception as exc:
+                    logger.warning(
+                        "mcp_proxy_close_failed",
+                        extra={"error_class": type(exc).__name__},
+                    )
         for model_provider in model_providers:
             try:
                 await model_provider.close()

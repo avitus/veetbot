@@ -6,12 +6,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
 
-from agent_core.domain.agents import Principal
 from agent_core.domain.messages import ContentPart, ToolResultItem
 from agent_core.domain.policies import (
     ExecutionTarget,
@@ -21,6 +20,9 @@ from agent_core.domain.policies import (
     SideEffectClass,
     TrustLevel,
 )
+
+if TYPE_CHECKING:
+    from agent_core.domain.agents import Principal
 
 
 class ToolKind(StrEnum):
@@ -65,6 +67,7 @@ class ToolFailureKind(StrEnum):
     OUTPUT_INVALID = "output_invalid"
     UPSTREAM_ERROR = "upstream_error"
     TRANSPORT = "transport"
+    OUTCOME_UNKNOWN = "outcome_unknown"
     INTERNAL = "internal"
 
 
@@ -117,6 +120,8 @@ class ToolExecutionContext:
     # runtime construction supplies an object satisfying CancellationToken.
     cancellation: object
     mark_effect_sent: Callable[[], Awaitable[None]]
+    loaded_skills: tuple[dict[str, Any], ...] = ()
+    available_tools: frozenset[str] = frozenset()
 
 
 class ToolOutcomeStatus(StrEnum):

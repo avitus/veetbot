@@ -43,6 +43,8 @@ class EvalRunLimits(StrictModel):
 
 class EvalFixtures(StrictModel):
     tools: list[str] = Field(default_factory=lambda: ["math.calculate", "system.current_time"])
+    skills: list[str] = Field(default_factory=list)
+    mcp_servers: list[str] = Field(default_factory=list)
     run_limits: EvalRunLimits = Field(default_factory=EvalRunLimits)
 
 
@@ -82,6 +84,24 @@ class EvalExpected(StrictModel):
     pending_approvals: int | None = Field(default=None, ge=0)
     distinct_prefixes: int | None = Field(default=None, ge=1)
     minimum_compactions: int | None = Field(default=None, ge=0)
+    absent_strings: list[str] = Field(default_factory=list)
+
+
+class EvalArm(StrictModel):
+    name: str
+    skills: list[str] = Field(default_factory=list)
+    expected: EvalExpected
+
+    @model_validator(mode="after")
+    def stable_name(self) -> EvalArm:
+        if CASE_NAME.fullmatch(self.name) is None:
+            raise ValueError("arm name must use lower snake case")
+        return self
+
+
+class EvalDelta(StrictModel):
+    policy_failures: Literal["same", "not_worse"] = "same"
+    outcome: Literal["improves", "not_worse"] = "improves"
 
 
 class EvalCase(StrictModel):
@@ -98,7 +118,9 @@ class EvalCase(StrictModel):
     model_fixture: str
     fixtures: EvalFixtures = Field(default_factory=EvalFixtures)
     session: EvalSession | None = None
-    expected: EvalExpected
+    expected: EvalExpected | None = None
+    arms: list[EvalArm] = Field(default_factory=list)
+    delta: EvalDelta | None = None
     approval_resolution: Literal["approve_once", "deny"] | None = None
     cancel_after_submission: bool = False
 
@@ -112,6 +134,17 @@ class EvalCase(StrictModel):
             raise ValueError("trajectory cases must carry their source export id")
         if self.source == "authored" and self.source_export_id is not None:
             raise ValueError("authored cases cannot carry a trajectory export id")
+        if (self.expected is None) == (not self.arms):
+            raise ValueError("a case must declare either expected or arms")
+        if self.arms:
+            if len(self.arms) != 2:
+                raise ValueError("comparison cases require exactly two arms")
+            if len({arm.name for arm in self.arms}) != len(self.arms):
+                raise ValueError("comparison arm names must be unique")
+            if self.delta is None:
+                raise ValueError("comparison cases require delta assertions")
+        elif self.delta is not None:
+            raise ValueError("single-run cases cannot declare delta assertions")
         return self
 
 
