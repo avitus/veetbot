@@ -4,11 +4,12 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 8 — skills and MCP integration (in progress)
+- **Current milestone:** Milestone 8 — skills and MCP integration (complete)
 - **Next milestone:** Milestone 9 — long-term memory and knowledge retrieval
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 7 are complete. Milestone 8 is in
-  progress, and Milestone 9 is authorized but remains sequentially gated.
+- **Project status:** Milestones 0 through 8 are complete. Milestone 9 is
+  authorized but remains sequentially gated until the Milestone 8 pull request
+  is merged.
 
 Milestone 8 adds immutable, content-addressed skill packages; pinned session
 catalogs and selectively loaded bodies; MCP discovery, authentication, and
@@ -41,8 +42,8 @@ review records that it has no complete acceptance criteria.
 
 ## Completion rule
 
-Milestone 8 remains in progress. Its local implementation and all 140 cumulative
-gates pass, but completion requires the combined verification, all hosted
-CircleCI lanes, and every CodeRabbit review thread to be addressed and resolved.
-Proposed ADR-0044 records the implementation decisions reserved for later owner
-review.
+Milestone 8 is complete. All 467 non-live tests, all four hosted CircleCI lanes,
+all 140 cumulative gates, and the final finding-free CodeRabbit review pass.
+Every prior review thread is resolved. Proposed ADR-0044 records the
+implementation decisions reserved for later owner review. Milestone 9 begins
+only after the reviewed Milestone 8 pull request is merged into `dev`.

@@ -4,7 +4,7 @@ title: Changelog
 
 # Changelog
 
-## 2026-08-04 — Milestone 8 implementation in progress
+## 2026-08-04 — Milestone 8 skills and MCP integration completed
 
 - Added validated immutable skill packages, content-addressed deterministic
   archives, positive revision pinning, a capped metadata-only session catalog,
@@ -21,10 +21,13 @@ title: Changelog
 - Proposed ADR-0044 for the reversible archive, pin reconstruction, prompt,
   official-SDK, child-environment, proxy, evaluation, and trace choices forced by
   the first implementation.
-- Passed `make check`, all 457 non-live tests against PostgreSQL 16 and Docker,
-  the 59-test PostgreSQL integration partition, strict documentation builds, and
-  all 140 cumulative gates. Hosted CircleCI and CodeRabbit review remain the
-  explicit completion gates before Milestone 8 can merge and Milestone 9 begins.
+- Passed `make check`, all 467 non-live tests against PostgreSQL 16 and Docker,
+  the 74-test PostgreSQL integration partition, strict documentation builds, and
+  all 140 cumulative gates.
+- Passed all four hosted CircleCI lanes on pull request 9. Addressed and resolved
+  all 19 initial CodeRabbit review threads and all three incremental findings;
+  the final hosted review completed without findings. Milestone 9 remains gated
+  on merging the reviewed Milestone 8 pull request into `dev`.
 
 ## 2026-08-03 — Milestone 3 completed
 
