@@ -180,7 +180,9 @@ client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
 client.connect(os.environ['AGENT_TOOL_BRIDGE_SOCKET'])
 request={'call':'math.calculate','arguments':{'expression':'6*7'},'ordinal':0}
 client.sendall(json.dumps(request).encode()+b'\n')
-print(client.makefile('rb').readline().decode().strip())
+response=json.loads(client.makefile('rb').readline())
+response['bridge_token_visible']='AGENT_TOOL_BRIDGE_TOKEN' in os.environ
+print(json.dumps(response,separators=(',',':')))
 """
     script_hash = hashlib.sha256(source.encode()).hexdigest()
     session = ProgrammaticBridgeSession(
@@ -200,6 +202,7 @@ print(client.makefile('rb').readline().decode().strip())
     assert json.loads(result.stdout) == {
         "status": "succeeded",
         "result": {"value": 42},
+        "bridge_token_visible": False,
     }
     assert [(name, arguments) for name, arguments, _call_id in observed] == [
         ("math.calculate", {"expression": "6*7"})

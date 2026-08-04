@@ -917,9 +917,7 @@ class ToolPipeline:
             head_bytes = min(head_bytes, remaining)
             tail_bytes = min(tail_bytes, remaining - head_bytes)
             excerpt = (
-                artifact_bytes[:head_bytes]
-                + marker
-                + (artifact_bytes[-tail_bytes:] if tail_bytes else b"")
+                rendered[:head_bytes] + marker + (rendered[-tail_bytes:] if tail_bytes else b"")
             )
         structured = None if result.structured is None else dict(result.structured)
         if structured is not None:

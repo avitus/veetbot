@@ -82,12 +82,18 @@ class ArtifactExportTool:
         workspace = cast(WorkspaceHandle, raw_workspace)
         writer = cast(ArtifactWriter, raw_writer)
         try:
-            ref = await writer.create(
-                workspace.stream(str(arguments["path"]), _MAX_ARTIFACT_BYTES),
-                str(arguments["filename"]),
-                str(arguments["media_type"]),
-                TrustLevel.EXTERNAL_UNTRUSTED,
-            )
+            stream = workspace.stream(str(arguments["path"]), _MAX_ARTIFACT_BYTES)
+            try:
+                ref = await writer.create(
+                    stream,
+                    str(arguments["filename"]),
+                    str(arguments["media_type"]),
+                    TrustLevel.EXTERNAL_UNTRUSTED,
+                )
+            finally:
+                close_stream = getattr(stream, "aclose", None)
+                if close_stream is not None:
+                    await close_stream()
         except (
             FileNotFoundError,
             IsADirectoryError,

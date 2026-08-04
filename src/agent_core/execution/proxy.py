@@ -84,8 +84,10 @@ async def _handle(
             path = target.path or "/"
             if target.query:
                 path += "?" + target.query
+            header_lines = [line for line in rest if line]
             upstream_header = b" ".join((method.encode(), path.encode(), version.encode()))
-            upstream_header += b"\r\n" + b"\r\n".join(rest) + b"\r\n"
+            upstream_header += b"\r\n" + b"".join(line + b"\r\n" for line in header_lines)
+            upstream_header += b"\r\n"
         addresses = await _resolved(host, port)
         allowed, reason = evaluate_core(policy[0], policy[1], host, port, addresses)
         _log(host, port, addresses, reason)

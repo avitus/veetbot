@@ -315,22 +315,23 @@ verification:
           status contexts completed successfully.
     remaining: []
   milestone_6:
-    recorded_at: 2026-08-04T06:29:55Z
+    recorded_at: 2026-08-04T09:22:53Z
     status: in_review
     evidence:
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 238 source and test
-          files, 215 static tests, 92 port contracts, 123 citation checks,
+          files, 216 static tests, 94 port contracts, 123 citation checks,
           strict documentation builds, and all 116 hard gates active through
           Milestone 6 passed.
       - check: complete non-live suite against PostgreSQL 16 and Docker
         outcome: passed
         detail: >-
-          All 385 non-live tests passed across the verified partitions with the two
-          credentialed provider tests deselected. This included the real Docker security
-          partition and all PostgreSQL integration and resilience coverage.
+          All 388 non-live tests passed across the verified partitions with the
+          two credentialed provider tests deselected. This included the real
+          Docker security partition and all PostgreSQL integration and
+          resilience coverage.
       - check: PostgreSQL 16 integration partition
         outcome: passed
         detail: >-

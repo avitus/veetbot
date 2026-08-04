@@ -216,12 +216,21 @@ class _BridgeHandler(Protocol):
 
 
 class _DockerCommandError(ExecutionUnavailable):
-    def __init__(self, return_code: int) -> None:
-        super().__init__("container runtime operation failed")
+    def __init__(self, return_code: int, stderr: bytes = b"") -> None:
+        detail = stderr[-2048:].decode("utf-8", errors="replace").strip()
+        message = "container runtime operation failed"
+        if detail:
+            message += f": {detail}"
+        super().__init__(message)
         self.return_code = return_code
+        self.stderr = stderr[-2048:]
 
 
-async def _docker(*arguments: str, stdin: bytes | None = None) -> bytes:
+async def _docker(
+    *arguments: str,
+    stdin: bytes | None = None,
+    timeout_seconds: float = 60.0,
+) -> bytes:
     try:
         process = await asyncio.create_subprocess_exec(
             "docker",
@@ -232,11 +241,20 @@ async def _docker(*arguments: str, stdin: bytes | None = None) -> bytes:
         )
     except OSError as exc:
         raise ExecutionUnavailable("container runtime is unavailable") from exc
-    stdout, _stderr = await process.communicate(stdin)
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(stdin), timeout_seconds)
+    except TimeoutError as exc:
+        process.kill()
+        await asyncio.gather(process.wait(), return_exceptions=True)
+        raise ExecutionUnavailable("container runtime operation timed out") from exc
+    except asyncio.CancelledError:
+        process.kill()
+        await asyncio.gather(process.wait(), return_exceptions=True)
+        raise
     if process.returncode != 0:
         if process.returncode is None:
             raise ExecutionUnavailable("container runtime did not report an exit status")
-        raise _DockerCommandError(process.returncode)
+        raise _DockerCommandError(process.returncode, stderr)
     return stdout
 
 
@@ -484,11 +502,9 @@ class DockerExecutionEnvironment:
                 "--network",
                 "none",
                 "--user",
-                "0:0",
+                "65534:65534",
                 "--cap-drop",
                 "ALL",
-                "--cap-add",
-                "CHOWN",
                 "--security-opt",
                 "no-new-privileges",
                 "--mount",
@@ -497,9 +513,8 @@ class DockerExecutionEnvironment:
                 "sh",
                 "-c",
                 (
-                    "chmod 0777 /workspace && mkdir -p /workspace/.agent && "
-                    "touch /workspace/.agent-initialized && chmod 0700 /workspace/.agent && "
-                    "chown 65534:65534 /workspace/.agent"
+                    "mkdir -p /workspace/.agent && "
+                    "touch /workspace/.agent-initialized && chmod 0700 /workspace/.agent"
                 ),
             )
             arguments = [
@@ -641,7 +656,12 @@ class DockerExecutionEnvironment:
                     return None
                 await asyncio.sleep(0.1)
                 continue
-            size, inodes = (int(value) for value in raw.decode("ascii").split())
+            try:
+                size, inodes = (int(value) for value in raw.decode("ascii").split())
+            except (UnicodeDecodeError, ValueError):
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), timeout=0.1)
+                continue
             if (
                 size > state.specification.limits.workspace_bytes
                 or inodes > state.specification.limits.inodes_max
@@ -655,7 +675,18 @@ class DockerExecutionEnvironment:
     async def _bridge_pump(process: asyncio.subprocess.Process, handler: _BridgeHandler) -> None:
         if process.stdout is None or process.stdin is None:
             raise ExecutionUnavailable("bridge relay did not provide transport pipes")
-        while request := await process.stdout.readline():
+        while True:
+            try:
+                request = await process.stdout.readline()
+            except (ValueError, asyncio.LimitOverrunError):
+                process.stdin.write(
+                    b'{"status":"denied","reason_code":"bridge.request_too_large",'
+                    b'"retryable":false}\n'
+                )
+                await process.stdin.drain()
+                return
+            if not request:
+                return
             try:
                 response = await handler.handle(request.rstrip(b"\n"))
             except Exception:
@@ -708,7 +739,6 @@ class DockerExecutionEnvironment:
             "PATH=/usr/local/bin:/usr/bin:/bin",
             "PYTHONPATH=/opt/agent",
             f"AGENT_TOOL_BRIDGE_SOCKET={endpoint.socket_path}",
-            f"AGENT_TOOL_BRIDGE_TOKEN={endpoint.token}",
             "python",
             "-m",
             "agent_core.execution.bridge_relay",
@@ -717,6 +747,12 @@ class DockerExecutionEnvironment:
             stderr=asyncio.subprocess.PIPE,
             limit=64 * 1024 + 1,
         )
+        if relay.stdin is None:
+            relay.terminate()
+            await relay.wait()
+            raise ExecutionUnavailable("bridge relay did not provide an input pipe")
+        relay.stdin.write(endpoint.token.encode("utf-8") + b"\n")
+        await relay.stdin.drain()
         pump = asyncio.create_task(self._bridge_pump(relay, handler))
         try:
             await self._wait_for_bridge(state.container_id, endpoint.socket_path)
@@ -737,8 +773,7 @@ class DockerExecutionEnvironment:
                 relay.terminate()
                 await relay.wait()
             pump.cancel()
-            with suppress(asyncio.CancelledError):
-                await pump
+            await asyncio.gather(pump, return_exceptions=True)
 
     async def execute(
         self, environment: EnvironmentHandle, command: ExecutionCommand
@@ -772,7 +807,6 @@ class DockerExecutionEnvironment:
             child_environment.update(
                 {
                     "AGENT_TOOL_BRIDGE_SOCKET": str(bridge.socket_path),
-                    "AGENT_TOOL_BRIDGE_TOKEN": bridge.token,
                 }
             )
         if state.specification.egress.mode.value == "allowlist":
@@ -837,79 +871,108 @@ class DockerExecutionEnvironment:
         timed_out = False
         killed_by: KillReason | None = None
         cancellation: asyncio.CancelledError | None = None
+        container_stopped = False
         try:
-            done, _pending = await asyncio.wait(
-                {wait_task, exceeded_task, disk_task},
-                timeout=effective_timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if exceeded_task in done and exceeded.is_set():
-                killed_by = KillReason.OUTPUT_LIMIT
-            elif disk_task in done and disk_task.result() is KillReason.DISK:
+            try:
+                done, _pending = await asyncio.wait(
+                    {wait_task, exceeded_task, disk_task},
+                    timeout=effective_timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if exceeded_task in done and exceeded.is_set():
+                    killed_by = KillReason.OUTPUT_LIMIT
+                elif disk_task in done and disk_task.result() is KillReason.DISK:
+                    killed_by = KillReason.DISK
+                elif wait_task not in done:
+                    timed_out = True
+                    killed_by = KillReason.TIMEOUT
+            except asyncio.CancelledError as exc:
+                killed_by = KillReason.CANCELLED
+                cancellation = exc
+            if killed_by is not None:
+                await _docker("kill", state.container_id)
+                container_stopped = True
+                with suppress(ProcessLookupError):
+                    process.kill()
+            disk_monitor_stop.set()
+            await wait_task
+            if container_stopped:
+                await _docker("start", state.container_id)
+                container_stopped = False
+            monitored_kill = await disk_task
+            if killed_by is None and monitored_kill is not None:
+                killed_by = monitored_kill
+            stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
+            if cancellation is not None:
+                raise cancellation
+            stdout_truncated = stdout_exceeded.is_set()
+            stderr_truncated = stderr_exceeded.is_set()
+            exit_code = process.returncode
+            if killed_by is not None:
+                exit_code = None
+            elif exit_code in {137, 139}:
+                killed_by = KillReason.MEMORY
+                exit_code = None
+            after = {} if killed_by is not None else await self._snapshot(state)
+            workspace_size = sum(item[0] for item in after.values())
+            if killed_by is None and (
+                workspace_size > state.specification.limits.workspace_bytes
+                or len(after) > state.specification.limits.inodes_max
+            ):
                 killed_by = KillReason.DISK
-            elif wait_task not in done:
-                timed_out = True
-                killed_by = KillReason.TIMEOUT
-        except asyncio.CancelledError as exc:
-            killed_by = KillReason.CANCELLED
-            cancellation = exc
-        if killed_by is not None:
-            await _docker("kill", state.container_id)
-            with suppress(ProcessLookupError):
-                process.kill()
-        disk_monitor_stop.set()
-        await wait_task
-        if killed_by is not None:
-            await _docker("start", state.container_id)
-        monitored_kill = await disk_task
-        if killed_by is None and monitored_kill is not None:
-            killed_by = monitored_kill
-        stdout, stderr = await asyncio.gather(stdout_task, stderr_task)
-        exceeded_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await exceeded_task
-        if cancellation is not None:
-            raise cancellation
-        stdout_truncated = stdout_exceeded.is_set()
-        stderr_truncated = stderr_exceeded.is_set()
-        exit_code = process.returncode
-        if killed_by is not None:
-            exit_code = None
-        elif exit_code in {137, 139}:
-            killed_by = KillReason.MEMORY
-            exit_code = None
-        after = {} if killed_by is not None else await self._snapshot(state)
-        workspace_size = sum(item[0] for item in after.values())
-        if killed_by is None and (
-            workspace_size > state.specification.limits.workspace_bytes
-            or len(after) > state.specification.limits.inodes_max
-        ):
-            killed_by = KillReason.DISK
-            exit_code = None
-            await _docker("kill", state.container_id)
-            await _docker("start", state.container_id)
-        if (
-            killed_by is None
-            and process.returncode != 0
-            and (b"Resource temporarily unavailable" in stderr or b"can't fork" in stderr)
-        ):
-            killed_by = KillReason.PIDS
-            exit_code = None
-        changes = self._changes(before, after)
-        for change in changes:
-            if change.change is not ChangeKind.DELETED:
-                state.provenance[change.path] = WorkspaceProvenance.SANDBOX_WRITTEN
-        return ExecutionResult(
-            exit_code=exit_code,
-            stdout=stdout,
-            stderr=stderr,
-            stdout_truncated=stdout_truncated,
-            stderr_truncated=stderr_truncated,
-            timed_out=timed_out,
-            killed_by=killed_by,
-            files_changed=changes[:1000],
-            duration_ms=max(0, int((self._clock.now() - started).total_seconds() * 1000)),
-        )
+                exit_code = None
+                await _docker("kill", state.container_id)
+                container_stopped = True
+                await _docker("start", state.container_id)
+                container_stopped = False
+            if (
+                killed_by is None
+                and process.returncode != 0
+                and (b"Resource temporarily unavailable" in stderr or b"can't fork" in stderr)
+            ):
+                killed_by = KillReason.PIDS
+                exit_code = None
+            changes = self._changes(before, after)
+            for change in changes:
+                if change.change is not ChangeKind.DELETED:
+                    state.provenance[change.path] = WorkspaceProvenance.SANDBOX_WRITTEN
+            return ExecutionResult(
+                exit_code=exit_code,
+                stdout=stdout,
+                stderr=stderr,
+                stdout_truncated=stdout_truncated,
+                stderr_truncated=stderr_truncated,
+                timed_out=timed_out,
+                killed_by=killed_by,
+                files_changed=changes[:1000],
+                duration_ms=max(0, int((self._clock.now() - started).total_seconds() * 1000)),
+            )
+        finally:
+            disk_monitor_stop.set()
+            for task in (stdout_task, stderr_task, wait_task, exceeded_task, disk_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                stdout_task,
+                stderr_task,
+                wait_task,
+                exceeded_task,
+                disk_task,
+                return_exceptions=True,
+            )
+            if process.returncode is None:
+                try:
+                    await _docker("kill", state.container_id)
+                except ExecutionUnavailable:
+                    pass
+                else:
+                    container_stopped = True
+                with suppress(ProcessLookupError):
+                    process.kill()
+                await asyncio.gather(process.wait(), return_exceptions=True)
+            if container_stopped:
+                with suppress(ExecutionUnavailable):
+                    await _docker("start", state.container_id)
 
     @staticmethod
     def _changes(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import PurePosixPath
 from typing import Protocol, cast
 from uuid import UUID
@@ -121,6 +121,7 @@ class SandboxManager:
         egress: EgressPolicy | None = None,
         parent_environment: Mapping[str, str] | None = None,
         passthrough_names: tuple[str, ...] = (),
+        drain_timeout_seconds: float = 5.0,
     ) -> None:
         self._environment = environment
         self._image_digest = image_digest
@@ -129,6 +130,9 @@ class SandboxManager:
         self._egress = egress or EgressPolicy()
         self._parent_environment = dict(parent_environment or {})
         self._passthrough_names = passthrough_names
+        if drain_timeout_seconds <= 0:
+            raise ValueError("sandbox drain timeout must be positive")
+        self._drain_timeout_seconds = drain_timeout_seconds
         self._handles: dict[tuple[str, UUID, int], EnvironmentHandle] = {}
         self._locks: dict[tuple[str, UUID, int], asyncio.Lock] = {}
         self._lock_users: dict[tuple[str, UUID, int], int] = {}
@@ -294,9 +298,11 @@ class SandboxManager:
             self._released_runs.add(run_id)
         async with self._teardown_lock:
             async with self._condition:
-                await self._condition.wait_for(
-                    lambda: not any(key[1] == run_id for key in self._active)
-                )
+                with suppress(TimeoutError):
+                    async with asyncio.timeout(self._drain_timeout_seconds):
+                        await self._condition.wait_for(
+                            lambda: not any(key[1] == run_id for key in self._active)
+                        )
                 matches = tuple(
                     (key, handle) for key, handle in self._handles.items() if key[1] == run_id
                 )
@@ -317,7 +323,9 @@ class SandboxManager:
     async def _close(self) -> None:
         async with self._condition:
             self._closing = True
-            await self._condition.wait_for(lambda: not self._active)
+            with suppress(TimeoutError):
+                async with asyncio.timeout(self._drain_timeout_seconds):
+                    await self._condition.wait_for(lambda: not self._active)
         async with self._teardown_lock:
             try:
                 await self._destroy_matches(tuple(self._handles.items()))

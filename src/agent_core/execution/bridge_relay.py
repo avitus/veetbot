@@ -14,13 +14,19 @@ _MAX_REQUEST_BYTES = 64 * 1024
 
 async def _run() -> None:
     socket_path = Path(os.environ["AGENT_TOOL_BRIDGE_SOCKET"])
-    token = os.environ["AGENT_TOOL_BRIDGE_TOKEN"]
     socket_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     socket_path.unlink(missing_ok=True)
     loop = asyncio.get_running_loop()
     responses = asyncio.StreamReader(limit=_MAX_REQUEST_BYTES + 1)
     protocol = asyncio.StreamReaderProtocol(responses)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin.buffer)
+    try:
+        raw_token = await responses.readline()
+    except ValueError as exc:
+        raise RuntimeError("bridge bootstrap token exceeds its bound") from exc
+    if not raw_token or len(raw_token) > _MAX_REQUEST_BYTES:
+        raise RuntimeError("bridge bootstrap token is missing or oversized")
+    token = raw_token.rstrip(b"\n").decode("utf-8")
     response_lock = asyncio.Lock()
     response_overrun = asyncio.Event()
 

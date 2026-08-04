@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import inspect
 from dataclasses import fields
 from datetime import UTC, datetime, timedelta
@@ -14,7 +15,9 @@ import pytest
 
 from agent_core.adapters.artifacts.filesystem import artifact_storage_key
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.execution import docker as docker_adapter
 from agent_core.adapters.execution.docker import DockerExecutionEnvironment
+from agent_core.domain.errors import ExecutionUnavailable
 from agent_core.domain.execution import (
     EnvironmentHandle,
     EnvironmentSpec,
@@ -121,6 +124,38 @@ def test_secret_like_passthrough_names_fail_closed() -> None:
             ("HTTPS_PROXY",),
         )
     assert build_sandbox_environment({"TZ": "UTC"}, ("TZ",))["TZ"] == "UTC"
+
+
+async def test_docker_commands_are_bounded_and_reaped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HangingProcess:
+        returncode: int | None = None
+        killed = False
+
+        async def communicate(self, stdin: bytes | None = None) -> tuple[bytes, bytes]:
+            del stdin
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            assert self.returncode is not None
+            return self.returncode
+
+    process = HangingProcess()
+
+    async def spawn(*args: object, **kwargs: object) -> HangingProcess:
+        del args, kwargs
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    with pytest.raises(ExecutionUnavailable, match="timed out"):
+        await docker_adapter._docker("ps", timeout_seconds=0.001)
+    assert process.killed is True
 
 
 @pytest.mark.parametrize(

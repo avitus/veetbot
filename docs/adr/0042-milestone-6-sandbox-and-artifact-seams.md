@@ -67,7 +67,9 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    bearer token, derives stable call IDs, caps calls at 64, and re-enters the
    ordinary tool pipeline. Both directions have a 64-KiB message ceiling; an
    unexpected response-stream overrun terminates the relay instead of allowing
-   leftover bytes to be interpreted as a later response.
+   leftover bytes to be interpreted as a later response. The host socket is
+   created with a restrictive process umask so it is mode 0600 from the instant
+   it is bound rather than being tightened in a later check/use window.
 8. **General artifacts use store-then-metadata commit order.** The application
    writer spools a bounded stream, computes its digest and size, writes bytes
    under a key derived only from tenant and artifact IDs, and then commits
@@ -109,13 +111,40 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
     component walk. This rejects intermediate and final symlinks without a
     check/use race and preserves distinct missing-path, non-directory, special
     file, and read-limit errors across both adapters.
+14. **The bridge bearer token terminates in the trusted relay.** The adapter
+    writes the one-time token to the relay over its standard-input pipe before
+    forwarding requests. It does not place the token in the host `docker exec`
+    argument vector or in the environment of model-generated code; that code
+    receives only the workspace socket path. This intentionally narrows the
+    tier-2 environment described by `sandbox-isolation.md:681-684`. The relay
+    still authenticates each forwarded request to the host bridge, so the
+    plan's bearer-token boundary remains enforced without making the bearer
+    available to the least-trusted process.
+15. **Operational waits have bounded cleanup.** Docker CLI calls have a
+    60-second adapter timeout and are killed and waited when the timeout or
+    caller cancellation wins. Execution monitor tasks are cancelled and joined
+    on every path. Release waits up to five seconds for abandoned workspace
+    streams before forcing teardown; artifact export explicitly closes its
+    source stream after the store finishes or fails. These bounds trade a
+    potentially incomplete abandoned read for deterministic lease cleanup.
+16. **Raw artifact filenames are preserved and sanitized at download.** The
+    implementation follows `sandbox-isolation.md:1100-1122` and
+    `sandbox-isolation.md:1599-1601`: a producer name such as
+    `../../etc/passwd` remains evidence-only metadata and never contributes to
+    a storage key, while the HTTP response emits an attachment disposition with
+    a separator-free quoted filename. This conflicts with
+    `http-api-and-streaming.md:1166-1173`, which says quotes, newlines, and path
+    separators are rejected at creation. Owner review must select one rule and
+    align the other specification; this ADR does not silently rewrite either
+    normative document.
 
 ## Consequences
 
 - Development and CircleCI can exercise real isolation behavior with Docker,
   while production retains the plan's gVisor requirement.
 - The bridge socket is present inside the sandbox without exposing a host path
-  or adding a network listener.
+  or adding a network listener, and model-generated code cannot read the bridge
+  bearer from its environment or the host process list.
 - Workspace byte and inode enforcement is portable but approximate to the
   monitor interval on Docker; production runtimes may add native quotas below
   the unchanged port.
@@ -125,6 +154,9 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
 - Until decision 10 is accepted, the existing 106-knob inventory test does not
   claim the nine sandbox-profile fields; both documents remain visible rather
   than one requirement being silently weakened to fit the other.
+- Until decision 16 is resolved, the implementation preserves the original
+  filename as required by the sandbox specification and enforces the HTTP
+  document's output-side attachment and sanitization controls.
 
 ## Alternatives considered
 

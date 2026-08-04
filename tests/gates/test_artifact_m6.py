@@ -106,6 +106,7 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
         assert result.structured is not None
         artifact_id = UUID(str(result.structured["artifact_id"]))
         ref = await composition.services.artifacts.get(composition.principal, artifact_id)
+        assert ref.name == "../../result.bin"
         app = create_app(
             composition.services,
             composition.settings,
@@ -120,8 +121,10 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
             metadata = await client.get(f"/v1/artifacts/{ref.id}")
             downloaded = await client.get(f"/v1/artifacts/{ref.id}/content")
         assert metadata.status_code == 200
+        assert metadata.json()["name"] == "../../result.bin"
         assert downloaded.status_code == 200
         assert downloaded.content == content
+        assert "/" not in downloaded.headers["content-disposition"]
         assert hashlib.sha256(downloaded.content).hexdigest() == ref.sha256
         other_tenant = Principal(
             tenant_id="tenant-b",
@@ -258,7 +261,7 @@ class _LargeOutputTool:
         self, arguments: dict[str, object], context: ToolExecutionContext
     ) -> ToolResult:
         del arguments, context
-        return ToolResult(ok=True, content=[TextPart(text="x" * 5000)])
+        return ToolResult(ok=True, content=[TextPart(text="x" * 4992 + "TAIL-END")])
 
 
 async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -> None:
@@ -311,3 +314,4 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
         stored = b"".join([chunk async for chunk in fetched.open()])
         assert len(stored) == result.metrics["captured_bytes"]
         assert "captured first" in result.content[0].text  # type: ignore[union-attr]
+        assert "TAIL-END" in result.content[0].text  # type: ignore[union-attr]

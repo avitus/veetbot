@@ -334,3 +334,22 @@ async def test_sandbox_failed_provision_discards_its_uncached_lock() -> None:
     assert manager._locks == {}
     await manager.release_run(run_id)
     assert manager._locks == {}
+
+
+async def test_sandbox_release_bounds_an_abandoned_workspace_stream() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(
+        adapter,
+        image_digest=fake_image_digest(),
+        limits=_limits(),
+        drain_timeout_seconds=0.01,
+    )
+    run_id = UUID(int=23)
+    workspace = manager.for_run("tenant-a", run_id, 1)
+    await workspace.write("large", b"x" * (128 * 1024))
+    stream = workspace.stream("large", 128 * 1024)
+    assert len(await anext(stream)) == 64 * 1024
+    await asyncio.wait_for(manager.release_run(run_id), timeout=0.2)
+    assert adapter.live_environment_ids() == frozenset()
+    await stream.aclose()  # type: ignore[attr-defined]

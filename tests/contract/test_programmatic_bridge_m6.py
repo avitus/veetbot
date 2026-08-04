@@ -3,6 +3,9 @@
 import asyncio
 import hashlib
 import json
+import os
+import stat
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -124,3 +127,23 @@ async def test_unix_bridge_rejects_a_symlinked_socket_directory(tmp_path: Path) 
     server = UnixToolBridgeServer(tmp_path / ".agent" / "bridge.sock", session)
     with pytest.raises(OSError):
         await server.start()
+
+
+async def test_unix_bridge_starts_with_a_private_socket() -> None:
+    async def dispatch(call: str, arguments: dict[str, object], call_id: str) -> dict[str, object]:
+        del call, arguments, call_id
+        return {"status": "succeeded", "result": {}}
+
+    with tempfile.TemporaryDirectory(prefix="bridge-") as directory:
+        socket_path = Path(directory) / "bridge.sock"
+        session = ProgrammaticBridgeSession(
+            script_hash=hashlib.sha256(b"script").hexdigest(),
+            token="turn-token",
+            dispatch=dispatch,
+        )
+        server = UnixToolBridgeServer(socket_path, session)
+        await server.start()
+        try:
+            assert stat.S_IMODE(os.stat(socket_path).st_mode) == 0o600
+        finally:
+            await server.close()

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import socket
+import threading
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
@@ -17,6 +18,18 @@ from typing import Any
 type BridgeDispatch = Callable[[str, dict[str, Any], str], Awaitable[dict[str, Any]]]
 
 logger = logging.getLogger(__name__)
+_BIND_UMASK_LOCK = threading.Lock()
+
+
+def _bind_private_socket(bound_socket: socket.socket, bind_path: str) -> None:
+    # umask is process-global, so serialize bridge binds and keep the changed
+    # window entirely inside one synchronous operation.
+    with _BIND_UMASK_LOCK:
+        previous_umask = os.umask(0o177)
+        try:
+            bound_socket.bind(bind_path)
+        finally:
+            os.umask(previous_umask)
 
 
 def bridge_call_id(script_hash: str, ordinal: int) -> str:
@@ -139,20 +152,13 @@ class UnixToolBridgeServer:
                 bind_path = str(self._socket_path)
             bound_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
-                await asyncio.to_thread(bound_socket.bind, bind_path)
+                await asyncio.to_thread(_bind_private_socket, bound_socket, bind_path)
                 visible_identity = os.stat(self._socket_path.parent, follow_symlinks=False)
                 if (visible_identity.st_dev, visible_identity.st_ino) != (
                     directory_identity.st_dev,
                     directory_identity.st_ino,
                 ):
                     raise RuntimeError("bridge directory changed while binding")
-                await asyncio.to_thread(
-                    os.chmod,
-                    self._socket_path.name,
-                    0o600,
-                    dir_fd=directory_fd,
-                    follow_symlinks=False,
-                )
                 bound_socket.setblocking(False)
                 self._server = await asyncio.start_unix_server(
                     self._handle, sock=bound_socket, limit=64 * 1024 + 1
