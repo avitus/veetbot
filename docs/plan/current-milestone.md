@@ -8,8 +8,8 @@ title: Current Milestone
 - **Next milestone:** Milestone 7 — context budgeting and structured working state
 - **Authorized milestones:** Milestones 0 through 9
 - **Project status:** Milestones 0 through 5 are complete. Milestone 6 is locally
-  implemented; the latest full CodeRabbit findings are remediated locally and
-  await hosted CI and a clean follow-up review. Milestones 7 through 9 are
+  implemented; the latest CodeRabbit follow-up findings are remediated locally
+  and await hosted CI and another clean review. Milestones 7 through 9 are
   explicitly authorized and remain sequentially gated.
 
 Milestone 6 adds container-backed and deterministic fake execution adapters,

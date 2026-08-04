@@ -127,10 +127,17 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
         ) as client:
             metadata = await client.get(f"/v1/artifacts/{ref.id}")
             downloaded = await client.get(f"/v1/artifacts/{ref.id}/content")
+            not_modified = await client.get(
+                f"/v1/artifacts/{ref.id}/content",
+                headers={"If-None-Match": f'"{ref.sha256}"'},
+            )
         assert metadata.status_code == 200
         assert metadata.json()["name"] == "../../result.bin"
         assert downloaded.status_code == 200
         assert downloaded.content == content
+        assert downloaded.headers["cache-control"] == "private, no-store"
+        assert not_modified.status_code == 304
+        assert not_modified.headers["cache-control"] == "private, no-store"
         assert "/" not in downloaded.headers["content-disposition"]
         assert hashlib.sha256(downloaded.content).hexdigest() == ref.sha256
         other_tenant = Principal(
@@ -392,12 +399,14 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
         registry = StaticToolRegistry()
         tool = _LargeOutputTool()
         registry.register(tool)
+        hard_ceiling_multiplier = 4
         pipeline = ToolPipeline(
             registry,
             composition.uow_factory,
             composition.clock,
             SequenceIdFactory([UUID(int=31_000)]),
             artifact_writers=writers,
+            hard_ceiling_multiplier=hard_ceiling_multiplier,
         )
         run_id = await composition.runs.submit("prepare an artifactization test")
         run = await composition.runs.get(run_id)
@@ -438,7 +447,7 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
             artifact = await uow.artifacts.get(reference.artifact_id, composition.principal)
         assert artifact.origin == ArtifactOrigin.TOOL_OUTPUT.value
         stored = b"".join([chunk async for chunk in await fetched.open()])
-        captured_bytes = tool.spec.maximum_output_bytes * 4
+        captured_bytes = tool.spec.maximum_output_bytes * hard_ceiling_multiplier
         assert len(stored) == captured_bytes
         assert invocation.output_bytes - captured_bytes > 0
         assert "captured first" in results[0].content[0].text  # type: ignore[union-attr]

@@ -35,7 +35,9 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
 3. **The execution image is immutable by the time composition completes.** Its
    base image is pinned by digest. The configured local reference is resolved
    to a Docker image ID and logged during asynchronous application composition,
-   and `EnvironmentSpec` accepts only a `sha256:` digest.
+   and `EnvironmentSpec` accepts only a `sha256:` digest. Provisioning captures
+   the initialized workspace as the first snapshot, so the private
+   `.agent-initialized` marker is baseline state rather than user provenance.
 4. **A named volume is the lease-scoped workspace cache.** No host path appears
    in a port value or mount argument. One environment is created lazily for a
    `(tenant_id, run_id, lease_epoch)` tuple and destroyed on every terminal run
@@ -52,6 +54,8 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    active execution and workspace operations, and then attempt every teardown.
    Cancellation is re-raised only after those bounded attempts finish, while
    failed handles remain available to a later cleanup retry.
+   The environment expiry is the hard resource cap and takes precedence over a
+   live-lease snapshot or revalidation result.
 5. **Portable workspace quotas use an active service-side monitor.** Docker's
    local volume driver has no portable per-volume byte or inode quota. The
    adapter measures both while a command runs, kills on the first violation,
@@ -70,7 +74,8 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    sandbox has no direct route to the external bridge network.
    CONNECT remains a byte tunnel after one authorization. Plaintext HTTP is
    deliberately one request per proxy connection: the proxy rejects transfer
-   encoding, forwards a bounded content-length body, forces upstream
+   encoding, non-HTTP absolute targets, and missing, invalid, or repeated
+   content-length framing; it forwards a bounded body, forces upstream
    `Connection: close`, and closes the client connection after the response.
    Pipelined requests therefore cannot inherit the first request's host
    authorization or evade its audit record.
@@ -104,7 +109,11 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    and translate a missing object into the public not-found boundary. Artifact
    metadata always has an expiry; adapters reject a database row that violates
    that invariant rather than carrying an optional expiry through the
-   application.
+   application. PostgreSQL has a partial expiry index for non-trajectory rows,
+   and principal-scoped download responses use `Cache-Control: private,
+   no-store` for both content and ETag revalidation responses. A failed metadata
+   commit retains its original exception even if the best-effort byte rollback
+   also fails; orphan reconciliation remains the recovery backstop.
 9. **Large tool output is an artifact plus a bounded model view.** The pipeline
    stores at most the configured hard-ceiling multiplier times the declared
    output bound, returns a head and tail excerpt with an explicit elision marker
@@ -112,7 +121,9 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
    artifactization, and persists the byte count, truncation flag, and artifact
    ID on the invocation. `artifact.export` remains `SANDBOX_EXPORT` even though
    the plan intentionally classifies it as an in-process capability; other
-   tool-created output uses `TOOL_OUTPUT`.
+   tool-created output uses `TOOL_OUTPUT`. Artifactization appends its output
+   artifact instead of discarding references already returned by the tool, and
+   invocation metadata explicitly selects the truncated-output artifact.
 10. **The sandbox security profile exposes a documentation conflict for owner
     review.** `sandbox-isolation.md` requires six operator-set resource limits
     plus an egress policy, while `bootstrap-and-composition.md` freezes an

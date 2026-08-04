@@ -962,12 +962,14 @@ class ToolPipeline:
                 ],
                 "structured": structured,
                 "artifacts": [
+                    *result.artifacts,
                     {
                         "artifact_id": str(ref.artifact_id),
                         "sha256": ref.sha256,
                         "size_bytes": ref.size_bytes,
                         "media_type": ref.media_type,
-                    }
+                        "role": "truncated_output",
+                    },
                 ],
                 "metrics": {
                     "output_bytes": len(rendered),
@@ -1306,8 +1308,19 @@ class ToolPipeline:
                 result.failure.external_text if result.failure is not None else None,
             )
         artifact_id: UUID | None = None
-        if result.artifacts and isinstance(result.artifacts[0], dict):
-            raw_artifact_id = result.artifacts[0].get("artifact_id")
+        artifact_record = next(
+            (
+                candidate
+                for candidate in reversed(result.artifacts)
+                if isinstance(candidate, dict) and candidate.get("role") == "truncated_output"
+            ),
+            next(
+                (candidate for candidate in result.artifacts if isinstance(candidate, dict)),
+                None,
+            ),
+        )
+        if artifact_record is not None:
+            raw_artifact_id = artifact_record.get("artifact_id")
             if isinstance(raw_artifact_id, str):
                 try:
                     artifact_id = UUID(raw_artifact_id)

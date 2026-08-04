@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import tempfile
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -17,6 +18,8 @@ from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.artifacts import ArtifactStore, ArtifactWriter
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
+
+logger = logging.getLogger(__name__)
 
 
 class _ReadableBytes(Protocol):
@@ -114,7 +117,13 @@ class BoundArtifactWriter:
             async with self._uow_factory() as uow:
                 await uow.artifacts.create(artifact)
         except BaseException:
-            await self._store.delete(stored, tenant_id=self._tenant_id)
+            try:
+                await self._store.delete(stored, tenant_id=self._tenant_id)
+            except BaseException:
+                logger.exception(
+                    "artifact_rollback_delete_failed",
+                    extra={"artifact_id": str(artifact_id)},
+                )
             raise
         return stored
 
@@ -179,6 +188,7 @@ class ArtifactWriterFactory:
                 await self._store.delete(ref, tenant_id=artifact.tenant_id)
                 async with self._uow_factory() as uow:
                     removed += int(await uow.artifacts.delete_expired(artifact.id, now=now))
+            # Aggregate all candidate failures so one object cannot stop the sweep.
             except Exception as exc:
                 failures.append(exc)
         if failures:

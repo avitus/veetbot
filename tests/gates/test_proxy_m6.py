@@ -76,3 +76,40 @@ async def test_plaintext_proxy_closes_after_one_audited_request(
     assert audited == [("allowed.example", 8080)]
     assert bytes(client_writer.data).endswith(b"OK")
     assert client_writer.closed is True
+
+
+@pytest.mark.parametrize(
+    "raw_request",
+    [
+        (b"GET https://allowed.example:443/ HTTP/1.1\r\nHost: allowed.example:443\r\n\r\n"),
+        (
+            b"POST http://allowed.example:8080/ HTTP/1.1\r\n"
+            b"Host: allowed.example:8080\r\n"
+            b"Content-Length: 1\r\nContent-Length: 1\r\n\r\nx"
+        ),
+    ],
+)
+async def test_plaintext_proxy_rejects_ambiguous_requests_before_dialing(
+    monkeypatch: pytest.MonkeyPatch, raw_request: bytes
+) -> None:
+    reader = asyncio.StreamReader()
+    reader.feed_data(raw_request)
+    reader.feed_eof()
+    writer = _Writer()
+    dialed = False
+
+    async def open_connection(_host: str, _port: int) -> tuple[asyncio.StreamReader, Any]:
+        nonlocal dialed
+        dialed = True
+        raise AssertionError("invalid proxy request reached the dial boundary")
+
+    monkeypatch.setattr(asyncio, "open_connection", open_connection)
+
+    await proxy._handle(
+        reader,
+        writer,  # type: ignore[arg-type]
+        ("allowlist", (("allowed.example", frozenset({443, 8080})),)),
+    )
+
+    assert dialed is False
+    assert bytes(writer.data).startswith(b"HTTP/1.1 502 Bad Gateway")

@@ -92,6 +92,8 @@ async def _handle(
             content_length = 0
         else:
             target = urlsplit(raw_target)
+            if target.scheme.lower() != "http":
+                raise ValueError("plaintext proxy requests require an http absolute URI")
             if not target.hostname or target.port is None:
                 raise ValueError("absolute proxy URI requires an explicit port")
             host, port = target.hostname, target.port
@@ -100,6 +102,7 @@ async def _handle(
                 path += "?" + target.query
             header_lines: list[bytes] = []
             content_length = 0
+            content_length_seen = False
             host_header: tuple[str, int] | None = None
             for line in rest:
                 if not line:
@@ -111,9 +114,11 @@ async def _handle(
                 if lowered == b"transfer-encoding":
                     raise ValueError("transfer-encoded proxy requests are unsupported")
                 if lowered == b"content-length":
-                    content_length = int(value.strip())
-                    if content_length < 0:
-                        raise ValueError("negative proxy content length")
+                    raw_length = value.strip()
+                    if content_length_seen or not raw_length or not raw_length.isdigit():
+                        raise ValueError("invalid or repeated proxy content length")
+                    content_length_seen = True
+                    content_length = int(raw_length)
                 if lowered == b"host":
                     if host_header is not None:
                         raise ValueError("multiple proxy host headers")

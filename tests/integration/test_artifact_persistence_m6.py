@@ -89,6 +89,7 @@ async def test_postgres_artifact_metadata_and_content_round_trip(tmp_path: Path)
         assert await expiry.sweep_expired() == 0
         async with composition.uow_factory() as uow:
             assert await uow.artifacts.exists(expired_ref.artifact_id) is False
+            assert await uow.artifacts.exists(ref.artifact_id) is True
 
     assert view.sha256 == hashlib.sha256(content).hexdigest()
     assert view.size_bytes == len(content)

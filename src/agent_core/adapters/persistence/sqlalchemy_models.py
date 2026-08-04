@@ -310,7 +310,14 @@ class ProcessEventRow(Base):
 
 class ArtifactRow(Base):
     __tablename__ = "artifacts"
-    __table_args__ = (Index("ix_artifacts_expires_at", "expires_at"),)
+    __table_args__ = (
+        Index("ix_artifacts_expires_at", "expires_at"),
+        Index(
+            "ix_artifacts_general_expires_at",
+            "expires_at",
+            postgresql_where=text("origin <> 'trajectory_export' AND expires_at IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     tenant_id: Mapped[str] = mapped_column(Text)

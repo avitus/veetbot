@@ -659,6 +659,8 @@ class DockerExecutionEnvironment:
             await _docker("start", container_id)
             if proxy_container is not None:
                 await self._wait_for_proxy(container_id)
+            state = _DockerState(specification, container_id, volume, network_name, proxy_container)
+            state.snapshot = await self._snapshot(state)
         except BaseException:
             await self._discard(container_name, volume, proxy_container, network_name)
             raise
@@ -671,9 +673,7 @@ class DockerExecutionEnvironment:
             expires_at=expires_at,
         )
         async with self._lock:
-            self._states[environment_id] = _DockerState(
-                specification, container_id, volume, network_name, proxy_container
-            )
+            self._states[environment_id] = state
         return handle
 
     def workspace(self, environment: EnvironmentHandle) -> DockerWorkspaceHandle:
@@ -1122,12 +1122,13 @@ class DockerExecutionEnvironment:
                 )
             except (ValueError, TypeError):
                 continue
-            if not expired and (run_id, lease_epoch) in live_leases:
-                continue
-            if not expired and not old_enough:
-                continue
-            if is_live is not None and await is_live(run_id, lease_epoch):
-                continue
+            if not expired:
+                if (run_id, lease_epoch) in live_leases:
+                    continue
+                if not old_enough:
+                    continue
+                if is_live is not None and await is_live(run_id, lease_epoch):
+                    continue
             state = self._states.get(environment_id)
             if state is not None:
                 handle = EnvironmentHandle(

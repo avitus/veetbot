@@ -8,12 +8,13 @@ import json
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import PurePosixPath
 from uuid import UUID
 
 import pytest
 
-from agent_core.adapters.determinism import RandomIdFactory, SystemClock
+from agent_core.adapters.determinism import FixedClock, RandomIdFactory, SystemClock
 from agent_core.adapters.execution.docker import (
     DockerExecutionEnvironment,
     resolve_local_image_digest,
@@ -140,6 +141,7 @@ print(json.dumps(observed,sort_keys=True))
         result = await _execute(adapter, handle, script)
     rendered = result.stdout.decode("utf-8", errors="replace")
     assert result.exit_code == 0
+    assert all(str(change.path) != ".agent-initialized" for change in result.files_changed)
     assert not set(parent_secrets) & set(json.loads(rendered)["environment"])
     assert all(value not in rendered for value in parent_secrets.values())
     assert all(name not in json.loads(rendered)["environment"] for name in TIER_ZERO_NAMES)
@@ -524,3 +526,27 @@ async def test_no_orphans(runtime: tuple[DockerExecutionEnvironment, str]) -> No
         SystemClock(), RandomIdFactory(), hard_cap_seconds=20, reaper_grace_seconds=0
     )
     assert await replacement_process.reap(frozenset()) == 1
+
+    expiry_clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    expiry_adapter = DockerExecutionEnvironment(
+        expiry_clock, RandomIdFactory(), hard_cap_seconds=1, reaper_grace_seconds=0
+    )
+    expired_run = UUID(int=152)
+    expired_handle = await expiry_adapter.provision(
+        EnvironmentSpec(
+            "tenant-a",
+            expired_run,
+            4,
+            digest,
+            _limits(),
+            EgressPolicy(),
+            build_sandbox_environment({}),
+        )
+    )
+    expiry_clock.advance(timedelta(seconds=2))
+
+    async def still_claimed(_run_id: UUID, _lease_epoch: int) -> bool:
+        return True
+
+    assert await expiry_adapter.reap(frozenset({(expired_run, 4)}), still_claimed) == 1
+    assert expired_handle.environment_id not in expiry_adapter.live_environment_ids()

@@ -56,3 +56,5 @@ async def test_trajectory_artifact_store_rejects_integrity_drift(tmp_path: Path)
         await store.read(stored)
     with pytest.raises(ArtifactIntegrityError, match="digest or size"):
         _ = [chunk async for chunk in store.stream(stored)]
+    with pytest.raises(ArtifactIntegrityError, match="digest or size"):
+        await store.open_verified(stored)
