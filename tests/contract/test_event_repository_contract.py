@@ -32,3 +32,44 @@ async def test_event_repository_reads_an_idempotent_derivation_key() -> None:
     loaded = await repository.get_by_derivation("contract:derived", principal())
     assert loaded == first == second
     assert await repository.get_by_derivation("contract:missing", principal()) is None
+
+
+async def test_event_repository_reads_the_latest_typed_event_before_a_sequence() -> None:
+    _clock, _sessions, _runs, repository = await memory_stack()
+    for event_type in (
+        "context.working_state.updated",
+        "other",
+        "context.working_state.updated",
+        "context.working_state.updated",
+    ):
+        await repository.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type=event_type,
+                actor_type="contract",
+            )
+        )
+
+    latest = await repository.latest_before(
+        SESSION_ID,
+        4,
+        "context.working_state.updated",
+        principal(),
+    )
+
+    assert latest is not None
+    assert latest.sequence == 3
+    assert await repository.existing_sequences(SESSION_ID, {1, 3, 99}, principal()) == {
+        1,
+        3,
+    }
+    assert (
+        await repository.latest_before(
+            SESSION_ID,
+            1,
+            "context.working_state.updated",
+            principal(),
+        )
+        is None
+    )

@@ -21,6 +21,7 @@ from agent_core.domain.approvals import (
 )
 from agent_core.domain.artifacts import StoredArtifactRef
 from agent_core.domain.canonical import canonical_json
+from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
     AuthorizationError,
     ConflictError,
@@ -302,6 +303,7 @@ class PublicRunService:
         cancel_active: Callable[[UUID | None], None],
         cancel_parked_run: CancelParkedRun,
         resume_waiting_run: ResumeWaitingRun,
+        resolve_open_question: Callable[[WorkingState, str | None], WorkingState],
         trajectory_export_enabled: bool,
         live_events: LiveEventBroadcaster,
     ) -> None:
@@ -313,6 +315,7 @@ class PublicRunService:
         self._cancel_active = cancel_active
         self._cancel_parked_run = cancel_parked_run
         self._resume_waiting_run = resume_waiting_run
+        self._resolve_open_question = resolve_open_question
         self._trajectory_export_enabled = trajectory_export_enabled
         self._live_events = live_events
 
@@ -435,7 +438,13 @@ class PublicRunService:
                             trace_id=trace_id,
                         )
                     )
-                    await self._seed_checkpoint(uow, run, user_event.sequence, None)
+                    await self._seed_checkpoint(
+                        uow,
+                        run,
+                        user_event.sequence,
+                        None,
+                        principal,
+                    )
                     if idempotency_key is not None:
                         record = await uow.idempotency.create(
                             IdempotencyRecord(
@@ -658,8 +667,31 @@ class PublicRunService:
         )
         checkpoint.version += 1
         checkpoint.status = RunStatus.QUEUED
+        question_text = checkpoint.working_state.get("outstanding_question_text")
+        raw_state = checkpoint.working_state.get("context")
+        state = WorkingState() if raw_state is None else WorkingState.model_validate(raw_state)
+        state = self._resolve_open_question(
+            state,
+            question_text if isinstance(question_text, str) else None,
+        )
+        checkpoint.working_state["context"] = state.model_dump(mode="json")
         checkpoint.working_state.pop("outstanding_question_id", None)
-        checkpoint.last_event_sequence = completed_event.sequence
+        checkpoint.working_state.pop("outstanding_question_text", None)
+        state_event = await uow.events.append(
+            NewEvent(
+                session_id=run.session_id,
+                run_id=run.id,
+                event_type="context.working_state.updated",
+                actor_type="application",
+                actor_id=principal.principal_id,
+                payload={
+                    "working_state": state.model_dump(mode="json"),
+                    "source": "user_answer",
+                },
+                derivation_key=f"run.input.state:{run.id}:{effective_question}",
+            )
+        )
+        checkpoint.last_event_sequence = max(completed_event.sequence, state_event.sequence)
         checkpoint.created_at = self._clock.now()
         await uow.checkpoints.write(run.id, checkpoint, full=True)
         await self._resume_waiting_run(uow, run)

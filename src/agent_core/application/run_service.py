@@ -131,7 +131,13 @@ class RunService:
                         payload={"run_id": str(run.id), "priority": run.priority},
                     )
                 )
-                await self._seed_checkpoint(uow, run, user_event.sequence, None)
+                await self._seed_checkpoint(
+                    uow,
+                    run,
+                    user_event.sequence,
+                    None,
+                    self._principal,
+                )
                 if idempotency_key is not None:
                     record = await uow.idempotency.create(
                         IdempotencyRecord(

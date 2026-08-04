@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_6_in_review
+  status: milestone_7_complete
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 6
+  current_milestone: 7
   authorized_milestones:
     - 0
     - 1
@@ -39,10 +39,10 @@ milestones:
     status: complete
   "6":
     title: Isolated execution and artifacts
-    status: in_review
+    status: complete
   "7":
     title: Context budgeting and structured working state
-    status: not_started
+    status: complete
   "8":
     title: Skills and MCP integration
     status: not_started
@@ -315,8 +315,8 @@ verification:
           status contexts completed successfully.
     remaining: []
   milestone_6:
-    recorded_at: 2026-08-04T11:45:23Z
-    status: in_review
+    recorded_at: 2026-08-04T11:57:17Z
+    status: complete
     evidence:
       - check: make check
         outcome: passed
@@ -375,13 +375,82 @@ verification:
           PostgreSQL upgraded through revision f2a6d74b9c10, the migration
           round-tripped from its predecessor, and the integration migration
           checks reported no schema drift.
-    remaining:
-      - Hosted CircleCI must pass for the Milestone 6 pull request.
-      - CodeRabbit review must have no unaddressed actionable comments.
-      - >-
-        Owner review is requested for proposed ADR-0042, especially the
-        sandbox-profile conflict with the pre-existing 106-knob inventory and
-        the Docker-development/gVisor-production runtime split.
+      - check: hosted CircleCI and CodeRabbit for pull request 7
+        outcome: passed
+        detail: >-
+          All hosted CircleCI lanes and GitGuardian passed, CodeRabbit reported
+          no remaining actionable findings, every review thread was resolved,
+          and pull request 7 merged to dev as commit
+          259ad4373e793f2205ffe39078c056bf55ad348f.
+    remaining: []
+  milestone_7:
+    recorded_at: 2026-08-04T14:29:18Z
+    status: complete
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over source and tests, 236
+          static tests, 107 port contracts, strict documentation builds, and all
+          123 hard gates active through Milestone 7 passed.
+      - check: PostgreSQL 16 integration partition
+        outcome: passed
+        detail: >-
+          All 70 integration and resilience tests passed. The suite includes
+          durable provider-continuation reconstruction, the 21 deterministic
+          evaluation cases, migrations, event runtime, HTTP, artifacts,
+          trajectories, and every tool recovery boundary.
+      - check: complete non-live suite against PostgreSQL 16 and Docker
+        outcome: passed
+        detail: >-
+          All 423 non-live tests passed with only the two credentialed provider
+          smoke tests deselected. This included all static and contract coverage,
+          70 PostgreSQL integration and resilience tests, and ten real-Docker
+          sandbox security tests inherited from Milestone 6.
+      - check: case 28 fifty-turn prefix stability
+        outcome: passed
+        detail: >-
+          One session completed 50 turns across a 50-hour clock advance while a
+          tool scope was revoked and memory formation and correction events were
+          appended. It forced 25 compactions and every model request recorded the
+          same prefix SHA-256 while retaining its output reserve and staying
+          within the model window.
+      - check: context hard-gate properties and trust corpus
+        outcome: passed
+        detail: >-
+          Generated histories retained deterministic pair-safe suffixes within
+          budget and above the summary floor. The trust corpus proved closing
+          delimiters cannot escape their nonce envelope and external canaries do
+          not enter compaction summaries.
+      - check: working-state and replay acceptance
+        outcome: passed
+        detail: >-
+          Typed control-tool updates emitted durable events, provenance-bearing
+          facts remained externally attributed, new runs carried open tasks and
+          constraints from the log, completed tasks dropped, and next_action
+          reset. Compaction left original events replayable and retained source
+          event identifiers on every summary.
+      - check: proposed ADR-0043
+        outcome: owner_review_requested
+        detail: >-
+          The forced implementation decisions are recorded explicitly, including
+          first-request plan pinning, conservative plan-time prefix measurement,
+          provider-valid in-turn chronology, runtime-owned checkpoint writes, and
+          the deterministic extractive first compactor.
+      - check: hosted CircleCI for pull request 8
+        outcome: passed
+        detail: >-
+          The static, contract, PostgreSQL integration, and real-Docker sandbox
+          lanes all passed on remediation commit 1dc15b4.
+      - check: CodeRabbit full-review remediation
+        outcome: passed_with_documented_exception
+        detail: >-
+          Nineteen actionable findings were fixed and verified. All twenty review
+          threads were answered and resolved; the remaining suggestion to refresh
+          tool visibility was rejected because the normative context design pins
+          the advertised tool set and requires authorization changes not to rewrite
+          the stable prefix. Revoked calls remain denied by policy.
+    remaining: []
 
 documentation:
   canonical_format: markdown

@@ -81,21 +81,35 @@ def conversation_items(event: EventEnvelope) -> list[ConversationItem]:
             UserMessage(
                 content=parts,
                 principal_id=event.actor_id,
+                source_event_sequence=event.sequence,
             )
         ]
     if event.event_type == "assistant.message.completed":
         message = payload.get("message")
         if not isinstance(message, dict):
             raise ValueError(f"assistant.message.completed payload has no message: {event.id}")
-        return [AssistantMessage.model_validate(message)]
+        return [
+            AssistantMessage.model_validate(message).model_copy(
+                update={"source_event_sequence": event.sequence}
+            )
+        ]
     if event.event_type == "model.response.completed":
         raw_items = payload.get("conversation_items")
         if not isinstance(raw_items, list):
             raise ValueError(f"model.response.completed has no conversation items: {event.id}")
-        return [CONVERSATION_ADAPTER.validate_python(item) for item in raw_items]
+        return [
+            CONVERSATION_ADAPTER.validate_python(item).model_copy(
+                update={"source_event_sequence": event.sequence}
+            )
+            for item in raw_items
+        ]
     if event.event_type in TOOL_RESULT_EVENTS:
         raw_result = payload.get("result_item")
         if not isinstance(raw_result, dict):
             raise ValueError(f"{event.event_type} has no result item: {event.id}")
-        return [ToolResultItem.model_validate(raw_result)]
+        return [
+            ToolResultItem.model_validate(raw_result).model_copy(
+                update={"source_event_sequence": event.sequence}
+            )
+        ]
     return []

@@ -20,6 +20,21 @@ class EventRepository(Protocol):
         self, session_id: UUID, sequence: int, principal: Principal
     ) -> list[EventEnvelope]: ...
 
+    async def latest_before(
+        self,
+        session_id: UUID,
+        sequence: int,
+        event_type: str,
+        principal: Principal,
+    ) -> EventEnvelope | None: ...
+
+    async def existing_sequences(
+        self,
+        session_id: UUID,
+        sequences: set[int],
+        principal: Principal,
+    ) -> set[int]: ...
+
     async def get_by_derivation(
         self, derivation_key: str, principal: Principal
     ) -> EventEnvelope | None: ...

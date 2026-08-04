@@ -325,6 +325,34 @@ class InMemoryEventRepository:
                 if event.sequence > sequence
             ]
 
+    async def latest_before(
+        self,
+        session_id: UUID,
+        sequence: int,
+        event_type: str,
+        principal: Principal,
+    ) -> EventEnvelope | None:
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            matching = [
+                event
+                for event in self._events[session_id]
+                if event.sequence < sequence and event.event_type == event_type
+            ]
+            return None if not matching else matching[-1].model_copy(deep=True)
+
+    async def existing_sequences(
+        self,
+        session_id: UUID,
+        sequences: set[int],
+        principal: Principal,
+    ) -> set[int]:
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            return {
+                event.sequence for event in self._events[session_id] if event.sequence in sequences
+            }
+
     async def get_by_derivation(
         self, derivation_key: str, principal: Principal
     ) -> EventEnvelope | None:
@@ -827,7 +855,7 @@ class InMemorySessionHistoryRepository:
             session_id=session_id,
             through_sequence=events[-1].sequence if events else 0,
             items=items,
-            builder_version="session-history-memory@1",
+            builder_version="session-history-memory@2",
         )
 
     async def catch_up(self, session_id: UUID) -> SessionHistory:

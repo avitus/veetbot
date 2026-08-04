@@ -9,6 +9,7 @@ import logging
 import re
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager, suppress
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
@@ -69,6 +70,7 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 from agent_core.ports.policies import PolicyEngine
 from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
+from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
 from agent_core.tools.messages import message_for
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
@@ -309,7 +311,6 @@ class ToolPipeline:
         token: CancellationToken,
         lease: WorkerLease | None = None,
     ) -> list[ToolResultItem]:
-        del checkpoint
         if self._parallel_ok(tool_calls, run, principal, agent):
             token.raise_if_cancelled()
             parallel_group = self._ids.new_id()
@@ -317,6 +318,7 @@ class ToolPipeline:
                 *(
                     self._dispatch_one(
                         run=run,
+                        checkpoint=checkpoint,
                         call=call,
                         principal=principal,
                         step=step,
@@ -340,6 +342,7 @@ class ToolPipeline:
             results.append(
                 await self._dispatch_one(
                     run=run,
+                    checkpoint=checkpoint,
                     call=call,
                     principal=principal,
                     step=step,
@@ -356,6 +359,7 @@ class ToolPipeline:
         self,
         *,
         run: Run,
+        checkpoint: RunCheckpoint,
         call: ToolCallItem,
         principal: Principal,
         step: Step,
@@ -408,6 +412,7 @@ class ToolPipeline:
         key = _idempotency_key(run, step, call, tool, arguments_hash)
         return await self._execute_once(
             run=run,
+            checkpoint=checkpoint,
             call=call,
             principal=principal,
             agent=agent,
@@ -425,6 +430,7 @@ class ToolPipeline:
         self,
         *,
         run: Run,
+        checkpoint: RunCheckpoint,
         call: ToolCallItem,
         principal: Principal,
         agent: AgentSpec,
@@ -492,6 +498,7 @@ class ToolPipeline:
             async with self._key_lock(key):
                 return await self._execute_once(
                     run=run,
+                    checkpoint=checkpoint,
                     call=call,
                     principal=principal,
                     agent=agent,
@@ -523,6 +530,12 @@ class ToolPipeline:
                         lease,
                     )
         if invocation.outcome is not None:
+            if invocation.outcome.status is ToolOutcomeStatus.SUCCEEDED:
+                self._apply_context_update(
+                    checkpoint,
+                    tool.spec.name,
+                    invocation.structured_result,
+                )
             return invocation.result_item or _outcome_item(
                 call.call_id, invocation.outcome, tool.spec.output_trust
             )
@@ -571,6 +584,7 @@ class ToolPipeline:
         if recovery is ToolRecoveryAction.RESUME_APPROVAL:
             return await self._resume_approval(
                 run=run,
+                checkpoint=checkpoint,
                 call=call,
                 principal=principal,
                 agent=agent,
@@ -700,6 +714,7 @@ class ToolPipeline:
                 try:
                     item = await self._dispatch_one(
                         run=run,
+                        checkpoint=checkpoint,
                         call=bridge_call,
                         principal=principal,
                         step=step,
@@ -787,6 +802,7 @@ class ToolPipeline:
                 else self._credentials
             ),
             bridge_dispatch=(bridge_dispatch if tool.spec.target_kind == "sandbox" else None),
+            working_state=deepcopy(checkpoint.working_state),
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
@@ -864,7 +880,10 @@ class ToolPipeline:
                     retryable=False,
                 ),
             )
-        return await self._finish(run, call, tool, invocation, result, lease)
+        result_item = await self._finish(run, call, tool, invocation, result, lease)
+        if result.ok:
+            self._apply_context_update(checkpoint, tool.spec.name, result.structured)
+        return result_item
 
     async def _artifactize_large_output(
         self,
@@ -1080,6 +1099,7 @@ class ToolPipeline:
         self,
         *,
         run: Run,
+        checkpoint: RunCheckpoint,
         call: ToolCallItem,
         principal: Principal,
         agent: AgentSpec,
@@ -1160,6 +1180,7 @@ class ToolPipeline:
             )
         return await self._execute_once(
             run=run,
+            checkpoint=checkpoint,
             call=call,
             principal=current,
             agent=agent,
@@ -1264,6 +1285,21 @@ class ToolPipeline:
             )
         return result_item
 
+    @staticmethod
+    def _apply_context_update(
+        checkpoint: RunCheckpoint,
+        tool_name: str,
+        structured: dict[str, Any] | None,
+    ) -> None:
+        if tool_name != WORKING_STATE_TOOL_NAME or structured is None:
+            return
+        if structured.get("updated") is not True:
+            return
+        state = structured.get("working_state")
+        if not isinstance(state, dict):
+            raise ConflictError("persisted working-state result has no state mapping")
+        checkpoint.working_state["context"] = dict(state)
+
     async def _finish(
         self,
         run: Run,
@@ -1360,6 +1396,23 @@ class ToolPipeline:
                 },
                 lease,
             )
+            if (
+                tool.spec.name == WORKING_STATE_TOOL_NAME
+                and result.ok
+                and result.structured is not None
+                and result.structured.get("updated") is True
+            ):
+                structured = result.structured
+                state = structured.get("working_state")
+                if not isinstance(state, dict):
+                    raise ConflictError("working-state control result has no state mapping")
+                await self._event_in(
+                    uow,
+                    run,
+                    "context.working_state.updated",
+                    {"working_state": state, "source": "control_tool"},
+                    lease,
+                )
         return result_item
 
     async def _refusal(

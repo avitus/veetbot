@@ -1,0 +1,5 @@
+on_exhausted: repeat_last
+turns:
+  - kind: final
+    text: Long-session turn completed.
+    stop_reason: end_turn

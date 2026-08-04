@@ -46,6 +46,30 @@ class EvalFixtures(StrictModel):
     run_limits: EvalRunLimits = Field(default_factory=EvalRunLimits)
 
 
+class EvalSession(StrictModel):
+    turns: int = Field(ge=2, le=100)
+    advance_seconds: int = Field(default=0, ge=0)
+    prompt_padding_bytes: int = Field(default=0, ge=0, le=16_384)
+    revoke_scope: str | None = None
+    revoke_scope_turn: int | None = Field(default=None, ge=2)
+    memory_write_turn: int | None = Field(default=None, ge=2)
+    memory_correction_turn: int | None = Field(default=None, ge=2)
+
+    @model_validator(mode="after")
+    def intervention_turns_fit(self) -> EvalSession:
+        for name in (
+            "revoke_scope_turn",
+            "memory_write_turn",
+            "memory_correction_turn",
+        ):
+            value = getattr(self, name)
+            if value is not None and value > self.turns:
+                raise ValueError(f"{name} cannot exceed session turns")
+        if (self.revoke_scope is None) != (self.revoke_scope_turn is None):
+            raise ValueError("scope revocation requires both a scope and a turn")
+        return self
+
+
 class EvalExpected(StrictModel):
     terminal_status: RunStatus
     final_text: str | None = None
@@ -56,6 +80,8 @@ class EvalExpected(StrictModel):
     event_order: list[str] = Field(default_factory=list)
     maximum_steps: int | None = Field(default=None, ge=0)
     pending_approvals: int | None = Field(default=None, ge=0)
+    distinct_prefixes: int | None = Field(default=None, ge=1)
+    minimum_compactions: int | None = Field(default=None, ge=0)
 
 
 class EvalCase(StrictModel):
@@ -71,6 +97,7 @@ class EvalCase(StrictModel):
     input: EvalInput
     model_fixture: str
     fixtures: EvalFixtures = Field(default_factory=EvalFixtures)
+    session: EvalSession | None = None
     expected: EvalExpected
     approval_resolution: Literal["approve_once", "deny"] | None = None
     cancel_after_submission: bool = False

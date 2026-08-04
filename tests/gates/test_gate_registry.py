@@ -18,14 +18,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_registry_complete() -> None:
-    assert registry_errors(ROOT, current_milestone=6) == []
+    assert registry_errors(ROOT, current_milestone=7) == []
 
 
 def test_no_stale_active_gate() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    active = [entry for entry in entries if entry.milestone <= 6]
-    assert len(active) == 116
+    active = [entry for entry in entries if entry.milestone <= 7]
+    assert len(active) == 123
     assert all(entry.check != "tests/gates/pending.py::pending_gate" for entry in active)
     assert all(not entry.optional for entry in active)
 

@@ -4,19 +4,16 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 6 — isolated execution and artifacts (review)
-- **Next milestone:** Milestone 7 — context budgeting and structured working state
+- **Current milestone:** Milestone 7 — context budgeting and structured working state (complete)
+- **Next milestone:** Milestone 8 — skills and MCP integration
 - **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 5 are complete. Milestone 6 is locally
-  implemented; the latest CodeRabbit follow-up findings are remediated locally
-  and await hosted CI and another clean review. Milestones 7 through 9 are
+- **Project status:** Milestones 0 through 7 are complete. Milestones 8 and 9 are
   explicitly authorized and remain sequentially gated.
 
-Milestone 6 adds container-backed and deterministic fake execution adapters,
-lease-scoped isolated workspaces, resource and egress enforcement,
-`sandbox.run_command`, the in-sandbox programmatic tool bridge, filesystem
-artifacts with tenant-authorized verified downloads, output artifactization,
-cleanup, and real-runtime security tests. The
+Milestone 7 adds durable context plans and prefix epochs, absolute context
+budgets, deterministic history selection, trust envelopes, structured working
+state and carry, pressure-driven checkpoint compaction, estimator reconciliation,
+and the fifty-turn long-session evaluation. The
 machine-readable [project state](../status/project-state.yaml) records progress
 and evidence.
 
@@ -38,14 +35,13 @@ substitute.
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Begin Milestone 7 only after the Milestone 6 pull request is merged. Milestone 10
+Begin Milestone 8 only after the Milestone 7 pull request is merged. Milestone 10
 is not authorized because the readiness review records that it has no complete
 acceptance criteria.
 
 ## Completion rule
 
-Milestone 6 is ready for follow-up review: every canonical acceptance criterion
-and all 116 cumulative gates pass locally, including the real-runtime security
-partition. Completion still requires hosted CircleCI to pass on the remediation
-commit and CodeRabbit to have no unaddressed actionable review comments on the
-milestone pull request.
+Milestone 7 is complete: every canonical acceptance criterion and all 123
+cumulative gates pass locally, all four hosted CircleCI lanes passed, and every
+CodeRabbit review thread was addressed and resolved. Proposed ADR-0043 records
+the implementation decisions reserved for later owner review.

@@ -28,7 +28,7 @@ from agent_core.domain.runs import TERMINAL_RUN_STATUSES
 from agent_core.ports.determinism import Clock
 
 SESSION_HISTORY_NAME = "session_history"
-SESSION_HISTORY_VERSION = "session-history@1"
+SESSION_HISTORY_VERSION = "session-history@2"
 TRAJECTORY_NAME = "trajectory_export"
 TRAJECTORY_VERSION = "trajectory@1"
 TERMINAL_EVENTS = frozenset(f"run.{status.value.lower()}" for status in TERMINAL_RUN_STATUSES)
