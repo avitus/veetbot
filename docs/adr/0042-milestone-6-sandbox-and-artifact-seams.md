@@ -39,7 +39,10 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
 4. **A named volume is the lease-scoped workspace cache.** No host path appears
    in a port value or mount argument. One environment is created lazily for a
    `(tenant_id, run_id, lease_epoch)` tuple and destroyed on every terminal run
-   path; the reaper destroys anything whose lease epoch is no longer live.
+   path; the reaper destroys anything whose lease epoch is no longer live. A
+   newly created, unexpired environment receives a 60-second grace window
+   before a missing lease snapshot can reap it, closing the race between lease
+   acquisition and the maintenance worker's database read.
 5. **Portable workspace quotas use an active service-side monitor.** Docker's
    local volume driver has no portable per-volume byte or inode quota. The
    adapter measures both while a command runs, kills on the first violation,
@@ -48,8 +51,10 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
 6. **Allowlisted egress uses an internal-only network and a disposable proxy.**
    The proxy performs the shared policy evaluation, resolves once, rejects
    private addresses before matching the allowlist, dials the resolved numeric
-   address, and emits structured decisions. The sandbox has no direct route to
-   the external bridge network.
+   address, and emits structured decisions. The proxy listens only on its
+   internal-network address and separately joins Docker's external bridge for
+   outbound dialing; it does not expose the listener on that bridge. The
+   sandbox has no direct route to the external bridge network.
 7. **The programmatic bridge crosses the boundary through `docker exec`
    standard I/O.** A tiny relay in the execution image owns the mode-0600 Unix
    socket inside the workspace. The worker never mounts that socket. The
@@ -60,8 +65,13 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
 8. **General artifacts use store-then-metadata commit order.** The application
    writer spools a bounded stream, computes its digest and size, writes bytes
    under a key derived only from tenant and artifact IDs, and then commits
-   metadata. A metadata failure deletes the just-written bytes. Reads recompute
-   and verify the digest before exposing content.
+   metadata. A metadata failure deletes the just-written bytes. A process crash
+   between those operations can still leave bytes without metadata, so the
+   maintenance worker reconciles objects older than a one-hour safety margin
+   against the artifact repository and deletes unmatched objects. Reads
+   recompute and verify the digest before exposing content. Artifact metadata
+   always has an expiry; adapters reject a database row that violates that
+   invariant rather than carrying an optional expiry through the application.
 9. **Large tool output is an artifact plus a bounded model view.** The pipeline
    stores at most four times the declared output bound, returns a head and tail
    excerpt with an explicit elision marker and file reference, and persists the
@@ -70,10 +80,22 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
     review.** `sandbox-isolation.md` requires six operator-set resource limits
     plus an egress policy, while `bootstrap-and-composition.md` freezes an
     exhaustive 106-knob inventory that contains none of them. The implementation
-    adds `sandbox/limits.yaml` so the security requirements are configurable and
-    does not silently rewrite the 106-knob inventory. If this ADR is accepted,
-    the inventory should be amended in a documentation-governance follow-up to
-    count and describe the seven sandbox fields.
+    adds `sandbox/limits.yaml` so the security requirements are configurable,
+    including artifact retention and maximum size, and does not silently
+    rewrite the 106-knob inventory. If this ADR is accepted, the inventory
+    should be amended in a documentation-governance follow-up to count and
+    describe the nine sandbox and artifact fields.
+11. **Environment construction is an allowlist.** Operator-requested
+    passthrough is limited to the reviewed tier-1 proxy and locale names, and a
+    secret-name pattern rejects credential-like names in addition to the fixed
+    tier-0 vocabulary. In-memory storage is an evaluation tier and is accepted
+    only when the deployment explicitly selects the fake sandbox mechanism;
+    other combinations fail before sandbox construction.
+12. **Enforced kills preserve a reusable lease environment.** Docker stops the
+    whole container to terminate a runaway process, then restarts the same
+    container before returning the structured kill result. Task cancellation
+    performs the same bounded cleanup and re-raises `CancelledError` instead of
+    converting caller cancellation into an ordinary tool result.
 
 ## Consequences
 
@@ -85,9 +107,10 @@ CI mechanism; it is not presented as the production kernel-isolation boundary.
   monitor interval on Docker; production runtimes may add native quotas below
   the unchanged port.
 - Artifact bytes never depend on a caller-supplied filename or a database
-  storage URI, and an integrity failure returns no content.
+  storage URI, an integrity failure returns no content, and maintenance bounds
+  the lifetime of crash-orphaned bytes.
 - Until decision 10 is accepted, the existing 106-knob inventory test does not
-  claim the seven sandbox-profile fields; both documents remain visible rather
+  claim the nine sandbox-profile fields; both documents remain visible rather
   than one requirement being silently weakened to fit the other.
 
 ## Alternatives considered

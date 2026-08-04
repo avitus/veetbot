@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import secrets
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from pathlib import PurePosixPath
 from typing import Protocol, cast
 from uuid import UUID
@@ -76,6 +76,11 @@ class LeaseWorkspaceHandle:
 
     async def read_bounded(self, path: str, maximum_bytes: int) -> bytes:
         return await (await self._delegate()).read_bounded(path, maximum_bytes)
+
+    async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
+        delegate = await self._delegate()
+        async for chunk in delegate.stream(path, maximum_bytes):
+            yield chunk
 
     async def write(self, path: str, data: bytes) -> None:
         await (await self._delegate()).write(path, data)
@@ -172,12 +177,17 @@ class SandboxManager:
 
     async def release_run(self, run_id: UUID) -> None:
         matches = [(key, handle) for key, handle in self._handles.items() if key[1] == run_id]
+        errors: list[Exception] = []
         for key, handle in matches:
             try:
                 await self._environment.destroy(handle)
-            finally:
+            except Exception as exc:
+                errors.append(exc)
+            else:
                 self._handles.pop(key, None)
                 self._locks.pop(key, None)
+        if errors:
+            raise ExceptionGroup("one or more sandbox releases failed", errors)
 
     async def reap(self, live_leases: frozenset[tuple[UUID, int]]) -> int:
         reaper = getattr(self._environment, "reap", None)
@@ -186,10 +196,17 @@ class SandboxManager:
         return int(await reaper(frozenset(live_leases)))
 
     async def close(self) -> None:
-        for handle in tuple(self._handles.values()):
-            await self._environment.destroy(handle)
-        self._handles.clear()
-        self._locks.clear()
+        errors: list[Exception] = []
+        for key, handle in tuple(self._handles.items()):
+            try:
+                await self._environment.destroy(handle)
+            except Exception as exc:
+                errors.append(exc)
+            else:
+                self._handles.pop(key, None)
+                self._locks.pop(key, None)
+        if errors:
+            raise ExceptionGroup("one or more sandbox closes failed", errors)
 
     @property
     def adapter(self) -> ExecutionEnvironment:

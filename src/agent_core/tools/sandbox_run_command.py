@@ -139,6 +139,7 @@ class SandboxRunCommandTool:
                     {
                         "argv": list(command.argv),
                         "working_directory": str(command.working_directory),
+                        "outer_call_id": str(context.call_id),
                     },
                     ensure_ascii=False,
                     separators=(",", ":"),

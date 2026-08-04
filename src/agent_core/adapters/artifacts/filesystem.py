@@ -6,7 +6,9 @@ import asyncio
 import hashlib
 import os
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import suppress
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import BinaryIO
 from uuid import UUID
@@ -102,3 +104,61 @@ class FilesystemArtifactStore:
 
     async def delete(self, ref: StoredArtifactRef, *, tenant_id: str) -> None:
         await asyncio.to_thread(self._path(tenant_id, ref.artifact_id).unlink, missing_ok=True)
+
+    async def reconcile_orphans(
+        self,
+        metadata_exists: Callable[[UUID], Awaitable[bool]],
+        *,
+        now: datetime,
+        safety_margin: timedelta = timedelta(hours=1),
+    ) -> int:
+        """Delete old committed objects that have no corresponding metadata row."""
+
+        object_root = self._root / "objects"
+        paths = await asyncio.to_thread(
+            lambda: tuple(path for path in object_root.glob("*/*/*") if path.is_file())
+        )
+        removed = 0
+        threshold = now.timestamp() - safety_margin.total_seconds()
+        for claim in (path for path in paths if path.name.startswith(".reconcile-")):
+            try:
+                artifact_id = UUID(claim.name.removeprefix(".reconcile-")[:36])
+                modified = (await asyncio.to_thread(claim.stat)).st_mtime
+            except (ValueError, FileNotFoundError):
+                continue
+            if modified > threshold:
+                continue
+            destination = claim.with_name(str(artifact_id))
+            if await metadata_exists(artifact_id):
+                await asyncio.to_thread(_restore_claim, claim, destination)
+            else:
+                await asyncio.to_thread(claim.unlink, missing_ok=True)
+                removed += 1
+        for path in paths:
+            if path.name.startswith(".reconcile-"):
+                continue
+            try:
+                artifact_id = UUID(path.name)
+                metadata = await asyncio.to_thread(path.stat)
+            except (ValueError, FileNotFoundError):
+                continue
+            if metadata.st_mtime > threshold:
+                continue
+            claim = path.with_name(f".reconcile-{artifact_id}-{metadata.st_ino}")
+            try:
+                await asyncio.to_thread(os.replace, path, claim)
+                claimed = await asyncio.to_thread(claim.stat)
+            except FileNotFoundError:
+                continue
+            if claimed.st_mtime > threshold or await metadata_exists(artifact_id):
+                await asyncio.to_thread(_restore_claim, claim, path)
+                continue
+            await asyncio.to_thread(claim.unlink, missing_ok=True)
+            removed += 1
+        return removed
+
+
+def _restore_claim(claim: Path, destination: Path) -> None:
+    with suppress(FileExistsError):
+        os.link(claim, destination)
+    claim.unlink(missing_ok=True)

@@ -125,11 +125,16 @@ class ArtifactWriterFactory:
         store: ArtifactStore,
         clock: Clock,
         ids: IdFactory,
+        *,
+        retention_days: int = 30,
+        maximum_bytes: int = 512 * 1024 * 1024,
     ) -> None:
         self._uow_factory = uow_factory
         self._store = store
         self._clock = clock
         self._ids = ids
+        self._retention_days = retention_days
+        self._maximum_bytes = maximum_bytes
 
     def for_run(
         self,
@@ -150,4 +155,6 @@ class ArtifactWriterFactory:
             session_id=session_id,
             run_id=run_id,
             origin=origin,
+            retention_days=self._retention_days,
+            maximum_bytes=self._maximum_bytes,
         )

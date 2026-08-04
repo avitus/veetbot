@@ -675,6 +675,7 @@ class ToolPipeline:
                     bridge_arguments, ensure_ascii=False, separators=(",", ":")
                 ),
             )
+            approval_poll_seconds = 0.2
             while True:
                 token.raise_if_cancelled()
                 try:
@@ -690,7 +691,8 @@ class ToolPipeline:
                     )
                     break
                 except ApprovalRequiredError:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(approval_poll_seconds)
+                    approval_poll_seconds = min(2.0, approval_poll_seconds * 2)
             if not item.is_error:
                 return {
                     "status": "succeeded",
@@ -717,6 +719,7 @@ class ToolPipeline:
         deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
         if run.deadline_at is not None:
             deadline = min(deadline, run.deadline_at)
+        effective_timeout = max(0.0, (deadline - self._clock.now()).total_seconds())
         execution_context = ToolExecutionContext(
             invocation_id=invocation.id,
             call_id=call.call_id,
@@ -729,7 +732,7 @@ class ToolPipeline:
             lease_epoch=0 if lease is None else lease.lease_epoch,
             idempotency_key=key,
             deadline_at=deadline,
-            timeout_seconds=tool.spec.timeout_seconds,
+            timeout_seconds=effective_timeout,
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
@@ -771,9 +774,11 @@ class ToolPipeline:
         if self._uow_factory.is_open():
             raise RuntimeError("tool execution cannot begin while a unit of work is open")
         try:
+            if effective_timeout <= 0:
+                raise TimeoutError
             if tool.spec.side_effect is not SideEffectClass.NONE:
                 await mark_effect_sent()
-            async with asyncio.timeout(tool.spec.timeout_seconds):
+            async with asyncio.timeout(effective_timeout):
                 result = await tool.execute(arguments, execution_context)
             if result.ok:
                 validate_output(result.structured, tool.spec.output_schema)
@@ -869,6 +874,7 @@ class ToolPipeline:
             )
         hard_ceiling = tool.spec.maximum_output_bytes * 4
         artifact_bytes = rendered[:hard_ceiling]
+        partial_capture = len(artifact_bytes) < len(rendered)
 
         async def stream() -> AsyncIterator[bytes]:
             yield artifact_bytes
@@ -883,33 +889,55 @@ class ToolPipeline:
             run_id=run.id,
             origin=ArtifactOrigin.TOOL_OUTPUT,
         )
-        ref = await writer.create(
-            stream(),
-            f"{tool.spec.name.replace('.', '-')}-output.json",
-            "application/json",
-            trust,
-        )
+        filename = f"{tool.spec.name.replace('.', '-')}-output"
+        filename += ".partial.json" if partial_capture else ".json"
+        media_type = "application/octet-stream" if partial_capture else "application/json"
+        ref = await writer.create(stream(), filename, media_type, trust)
         budget = tool.spec.maximum_output_bytes
-        head_bytes = int(budget * 0.6)
-        tail_bytes = int(budget * 0.2)
-        head = artifact_bytes[:head_bytes].decode("utf-8", errors="ignore")
-        tail = artifact_bytes[-tail_bytes:].decode("utf-8", errors="ignore")
-        elided = max(0, len(rendered) - len(head.encode()) - len(tail.encode()))
-        marker = f"\n[... {elided:,} bytes elided; full output: artifact:{ref.artifact_id} ...]\n"
+        capture_label = (
+            f"captured first {len(artifact_bytes):,} of {len(rendered):,} bytes"
+            if partial_capture
+            else "full output"
+        )
+        provisional_marker = (
+            f"\n[... {len(rendered):,} bytes elided; {capture_label}: "
+            f"artifact:{ref.artifact_id} ...]\n"
+        ).encode()
+        excerpt_budget = max(0, budget - len(provisional_marker))
+        head_bytes = int(excerpt_budget * 0.75)
+        tail_bytes = excerpt_budget - head_bytes
+        elided = max(0, len(rendered) - head_bytes - tail_bytes)
+        marker = (
+            f"\n[... {elided:,} bytes elided; {capture_label}: artifact:{ref.artifact_id} ...]\n"
+        ).encode()
+        if len(marker) > budget:
+            excerpt = marker[:budget]
+        else:
+            remaining = budget - len(marker)
+            head_bytes = min(head_bytes, remaining)
+            tail_bytes = min(tail_bytes, remaining - head_bytes)
+            excerpt = (
+                artifact_bytes[:head_bytes]
+                + marker
+                + (artifact_bytes[-tail_bytes:] if tail_bytes else b"")
+            )
         structured = None if result.structured is None else dict(result.structured)
         if structured is not None:
             for key in ("stdout", "stderr"):
                 value = structured.get(key)
                 if isinstance(value, str) and len(value.encode("utf-8")) > budget // 2:
-                    structured[key] = value[: budget // 4] + "\n[TRUNCATED]"
+                    structured[key] = (
+                        value.encode("utf-8")[: budget // 4].decode("utf-8", errors="ignore")
+                        + "\n[TRUNCATED]"
+                    )
         return result.model_copy(
             update={
                 "content": [
-                    TextPart(text=head + marker + tail),
+                    TextPart(text=excerpt.decode("utf-8", errors="ignore")),
                     FileReferencePart(
                         artifact_id=ref.artifact_id,
                         media_type=ref.media_type,
-                        filename=f"{tool.spec.name.replace('.', '-')}-output.json",
+                        filename=filename,
                     ),
                 ],
                 "structured": structured,
@@ -921,7 +949,12 @@ class ToolPipeline:
                         "media_type": ref.media_type,
                     }
                 ],
-                "metrics": {"output_bytes": len(rendered), "truncated": 1},
+                "metrics": {
+                    "output_bytes": len(rendered),
+                    "captured_bytes": len(artifact_bytes),
+                    "discarded_bytes": len(rendered) - len(artifact_bytes),
+                    "truncated": 1,
+                },
             },
             deep=True,
         )
@@ -1258,7 +1291,12 @@ class ToolPipeline:
         if result.artifacts and isinstance(result.artifacts[0], dict):
             raw_artifact_id = result.artifacts[0].get("artifact_id")
             if isinstance(raw_artifact_id, str):
-                artifact_id = UUID(raw_artifact_id)
+                try:
+                    artifact_id = UUID(raw_artifact_id)
+                except ValueError:
+                    logger.warning(
+                        "tool_artifact_id_malformed", extra={"tool_name": tool.spec.name}
+                    )
         finished = invocation.model_copy(
             update={
                 "status": status,

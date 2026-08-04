@@ -842,7 +842,8 @@ class PublicArtifactService:
                 artifact = await uow.artifacts.get(artifact_id, principal)
             except NotFoundError:
                 artifact = await uow.trajectory_exports.get_artifact(artifact_id, principal)
-        if artifact.expires_at is not None and artifact.expires_at <= self._clock.now():
+        # ArtifactRef requires an expiry, and persistence mapping rejects legacy null rows.
+        if artifact.expires_at <= self._clock.now():
             raise NotFoundError("artifact not found")
         return artifact
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from pathlib import PurePosixPath
 from typing import Protocol
 
@@ -37,6 +37,8 @@ class WorkspaceHandle(Protocol):
     async def read(self, path: str) -> bytes: ...
 
     async def read_bounded(self, path: str, maximum_bytes: int) -> bytes: ...
+
+    def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]: ...
 
     async def write(self, path: str, data: bytes) -> None: ...
 

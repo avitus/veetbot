@@ -1441,6 +1441,13 @@ class PostgresArtifactRepository:
             raise ConflictError("artifact id already exists with different metadata")
         return stored
 
+    async def exists(self, artifact_id: UUID) -> bool:
+        return bool(
+            await self._session.scalar(
+                select(ArtifactRow.id).where(ArtifactRow.id == artifact_id).limit(1)
+            )
+        )
+
     async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
         row = (
             await self._session.scalars(

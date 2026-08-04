@@ -163,6 +163,7 @@ class MaintenanceWorker:
         reclaim_limit: int = 100,
         sweep_exports: Callable[[], Awaitable[int]] | None = None,
         sweep_sandboxes: Callable[[frozenset[tuple[UUID, int]]], Awaitable[int]] | None = None,
+        sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -170,6 +171,7 @@ class MaintenanceWorker:
         self._reclaim_limit = reclaim_limit
         self._sweep_exports = sweep_exports
         self._sweep_sandboxes = sweep_sandboxes
+        self._sweep_artifact_orphans = sweep_artifact_orphans
         self._stopping = False
 
     def stop(self) -> None:
@@ -206,6 +208,11 @@ class MaintenanceWorker:
                 await self._sweep_exports()
             except ArtifactSweepError:
                 logger.exception("trajectory artifact sweep failed")
+        if self._sweep_artifact_orphans is not None:
+            try:
+                await self._sweep_artifact_orphans()
+            except Exception:
+                logger.exception("artifact orphan reconciliation failed")
         return reclaimed
 
     async def run_forever(self) -> None:

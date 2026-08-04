@@ -9,3 +9,6 @@ resources:
 egress:
   mode: deny
   destinations: []
+artifacts:
+  retention_days: 30
+  maximum_bytes: 536870912

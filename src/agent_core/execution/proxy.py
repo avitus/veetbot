@@ -105,7 +105,13 @@ async def _handle(
             _relay(reader, upstream_writer),
             _relay(upstream_reader, writer),
         )
-    except (ValueError, UnicodeError, asyncio.IncompleteReadError, OSError) as exc:
+    except (
+        ValueError,
+        UnicodeError,
+        asyncio.IncompleteReadError,
+        asyncio.LimitOverrunError,
+        OSError,
+    ) as exc:
         print(
             json.dumps({"reason": "proxy_error", "error_class": type(exc).__name__}),
             file=sys.stderr,
@@ -123,7 +129,13 @@ async def _handle(
 
 async def main() -> None:
     policy = _policy()
-    server = await asyncio.start_server(lambda r, w: _handle(r, w, policy), "0.0.0.0", 3128)
+    bind_host = os.environ.get("AGENT_PROXY_BIND_HOST", "127.0.0.1")
+    server = await asyncio.start_server(
+        lambda r, w: _handle(r, w, policy),
+        bind_host,
+        3128,
+        limit=_MAX_HEADER_BYTES + 1,
+    )
     async with server:
         await server.serve_forever()
 

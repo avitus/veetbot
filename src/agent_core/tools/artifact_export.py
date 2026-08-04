@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from typing import Any, cast
 
-from agent_core.domain.errors import WorkspaceEscape
+from agent_core.domain.errors import WorkspaceEscape, WorkspaceReadLimitExceededError
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
     ToolExecutionContext,
@@ -43,10 +42,6 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
-async def _one_chunk(data: bytes) -> AsyncIterator[bytes]:
-    yield data
-
-
 class ArtifactExportTool:
     spec = ToolSpec(
         name="artifact.export",
@@ -65,23 +60,52 @@ class ArtifactExportTool:
     )
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
-        workspace = cast(WorkspaceHandle, context.workspace)
-        writer = cast(ArtifactWriter, context.artifacts)
+        raw_workspace = context.workspace
+        raw_writer = context.artifacts
+        if not callable(getattr(raw_workspace, "stream", None)) or not callable(
+            getattr(raw_writer, "create", None)
+        ):
+            return ToolResult(
+                ok=False,
+                content=[],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.INTERNAL,
+                    reason_code="tool.internal_error",
+                    detail="artifact collaborators are unavailable",
+                    retryable=False,
+                ),
+            )
+        workspace = cast(WorkspaceHandle, raw_workspace)
+        writer = cast(ArtifactWriter, raw_writer)
         try:
-            data = await workspace.read_bounded(str(arguments["path"]), _MAX_ARTIFACT_BYTES)
             ref = await writer.create(
-                _one_chunk(data),
+                workspace.stream(str(arguments["path"]), _MAX_ARTIFACT_BYTES),
                 str(arguments["filename"]),
                 str(arguments["media_type"]),
                 TrustLevel.EXTERNAL_UNTRUSTED,
             )
-        except (FileNotFoundError, IsADirectoryError, WorkspaceEscape) as exc:
+        except (
+            FileNotFoundError,
+            IsADirectoryError,
+            WorkspaceEscape,
+        ) as exc:
             return ToolResult(
                 ok=False,
                 content=[],
                 failure=ToolFailure(
                     kind=ToolFailureKind.INVALID_ARGUMENTS,
                     reason_code="tool.arguments_invalid",
+                    detail=type(exc).__name__,
+                    retryable=False,
+                ),
+            )
+        except WorkspaceReadLimitExceededError as exc:
+            return ToolResult(
+                ok=False,
+                content=[],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.OUTPUT_TOO_LARGE,
+                    reason_code="tool.output_invalid",
                     detail=type(exc).__name__,
                     retryable=False,
                 ),

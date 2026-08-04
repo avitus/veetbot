@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
 from uuid import UUID
@@ -58,8 +59,14 @@ def _settings(tmp_path: Path) -> Settings:
 
 async def test_artifact_checksum(tmp_path: Path) -> None:
     content = b"streamed-sandbox-output\n" * 10_000
+    run_id = UUID(int=9001)
+    session_id = UUID(int=9000)
     async with build(settings=_settings(tmp_path), sequential_ids=True) as composition:
         store = FilesystemArtifactStore(composition.settings.artifact_root)
+        workspace = composition.sandbox.for_run(
+            composition.principal.tenant_id, run_id, lease_epoch=1
+        )
+        await workspace.write("generated/result.bin", content)
         writer = ArtifactWriterFactory(
             composition.uow_factory,
             store,
@@ -68,16 +75,31 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
         ).for_run(
             tenant_id=composition.principal.tenant_id,
             principal_id=composition.principal.principal_id,
-            session_id=UUID(int=9000),
-            run_id=UUID(int=9001),
+            session_id=session_id,
+            run_id=run_id,
             origin=ArtifactOrigin.SANDBOX_EXPORT,
         )
-        ref = await writer.create(
-            _chunks(content),
-            "../../result.bin",
-            "application/octet-stream",
-            TrustLevel.EXTERNAL_UNTRUSTED,
+        result = await ArtifactExportTool().execute(
+            {
+                "path": "generated/result.bin",
+                "filename": "../../result.bin",
+                "media_type": "application/octet-stream",
+            },
+            replace(
+                tool_context(),
+                run_id=run_id,
+                session_id=session_id,
+                tenant_id=composition.principal.tenant_id,
+                principal=composition.principal,
+                lease_epoch=1,
+                workspace=workspace,
+                artifacts=writer,
+            ),
         )
+        assert result.ok is True
+        assert result.structured is not None
+        artifact_id = UUID(str(result.structured["artifact_id"]))
+        ref = await composition.services.artifacts.get(composition.principal, artifact_id)
         app = create_app(
             composition.services,
             composition.settings,
@@ -89,8 +111,8 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
             transport=httpx.ASGITransport(app=app, client=("127.0.0.1", 43101)),
             base_url="http://agent.test",
         ) as client:
-            metadata = await client.get(f"/v1/artifacts/{ref.artifact_id}")
-            downloaded = await client.get(f"/v1/artifacts/{ref.artifact_id}/content")
+            metadata = await client.get(f"/v1/artifacts/{ref.id}")
+            downloaded = await client.get(f"/v1/artifacts/{ref.id}/content")
         assert metadata.status_code == 200
         assert downloaded.status_code == 200
         assert downloaded.content == content
@@ -101,7 +123,7 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
             scopes=set(PLATFORM_SCOPES),
         )
         with pytest.raises(NotFoundError):
-            await composition.services.artifacts.get(other_tenant, ref.artifact_id)
+            await composition.services.artifacts.get(other_tenant, ref.id)
 
         now = composition.clock.now()
         mismatch = ArtifactMetadata(
@@ -117,7 +139,7 @@ async def test_artifact_checksum(tmp_path: Path) -> None:
             sha256="0" * 64,
             trust=TrustLevel.EXTERNAL_UNTRUSTED,
             created_at=now,
-            expires_at=None,
+            expires_at=now + timedelta(days=30),
         )
         with pytest.raises(ArtifactIntegrityError):
             await store.put(_chunks(content), mismatch)
@@ -192,7 +214,7 @@ class _LargeOutputTool:
         self, arguments: dict[str, object], context: ToolExecutionContext
     ) -> ToolResult:
         del arguments, context
-        return ToolResult(ok=True, content=[TextPart(text="x" * 2500)])
+        return ToolResult(ok=True, content=[TextPart(text="x" * 5000)])
 
 
 async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -> None:
@@ -233,11 +255,15 @@ async def test_large_tool_output_is_excerpted_and_artifactized(tmp_path: Path) -
             run=run,
             principal=composition.principal,
         )
-        assert result.metrics == {"output_bytes": 2527, "truncated": 1}
+        assert result.metrics["output_bytes"] == 5027
+        assert result.metrics["captured_bytes"] == 4000
+        assert result.metrics["discarded_bytes"] == 1027
+        assert result.metrics["truncated"] == 1
         reference = next(part for part in result.content if isinstance(part, FileReferencePart))
         assert "bytes elided" in result.content[0].text  # type: ignore[union-attr]
         fetched = await composition.services.artifacts.open_content(
             composition.principal, reference.artifact_id
         )
         stored = b"".join([chunk async for chunk in fetched.open()])
-        assert len(stored) == result.metrics["output_bytes"]
+        assert len(stored) == result.metrics["captured_bytes"]
+        assert "captured first" in result.content[0].text  # type: ignore[union-attr]

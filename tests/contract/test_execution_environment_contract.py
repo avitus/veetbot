@@ -16,10 +16,25 @@ from agent_core.domain.execution import (
     ExecutionCommand,
     ResourceLimits,
 )
+from agent_core.execution.manager import SandboxManager
 
 
 def _limits() -> ResourceLimits:
     return ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30)
+
+
+class _FailingDestroyEnvironment(FakeExecutionEnvironment):
+    def __init__(self, clock: FixedClock, ids: SequenceIdFactory) -> None:
+        super().__init__(clock, ids)
+        self.fail_next_destroy = True
+        self.destroy_attempts: list[str] = []
+
+    async def destroy(self, environment: EnvironmentHandle) -> None:
+        self.destroy_attempts.append(environment.environment_id)
+        if self.fail_next_destroy:
+            self.fail_next_destroy = False
+            raise RuntimeError("synthetic destroy failure")
+        await super().destroy(environment)
 
 
 async def test_execution_environment_lifecycle_stdin_and_output_limit() -> None:
@@ -74,3 +89,41 @@ async def test_execution_environment_rejects_mismatched_handle() -> None:
             ExecutionCommand(("true",), PurePosixPath(""), 1, None, 10),
         )
     await adapter.destroy(handle)
+
+
+async def test_fake_workspace_listdir_matches_filesystem_error_semantics() -> None:
+    adapter = FakeExecutionEnvironment(
+        FixedClock(datetime(2026, 1, 1, tzinfo=UTC)), SequenceIdFactory()
+    )
+    handle = await adapter.provision(
+        EnvironmentSpec(
+            "tenant-a", UUID(int=12), 1, fake_image_digest(), _limits(), EgressPolicy(), {}
+        )
+    )
+    workspace = adapter.workspace(handle)
+    await workspace.write("notes/a.txt", b"a")
+    with pytest.raises(NotADirectoryError):
+        await workspace.listdir("notes/a.txt")
+    with pytest.raises(NotADirectoryError):
+        await workspace.listdir("notes/a.txt/child")
+    with pytest.raises(FileNotFoundError):
+        await workspace.listdir("missing")
+
+
+async def test_sandbox_release_attempts_all_handles_and_retains_failures() -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = _FailingDestroyEnvironment(clock, SequenceIdFactory())
+    manager = SandboxManager(
+        adapter,
+        image_digest=fake_image_digest(),
+        limits=_limits(),
+    )
+    run_id = UUID(int=13)
+    await manager.workspace_for("tenant-a", run_id, 1)
+    await manager.workspace_for("tenant-a", run_id, 2)
+    with pytest.raises(ExceptionGroup):
+        await manager.release_run(run_id)
+    assert len(adapter.destroy_attempts) == 2
+    assert len(adapter.live_environment_ids()) == 1
+    await manager.release_run(run_id)
+    assert adapter.live_environment_ids() == frozenset()

@@ -423,6 +423,14 @@ async def _compose(
     for destination in destinations:
         validate_destination(destination)
     egress = EgressPolicy(mode=EgressMode(str(raw_egress["mode"])), destinations=destinations)
+    raw_artifacts = sandbox_config["artifacts"]
+    artifact_retention_days = int(raw_artifacts["retention_days"])
+    artifact_maximum_bytes = int(raw_artifacts["maximum_bytes"])
+    if storage == "memory" and settings.sandbox.value != "fake":
+        raise ConfigurationError(
+            "in-memory storage requires SANDBOX_MECHANISM=fake; configured "
+            f"SANDBOX_MECHANISM={settings.sandbox.value}"
+        )
     if storage == "memory" or settings.sandbox.value == "fake":
         fake_environment = FakeExecutionEnvironment(clock, ids)
         sandbox_manager = SandboxManager(
@@ -504,8 +512,25 @@ async def _compose(
         )
         context_builder = MinimalContextBuilder(registry, clock, maximum_tools=maximum_tools)
         trajectory_artifact_store = LocalTrajectoryArtifactStore(artifact_root)
-        general_artifact_store = FilesystemArtifactStore(artifact_root)
-        artifact_writers = ArtifactWriterFactory(uow_factory, general_artifact_store, clock, ids)
+        general_artifact_store = FilesystemArtifactStore(
+            artifact_root, maximum_bytes=artifact_maximum_bytes
+        )
+        artifact_writers = ArtifactWriterFactory(
+            uow_factory,
+            general_artifact_store,
+            clock,
+            ids,
+            retention_days=artifact_retention_days,
+            maximum_bytes=artifact_maximum_bytes,
+        )
+
+        async def reconcile_artifact_orphans() -> int:
+            async def metadata_exists(artifact_id: UUID) -> bool:
+                async with uow_factory() as uow:
+                    return await uow.artifacts.exists(artifact_id)
+
+            return await general_artifact_store.reconcile_orphans(metadata_exists, now=clock.now())
+
         pipeline = ToolPipeline(
             registry,
             uow_factory,
@@ -638,7 +663,8 @@ async def _compose(
                     uow_factory=uow_factory,
                     clock=clock,
                     sweep_exports=trajectory_service.sweep_once,
-                    sweep_sandboxes=sandbox_manager.reap,
+                    sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
+                    sweep_artifact_orphans=reconcile_artifact_orphans,
                 ),
                 sandbox=sandbox_manager,
             ),

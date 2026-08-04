@@ -9,10 +9,10 @@ from agent_core.ports.artifacts import ArtifactWriterProvider
 
 class _Provider:
     def __init__(self) -> None:
-        self.bound: tuple[object, ...] | None = None
+        self.bound: dict[str, object] | None = None
 
     def for_run(self, **values: object) -> object:
-        self.bound = tuple(values[key] for key in sorted(values))
+        self.bound = dict(values)
         return object()
 
 
@@ -26,5 +26,10 @@ def test_artifact_writer_provider_binds_run_and_tenant() -> None:
         origin=ArtifactOrigin.SANDBOX_EXPORT,
     )
     assert provider.bound is not None
-    assert "tenant-a" in provider.bound
-    assert UUID(int=81) in provider.bound
+    assert provider.bound == {
+        "tenant_id": "tenant-a",
+        "principal_id": "user-a",
+        "session_id": UUID(int=80),
+        "run_id": UUID(int=81),
+        "origin": ArtifactOrigin.SANDBOX_EXPORT,
+    }

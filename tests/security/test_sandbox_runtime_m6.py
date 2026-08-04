@@ -50,7 +50,9 @@ def _limits(**overrides: int) -> ResourceLimits:
 
 @pytest.fixture
 async def runtime() -> AsyncIterator[tuple[DockerExecutionEnvironment, str]]:
-    adapter = DockerExecutionEnvironment(SystemClock(), RandomIdFactory(), hard_cap_seconds=20)
+    adapter = DockerExecutionEnvironment(
+        SystemClock(), RandomIdFactory(), hard_cap_seconds=20, reaper_grace_seconds=0
+    )
     digest = await resolve_local_image_digest("agent-core-sandbox:dev")
     try:
         yield adapter, digest
@@ -122,6 +124,7 @@ async def test_no_credential_reaches(
         "OPENAI_API_KEY": "synthetic-provider-value-7d951",
         "AGENT_DATABASE_URL": "synthetic-database-value-0be44",
         "AWS_SECRET_ACCESS_KEY": "synthetic-cloud-value-18c12",
+        "PRIVATE_SERVICE_TOKEN": "synthetic-pattern-value-19d42",
     }
     script = r"""
 import json,os,pathlib
@@ -210,7 +213,7 @@ async def test_egress_allowlisted(runtime: tuple[DockerExecutionEnvironment, str
         ),
     )
     script = r"""
-import json,urllib.error,urllib.request
+import json,socket,urllib.error,urllib.request
 out={}
 for name,url in {
  'allowed':'http://example.com:80',
@@ -221,6 +224,9 @@ for name,url in {
 }.items():
   try: out[name]=urllib.request.urlopen(url,timeout=5).status
   except Exception as exc: out[name]=type(exc).__name__
+try:
+  raw=socket.create_connection(('example.com',80),0.5); raw.close(); out['unproxied']=True
+except OSError: out['unproxied']=False
 print(json.dumps(out,sort_keys=True))
 """
     async with _environment(runtime, run_id=102, egress=policy) as (adapter, handle):
@@ -229,6 +235,7 @@ print(json.dumps(out,sort_keys=True))
         logs = await adapter.egress_log(handle)
     outcomes = json.loads(result.stdout)
     assert outcomes["allowed"] == 200
+    assert outcomes["unproxied"] is False
     assert all(outcomes[name] != 200 for name in ("other", "private", "private_name", "port"))
     reasons = {(entry.get("host"), entry.get("port")): entry.get("reason") for entry in logs}
     assert reasons[("example.com", 80)] == "allowed"
@@ -294,9 +301,41 @@ async def test_limits_enforced(runtime: tuple[DockerExecutionEnvironment, str]) 
             ),
             maximum_output=4096,
         )
+        follow_up = await _execute(adapter, handle, "print('restarted')")
+        cancelled = asyncio.create_task(
+            _execute(
+                adapter,
+                handle,
+                (
+                    "import os,pathlib,time; "
+                    "pathlib.Path('cancel.pid').write_text(str(os.getpid())); time.sleep(30)"
+                ),
+                timeout=12,
+            )
+        )
+        workspace = adapter.workspace(handle)
+        for _attempt in range(50):
+            try:
+                cancelled_pid = int((await workspace.read("cancel.pid")).decode())
+                break
+            except FileNotFoundError:
+                await asyncio.sleep(0.05)
+        else:
+            raise AssertionError("cancelled command did not start")
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+        after_cancel = await _execute(
+            adapter,
+            handle,
+            f"import pathlib; print(pathlib.Path('/proc/{cancelled_pid}').exists())",
+        )
     assert result.killed_by is KillReason.OUTPUT_LIMIT
     assert len(result.stdout) + len(result.stderr) <= 4096
     assert result.stdout_truncated or result.stderr_truncated
+    assert follow_up.exit_code == 0
+    assert after_cancel.exit_code == 0
+    assert after_cancel.stdout.strip() == b"False"
 
 
 async def test_escape_denied(runtime: tuple[DockerExecutionEnvironment, str]) -> None:
@@ -413,6 +452,6 @@ async def test_no_orphans(runtime: tuple[DockerExecutionEnvironment, str]) -> No
     )
     adapter._states.pop(orphan.environment_id)
     replacement_process = DockerExecutionEnvironment(
-        SystemClock(), RandomIdFactory(), hard_cap_seconds=20
+        SystemClock(), RandomIdFactory(), hard_cap_seconds=20, reaper_grace_seconds=0
     )
     assert await replacement_process.reap(frozenset()) == 1

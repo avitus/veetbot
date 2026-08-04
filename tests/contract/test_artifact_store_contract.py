@@ -1,6 +1,7 @@
 """Streaming artifact-store integrity contract."""
 
 import hashlib
+import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -70,3 +71,60 @@ async def test_artifact_store_rejects_digest_drift_without_committing(tmp_path: 
     ref = StoredArtifactRef(broken.artifact_id, broken.sha256, broken.size_bytes, broken.media_type)
     with pytest.raises(FileNotFoundError):
         _ = [chunk async for chunk in store.open(ref, tenant_id=broken.tenant_id)]
+
+
+async def _false(_artifact_id: UUID) -> bool:
+    return False
+
+
+async def test_artifact_store_reconciles_only_old_metadata_orphans(tmp_path: Path) -> None:
+    content = b"orphan"
+    store = FilesystemArtifactStore(tmp_path)
+    orphan = await store.put(_chunks(content), _metadata(content))
+    orphan_path = next(tmp_path.rglob(str(orphan.artifact_id)))
+    now = datetime(2026, 1, 2, tzinfo=UTC)
+    old_timestamp = (now - timedelta(hours=2)).timestamp()
+    os.utime(orphan_path, (old_timestamp, old_timestamp))
+
+    assert await store.reconcile_orphans(_false, now=now) == 1
+    assert not orphan_path.exists()
+
+
+async def test_reconciliation_does_not_delete_a_concurrent_replacement(tmp_path: Path) -> None:
+    content = b"orphan"
+    replacement = b"replacement"
+    store = FilesystemArtifactStore(tmp_path)
+    metadata = _metadata(content)
+    orphan = await store.put(_chunks(content), metadata)
+    orphan_path = next(tmp_path.rglob(str(orphan.artifact_id)))
+    now = datetime.now(UTC)
+    old_timestamp = (now - timedelta(hours=2)).timestamp()
+    os.utime(orphan_path, (old_timestamp, old_timestamp))
+    replacement_metadata = ArtifactMetadata(
+        metadata.artifact_id,
+        metadata.tenant_id,
+        metadata.principal_id,
+        metadata.session_id,
+        metadata.run_id,
+        metadata.origin,
+        metadata.filename,
+        metadata.media_type,
+        len(replacement),
+        hashlib.sha256(replacement).hexdigest(),
+        metadata.trust,
+        metadata.created_at,
+        metadata.expires_at,
+    )
+
+    async def replace_during_lookup(_artifact_id: UUID) -> bool:
+        await store.put(_chunks(replacement), replacement_metadata)
+        return False
+
+    assert await store.reconcile_orphans(replace_during_lookup, now=now) == 1
+    ref = StoredArtifactRef(
+        replacement_metadata.artifact_id,
+        replacement_metadata.sha256,
+        replacement_metadata.size_bytes,
+        replacement_metadata.media_type,
+    )
+    assert b"".join([chunk async for chunk in store.open(ref, tenant_id="tenant-a")]) == replacement

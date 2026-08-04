@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -200,6 +201,75 @@ sys.stdout.buffer.write(p.read_bytes())
                 raise WorkspaceReadLimitExceededError("workspace file exceeds read limit") from exc
             raise
 
+    async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
+        if maximum_bytes < 0:
+            raise ValueError("maximum_bytes must not be negative")
+        relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
+        state = self._owner._state(self._handle)
+        validation = r"""
+import pathlib,sys
+p=pathlib.Path('/workspace')/sys.argv[1]
+if not p.exists(): raise SystemExit(44)
+if not p.is_file(): raise SystemExit(45)
+if p.stat().st_size>int(sys.argv[2]): raise SystemExit(46)
+"""
+        try:
+            await _docker(
+                "exec",
+                state.container_id,
+                "python",
+                "-c",
+                validation,
+                relative,
+                str(maximum_bytes),
+            )
+        except _DockerCommandError as exc:
+            if exc.return_code == 44:
+                raise FileNotFoundError(path) from exc
+            if exc.return_code == 45:
+                raise IsADirectoryError(path) from exc
+            if exc.return_code == 46:
+                from agent_core.domain.errors import WorkspaceReadLimitExceededError
+
+                raise WorkspaceReadLimitExceededError("workspace file exceeds read limit") from exc
+            raise
+        script = r"""
+import pathlib,sys
+p=pathlib.Path('/workspace')/sys.argv[1]
+with p.open('rb') as source:
+  while chunk:=source.read(65536): sys.stdout.buffer.write(chunk)
+"""
+        process = await asyncio.create_subprocess_exec(
+            "docker",
+            "exec",
+            state.container_id,
+            "python",
+            "-c",
+            script,
+            relative,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        if process.stdout is None:
+            raise ExecutionUnavailable("container runtime did not provide an output pipe")
+        observed = 0
+        try:
+            while chunk := await process.stdout.read(64 * 1024):
+                observed += len(chunk)
+                if observed > maximum_bytes:
+                    process.kill()
+                    await process.wait()
+                    from agent_core.domain.errors import WorkspaceReadLimitExceededError
+
+                    raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
+                yield chunk
+            if await process.wait() != 0:
+                raise ExecutionUnavailable("container workspace stream failed")
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
     async def write(self, path: str, data: bytes) -> None:
         relative = self.resolve(path).relative_to(_VIRTUAL_ROOT).as_posix()
         script = r"""
@@ -288,11 +358,13 @@ class DockerExecutionEnvironment:
         *,
         runtime: str | None = None,
         hard_cap_seconds: int = 300,
+        reaper_grace_seconds: int = 60,
     ) -> None:
         self._clock = clock
         self._ids = ids
         self._runtime = runtime
         self._hard_cap_seconds = hard_cap_seconds
+        self._reaper_grace_seconds = reaper_grace_seconds
         self._states: dict[str, _DockerState] = {}
         self._lock = asyncio.Lock()
 
@@ -319,6 +391,8 @@ class DockerExecutionEnvironment:
             f"agent.core.lease_epoch={specification.lease_epoch}",
             "--label",
             f"agent.core.expires_at={int(expires_at.timestamp())}",
+            "--label",
+            f"agent.core.created_at={int(now.timestamp())}",
         )
         await _docker("volume", "create", *labels, volume)
         try:
@@ -331,6 +405,8 @@ class DockerExecutionEnvironment:
                 "0:0",
                 "--cap-drop",
                 "ALL",
+                "--cap-add",
+                "CHOWN",
                 "--security-opt",
                 "no-new-privileges",
                 "--mount",
@@ -340,8 +416,8 @@ class DockerExecutionEnvironment:
                 "-c",
                 (
                     "chmod 0777 /workspace && mkdir -p /workspace/.agent && "
-                    "chmod 0777 /workspace/.agent && "
-                    "touch /workspace/.agent-initialized"
+                    "touch /workspace/.agent-initialized && chmod 0700 /workspace/.agent && "
+                    "chown 65534:65534 /workspace/.agent"
                 ),
             )
             arguments = [
@@ -390,7 +466,9 @@ class DockerExecutionEnvironment:
                             "--name",
                             proxy_name,
                             "--network",
-                            "bridge",
+                            network_name,
+                            "--network-alias",
+                            "egress-proxy",
                             "--read-only",
                             "--cap-drop",
                             "ALL",
@@ -404,6 +482,8 @@ class DockerExecutionEnvironment:
                             f"AGENT_TENANT_ID={specification.tenant_id}",
                             "--env",
                             f"AGENT_RUN_ID={specification.run_id}",
+                            "--env",
+                            "AGENT_PROXY_BIND_HOST=egress-proxy",
                             specification.image_digest,
                             "python",
                             "-m",
@@ -416,9 +496,7 @@ class DockerExecutionEnvironment:
                 await _docker(
                     "network",
                     "connect",
-                    "--alias",
-                    "egress-proxy",
-                    network_name,
+                    "bridge",
                     proxy_container,
                 )
                 arguments.extend(("--network", network_name))
@@ -550,6 +628,7 @@ class DockerExecutionEnvironment:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            limit=64 * 1024 + 1,
         )
         pump = asyncio.create_task(self._bridge_pump(relay, handler))
         try:
@@ -670,6 +749,7 @@ class DockerExecutionEnvironment:
         disk_task = asyncio.create_task(self._monitor_workspace_limits(state, disk_monitor_stop))
         timed_out = False
         killed_by: KillReason | None = None
+        cancellation: asyncio.CancelledError | None = None
         try:
             done, _pending = await asyncio.wait(
                 {wait_task, exceeded_task, disk_task},
@@ -683,14 +763,17 @@ class DockerExecutionEnvironment:
             elif wait_task not in done:
                 timed_out = True
                 killed_by = KillReason.TIMEOUT
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
             killed_by = KillReason.CANCELLED
+            cancellation = exc
         if killed_by is not None:
             await _docker("kill", state.container_id)
             with suppress(ProcessLookupError):
                 process.kill()
-        await wait_task
         disk_monitor_stop.set()
+        await wait_task
+        if killed_by is not None:
+            await _docker("start", state.container_id)
         monitored_kill = await disk_task
         if killed_by is None and monitored_kill is not None:
             killed_by = monitored_kill
@@ -698,6 +781,8 @@ class DockerExecutionEnvironment:
         exceeded_task.cancel()
         with suppress(asyncio.CancelledError):
             await exceeded_task
+        if cancellation is not None:
+            raise cancellation
         stdout_truncated = stdout_exceeded.is_set()
         stderr_truncated = stderr_exceeded.is_set()
         exit_code = process.returncode
@@ -715,6 +800,7 @@ class DockerExecutionEnvironment:
             killed_by = KillReason.DISK
             exit_code = None
             await _docker("kill", state.container_id)
+            await _docker("start", state.container_id)
         if (
             killed_by is None
             and process.returncode != 0
@@ -785,19 +871,30 @@ class DockerExecutionEnvironment:
                 '{{.ID}}\t{{.Label "agent.core.environment_id"}}\t'
                 '{{.Label "agent.core.run_id"}}\t{{.Label "agent.core.lease_epoch"}}\t'
                 '{{.Label "agent.core.expires_at"}}'
+                '\t{{.Label "agent.core.created_at"}}'
             ),
         )
         reaped = 0
         now_epoch = int(self._clock.now().timestamp())
         for line in raw.decode("utf-8").splitlines():
             try:
-                container_id, environment_id, raw_run_id, raw_epoch, raw_expiry = line.split("\t")
+                (
+                    container_id,
+                    environment_id,
+                    raw_run_id,
+                    raw_epoch,
+                    raw_expiry,
+                    raw_created,
+                ) = line.split("\t")
                 run_id = UUID(raw_run_id)
                 lease_epoch = int(raw_epoch)
                 expired = int(raw_expiry) <= now_epoch
+                old_enough = int(raw_created) + self._reaper_grace_seconds <= now_epoch
             except (ValueError, TypeError):
                 continue
             if not expired and (run_id, lease_epoch) in live_leases:
+                continue
+            if not expired and not old_enough:
                 continue
             state = self._states.get(environment_id)
             if state is not None:

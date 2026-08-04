@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from pathlib import PurePosixPath
 
@@ -52,6 +53,11 @@ class _FakeWorkspaceHandle:
             raise WorkspaceReadLimitExceededError("workspace file exceeds read limit")
         return data
 
+    async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
+        data = await self.read_bounded(path, maximum_bytes)
+        for offset in range(0, len(data), 64 * 1024):
+            yield data[offset : offset + 64 * 1024]
+
     async def write(self, path: str, data: bytes) -> None:
         relative = self._relative(path)
         self._files[relative] = data
@@ -59,6 +65,10 @@ class _FakeWorkspaceHandle:
 
     async def listdir(self, path: str, *, recursive: bool = False) -> tuple[WorkspaceEntry, ...]:
         base = self._relative(path)
+        if base in self._files or any(parent in self._files for parent in base.parents):
+            raise NotADirectoryError(path)
+        if base.parts and not any(file_path.is_relative_to(base) for file_path in self._files):
+            raise FileNotFoundError(path)
         entries: dict[PurePosixPath, WorkspaceEntry] = {}
         for file_path, data in self._files.items():
             try:

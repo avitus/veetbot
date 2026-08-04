@@ -321,6 +321,46 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "sandbox/limits.yaml":
+        resources = merged["resources"]
+        for name, value in resources.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:resources.{name} must be a positive integer"
+                )
+        artifacts = merged["artifacts"]
+        for name, value in artifacts.items():
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:artifacts.{name} must be a positive integer"
+                )
+        egress = merged["egress"]
+        if egress["mode"] not in {"deny", "allowlist"}:
+            raise ConfigurationError("sandbox/limits.yaml:egress.mode must be deny or allowlist")
+        destinations = egress["destinations"]
+        if not isinstance(destinations, list):
+            raise ConfigurationError("sandbox/limits.yaml:egress.destinations must be a list")
+        from agent_core.execution.egress_core import validate_host_and_ports
+
+        for index, destination in enumerate(destinations):
+            if not isinstance(destination, Mapping):
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:egress.destinations.{index} must be a mapping"
+                )
+            try:
+                host = destination["host"]
+                ports = destination["ports"]
+                if (
+                    not isinstance(host, str)
+                    or not isinstance(ports, list)
+                    or any(not isinstance(port, int) or isinstance(port, bool) for port in ports)
+                ):
+                    raise TypeError
+                validate_host_and_ports(host, frozenset(ports))
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ConfigurationError(
+                    f"sandbox/limits.yaml:egress.destinations.{index} is invalid"
+                ) from exc
     _validate_interpolation(relative, merged, interpolation)
 
 

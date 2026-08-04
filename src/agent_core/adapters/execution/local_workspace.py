@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import os
 import stat
+from collections.abc import AsyncIterator
 from pathlib import Path, PurePosixPath
 from uuid import UUID
 
@@ -62,21 +64,21 @@ class LocalWorkspaceHandle:
         return _VIRTUAL_ROOT.joinpath(*components)
 
     async def read(self, path: str) -> bytes:
-        target = self._host_path(path)
-        return await asyncio.to_thread(target.read_bytes)
+        def _read() -> bytes:
+            descriptor = self._open_regular(path)
+            with os.fdopen(descriptor, "rb") as source:
+                return source.read()
+
+        return await asyncio.to_thread(_read)
 
     async def read_bounded(self, path: str, maximum_bytes: int) -> bytes:
         if maximum_bytes < 0:
             raise ValueError("maximum_bytes must not be negative")
-        target = self._host_path(path)
 
         def _read() -> bytes:
-            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
-            descriptor = os.open(target, flags)
+            descriptor = self._open_regular(path)
             try:
                 metadata = os.fstat(descriptor)
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise IsADirectoryError(str(path))
                 if metadata.st_size > maximum_bytes:
                     raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
                 with os.fdopen(descriptor, "rb", closefd=False) as source:
@@ -88,6 +90,64 @@ class LocalWorkspaceHandle:
             return data
 
         return await asyncio.to_thread(_read)
+
+    async def stream(self, path: str, maximum_bytes: int) -> AsyncIterator[bytes]:
+        if maximum_bytes < 0:
+            raise ValueError("maximum_bytes must not be negative")
+        descriptor = await asyncio.to_thread(self._open_regular, path)
+        source = os.fdopen(descriptor, "rb")
+        size = 0
+        try:
+            metadata = await asyncio.to_thread(os.fstat, source.fileno())
+            if metadata.st_size > maximum_bytes:
+                raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
+            while chunk := await asyncio.to_thread(source.read, 64 * 1024):
+                size += len(chunk)
+                if size > maximum_bytes:
+                    raise WorkspaceReadLimitExceededError("workspace file exceeds the read limit")
+                yield chunk
+        finally:
+            await asyncio.to_thread(source.close)
+
+    def _open_regular(self, path: str | PurePosixPath) -> int:
+        components = self._components(path)
+        if not components:
+            raise IsADirectoryError(str(path))
+        directory_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        file_flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        directory = os.open(self._host_root, directory_flags)
+        try:
+            for component in components[:-1]:
+                next_directory = os.open(component, directory_flags, dir_fd=directory)
+                os.close(directory)
+                directory = next_directory
+            try:
+                descriptor = os.open(components[-1], file_flags, dir_fd=directory)
+            except OSError as exc:
+                if exc.errno == errno.ELOOP:
+                    raise WorkspaceEscape("workspace path resolves through a symlink") from exc
+                raise
+        finally:
+            os.close(directory)
+        try:
+            metadata = os.fstat(descriptor)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        if not stat.S_ISREG(metadata.st_mode):
+            os.close(descriptor)
+            raise IsADirectoryError(str(path))
+        return descriptor
 
     async def write(self, path: str, data: bytes) -> None:
         target = self._host_path(path)

@@ -35,7 +35,9 @@ def _artifact() -> ArtifactRef:
 async def test_artifact_repository_is_idempotent_and_tenant_scoped() -> None:
     repository = InMemoryArtifactRepository()
     artifact = _artifact()
+    assert await repository.exists(artifact.id) is False
     assert await repository.create(artifact) == artifact
+    assert await repository.exists(artifact.id) is True
     assert await repository.create(artifact) == artifact
     assert (
         await repository.get(artifact.id, Principal(tenant_id="tenant-a", principal_id="user-a"))

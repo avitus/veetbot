@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 _MAX_REQUEST_BYTES = 64 * 1024
@@ -24,7 +25,15 @@ async def _run() -> None:
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            while request := await reader.readline():
+            while True:
+                try:
+                    request = await reader.readline()
+                except ValueError:
+                    writer.write(_denied("bridge.request_too_large") + b"\n")
+                    await writer.drain()
+                    return
+                if not request:
+                    return
                 if len(request) > _MAX_REQUEST_BYTES:
                     response = _denied("bridge.request_too_large")
                 else:
@@ -37,19 +46,26 @@ async def _run() -> None:
                     else:
                         payload["token"] = token
                         encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-                        async with response_lock:
-                            sys.stdout.buffer.write(encoded + b"\n")
-                            sys.stdout.buffer.flush()
-                            response = await responses.readline()
-                            if not response:
-                                return
+                        if len(encoded) > _MAX_REQUEST_BYTES:
+                            response = _denied("bridge.request_too_large")
+                        else:
+                            async with response_lock:
+                                sys.stdout.buffer.write(encoded + b"\n")
+                                sys.stdout.buffer.flush()
+                                try:
+                                    response = await responses.readline()
+                                except ValueError:
+                                    response = _denied("bridge.response_too_large")
+                                if not response:
+                                    return
                 writer.write(response.rstrip(b"\n") + b"\n")
                 await writer.drain()
         finally:
             writer.close()
-            await writer.wait_closed()
+            with suppress(ConnectionError):
+                await writer.wait_closed()
 
-    server = await asyncio.start_unix_server(handle, path=socket_path)
+    server = await asyncio.start_unix_server(handle, path=socket_path, limit=_MAX_REQUEST_BYTES + 1)
     os.chmod(socket_path, 0o600)
     async with server:
         await server.serve_forever()

@@ -950,7 +950,7 @@ class InMemoryTrajectoryExportRepository:
             for run_id, row in list(self._rows.items()):
                 if row.tenant_id != tenant_id or row.principal_id != principal_id:
                     continue
-                if row.artifact.expires_at is None or row.artifact.expires_at <= expired_at:
+                if row.artifact.expires_at <= expired_at:
                     continue
                 artifact = row.artifact.model_copy(update={"expires_at": expired_at})
                 self._rows[run_id] = row.model_copy(update={"artifact": artifact})
@@ -963,18 +963,14 @@ class InMemoryTrajectoryExportRepository:
             for row in self._rows.values():
                 if len(expired) >= limit:
                     break
-                if row.artifact.expires_at is not None and row.artifact.expires_at <= now:
+                if row.artifact.expires_at <= now:
                     expired.append(row.artifact.model_copy(deep=True))
         return expired
 
     async def delete_expired(self, artifact_id: UUID, *, now: datetime) -> bool:
         async with self._lock:
             for run_id, row in list(self._rows.items()):
-                if (
-                    row.artifact.id == artifact_id
-                    and row.artifact.expires_at is not None
-                    and row.artifact.expires_at <= now
-                ):
+                if row.artifact.id == artifact_id and row.artifact.expires_at <= now:
                     del self._rows[run_id]
                     return True
         return False
@@ -992,6 +988,10 @@ class InMemoryArtifactRepository:
                 raise ConflictError("artifact id already exists with different metadata")
             self._rows[artifact.id] = artifact.model_copy(deep=True)
             return artifact.model_copy(deep=True)
+
+    async def exists(self, artifact_id: UUID) -> bool:
+        async with self._lock:
+            return artifact_id in self._rows
 
     async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
         async with self._lock:
