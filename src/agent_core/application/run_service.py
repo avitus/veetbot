@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from uuid import UUID
 
@@ -15,7 +15,13 @@ from agent_core.domain.persistence import IdempotencyRecord
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import RunDispatcher
-from agent_core.ports.persistence import CheckpointSeeder, UnitOfWorkFactory
+from agent_core.ports.persistence import (
+    CheckpointSeeder,
+    RepositoryUnitOfWork,
+    UnitOfWorkFactory,
+)
+
+type CancelParkedRun = Callable[[RepositoryUnitOfWork, Run, str], Awaitable[Run]]
 
 
 class _ExistingIdempotentRunError(Exception):
@@ -33,8 +39,9 @@ class RunService:
         principal: Principal,
         clock: Clock,
         ids: IdFactory,
-        cancel_active: Callable[[], None],
+        cancel_active: Callable[[UUID | None], None],
         seed_checkpoint: CheckpointSeeder,
+        cancel_parked_run: CancelParkedRun,
         trajectory_export_enabled: bool = False,
     ) -> None:
         self._uow_factory = uow_factory
@@ -45,6 +52,7 @@ class RunService:
         self._ids = ids
         self._cancel_active = cancel_active
         self._seed_checkpoint = seed_checkpoint
+        self._cancel_parked_run = cancel_parked_run
         self._trajectory_export_enabled = trajectory_export_enabled
 
     async def submit(
@@ -85,6 +93,7 @@ class RunService:
                     id=self._ids.new_id(),
                     session_id=session.id,
                     tenant_id=session.tenant_id,
+                    principal_scopes=set(self._principal.scopes),
                     agent_id=session.agent_id,
                     agent_version=session.agent_version,
                     status=RunStatus.QUEUED,
@@ -159,5 +168,22 @@ class RunService:
             events = await uow.events.list_after(run.session_id, 0, self._principal)
             return [event for event in events if event.run_id == run.id]
 
+    async def cancel(self, run_id: UUID) -> Run:
+        async with self._uow_factory() as uow:
+            run = await uow.runs.get(run_id, self._principal)
+            if run.status in TERMINAL_RUN_STATUSES:
+                return run
+            if run.status in {RunStatus.QUEUED, RunStatus.WAITING_FOR_APPROVAL}:
+                return await self._cancel_parked_run(uow, run, self._principal.principal_id)
+            try:
+                requested = await uow.runs.request_cancellation(run.id, run.status)
+            except ConflictError:
+                refreshed = await uow.runs.get(run_id, self._principal)
+                if refreshed.status in TERMINAL_RUN_STATUSES:
+                    return refreshed
+                raise
+        self._cancel_active(run_id)
+        return requested
+
     def interrupt(self) -> None:
-        self._cancel_active()
+        self._cancel_active(None)

@@ -34,6 +34,18 @@ TOOL_MESSAGES: dict[str, str] = {
         "Not performed. This milestone authorizes only side-effect-free tools."
     ),
     "policy.matrix.unknown_tool": "Not performed. The requested capability is unknown.",
+    "policy.matrix.external_write": "Not performed. Approval is required.",
+    "policy.matrix.workspace_read": "Not performed. The path is outside the workspace.",
+    "policy.unclassifiable_action": "Not performed. The action could not be classified.",
+    "policy.revalidation.changed": "Not performed. The approved action changed.",
+    "policy.revalidation.escalated": "Not performed. Policy changed before execution.",
+    "approval.denied": "Not performed. Approval was required and was denied.",
+    "approval.expired": "Not performed. The approval expired.",
+    "approval.cancelled": "Not performed. The approval was cancelled.",
+    "tool.not_found.no_such_path": "No such path in the workspace.",
+    "tool.invalid_arguments.not_text": "Not a UTF-8 text file. This tool reads text only.",
+    "tool.invalid_arguments.not_a_file": ("That path is a directory. Use workspace.list_files."),
+    "tool.invalid_arguments.not_a_directory": ("That path is a file. Use workspace.read_text."),
 }
 
 

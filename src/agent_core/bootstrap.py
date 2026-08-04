@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from agent_core.adapters.determinism import (
 )
 from agent_core.adapters.dispatch.inline import InlineRunDispatcher
 from agent_core.adapters.dispatch.postgres import PostgresRunDispatcher
+from agent_core.adapters.execution.local_workspace import LocalWorkspaceFactory
 from agent_core.adapters.identity import StaticPrincipalResolver
 from agent_core.adapters.models.anthropic_messages import AnthropicMessagesProvider
 from agent_core.adapters.models.chat_completions import ChatCompletionsProvider
@@ -37,11 +38,14 @@ from agent_core.adapters.persistence.database import (
 )
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
+    InMemoryApprovalRepository,
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
     InMemoryExportConsentRepository,
     InMemoryIdempotencyRepository,
     InMemoryMaintenanceRepository,
+    InMemoryPolicyProfileRepository,
+    InMemoryProcessEventRepository,
     InMemoryRunRepository,
     InMemorySessionHistoryRepository,
     InMemorySessionRepository,
@@ -57,11 +61,14 @@ from agent_core.adapters.persistence.projections import (
 from agent_core.adapters.persistence.queue import PostgresRunQueue
 from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
+    PostgresApprovalRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
     PostgresExportConsentRepository,
     PostgresIdempotencyRepository,
     PostgresMaintenanceRepository,
+    PostgresPolicyProfileRepository,
+    PostgresProcessEventRepository,
     PostgresRunRepository,
     PostgresSessionRepository,
     PostgresToolInvocationRepository,
@@ -75,6 +82,7 @@ from agent_core.adapters.persistence.unit_of_work import (
     UnitOfWorkRepositories,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
+from agent_core.application.approval_service import ApprovalService
 from agent_core.application.run_service import RunService
 from agent_core.application.session_service import SessionService
 from agent_core.application.trajectory_service import (
@@ -92,6 +100,7 @@ from agent_core.config import (
 )
 from agent_core.context.builder import MinimalContextBuilder
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.events import ProcessEvent
 from agent_core.domain.messages import (
     FakeModelScript,
     ResolvedModel,
@@ -99,8 +108,12 @@ from agent_core.domain.messages import (
     ScriptedTurn,
     StopReason,
 )
+from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import CancelReason, RunLimits
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.loader import load_ruleset_documents
+from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.models import ModelProvider
@@ -112,13 +125,18 @@ from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.current_time import CurrentTimeTool
+from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.registry import StaticToolRegistry
+from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
+from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
+from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
 
 
 @dataclass(frozen=True, slots=True)
 class Composition:
     runs: RunService
+    approvals: ApprovalService
     sessions: SessionService
     trajectories: TrajectoryExportService
     executor: RunExecutor
@@ -140,14 +158,19 @@ def _content_addressed_agent_version(agent: AgentSpec) -> str:
 
 class _ActiveToken:
     def __init__(self) -> None:
-        self._token: RunCancellationToken | None = None
+        self._tokens: dict[UUID, RunCancellationToken] = {}
 
-    def set(self, token: RunCancellationToken) -> None:
-        self._token = token
+    def set(self, run_id: UUID, token: RunCancellationToken) -> None:
+        self._tokens[run_id] = token
 
-    def cancel(self) -> None:
-        if self._token is not None:
-            self._token.cancel(CancelReason.REQUESTED)
+    def discard(self, run_id: UUID) -> None:
+        self._tokens.pop(run_id, None)
+
+    def cancel(self, run_id: UUID | None) -> None:
+        tokens = tuple(self._tokens.values()) if run_id is None else (self._tokens.get(run_id),)
+        for token in tokens:
+            if token is not None:
+                token.cancel(CancelReason.REQUESTED)
 
 
 def default_fake_script() -> FakeModelScript:
@@ -176,9 +199,14 @@ def _memory_uow_repositories(
     events: InMemoryEventRepository,
     invocations: InMemoryToolInvocationRepository,
     clock: Clock,
+    approvals: InMemoryApprovalRepository | None = None,
 ) -> UnitOfWorkRepositories:
+    approvals = approvals or InMemoryApprovalRepository(clock)
     return UnitOfWorkRepositories(
         agents=agents,
+        approvals=approvals,
+        policy_profiles=InMemoryPolicyProfileRepository(),
+        process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
         runs=runs,
         events=events,
@@ -213,6 +241,9 @@ def _postgres_repository_factory(
         invocations = PostgresToolInvocationRepository(session, runs)
         return UnitOfWorkRepositories(
             agents=agents,
+            approvals=PostgresApprovalRepository(session, clock),
+            policy_profiles=PostgresPolicyProfileRepository(session),
+            process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
             runs=runs,
             events=events,
@@ -254,15 +285,48 @@ async def _compose(
     maximum_tools: int,
     max_internal_attempts: int,
     identical_call_threshold: int,
+    identical_denial_threshold: int,
+    max_parallel_calls: int,
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
+    workspace_root: Path,
+    ruleset: LoadedRuleset,
 ) -> tuple[Composition, list[ModelProvider]]:
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(CurrentTimeTool(clock))
+    registry.register(WorkspaceReadTextTool())
+    registry.register(WorkspaceWriteTextTool())
+    registry.register(WorkspaceListFilesTool())
+    registry.register(DemoExternalWriteTool())
     async with uow_factory() as uow:
         await uow.agents.put(agent)
+        await uow.policy_profiles.record(
+            PolicyProfileRecord(
+                policy_version=ruleset.policy_version,
+                profile_name=ruleset.profile_name,
+                profile_sha256=ruleset.profile_sha256,
+                hardline_sha256=ruleset.hardline_sha256,
+                rule_count=len(ruleset.rules) + len(ruleset.hardline),
+                loaded_at=clock.now(),
+                loaded_by="composition-root",
+            )
+        )
+        derivation_key = f"policy.profile.loaded:{ruleset.policy_version}"
+        await uow.process_events.append(
+            ProcessEvent(
+                id=uuid5(NAMESPACE_URL, derivation_key),
+                event_type="policy.profile.loaded",
+                actor_type="composition-root",
+                payload={
+                    "policy_version": ruleset.policy_version,
+                    "profile_name": ruleset.profile_name,
+                },
+                derivation_key=derivation_key,
+                created_at=clock.now(),
+            )
+        )
     model_provider = FakeModelProvider(script or default_fake_script(), clock)
     effective_providers = {"fake": model_provider, **model_providers}
     try:
@@ -274,7 +338,17 @@ async def _compose(
             resolved_at=clock.now(),
         )
         context_builder = MinimalContextBuilder(registry, clock, maximum_tools=maximum_tools)
-        pipeline = ToolPipeline(registry, uow_factory, clock, ids)
+        pipeline = ToolPipeline(
+            registry,
+            uow_factory,
+            clock,
+            ids,
+            policy=DeterministicPolicyEngine(ruleset),
+            workspace_factory=LocalWorkspaceFactory(workspace_root),
+            current_principal=principal,
+            max_parallel_calls=max_parallel_calls,
+            approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
+        )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
         principal_resolver = StaticPrincipalResolver(principal)
@@ -293,8 +367,10 @@ async def _compose(
             dispatch_tools=pipeline.dispatch,
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
+            on_token_complete=token_slot.discard,
             max_internal_attempts=max_internal_attempts,
             identical_call_threshold=identical_call_threshold,
+            identical_denial_threshold=identical_denial_threshold,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -321,11 +397,21 @@ async def _compose(
             ids=ids,
             cancel_active=token_slot.cancel,
             seed_checkpoint=checkpoint_seeder,
+            cancel_parked_run=executor.cancel_parked_run,
             trajectory_export_enabled=trajectory_export_enabled,
+        )
+        approval_service = ApprovalService(
+            uow_factory=uow_factory,
+            dispatcher=dispatcher,
+            principal=principal,
+            clock=clock,
+            resume_waiting_run=executor.requeue_after_approval,
+            self_approval_enabled=ruleset.self_approval_enabled,
         )
         return (
             Composition(
                 runs=run_service,
+                approvals=approval_service,
                 sessions=session_service,
                 trajectories=trajectory_service,
                 executor=executor,
@@ -423,7 +509,7 @@ async def build(
         tenant_id="local",
         principal_id="local-user",
         roles={"user"},
-        scopes=set(),
+        scopes=set(PLATFORM_SCOPES),
     )
     validate_runtime_identity(
         effective_settings,
@@ -433,12 +519,33 @@ async def build(
     )
     runtime_config = load_config_document(effective_settings, "runtime/limits.yaml")
     tool_config = load_config_document(effective_settings, "tools/limits.yaml")
+    policy_document = load_config_document(effective_settings, "policy/default.yaml")
+    hardline_document = load_config_document(effective_settings, "policy/hardline.yaml")
+    ruleset = load_ruleset_documents(policy_document, hardline_document)
+    if ruleset.profile_name != policy_profile:
+        if policy_profile == f"eval.{ruleset.profile_name}":
+            ruleset = ruleset.model_copy(
+                update={
+                    "profile_name": policy_profile,
+                    "policy_version": (
+                        f"{policy_profile}@{ruleset.profile_sha256[:12]}"
+                        f"+h{ruleset.hardline_sha256[:8]}"
+                    ),
+                },
+                deep=True,
+            )
+        else:
+            raise ConfigurationError(
+                f"policy profile {policy_profile!r} does not match loaded profile "
+                f"{ruleset.profile_name!r}"
+            )
     context_config = load_config_document(effective_settings, "context/plan.yaml")
     run_defaults = runtime_config["run_defaults"]
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
     worker_config = runtime_config["worker"]
     circuit_breaker = tool_config["circuit_breaker"]
+    parallel = tool_config["parallel"]
     tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
@@ -462,13 +569,20 @@ async def build(
             if model_policy is None
             else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
         ),
-        name="Milestone 3 Agent",
+        name="Milestone 4 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
         model_policy=effective_model_policy,
         enabled_tools=(
             enabled_tools
             if enabled_tools is not None
-            else ["math.calculate", "system.current_time"]
+            else [
+                "math.calculate",
+                "system.current_time",
+                "workspace.read_text",
+                "workspace.write_text",
+                "workspace.list_files",
+                "demo.external_write",
+            ]
         ),
         policy_profile=policy_profile,
         limits=limits
@@ -491,11 +605,13 @@ async def build(
             run_repository = InMemoryRunRepository(session_repository, effective_clock)
             event_repository = InMemoryEventRepository(session_repository, effective_clock)
             invocation_repository = InMemoryToolInvocationRepository(run_repository)
+            approval_repository = InMemoryApprovalRepository(effective_clock)
             uow_factory: UnitOfWorkFactory = cast(
                 UnitOfWorkFactory,
                 MemoryUnitOfWorkFactory(
                     _memory_uow_repositories(
                         agents=agent_repository,
+                        approvals=approval_repository,
                         sessions=session_repository,
                         runs=run_repository,
                         events=event_repository,
@@ -541,9 +657,13 @@ async def build(
             maximum_tools=int(tool_definitions["max_items"]),
             max_internal_attempts=int(model_limits["max_internal_attempts"]),
             identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
+            identical_denial_threshold=int(circuit_breaker["identical_denied_threshold"]),
+            max_parallel_calls=int(parallel["maximum_calls"]),
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
+            workspace_root=effective_settings.artifact_root.parent / "workspaces",
+            ruleset=ruleset,
         )
         yield composition
     finally:

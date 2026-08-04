@@ -1215,7 +1215,7 @@ Rows 10 and 11 are citation errors and are worth listing because they
 propagate. Four documents — `policy-and-approvals.md:137`,
 `0005-deterministic-policy-engine.md:10` and
 `0005-deterministic-policy-engine.md:148`, and
-`docs/status/questions-for-review.md:353` — attribute the
+`docs/status/questions-for-review.md:391` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
 `readiness.md:723` cited `engineering-plan.md:2690` for the

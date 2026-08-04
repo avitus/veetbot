@@ -16,6 +16,7 @@ from agent_core.domain.messages import ContentPart, ToolResultItem
 from agent_core.domain.policies import (
     ExecutionTarget,
     IdempotencyClass,
+    PolicyDecision,
     RiskLevel,
     SideEffectClass,
     TrustLevel,
@@ -145,9 +146,15 @@ class ToolInvocationStatus(StrEnum):
 
 ALLOWED_TOOL_TRANSITIONS: dict[ToolInvocationStatus, frozenset[ToolInvocationStatus]] = {
     ToolInvocationStatus.PROPOSED: frozenset(
-        {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
+        {
+            ToolInvocationStatus.AUTHORIZED,
+            ToolInvocationStatus.WAITING_FOR_APPROVAL,
+            ToolInvocationStatus.DENIED,
+        }
     ),
-    ToolInvocationStatus.AUTHORIZED: frozenset({ToolInvocationStatus.RUNNING}),
+    ToolInvocationStatus.AUTHORIZED: frozenset(
+        {ToolInvocationStatus.RUNNING, ToolInvocationStatus.WAITING_FOR_APPROVAL}
+    ),
     ToolInvocationStatus.WAITING_FOR_APPROVAL: frozenset(
         {ToolInvocationStatus.AUTHORIZED, ToolInvocationStatus.DENIED}
     ),
@@ -177,11 +184,14 @@ class ToolInvocation(BaseModel):
     tool_source: ToolSource = ToolSource.BUILTIN
     server_id: str | None = None
     idempotency_class: IdempotencyClass = IdempotencyClass.READ_ONLY
+    side_effect: SideEffectClass
+    risk: RiskLevel
     attempt_number: int = 1
     status: ToolInvocationStatus
     raw_arguments: str
     normalized_arguments: dict[str, Any] | None = None
     normalized_arguments_hash: str | None = None
+    effective_arguments_hash: str | None = None
     idempotency_key: str
     effect_sent_at: datetime | None = None
     suspended_kind: str | None = None
@@ -192,6 +202,8 @@ class ToolInvocation(BaseModel):
     origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
     parallel_group: UUID | None = None
     outcome: ToolOutcome | None = None
+    policy_decision: PolicyDecision | None = None
+    structured_result: dict[str, Any] | None = None
     result_item: ToolResultItem | None = None
     created_at: datetime
     updated_at: datetime

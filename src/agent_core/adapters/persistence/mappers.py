@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
+    ApprovalRow,
     ArtifactRow,
     EventRow,
     IdempotencyKeyRow,
@@ -17,6 +18,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec
+from agent_core.domain.approvals import ApprovalRequest
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import (
     CostSource,
@@ -27,7 +29,13 @@ from agent_core.domain.messages import (
     ToolResultItem,
 )
 from agent_core.domain.persistence import IdempotencyRecord, ModelCallRecord
-from agent_core.domain.policies import IdempotencyClass, TrustLevel
+from agent_core.domain.policies import (
+    IdempotencyClass,
+    PolicyDecision,
+    RiskLevel,
+    SideEffectClass,
+    TrustLevel,
+)
 from agent_core.domain.runs import Run, RunFailure, RunLimits, RunStatus, RunUsage
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolOutcome, ToolSource
@@ -101,6 +109,7 @@ def run_to_domain(row: RunRow) -> Run:
         session_id=row.session_id,
         parent_run_id=row.parent_run_id,
         tenant_id=row.tenant_id,
+        principal_scopes=set(row.principal_scopes),
         agent_id=row.agent_id,
         agent_version=row.agent_version,
         status=RunStatus(row.status),
@@ -135,6 +144,7 @@ def run_values(run: Run) -> dict[str, Any]:
         "session_id": run.session_id,
         "parent_run_id": run.parent_run_id,
         "tenant_id": run.tenant_id,
+        "principal_scopes": sorted(run.principal_scopes),
         "agent_id": run.agent_id,
         "agent_version": run.agent_version,
         "status": run.status.value,
@@ -212,11 +222,14 @@ def invocation_to_domain(row: ToolInvocationRow) -> ToolInvocation:
         tool_source=ToolSource(row.tool_source),
         server_id=row.server_id,
         idempotency_class=IdempotencyClass(row.idempotency_class),
+        side_effect=SideEffectClass(row.side_effect),
+        risk=RiskLevel(row.risk),
         attempt_number=row.attempt_number,
         status=ToolInvocationStatus(row.status),
         raw_arguments=row.raw_arguments,
         normalized_arguments=None if row.arguments is None else dict(row.arguments),
         normalized_arguments_hash=row.normalized_arguments_hash,
+        effective_arguments_hash=row.effective_arguments_hash,
         idempotency_key=row.idempotency_key,
         effect_sent_at=row.effect_sent_at,
         suspended_kind=row.suspended_kind,
@@ -227,6 +240,12 @@ def invocation_to_domain(row: ToolInvocationRow) -> ToolInvocation:
         origin_trust=TrustLevel(row.origin_trust),
         parallel_group=row.parallel_group,
         outcome=None if row.outcome is None else ToolOutcome.model_validate(row.outcome),
+        policy_decision=(
+            None
+            if row.policy_decision is None
+            else PolicyDecision.model_validate(row.policy_decision)
+        ),
+        structured_result=(None if row.structured_result is None else dict(row.structured_result)),
         result_item=(
             None if row.result_item is None else ToolResultItem.model_validate(row.result_item)
         ),
@@ -247,10 +266,13 @@ def invocation_values(invocation: ToolInvocation) -> dict[str, Any]:
         "tool_source": invocation.tool_source.value,
         "server_id": invocation.server_id,
         "idempotency_class": invocation.idempotency_class.value,
+        "side_effect": invocation.side_effect.value,
+        "risk": invocation.risk.value,
         "attempt_number": invocation.attempt_number,
         "raw_arguments": invocation.raw_arguments,
         "arguments": invocation.normalized_arguments,
         "normalized_arguments_hash": invocation.normalized_arguments_hash,
+        "effective_arguments_hash": invocation.effective_arguments_hash,
         "idempotency_key": invocation.idempotency_key,
         "status": invocation.status.value,
         "effect_sent_at": invocation.effect_sent_at,
@@ -271,8 +293,56 @@ def invocation_values(invocation: ToolInvocation) -> dict[str, Any]:
             if invocation.result_item is None
             else invocation.result_item.model_dump(mode="json")
         ),
+        "structured_result": invocation.structured_result,
+        "policy_decision": (
+            None
+            if invocation.policy_decision is None
+            else invocation.policy_decision.model_dump(mode="json")
+        ),
         "created_at": invocation.created_at,
         "updated_at": invocation.updated_at,
+    }
+
+
+def approval_to_domain(row: ApprovalRow) -> ApprovalRequest:
+    data = dict(row.request)
+    data.update(
+        {
+            "status": row.status,
+            "resolution": (None if row.resolution is None else row.resolution.get("resolution")),
+            "resolution_reason": (None if row.resolution is None else row.resolution.get("reason")),
+            "revalidated_policy_version": row.revalidated_policy_version,
+            "resolved_at": row.resolved_at,
+            "resolved_by": row.resolved_by,
+        }
+    )
+    return ApprovalRequest.model_validate(data)
+
+
+def approval_values(request: ApprovalRequest) -> dict[str, Any]:
+    return {
+        "id": request.id,
+        "tenant_id": request.tenant_id,
+        "principal_id": request.principal_id,
+        "session_id": request.session_id,
+        "run_id": request.run_id,
+        "action_kind": request.action_kind.value,
+        "action_id": request.action_id,
+        "tool_invocation_id": request.tool_invocation_id,
+        "risk": request.risk.value,
+        "policy_version": request.policy_version,
+        "revalidated_policy_version": request.revalidated_policy_version,
+        "status": request.status.value,
+        "request": request.model_dump(mode="json"),
+        "resolution": (
+            None
+            if request.resolution is None
+            else {"resolution": request.resolution.value, "reason": request.resolution_reason}
+        ),
+        "expires_at": request.expires_at,
+        "created_at": request.created_at,
+        "resolved_at": request.resolved_at,
+        "resolved_by": request.resolved_by,
     }
 
 

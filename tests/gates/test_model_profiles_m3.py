@@ -13,7 +13,12 @@ import yaml
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
-from agent_core.model.registry import ProfileValidationError, ProviderRegistry, StaticModelRouter
+from agent_core.model.registry import (
+    PROFILE_VALIDATION_RULES,
+    ProfileValidationError,
+    ProviderRegistry,
+    StaticModelRouter,
+)
 from tests.contract.support import NOW
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -106,7 +111,7 @@ def test_all_shipped_provider_profiles_load_as_one_total_registry() -> None:
 def test_every_invalid_profile_corpus_member_names_the_rule_it_broke(tmp_path: Path) -> None:
     members = yaml.safe_load(CORPUS.read_text(encoding="utf-8"))
     assert isinstance(members, list)
-    assert len(members) == 22
+    assert {str(member["rule"]) for member in members} == PROFILE_VALIDATION_RULES
     for member in members:
         assert isinstance(member, dict)
         case_root = tmp_path / str(member["rule"])

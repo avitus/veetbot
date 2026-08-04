@@ -16,6 +16,7 @@ from agent_core.domain.tools import (
     ToolSource,
     ToolSpec,
 )
+from agent_core.policy.scopes import validate_required_scopes
 from agent_core.ports.tools import Tool
 from agent_core.tools.validation import validate_schema
 
@@ -63,8 +64,17 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
         raise ToolValidationError("external tools may not use builtin-owned domains")
     if spec.source is ToolSource.MCP and domain != "mcp":
         raise ToolValidationError("MCP tools must use the mcp namespace")
+    if spec.source is ToolSource.MCP:
+        if spec.server_id is None or re.fullmatch(r"[a-z][a-z0-9_]*", spec.server_id) is None:
+            raise ToolValidationError("MCP tools require a valid server id")
+        if not spec.name.startswith(f"mcp.{spec.server_id}."):
+            raise ToolValidationError("MCP tool name does not match its server id")
     if spec.source is ToolSource.DEVICE and domain != "device":
         raise ToolValidationError("device tools must use the device namespace")
+    validate_required_scopes(
+        spec.required_scopes,
+        mcp_server_id=spec.server_id if spec.source is ToolSource.MCP else None,
+    )
     validate_schema(spec.input_schema)
     if spec.output_schema is not None:
         validate_schema(spec.output_schema)

@@ -14,4 +14,4 @@ class StaticPrincipalResolver:
     async def for_run(self, run: Run) -> Principal:
         if run.tenant_id != self._principal.tenant_id:
             raise NotFoundError("principal not found for run")
-        return self._principal.model_copy(deep=True)
+        return self._principal.model_copy(update={"scopes": set(run.principal_scopes)}, deep=True)

@@ -3,7 +3,7 @@ from uuid import UUID
 
 import pytest
 
-from agent_core.domain.policies import IdempotencyClass
+from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.tools import (
     ToolInvocation,
     ToolInvocationStatus,
@@ -30,6 +30,8 @@ def _invocation(
         tool_name="demo.recovery",
         tool_version="1.0.0",
         idempotency_class=idempotency,
+        side_effect=SideEffectClass.NONE,
+        risk=RiskLevel.LOW,
         status=status,
         raw_arguments="{}",
         idempotency_key="recovery-key",

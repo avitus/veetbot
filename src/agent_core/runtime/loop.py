@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.errors import ApprovalRequiredError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -22,6 +25,7 @@ from agent_core.domain.messages import (
     ResolvedModel,
     StopReason,
     TextPart,
+    ToolCallItem,
     ToolResultItem,
 )
 from agent_core.domain.persistence import WorkerLease
@@ -36,6 +40,7 @@ from agent_core.domain.runs import (
     RunOutcome,
     Step,
 )
+from agent_core.domain.tools import ToolOutcome, ToolOutcomeStatus
 from agent_core.model.streaming import ModelStreamError, validated_stream
 from agent_core.ports.context import ContextBuilder
 from agent_core.ports.determinism import Clock, IdFactory
@@ -65,6 +70,7 @@ class RunContext:
     dispatch_tools: ToolDispatch
     max_internal_attempts: int = 3
     identical_call_threshold: int = 5
+    identical_denial_threshold: int = 3
 
 
 class CheckpointContext(Protocol):
@@ -167,6 +173,61 @@ def _has_final_text(message: AssistantMessage | None) -> bool:
     return message is not None and any(
         isinstance(part, TextPart) and part.text for part in message.content
     )
+
+
+def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
+    for part in result.content:
+        if not isinstance(part, TextPart):
+            continue
+        try:
+            outcome = ToolOutcome.model_validate_json(part.text)
+        except ValueError:
+            continue
+        if outcome.status is ToolOutcomeStatus.DENIED:
+            return outcome
+    return None
+
+
+async def _record_denials(
+    context: RunContext,
+    step: Step,
+    calls: list[ToolCallItem],
+    results: list[ToolResultItem],
+) -> bool:
+    denied = [
+        (call, outcome)
+        for call, result in zip(calls, results, strict=True)
+        if (outcome := _denied_outcome(result)) is not None
+    ]
+    if not denied:
+        return False
+    async with context.uow_factory() as uow:
+        invocations = await uow.invocations.list_for_run(context.run.id, context.principal)
+    hashes = {
+        invocation.call_id: invocation.normalized_arguments_hash
+        for invocation in invocations
+        if invocation.step_number == step.step_number
+        and invocation.normalized_arguments_hash is not None
+    }
+    counters = context.checkpoint.working_state.setdefault("identical_denials", {})
+    if not isinstance(counters, dict):
+        raise RuntimeError("the identical-denial counter was malformed")
+    tripped = False
+    for call, outcome in denied:
+        arguments_hash = hashes.get(call.call_id)
+        if arguments_hash is None:
+            canonical = json.dumps(
+                call.arguments,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            arguments_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        key = json.dumps([call.name, arguments_hash, outcome.reason_code], separators=(",", ":"))
+        count = int(counters.get(key, 0)) + 1
+        counters[key] = count
+        tripped = tripped or count >= context.identical_denial_threshold
+    return tripped
 
 
 async def _invoke_model(
@@ -426,18 +487,39 @@ async def run_loop(context: RunContext) -> RunOutcome:
         await checkpoint(context, "tool_pending")
         if context.uow_factory.is_open():
             raise RuntimeError("tool I/O cannot begin while a unit of work is open")
-        results = await context.dispatch_tools(
-            run=context.run,
-            checkpoint=context.checkpoint,
-            tool_calls=turn.tool_calls,
-            principal=context.principal,
-            step=step,
-            agent=context.agent,
-            token=context.token,
-            lease=context.lease,
-        )
+        try:
+            results = await context.dispatch_tools(
+                run=context.run,
+                checkpoint=context.checkpoint,
+                tool_calls=turn.tool_calls,
+                principal=context.principal,
+                step=step,
+                agent=context.agent,
+                token=context.token,
+                lease=context.lease,
+            )
+        except ApprovalRequiredError as exc:
+            if exc.approval_id not in context.checkpoint.pending_approval_ids:
+                context.checkpoint.pending_approval_ids.append(exc.approval_id)
+            await checkpoint(context, "suspended")
+            return RunOutcome(
+                kind=OutcomeKind.SUSPENDED,
+                suspension={
+                    "kind": "approval",
+                    "approval_id": str(exc.approval_id),
+                },
+            )
         step.tool_call_count = len(results)
         await context.budgets.record_tool_usage(context.run, len(results), step=step)
         context.checkpoint.conversation.extend(results)
         context.checkpoint.pending_tool_calls = []
+        repeated_denial = await _record_denials(context, step, turn.tool_calls, results)
         await checkpoint(context, "tool_call")
+        if repeated_denial:
+            return _failure(
+                context,
+                FailureReason.REPEATED_DENIAL,
+                "ToolPolicyDenied",
+                "the model repeated an identical denied action too many times",
+                step,
+            )

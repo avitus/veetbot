@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 
 class AgentCoreError(Exception):
     """Base class for typed platform failures."""
@@ -29,6 +31,26 @@ class BudgetExceededError(AgentCoreError):
 
 class ToolValidationError(AgentCoreError):
     """A tool schema or invocation argument failed validation."""
+
+
+class AuthorizationError(AgentCoreError):
+    """The authenticated principal lacks authority for an action."""
+
+
+class ApprovalRequiredError(AgentCoreError):
+    """Normal control flow indicating a durable approval has parked the run."""
+
+    def __init__(self, approval_id: UUID) -> None:
+        super().__init__(f"approval {approval_id} is pending")
+        self.approval_id = approval_id
+
+
+class WorkspaceEscape(ToolValidationError):  # noqa: N818 - normative domain name
+    """A path failed the workspace containment boundary."""
+
+
+class WorkspaceReadLimitExceededError(ToolValidationError):
+    """A bounded workspace read exceeded its declared byte limit."""
 
 
 class ModelScriptExhaustedError(AgentCoreError):

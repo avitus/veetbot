@@ -52,7 +52,7 @@
   kind: case
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**A waiting run holds nothing.** While a run is in either `WAITING_*` state, it holds no lease, no worker slot, and no open transaction, and the lease sweep does not reclaim it."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m4.py::test_waiting_holds_nothing
 - id: gate.runtime.cancel_keeps_effects
   milestone: 5
   kind: case

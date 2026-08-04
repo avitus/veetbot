@@ -1,0 +1,8 @@
+turns:
+  - tool_calls:
+      - name: workspace.read_text
+        arguments: {path: ../outside.txt}
+        call_id: traversal-demo
+    stop_reason: tool_use
+  - text: The path was rejected.
+    stop_reason: end_turn

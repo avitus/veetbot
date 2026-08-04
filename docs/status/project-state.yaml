@@ -3,14 +3,16 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_3_complete
+  status: milestone_4_complete
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 3
+  current_milestone: 4
   authorized_milestones:
     - 0
     - 1
     - 2
     - 3
+    - 4
+    - 5
 
 milestones:
   "0":
@@ -27,7 +29,7 @@ milestones:
     status: complete
   "4":
     title: Policy, approvals, and complete tool lifecycle
-    status: not_started
+    status: complete
   "5":
     title: HTTP API and SSE
     status: not_started
@@ -224,6 +226,44 @@ verification:
         detail: >-
           CircleCI jobs 67, 68, and 69 ran the static, PostgreSQL integration,
           and contract partitions respectively; all three GitHub commit status
+          contexts completed successfully.
+    remaining: []
+  milestone_4:
+    recorded_at: 2026-08-04T03:15:38Z
+    status: complete
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 192 source and test
+          files, 180 static tests, 65 port contracts, 123 citation checks,
+          strict documentation builds, and all 94 hard gates active through
+          Milestone 4 passed.
+      - check: deterministic evaluation corpus
+        outcome: passed
+        detail: >-
+          All 20 active cases passed without network access, including the six
+          approval and workspace cases and the two concurrency-admission cases
+          introduced for Milestone 4.
+      - check: complete non-live suite against clean PostgreSQL 16
+        outcome: passed
+        detail: >-
+          Alembic upgraded an empty database through revision e7c4a91f20b6,
+          alembic check reported no schema drift, and all 309 non-live tests
+          passed with the two credentialed live tests deselected.
+      - check: CodeRabbit implementation review
+        outcome: passed
+        detail: >-
+          Every actionable finding and follow-up finding was fixed and covered
+          by regression tests. The final incremental review of commit ce09048
+          completed without new findings, all review threads are resolved, and
+          CodeRabbit confirmed the cited historical line and the repository's
+          citation-ledger entry were correct.
+      - check: hosted CircleCI for pull request 5 commit ce09048
+        outcome: passed
+        detail: >-
+          CircleCI jobs 85, 86, and 87 ran the contract, PostgreSQL integration,
+          and static partitions respectively; all three GitHub commit status
           contexts completed successfully.
     remaining: []
 
@@ -515,5 +555,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-04T00:19:40Z
+last_updated: 2026-08-04T01:00:00Z
 last_reviewed_commit: c7fd4a2

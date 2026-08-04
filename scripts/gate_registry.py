@@ -53,6 +53,8 @@ class GateEntry:
     statement: str
     check: str
     optional: bool = False
+    corpus: str | None = None
+    minimum_members: int | None = None
 
 
 def _slugify(value: str) -> str:
@@ -93,6 +95,10 @@ def load_registry(root: Path) -> tuple[list[GateEntry], list[str]]:
                     statement=str(raw["statement"]),
                     check=str(raw["check"]),
                     optional=bool(raw.get("optional", False)),
+                    corpus=None if raw.get("corpus") is None else str(raw["corpus"]),
+                    minimum_members=(
+                        None if raw.get("minimum_members") is None else int(raw["minimum_members"])
+                    ),
                 )
             except (TypeError, ValueError) as exc:
                 errors.append(f"{where} has invalid field types: {exc}")
@@ -205,6 +211,13 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
                 errors.append(f"active gate {gate_id} still points at the pending check")
             if entry.optional:
                 errors.append(f"active gate {gate_id} may not be optional")
+            if entry.kind == "corpus":
+                if entry.corpus is None or entry.minimum_members is None:
+                    errors.append(f"active corpus gate {gate_id} lacks corpus metadata")
+                elif entry.minimum_members <= 0:
+                    errors.append(f"active corpus gate {gate_id} has no positive minimum")
+                elif not (root / entry.corpus).is_dir():
+                    errors.append(f"active corpus gate {gate_id} corpus is not a directory")
 
     spec_counts = Counter(entry.spec.split("#", 1)[0].rsplit("/", 1)[-1] for entry in entries)
     for filename, (declared, aliases) in DECLARING_SPECS.items():

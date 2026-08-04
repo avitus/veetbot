@@ -55,6 +55,7 @@ class EvalExpected(StrictModel):
     reason_codes: list[str] = Field(default_factory=list)
     event_order: list[str] = Field(default_factory=list)
     maximum_steps: int | None = Field(default=None, ge=0)
+    pending_approvals: int | None = Field(default=None, ge=0)
 
 
 class EvalCase(StrictModel):
@@ -71,6 +72,8 @@ class EvalCase(StrictModel):
     model_fixture: str
     fixtures: EvalFixtures = Field(default_factory=EvalFixtures)
     expected: EvalExpected
+    approval_resolution: Literal["approve_once", "deny"] | None = None
+    cancel_after_submission: bool = False
 
     @model_validator(mode="after")
     def stable_names(self) -> EvalCase:

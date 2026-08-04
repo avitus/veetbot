@@ -1,0 +1,13 @@
+name: approval_requested
+milestone: 4
+tags: [approval, policy]
+input: {text: "Record a demo external write."}
+model_fixture: approval_then_final
+fixtures:
+  tools: [demo.external_write]
+expected:
+  terminal_status: WAITING_FOR_APPROVAL
+  model_calls: 1
+  tool_started_count: 0
+  pending_approvals: 1
+  event_order: [tool.call.proposed, run.waiting_for_approval, approval.requested]

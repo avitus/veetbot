@@ -1,0 +1,14 @@
+name: workspace_path_traversal
+milestone: 4
+tags: [workspace, security]
+input: {text: "Read a path outside the workspace."}
+model_fixture: traversal_then_final
+fixtures:
+  tools: [workspace.read_text]
+expected:
+  terminal_status: COMPLETED
+  final_text: The path was rejected.
+  model_calls: 2
+  tool_started_count: 0
+  reason_codes: [policy.matrix.workspace_read]
+  event_order: [tool.call.denied, run.completed]

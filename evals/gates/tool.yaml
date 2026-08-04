@@ -29,6 +29,8 @@
   spec: docs/plan/tool-system.md#hard-gates
   statement: "No external text appears in `message` for any failure path, asserted with a fake MCP server that returns a hostile error string."
   check: tests/gates/test_tool_m1.py::test_no_external_text
+  corpus: evals/corpora/external_errors/
+  minimum_members: 1
 - id: gate.tool.crash_recovery
   milestone: 2
   kind: case

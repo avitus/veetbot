@@ -26,3 +26,8 @@ class InlineRunDispatcher:
                 return
             self._dispatched.add(run_id)
         await self._execute(run_id)
+
+    async def resume(self, run_id: UUID) -> None:
+        async with self._lock:
+            self._dispatched.discard(run_id)
+        await self.dispatch(run_id)

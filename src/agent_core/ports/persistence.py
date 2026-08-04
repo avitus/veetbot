@@ -9,13 +9,15 @@ from typing import Protocol, Self
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.dispatch import RunQueue
-from agent_core.ports.events import EventRepository
+from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.repositories import (
     AgentRepository,
+    ApprovalRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
     MaintenanceRepository,
+    PolicyProfileRepository,
     RunRepository,
     SessionHistoryRepository,
     SessionRepository,
@@ -28,6 +30,9 @@ from agent_core.ports.repositories import (
 
 class RepositoryUnitOfWork(Protocol):
     agents: AgentRepository
+    approvals: ApprovalRepository
+    policy_profiles: PolicyProfileRepository
+    process_events: ProcessEventRepository
     sessions: SessionRepository
     runs: RunRepository
     events: EventRepository

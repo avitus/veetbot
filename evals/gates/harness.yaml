@@ -46,7 +46,7 @@
   kind: structural
   spec: docs/plan/evaluation-harness.md#hard-gates
   statement: "Every corpus gate has at least `minimum_members` members."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_harness_m4.py::test_corpus_minimum
 - id: gate.harness.trajectory_source
   milestone: 3
   kind: structural

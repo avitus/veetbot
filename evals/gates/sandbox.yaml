@@ -76,4 +76,4 @@
   kind: property
   spec: docs/plan/sandbox-isolation.md#hard-gates
   statement: "**The workspace boundary holds against generated input.** A property test over `WorkspaceHandle.resolve` with generated paths — separators, dot segments, encodings, NUL bytes, absolute forms, symlink chains, over-long components — asserts the result is under `root` or `WorkspaceEscape` is raised, and never anything else. This is the machinery harness case 19 exercises at the tool level. `gate.sandbox.workspace_containment`, property."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_sandbox_m4.py::test_workspace_containment

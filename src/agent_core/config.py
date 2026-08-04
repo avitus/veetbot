@@ -205,6 +205,9 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:worker.heartbeat_divisor": 2,
         "runtime/limits.yaml:worker.lease_seconds": 1,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
+        "tools/limits.yaml:circuit_breaker.identical_denied_threshold": 1,
+        "tools/limits.yaml:circuit_breaker.uncertain_threshold": 1,
+        "tools/limits.yaml:parallel.maximum_calls": 1,
         "context/plan.yaml:classes.tool_definitions.max_items": 1,
     }
 )

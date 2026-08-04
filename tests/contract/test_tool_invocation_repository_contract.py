@@ -4,6 +4,7 @@ import pytest
 
 from agent_core.adapters.persistence.memory import InMemoryToolInvocationRepository
 from agent_core.domain.errors import ConflictError
+from agent_core.domain.policies import RiskLevel, SideEffectClass
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 
@@ -20,6 +21,8 @@ async def test_tool_invocation_repository_deduplicates_stable_keys() -> None:
         call_id="call-1",
         tool_name="math.calculate",
         tool_version="1.0.0",
+        side_effect=SideEffectClass.NONE,
+        risk=RiskLevel.LOW,
         status=ToolInvocationStatus.PROPOSED,
         raw_arguments='{"expression":"1+1"}',
         idempotency_key="same-key",
