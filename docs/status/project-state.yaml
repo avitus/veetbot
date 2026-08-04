@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_5_review_pending
+  status: milestone_5_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 5
   authorized_milestones:
@@ -36,7 +36,7 @@ milestones:
     status: complete
   "5":
     title: HTTP API and SSE
-    status: review_pending
+    status: complete
   "6":
     title: Isolated execution and artifacts
     status: not_started
@@ -271,8 +271,8 @@ verification:
           contexts completed successfully.
     remaining: []
   milestone_5:
-    recorded_at: 2026-08-04T04:19:25Z
-    status: review_pending
+    recorded_at: 2026-08-04T05:28:19Z
+    status: complete
     evidence:
       - check: make check
         outcome: passed
@@ -300,9 +300,20 @@ verification:
           All 20 active cases passed without network access, including approval,
           workspace, parallel admission, and cancellation cases inherited from
           the earlier milestones.
-    remaining:
-      - Hosted CircleCI must pass on the Milestone 5 pull request.
-      - CodeRabbit findings must be addressed and the final review must be clean.
+      - check: CodeRabbit implementation review
+        outcome: passed
+        detail: >-
+          All ten initial hosted findings and all three incremental follow-ups
+          were fixed or resolved with plan-grounded evidence. The final review
+          of commit 7fef94a completed without new findings and every review
+          thread is resolved.
+      - check: hosted CircleCI for pull request 6 commit 7fef94a
+        outcome: passed
+        detail: >-
+          CircleCI jobs 103, 104, and 105 ran the PostgreSQL integration,
+          static, and contract partitions respectively; all three GitHub commit
+          status contexts completed successfully.
+    remaining: []
 
 documentation:
   canonical_format: markdown
