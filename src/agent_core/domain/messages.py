@@ -39,6 +39,7 @@ class SystemMessage(BaseModel):
     kind: Literal["system"] = "system"
     content: list[ContentPart]
     trust: TrustLevel = TrustLevel.PLATFORM
+    source_event_sequence: int | None = Field(default=None, ge=1)
 
 
 class UserMessage(BaseModel):
@@ -46,6 +47,7 @@ class UserMessage(BaseModel):
     content: list[ContentPart]
     trust: TrustLevel = TrustLevel.USER
     principal_id: str | None = None
+    source_event_sequence: int | None = Field(default=None, ge=1)
 
 
 class AssistantMessage(BaseModel):
@@ -53,6 +55,7 @@ class AssistantMessage(BaseModel):
     content: list[ContentPart]
     item_index: int = 0
     trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
+    source_event_sequence: int | None = Field(default=None, ge=1)
 
 
 class ToolCallItem(BaseModel):
@@ -63,6 +66,7 @@ class ToolCallItem(BaseModel):
     arguments: dict[str, Any]
     raw_arguments: str
     parse_error: str | None = None
+    source_event_sequence: int | None = Field(default=None, ge=1)
 
 
 class ToolResultItem(BaseModel):
@@ -71,6 +75,7 @@ class ToolResultItem(BaseModel):
     content: list[ContentPart]
     is_error: bool = False
     trust: TrustLevel = TrustLevel.INTERNAL_TOOL
+    source_event_sequence: int | None = Field(default=None, ge=1)
 
 
 class ProviderReasoningItem(BaseModel):
@@ -80,6 +85,7 @@ class ProviderReasoningItem(BaseModel):
     provider_payload: dict[str, Any]
     token_count: int | None = None
     trust_level: TrustLevel = TrustLevel.PLATFORM
+    source_event_sequence: int | None = Field(default=None, ge=1)
 
 
 type ConversationItem = (

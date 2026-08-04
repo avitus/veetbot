@@ -9,10 +9,12 @@ from typing import Any
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
+from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
     ConflictError,
+    ContextOverflow,
     RunCancelledError,
     UserInputRequiredError,
     WorkerFencedError,
@@ -40,7 +42,12 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
-from agent_core.ports.context import ContextBuilder
+from agent_core.ports.context import (
+    Compactor,
+    ContextPlanner,
+    PressureAwareContextBuilder,
+    TokenEstimator,
+)
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.models import ModelProvider, ModelRouter
 from agent_core.ports.persistence import (
@@ -51,6 +58,7 @@ from agent_core.ports.persistence import (
 from agent_core.ports.repositories import BudgetLedger, PrincipalResolver
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.loop import (
+    AddOpenQuestion,
     ModelEventCallback,
     RunContext,
     ToolDispatch,
@@ -82,7 +90,10 @@ class RunExecutor:
         principal: Principal,
         principals: PrincipalResolver,
         uow_factory: UnitOfWorkFactory,
-        context_builder: ContextBuilder,
+        context_builder: PressureAwareContextBuilder,
+        context_planner: ContextPlanner,
+        compactor: Compactor,
+        token_estimator: TokenEstimator,
         model_provider: ModelProvider,
         resolved_model: ResolvedModel,
         model_router: ModelRouter | None = None,
@@ -91,6 +102,7 @@ class RunExecutor:
         clock: Clock,
         ids: IdFactory,
         dispatch_tools: ToolDispatch,
+        add_open_question: AddOpenQuestion,
         seed_checkpoint: CheckpointSeeder,
         on_token: TokenCallback | None = None,
         on_token_complete: TokenCompleteCallback | None = None,
@@ -99,11 +111,15 @@ class RunExecutor:
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
+        max_compactions_per_step: int = 2,
     ) -> None:
         self._principal = principal
         self._principals = principals
         self._uow_factory = uow_factory
         self._context_builder = context_builder
+        self._context_planner = context_planner
+        self._compactor = compactor
+        self._token_estimator = token_estimator
         self._model_provider = model_provider
         self._resolved_model = resolved_model
         self._model_router = model_router
@@ -112,6 +128,7 @@ class RunExecutor:
         self._clock = clock
         self._ids = ids
         self._dispatch_tools = dispatch_tools
+        self._add_open_question = add_open_question
         self._seed_checkpoint = seed_checkpoint
         self._on_token = on_token
         self._on_token_complete = on_token_complete
@@ -120,6 +137,7 @@ class RunExecutor:
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
+        self._max_compactions_per_step = max_compactions_per_step
 
     async def requeue_after_approval(self, uow: RepositoryUnitOfWork, run: Run) -> Run:
         """Apply the guarded approval-resume edge in the sole run-state writer."""
@@ -258,10 +276,12 @@ class RunExecutor:
         on_token: TokenCallback | None = None,
     ) -> None:
         token = RunCancellationToken(self._clock, run.deadline_at)
-        async with self._uow_factory() as uow:
-            checkpoint_state = await uow.checkpoints.latest(run.id)
-            if checkpoint_state is None:
-                checkpoint_state = await self._seed_checkpoint(uow, run, None, lease)
+        checkpoint_state = RunCheckpoint(
+            run_id=run.id,
+            version=0,
+            status=run.status,
+            created_at=self._clock.now(),
+        )
         finalization = _FinalizationContext(
             run=run,
             checkpoint=checkpoint_state,
@@ -272,9 +292,25 @@ class RunExecutor:
         )
         context: RunContext | None = None
         try:
+            async with self._uow_factory() as uow:
+                persisted_checkpoint = await uow.checkpoints.latest(run.id)
+            if persisted_checkpoint is not None:
+                checkpoint_state = persisted_checkpoint
+                finalization.checkpoint = persisted_checkpoint
             principal = await self._principals.for_run(run)
+            if persisted_checkpoint is None:
+                async with self._uow_factory() as uow:
+                    checkpoint_state = await self._seed_checkpoint(
+                        uow,
+                        run,
+                        None,
+                        lease,
+                        principal,
+                    )
+                finalization.checkpoint = checkpoint_state
             async with self._uow_factory() as uow:
                 agent = await uow.agents.get_version(run.agent_id, run.agent_version)
+                session = await uow.sessions.get(run.session_id, principal)
             model_provider = self._model_provider
             resolved_model = self._resolved_model
             pin_created = False
@@ -310,6 +346,12 @@ class RunExecutor:
                 if selected is None:
                     raise RuntimeError("the pinned model provider has no registered adapter")
                 model_provider = selected
+            context_plan = await self._context_planner.plan(
+                session,
+                agent,
+                principal,
+                resolved_model,
+            )
             callback = on_token or self._on_token
             if callback is not None:
                 callback(run.id, token)
@@ -319,6 +361,9 @@ class RunExecutor:
                 agent=agent,
                 principal=principal,
                 context_builder=self._context_builder,
+                context_plan=context_plan,
+                compactor=self._compactor,
+                token_estimator=self._token_estimator,
                 model_provider=model_provider,
                 resolved_model=resolved_model,
                 budgets=self._budget_factory(lease),
@@ -328,10 +373,12 @@ class RunExecutor:
                 ids=self._ids,
                 token=token,
                 dispatch_tools=self._dispatch_tools,
+                add_open_question=self._add_open_question,
                 on_model_event=self._on_model_event,
                 max_internal_attempts=self._max_internal_attempts,
                 identical_call_threshold=self._identical_call_threshold,
                 identical_denial_threshold=self._identical_denial_threshold,
+                max_compactions_per_step=self._max_compactions_per_step,
             )
             if pin_created:
                 await checkpoint(context, "provider_pinned")
@@ -349,7 +396,39 @@ class RunExecutor:
                     },
                 )
             except UserInputRequiredError as exc:
+                question = next(
+                    (
+                        str(call.get("arguments", {}).get("question"))
+                        for call in context.checkpoint.pending_tool_calls
+                        if isinstance(call, dict)
+                        and call.get("name") == "conversation.ask_user"
+                        and isinstance(call.get("arguments"), dict)
+                        and isinstance(call["arguments"].get("question"), str)
+                    ),
+                    "The run is waiting for user input.",
+                )
+                raw_state = context.checkpoint.working_state.get("context")
+                state = (
+                    WorkingState() if raw_state is None else WorkingState.model_validate(raw_state)
+                )
+                state = self._add_open_question(state, question)
+                context.checkpoint.working_state["context"] = state.model_dump(mode="json")
+                context.checkpoint.working_state["outstanding_question_text"] = question
                 context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
+                async with context.uow_factory() as uow:
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=context.run.session_id,
+                            run_id=context.run.id,
+                            event_type="context.working_state.updated",
+                            actor_type="runtime",
+                            payload={
+                                "working_state": state.model_dump(mode="json"),
+                                "source": "runtime_question",
+                            },
+                        ),
+                        lease=context.lease,
+                    )
                 await checkpoint(context, "suspended")
                 outcome = RunOutcome(
                     kind=OutcomeKind.SUSPENDED,
@@ -381,6 +460,17 @@ class RunExecutor:
                 kind=OutcomeKind.FAILED,
                 failure=RunFailure(
                     reason=reason,
+                    error_class=type(exc).__name__,
+                    message=str(exc),
+                    step_number=run.step_count or None,
+                    occurred_at=self._clock.now(),
+                ),
+            )
+        except ContextOverflow as exc:
+            outcome = RunOutcome(
+                kind=OutcomeKind.FAILED,
+                failure=RunFailure(
+                    reason=FailureReason.CONTEXT_OVERFLOW,
                     error_class=type(exc).__name__,
                     message=str(exc),
                     step_number=run.step_count or None,

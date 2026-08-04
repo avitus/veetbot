@@ -132,7 +132,11 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
-from agent_core.context.builder import MinimalContextBuilder
+from agent_core.context.builder import BudgetedContextBuilder
+from agent_core.context.compactor import StructuredCompactor
+from agent_core.context.estimator import ConservativeTokenEstimator
+from agent_core.context.planner import EventContextPlanner
+from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.events import ProcessEvent
 from agent_core.domain.execution import (
@@ -173,6 +177,7 @@ from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
 from agent_core.tools.calculator import CalculatorTool
+from agent_core.tools.context_update import UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
@@ -391,7 +396,6 @@ async def _compose(
     trajectory_export_enabled: bool,
     artifact_root: Path,
     trajectory_redactor: TrajectoryRedactor | None,
-    maximum_tools: int,
     max_internal_attempts: int,
     identical_call_threshold: int,
     identical_denial_threshold: int,
@@ -402,6 +406,8 @@ async def _compose(
     worker_poll_interval: float,
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
+    context_config: Mapping[str, object],
+    max_compactions_per_step: int,
 ) -> tuple[Composition, list[ModelProvider]]:
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
@@ -464,6 +470,11 @@ async def _compose(
         )
     else:
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
+    working_config = context_config.get("working_state")
+    if not isinstance(working_config, dict):
+        raise ConfigurationError("context working_state configuration must be a mapping")
+    estimator = ConservativeTokenEstimator()
+    working_state = WorkingStateManager(clock, working_config)
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
@@ -476,6 +487,7 @@ async def _compose(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
     registry.register(ArtifactExportTool())
+    registry.register(UpdateWorkingStateTool(working_state))
     async with uow_factory() as uow:
         await uow.agents.put(agent)
         await uow.policy_profiles.record(
@@ -513,7 +525,28 @@ async def _compose(
             policy_name=agent.model_policy,
             resolved_at=clock.now(),
         )
-        context_builder = MinimalContextBuilder(registry, clock, maximum_tools=maximum_tools)
+        context_planner = EventContextPlanner(
+            uow_factory,
+            registry,
+            estimator,
+            clock,
+            principal,
+            context_config,
+            policy_version=ruleset.policy_version,
+        )
+        context_builder = BudgetedContextBuilder(
+            context_planner,
+            estimator,
+            clock,
+            working_state,
+        )
+        summary_config = context_config.get("summary")
+        if not isinstance(summary_config, dict):
+            raise ConfigurationError("context summary configuration must be a mapping")
+        compactor = StructuredCompactor(
+            estimator,
+            maximum_depth=int(summary_config["max_depth"]),
+        )
         trajectory_artifact_store = LocalTrajectoryArtifactStore(artifact_root)
         general_artifact_store = FilesystemArtifactStore(
             artifact_root, maximum_bytes=artifact_maximum_bytes
@@ -555,6 +588,9 @@ async def _compose(
             principals=principal_resolver,
             uow_factory=uow_factory,
             context_builder=context_builder,
+            context_planner=context_planner,
+            compactor=compactor,
+            token_estimator=estimator,
             model_provider=model_provider,
             resolved_model=resolved_model,
             model_router=model_router,
@@ -563,6 +599,7 @@ async def _compose(
             clock=clock,
             ids=ids,
             dispatch_tools=pipeline.dispatch,
+            add_open_question=working_state.add_question,
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
             on_token_complete=token_slot.discard,
@@ -573,6 +610,7 @@ async def _compose(
             max_internal_attempts=max_internal_attempts,
             identical_call_threshold=identical_call_threshold,
             identical_denial_threshold=identical_denial_threshold,
+            max_compactions_per_step=max_compactions_per_step,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -622,6 +660,7 @@ async def _compose(
                 cancel_active=token_slot.cancel,
                 cancel_parked_run=executor.cancel_parked_run,
                 resume_waiting_run=executor.requeue_after_input,
+                resolve_open_question=working_state.resolve_question,
                 trajectory_export_enabled=trajectory_export_enabled,
                 live_events=live_events,
             ),
@@ -804,7 +843,6 @@ async def build(
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
-    tool_definitions = context_config["classes"]["tool_definitions"]
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
     if clock is not None and fixed_clock_at is not None:
@@ -827,7 +865,7 @@ async def build(
             if model_policy is None
             else f"1.0.0+model.{effective_model_policy.replace('_', '-')}"
         ),
-        name="Milestone 6 Agent",
+        name="Milestone 7 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
         model_policy=effective_model_policy,
         enabled_tools=(
@@ -843,6 +881,7 @@ async def build(
                 "demo.external_write",
                 "sandbox.run_command",
                 "artifact.export",
+                "context.update_working_state",
             ]
         ),
         policy_profile=policy_profile,
@@ -922,7 +961,6 @@ async def build(
             trajectory_export_enabled=effective_settings.trajectory_export_enabled,
             artifact_root=effective_settings.artifact_root,
             trajectory_redactor=trajectory_redactor,
-            maximum_tools=int(tool_definitions["max_items"]),
             max_internal_attempts=int(model_limits["max_internal_attempts"]),
             identical_call_threshold=int(circuit_breaker["identical_call_threshold"]),
             identical_denial_threshold=int(circuit_breaker["identical_denied_threshold"]),
@@ -933,6 +971,8 @@ async def build(
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
             ruleset=ruleset,
             live_events=live_events,
+            context_config=context_config,
+            max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
         )
         yield composition
     finally:

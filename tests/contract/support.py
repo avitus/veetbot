@@ -123,6 +123,7 @@ def tool_context() -> ToolExecutionContext:
         artifacts=object(),
         credentials=object(),
         bridge_dispatch=None,
+        working_state={},
         cancellation=NeverCancelled(),
         mark_effect_sent=no_effect,
     )

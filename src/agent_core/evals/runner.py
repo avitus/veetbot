@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -13,7 +14,7 @@ from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settin
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import EvalExpectationError
-from agent_core.domain.events import EventEnvelope
+from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.runs import Run, RunLimits, RunStatus
 from agent_core.evals.cases import EvalCase, load_cases
 from agent_core.evals.fixtures import resolve_model_fixture
@@ -26,6 +27,7 @@ class EvalResult:
     run: Run
     events: list[EventEnvelope]
     pending_approvals: int = 0
+    runs: tuple[Run, ...] = ()
 
 
 def _settings() -> Settings:
@@ -87,6 +89,22 @@ def assert_expected(result: EvalResult) -> None:
             f"expected {expected.pending_approvals} pending approvals, "
             f"got {result.pending_approvals}"
         )
+    prefix_hashes = {
+        value
+        for event in result.events
+        if event.event_type == "model.request.started"
+        and isinstance((value := event.payload.get("prefix_sha256")), str)
+    }
+    if expected.distinct_prefixes is not None and len(prefix_hashes) != expected.distinct_prefixes:
+        raise EvalExpectationError(
+            f"expected {expected.distinct_prefixes} distinct prefixes, got {len(prefix_hashes)}"
+        )
+    if expected.minimum_compactions is not None:
+        compactions = sum(event.event_type == "context.compacted" for event in result.events)
+        if compactions < expected.minimum_compactions:
+            raise EvalExpectationError(
+                f"expected at least {expected.minimum_compactions} compactions, got {compactions}"
+            )
     event_types = [event.event_type for event in result.events]
     _assert_subsequence(event_types, expected.event_order)
     if expected.tool_started_count is not None:
@@ -127,26 +145,77 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         principal=principal,
         policy_profile=case.policy_profile,
     ) as composition:
-        run_id = await composition.runs.submit(case.input.text)
-        if case.cancel_after_submission:
-            await composition.runs.cancel(run_id)
-        if case.approval_resolution is not None:
-            resolution = ApprovalResolutionType(case.approval_resolution)
-            while pending := await composition.approvals.list_pending(run_id=run_id):
-                await composition.approvals.resolve(pending[0].id, resolution)
-        run = await composition.runs.get(run_id)
-        if run.status not in {
-            RunStatus.WAITING_FOR_APPROVAL,
-            RunStatus.WAITING_FOR_USER,
-        }:
-            run = await composition.runs.wait_terminal(run_id)
-        pending_count = len(await composition.approvals.list_pending(run_id=run_id))
-        events = await composition.runs.events(run_id)
+        session_id = None
+        prompts = [case.input.text]
+        if case.session is not None:
+            session_id = await composition.sessions.create()
+            prompts = [
+                (
+                    f"{case.input.text}\nTurn {turn} of {case.session.turns}.\n"
+                    + (f"history-padding-{turn}:" + "x" * case.session.prompt_padding_bytes)
+                )
+                for turn in range(1, case.session.turns + 1)
+            ]
+        completed_runs: list[Run] = []
+        all_events: list[EventEnvelope] = []
+        pending_count = 0
+        for turn, prompt in enumerate(prompts, start=1):
+            if case.session is not None:
+                if turn == case.session.revoke_scope_turn:
+                    assert case.session.revoke_scope is not None
+                    principal.scopes.discard(case.session.revoke_scope)
+                memory_event = (
+                    "memory.formed"
+                    if turn == case.session.memory_write_turn
+                    else "memory.superseded"
+                    if turn == case.session.memory_correction_turn
+                    else None
+                )
+                if memory_event is not None:
+                    assert session_id is not None
+                    async with composition.uow_factory() as uow:
+                        await uow.events.append(
+                            NewEvent(
+                                session_id=session_id,
+                                run_id=None,
+                                event_type=memory_event,
+                                actor_type="eval",
+                                payload={"turn": turn, "case": case.name},
+                            )
+                        )
+            run_id = await composition.runs.submit(prompt, session_id)
+            if case.cancel_after_submission:
+                await composition.runs.cancel(run_id)
+            if case.approval_resolution is not None:
+                resolution = ApprovalResolutionType(case.approval_resolution)
+                while pending := await composition.approvals.list_pending(run_id=run_id):
+                    await composition.approvals.resolve(pending[0].id, resolution)
+            run = await composition.runs.get(run_id)
+            if run.status not in {
+                RunStatus.WAITING_FOR_APPROVAL,
+                RunStatus.WAITING_FOR_USER,
+            }:
+                run = await composition.runs.wait_terminal(run_id)
+            pending_count += len(await composition.approvals.list_pending(run_id=run_id))
+            events = await composition.runs.events(run_id)
+            completed_runs.append(run)
+            all_events.extend(events)
+            if case.session is not None and case.session.advance_seconds:
+                advance = getattr(composition.clock, "advance", None)
+                if not callable(advance):
+                    raise EvalExpectationError("long-session evaluation requires a fixed clock")
+                advance(timedelta(seconds=case.session.advance_seconds))
+        if case.session is not None:
+            assert session_id is not None
+            async with composition.uow_factory() as uow:
+                all_events = await uow.events.list_after(session_id, 0, principal)
+        run = completed_runs[-1]
     result = EvalResult(
         case=case,
         run=run,
-        events=events,
+        events=all_events,
         pending_approvals=pending_count,
+        runs=tuple(completed_runs),
     )
     assert_expected(result)
     return result

@@ -8,7 +8,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PositiveInt, model_validator
 
 from agent_core.domain.messages import ConversationItem, ProviderPin
 
@@ -111,6 +111,11 @@ class RunCheckpoint(BaseModel):
     pending_approval_ids: list[UUID] = Field(default_factory=list)
     working_state: dict[str, Any] = Field(default_factory=dict)
     compacted_summary: str | None = None
+    summary_source_event_ids: list[PositiveInt] = Field(default_factory=list)
+    summary_elided: list[dict[str, Any]] = Field(default_factory=list)
+    replaced_through_sequence: int = 0
+    summary_depth: int = Field(default=0, ge=0, le=2)
+    compactor_version: str | None = None
     budget_state: dict[str, Any] = Field(default_factory=dict)
     last_event_sequence: int = 0
     provider_continuation: ProviderContinuation | None = None

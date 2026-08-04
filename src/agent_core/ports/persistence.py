@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 from types import TracebackType
 from typing import Protocol, Self
 
+from agent_core.domain.agents import Principal
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.dispatch import RunQueue
@@ -66,6 +67,6 @@ class UnitOfWorkFactory(Protocol):
 
 
 type CheckpointSeeder = Callable[
-    [RepositoryUnitOfWork, Run, int | None, WorkerLease | None],
+    [RepositoryUnitOfWork, Run, int | None, WorkerLease | None, Principal],
     Awaitable[RunCheckpoint],
 ]

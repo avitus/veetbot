@@ -112,6 +112,7 @@ class ToolExecutionContext:
     artifacts: object
     credentials: object
     bridge_dispatch: object | None
+    working_state: dict[str, Any]
     # Kept structural here to preserve the domain-to-ports dependency boundary;
     # runtime construction supplies an object satisfying CancellationToken.
     cancellation: object

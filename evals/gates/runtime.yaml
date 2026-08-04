@@ -64,10 +64,10 @@
   kind: property
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**`build()` is called with a checkpoint that fits.** Every `context.build` span is preceded in its step by a pressure measurement, and no `model.request.started` carries a request over the plan's budget."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m7.py::test_build_fits
 - id: gate.runtime.build_stable
   milestone: 7
   kind: property
   spec: docs/plan/runtime-loop.md#hard-gates
   statement: "**Two builds of one checkpoint are byte-identical.** The step-retry path rebuilds from the same checkpoint and produces the same `prefix_sha256`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_runtime_m7.py::test_build_stable

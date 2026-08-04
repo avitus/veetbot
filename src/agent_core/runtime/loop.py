@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.errors import ApprovalRequiredError, UserInputRequiredError
+from agent_core.domain.context import ContextPlan, WorkingState
+from agent_core.domain.errors import ApprovalRequiredError, ContextOverflow, UserInputRequiredError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -42,7 +43,7 @@ from agent_core.domain.runs import (
 )
 from agent_core.domain.tools import ToolOutcome, ToolOutcomeStatus
 from agent_core.model.streaming import ModelStreamError, validated_stream
-from agent_core.ports.context import ContextBuilder
+from agent_core.ports.context import Compactor, PressureAwareContextBuilder, TokenEstimator
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
 from agent_core.ports.models import ModelProvider
@@ -51,6 +52,7 @@ from agent_core.ports.repositories import BudgetLedger
 
 type ToolDispatch = Callable[..., Awaitable[list[ToolResultItem]]]
 type ModelEventCallback = Callable[[Run, ModelEvent], Awaitable[None]]
+type AddOpenQuestion = Callable[[WorkingState, str], WorkingState]
 
 
 @dataclass(slots=True)
@@ -59,7 +61,10 @@ class RunContext:
     checkpoint: RunCheckpoint
     agent: AgentSpec
     principal: Principal
-    context_builder: ContextBuilder
+    context_builder: PressureAwareContextBuilder
+    context_plan: ContextPlan
+    compactor: Compactor
+    token_estimator: TokenEstimator
     model_provider: ModelProvider
     resolved_model: ResolvedModel
     budgets: BudgetLedger
@@ -69,10 +74,12 @@ class RunContext:
     ids: IdFactory
     token: CancellationToken
     dispatch_tools: ToolDispatch
+    add_open_question: AddOpenQuestion
     on_model_event: ModelEventCallback | None = None
     max_internal_attempts: int = 3
     identical_call_threshold: int = 5
     identical_denial_threshold: int = 3
+    max_compactions_per_step: int = 2
 
 
 class CheckpointContext(Protocol):
@@ -97,6 +104,89 @@ async def _append_event(
             ),
             lease=context.lease,
         )
+
+
+def _record_open_question(
+    checkpoint: RunCheckpoint,
+    question: str,
+    add_open_question: AddOpenQuestion,
+) -> WorkingState:
+    raw = checkpoint.working_state.get("context")
+    state = WorkingState() if raw is None else WorkingState.model_validate(raw)
+    updated = add_open_question(state, question)
+    checkpoint.working_state["context"] = updated.model_dump(mode="json")
+    checkpoint.working_state["outstanding_question_text"] = question
+    return updated
+
+
+async def build_with_pressure(context: RunContext, step: Step) -> ModelRequest:
+    """Measure, compact through a checkpoint write, and only then build."""
+
+    while True:
+        context.checkpoint.budget_state["context_model_id"] = (
+            f"{context.resolved_model.provider}:{context.resolved_model.model}"
+        )
+        context.checkpoint.budget_state["context_seed_event_sequence"] = (
+            context.run.seed_event_sequence
+        )
+        pressure = await context.context_builder.measure(
+            context.run,
+            context.checkpoint,
+            context.agent,
+            context.principal,
+        )
+        if pressure.fits:
+            return await context.context_builder.build(
+                context.run,
+                context.checkpoint,
+                context.agent,
+                context.principal,
+            )
+        await _append_event(
+            context,
+            "context.budget.pressure",
+            {
+                "step_number": step.step_number,
+                "reason": pressure.reason,
+                "total_tokens": pressure.total_tokens,
+                "capacity_tokens": pressure.capacity_tokens,
+                "yield_steps": list(pressure.yield_steps),
+            },
+        )
+        if not pressure.compactable or step.compactions >= context.max_compactions_per_step:
+            await _append_event(
+                context,
+                "context.budget.exceeded",
+                {
+                    "step_number": step.step_number,
+                    "reason": pressure.reason,
+                    "compactions": step.compactions,
+                },
+            )
+            raise ContextOverflow(pressure.reason)
+        updated, result = await context.compactor.compact(
+            context.checkpoint,
+            context.context_plan.budget.model_copy(
+                update={"history_tokens": pressure.history_budget_tokens}
+            ),
+            pressure.reason,
+        )
+        context.checkpoint = updated
+        step.compactions += 1
+        await _append_event(
+            context,
+            "context.compacted",
+            {
+                "step_number": step.step_number,
+                "depth": result.depth,
+                "source_event_ids": list(result.source_event_ids),
+                "replaced_through_sequence": result.replaced_through_sequence,
+                "tokens_before": result.tokens_before,
+                "tokens_after": result.tokens_after,
+                "compactor_version": result.compactor_version,
+            },
+        )
+        await checkpoint(context, "compaction")
 
 
 async def checkpoint(context: CheckpointContext, trigger: str) -> None:
@@ -190,6 +280,24 @@ def _denied_outcome(result: ToolResultItem) -> ToolOutcome | None:
     return None
 
 
+def _reconcile_context_estimate(
+    context: RunContext, request: ModelRequest, usage: ModelUsage
+) -> None:
+    raw_total = request.metadata.get("context_total_tokens")
+    raw_reserve = request.metadata.get("context_reserve_tokens", "0")
+    if raw_total is None or usage.input_tokens <= 0:
+        return
+    try:
+        estimated = max(1, int(raw_total) - int(raw_reserve))
+    except (TypeError, ValueError):
+        return
+    context.token_estimator.reconcile(
+        f"{context.resolved_model.provider}:{context.resolved_model.model}",
+        estimated,
+        usage.input_tokens,
+    )
+
+
 async def _record_denials(
     context: RunContext,
     step: Step,
@@ -252,6 +360,10 @@ async def _invoke_model(
                 "attempt_id": str(attempt.attempt_id),
                 "step_number": step.step_number,
                 "prefix_sha256": request.metadata.get("prefix_sha256"),
+                "context_epoch": request.metadata.get("context_epoch"),
+                "context_total_tokens": request.metadata.get("context_total_tokens"),
+                "context_capacity_tokens": request.metadata.get("context_capacity_tokens"),
+                "context_reserve_tokens": request.metadata.get("context_reserve_tokens"),
             },
         )
         expected_sequence = 0
@@ -314,11 +426,14 @@ async def _invoke_model(
                     "error_class": type(terminal.error).__name__,
                 },
             )
-            await context.budgets.record_model_usage(
-                context.run,
+            failure_usage = (
                 terminal.partial_turn.usage
                 if terminal.partial_turn is not None
-                else ModelUsage(provider=terminal.error.provider, model=terminal.error.model),
+                else ModelUsage(provider=terminal.error.provider, model=terminal.error.model)
+            )
+            await context.budgets.record_model_usage(
+                context.run,
+                failure_usage,
                 step=step,
                 attempt=attempt,
                 request=request,
@@ -333,6 +448,7 @@ async def _invoke_model(
                     "transient" if isinstance(terminal.error, ModelTransientError) else "permanent"
                 ),
             )
+            _reconcile_context_estimate(context, request, failure_usage)
             if (
                 isinstance(terminal.error, ModelTransientError)
                 and not terminal.error.stream_had_output
@@ -383,6 +499,7 @@ async def _invoke_model(
             ),
             stop_reason=terminal.stop_reason,
         )
+        _reconcile_context_estimate(context, request, terminal.turn.usage)
         if not terminal.turn.tool_calls and not _has_final_text(
             select_final_message(terminal.turn)
         ):
@@ -420,9 +537,7 @@ async def run_loop(context: RunContext) -> RunOutcome:
             step_number=context.run.step_count,
             started_at=context.clock.now(),
         )
-        request = await context.context_builder.build(
-            context.run, context.checkpoint, context.agent, context.principal
-        )
+        request = await build_with_pressure(context, step)
         invoked = await _invoke_model(context, step, request)
         if isinstance(invoked, RunOutcome):
             return invoked
@@ -516,7 +631,29 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 },
             )
         except UserInputRequiredError as exc:
+            question = next(
+                (
+                    str(call.arguments.get("question"))
+                    for call in turn.tool_calls
+                    if call.name == "conversation.ask_user"
+                    and isinstance(call.arguments.get("question"), str)
+                ),
+                "The run is waiting for user input.",
+            )
+            updated_state = _record_open_question(
+                context.checkpoint,
+                question,
+                context.add_open_question,
+            )
             context.checkpoint.working_state["outstanding_question_id"] = str(exc.question_id)
+            await _append_event(
+                context,
+                "context.working_state.updated",
+                {
+                    "working_state": updated_state.model_dump(mode="json"),
+                    "source": "runtime_question",
+                },
+            )
             await checkpoint(context, "suspended")
             return RunOutcome(
                 kind=OutcomeKind.SUSPENDED,
