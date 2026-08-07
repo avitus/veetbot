@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-07 — Sandbox approval-resume resilience
+
+- Added a durable regression proving that an approved sandbox call resumes on a
+  different worker composition with a fresh lease-scoped workspace.
+- Normalized execution-service unavailability as a retryable transport outcome
+  instead of an opaque, non-retryable internal tool failure, matching the
+  sandbox isolation contract.
+- Added an ignore rule for the untracked local `.env` deployment file.
+
 ## 2026-08-07 — OpenAI live-run compatibility
 
 - Made `VEETBOT_OPENAI_KEY` the canonical OpenAI credential, with

@@ -27,6 +27,7 @@ from agent_core.domain.execution import (
     FileChange,
     ResourceLimits,
 )
+from agent_core.domain.tools import ToolFailureKind
 from agent_core.execution.egress_core import address_is_public
 from agent_core.execution.environment import build_sandbox_environment
 from agent_core.execution.manager import SandboxManager
@@ -135,6 +136,39 @@ async def test_sandbox_command_uses_the_configured_hard_output_ceiling() -> None
 
     assert result.ok is True
     assert adapter.commands[-1][1].maximum_output_bytes == 3 * 1024
+    await manager.close()
+
+
+async def test_sandbox_command_reports_execution_service_unavailability_as_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = FixedClock(datetime(2026, 1, 1, tzinfo=UTC))
+    adapter = FakeExecutionEnvironment(clock, SequenceIdFactory())
+    limits = ResourceLimits(1000, 64 * 1024 * 1024, 32, 1024 * 1024, 100, 30)
+    manager = SandboxManager(adapter, image_digest=fake_image_digest(), limits=limits)
+
+    async def unavailable(*_args: object, **_kwargs: object) -> ExecutionResult:
+        raise ExecutionUnavailable("container runtime operation failed")
+
+    monkeypatch.setattr(manager, "execute_for", unavailable)
+
+    run_id = UUID(int=95)
+    context = replace(
+        tool_context(),
+        run_id=run_id,
+        workspace=manager.for_run("tenant-a", run_id, 1),
+    )
+
+    result = await SandboxRunCommandTool(manager).execute(
+        {"command": ["python", "-c", "print(5050)"]}, context
+    )
+
+    assert result.ok is False
+    assert result.failure is not None
+    assert result.failure.kind is ToolFailureKind.TRANSPORT
+    assert result.failure.reason_code == "tool.server_unreachable"
+    assert result.failure.retryable is True
+    assert "container runtime operation failed" not in result.failure.detail
     await manager.close()
 
 

@@ -75,6 +75,65 @@ async def test_approval_resumes_after_worker_and_composition_restart() -> None:
     assert invocations[0].structured_result["byte_count"] == 12
 
 
+async def test_sandbox_approval_resumes_on_a_different_worker_composition() -> None:
+    proposed = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="sandbox.run_command",
+                        arguments={"command": ["python", "-c", "print(sum(range(1, 101)))"]},
+                        call_id="durable-sandbox-approval",
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            )
+        ]
+    )
+    async with build(
+        settings=database_settings(), storage="postgres", script=proposed
+    ) as composition:
+        run_id = await composition.runs.submit("run an isolated calculation")
+        first_worker = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=composition.clock,
+            worker_id="sandbox-worker-before-approval",
+        )
+        assert await first_worker.run_once()
+        parked = await composition.runs.get(run_id)
+        assert parked.status is RunStatus.WAITING_FOR_APPROVAL
+
+    resumed_script = FakeModelScript(
+        turns=[ScriptedTurn(text="sandbox complete", stop_reason=StopReason.END_TURN)]
+    )
+    async with build(
+        settings=database_settings(), storage="postgres", script=resumed_script
+    ) as composition:
+        approval = (await composition.approvals.list_pending(run_id=run_id))[0]
+        await composition.approvals.resolve(approval.id, ApprovalResolutionType.APPROVE_ONCE)
+        second_worker = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=composition.clock,
+            worker_id="sandbox-worker-after-approval",
+        )
+        assert await second_worker.run_once()
+        completed = await composition.runs.get(run_id)
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(
+                run_id,
+                Principal(tenant_id="local", principal_id="local-user"),
+            )
+
+    assert completed.status is RunStatus.COMPLETED
+    assert completed.final_message == "sandbox complete"
+    assert len(invocations) == 1
+    assert invocations[0].status is ToolInvocationStatus.SUCCEEDED
+    assert invocations[0].structured_result is not None
+    assert invocations[0].structured_result["exit_code"] == 0
+
+
 async def test_active_run_cancellation_is_persisted_and_observed_by_worker() -> None:
     script = FakeModelScript(
         turns=[

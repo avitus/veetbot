@@ -8,7 +8,7 @@ import secrets
 from pathlib import PurePosixPath
 from typing import Any, cast
 
-from agent_core.domain.errors import ToolValidationError, WorkspaceEscape
+from agent_core.domain.errors import ExecutionUnavailable, ToolValidationError, WorkspaceEscape
 from agent_core.domain.execution import ExecutionCommand
 from agent_core.domain.messages import ContentPart, TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
@@ -160,6 +160,17 @@ class SandboxRunCommandTool:
                 context.lease_epoch,
                 command,
                 bridge=bridge,
+            )
+        except ExecutionUnavailable:
+            return ToolResult(
+                ok=False,
+                content=[],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.TRANSPORT,
+                    reason_code="tool.server_unreachable",
+                    detail="sandbox execution service is unavailable",
+                    retryable=True,
+                ),
             )
         except ToolValidationError as exc:
             return ToolResult(

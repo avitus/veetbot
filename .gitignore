@@ -5,6 +5,7 @@
 # Python
 __pycache__/
 *.py[cod]
+.env
 .venv/
 venv/
 *.egg-info/
