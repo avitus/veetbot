@@ -10,11 +10,10 @@ and governed trajectory export.
 
 ## Current status
 
-Milestones 0, 1, and 2 are complete. PostgreSQL persistence, durable
-checkpoints, fenced run claiming, crash recovery, and separate worker and
-maintenance processes are implemented. Milestone 3 is implemented locally and
-awaits its final review and hosted-CI evidence before completion is recorded;
-no later milestone is authorized.
+Milestones 0 through 9 are complete. The durable runtime, model providers,
+policy and approvals, HTTP API, isolated execution, context engine, skills and
+MCP, and long-term memory and knowledge retrieval are implemented. Milestone 10
+is not authorized and has no complete acceptance criteria.
 
 ## Prerequisites
 
@@ -84,6 +83,7 @@ Additional targets are explicit about their requirements:
 | `make test-contract` | Run shared port contracts against in-memory/fake adapters |
 | `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
 | `make test-live` | Explicitly enable credentialed provider tests |
+| `make production-check` | Validate production config, gVisor, sandbox image, storage, and migration head |
 | `make docs` | Build the MkDocs site and standalone HTML publication |
 | `make docs-check` | Validate citations, registry structure, and strict docs output |
 
@@ -210,3 +210,8 @@ the [current-milestone pointer](docs/plan/current-milestone.md), the
 
 Security boundaries and the controls established so far are documented in
 [docs/security.md](docs/security.md).
+
+Production operators should follow the evidence-based
+[DigitalOcean deployment runbook](docs/deployment.md). It includes the checked-in
+systemd, Caddy, production environment, gVisor, and preflight assets and leaves
+server-specific steps unchecked until they are verified on the target host.

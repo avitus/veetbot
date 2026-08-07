@@ -54,3 +54,4 @@ implementation without one.
 - [ADR-0043 — Milestone 7 context-engine seams (Proposed)](0043-milestone-7-context-engine-seams.md)
 - [ADR-0044 — Milestone 8 skill and MCP seams (Proposed)](0044-milestone-8-skills-and-mcp-seams.md)
 - [ADR-0045 — Milestone 9 memory and knowledge seams (Proposed)](0045-milestone-9-memory-and-knowledge-seams.md)
+- [ADR-0046 — Host-native DigitalOcean production topology (Proposed)](0046-digitalocean-production-topology.md)

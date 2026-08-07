@@ -3,6 +3,7 @@ PYTHON ?= python
 .PHONY: install format lint typecheck test check db-up migrate \
 	test-static test-contract test-fast test-integration test-live \
 	test-sandbox sandbox-image \
+	production-check \
 	docs docs-serve docs-check citations-fix
 
 install:
@@ -44,6 +45,9 @@ test-sandbox: sandbox-image
 test-live:
 	@RUN_LIVE_MODEL_TESTS=1 uv run pytest -m live; \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
+
+production-check:
+	uv run python scripts/check_production_deployment.py
 
 docs:
 	uv run $(PYTHON) scripts/build_docs.py

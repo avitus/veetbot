@@ -2,6 +2,7 @@
 
 import importlib
 import socket
+import subprocess
 import tomllib
 from pathlib import Path
 from uuid import UUID
@@ -12,6 +13,7 @@ from alembic.config import Config
 from typer.testing import CliRunner
 
 import agent_core.cli.main as cli_main
+import scripts.check_production_deployment as production_check
 from agent_core.cli.main import app
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import AssistantMessage, TextPart
@@ -79,12 +81,67 @@ def test_required_make_targets_exist() -> None:
         "test-fast",
         "test-integration",
         "test-live",
+        "production-check",
         "docs",
     ):
         assert f"{target}:" in text
 
     assert "docker inspect --format '{{.State.Health.Status}}'" in text
     assert "docker compose ps --status healthy" not in text
+
+
+def test_production_deployment_assets_preserve_process_boundaries() -> None:
+    deploy = ROOT / "deploy"
+    environment = (deploy / "veetbot.env.example").read_text(encoding="utf-8")
+    assert "DEPLOYMENT_MODE=production" in environment
+    assert "AUTH_MODE=token" in environment
+    assert "SANDBOX_MECHANISM=gvisor" in environment
+    assert "AGENT_ARTIFACT_ROOT=/var/lib/veetbot/artifacts" in environment
+    assert "REQUIRED_RANDOM_TOKEN" in environment
+
+    units = deploy / "systemd"
+    api = (units / "veetbot-api.service").read_text(encoding="utf-8")
+    worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
+    maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
+    assert "agent api" in api
+    assert "SupplementaryGroups=docker" not in api
+    assert "agent worker --role worker" in worker
+    assert "SupplementaryGroups=docker" in worker
+    assert "agent worker --role maintenance" in maintenance
+    assert "SupplementaryGroups=docker" not in maintenance
+    assert all(
+        "EnvironmentFile=/etc/veetbot/veetbot.env" in unit for unit in (api, worker, maintenance)
+    )
+
+    caddy = (deploy / "Caddyfile.example").read_text(encoding="utf-8")
+    assert "reverse_proxy 127.0.0.1:8000" in caddy
+    assert "flush_interval -1" in caddy
+
+
+def test_production_preflight_normalizes_missing_executable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def missing(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        raise FileNotFoundError("missing")
+
+    monkeypatch.setattr(subprocess, "run", missing)
+    result = production_check._run("missing-command")
+    assert result.returncode == 127
+    assert "missing" in result.stderr
+
+
+def test_production_preflight_normalizes_command_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def timeout(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        del args, kwargs
+        raise subprocess.TimeoutExpired(("slow-command",), 1)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    result = production_check._run("slow-command", timeout=1)
+    assert result.returncode == 124
+    assert "timed out" in result.stderr
 
 
 def test_compose_has_one_healthy_postgres_service() -> None:

@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-07 — DigitalOcean production deployment assets
+
+- Added the first production topology decision and operator runbook for a
+  host-native DigitalOcean Droplet deployment.
+- Added protected environment, systemd, Caddy, gVisor, and preflight assets for
+  the API, worker, and maintenance processes.
+- Kept account-, network-, host-, restore-, and smoke-test checklist entries
+  open until the actual production server supplies evidence.
+
 ## 2026-08-07 — Sandbox approval-resume resilience
 
 - Added a durable regression proving that an approved sandbox call resumes on a

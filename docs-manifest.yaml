@@ -8,3 +8,5 @@ sources:
   - docs/plan/current-milestone.md
   - docs/plan/engineering-plan.md
   - docs/changelog.md
+  - docs/deployment.md
+  - docs/adr/0046-digitalocean-production-topology.md

@@ -1,0 +1,25 @@
+[Unit]
+Description=Veetbot durable worker
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=veetbot
+Group=veetbot
+SupplementaryGroups=docker
+WorkingDirectory=/opt/veetbot/current
+EnvironmentFile=/etc/veetbot/veetbot.env
+ExecStart=/opt/veetbot/current/.venv/bin/agent worker --role worker
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/veetbot/artifacts /var/run/docker.sock
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
