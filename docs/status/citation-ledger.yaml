@@ -238,7 +238,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/milestone-map.md:910"
     excerpt: "model-gateway 14 all M3"
     digest: "a98cf9596ce2cd17"
-  - cite: "docs/plan/readiness.md#docs/plan/model-gateway.md:1765"
+  - cite: "docs/plan/readiness.md#docs/plan/model-gateway.md:1778"
     excerpt: "10. `model_calls`, `model_prices`, `UsageRepository`, cost c"
     digest: "c2be30fe851cd120"
   - cite: "docs/plan/readiness.md#docs/plan/policy-and-approvals.md:1008"

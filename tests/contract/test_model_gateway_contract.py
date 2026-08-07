@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -161,6 +163,38 @@ async def test_contract_is_identical_across_fake_recorded_and_three_api_modes() 
     assert all(portable(turn) == portable(turns[0]) for turn in turns[1:])
     assert turns[0].tool_calls[0].call_id == "call-byte-1"
     assert turns[0].stop_reason is StopReason.TOOL_USE
+
+
+async def test_openai_tool_names_are_wire_safe_and_round_trip_to_canonical_names() -> None:
+    requests: list[dict[str, Any]] = []
+
+    async def source(payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        requests.append(payload)
+        wire_name = str(payload["tools"][0]["name"])
+        for event in openai_tool_events(ARGUMENTS):
+            copied = dict(event)
+            item = copied.get("item")
+            if isinstance(item, dict):
+                copied["item"] = {**item, "name": wire_name}
+            yield copied
+
+    provider = OpenAIResponsesProvider(event_source=source)
+    turn = await collect(provider, "openai")
+
+    wire_name = str(requests[0]["tools"][0]["name"])
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,64}", wire_name)
+    assert wire_name != "math.calculate"
+    assert requests[0]["tools"][0]["strict"] is False
+    assert turn.tool_calls[0].name == "math.calculate"
+
+
+def test_openai_responses_omits_unsupported_temperature() -> None:
+    payload = OpenAIResponsesProvider._request_payload(
+        request().model_copy(update={"temperature": 0}),
+        resolved("openai"),
+    )
+
+    assert "temperature" not in payload
 
 
 async def test_malformed_arguments_remain_a_recoverable_tool_turn_on_every_adapter() -> None:

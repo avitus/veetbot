@@ -91,6 +91,14 @@ They do not weaken a security requirement or an acceptance criterion.
     conditionals are rejected at construction. This preserves useful literal
     and character-class rules while preventing operator configuration from
     turning untrusted export text into a regex denial of service.
+13. **OpenAI wire constraints do not rewrite platform tool identity.** The
+    Responses adapter derives deterministic provider-safe aliases for dotted
+    tool names and reverses them on streamed calls. It sends function schemas
+    in non-strict provider mode because platform schemas intentionally contain
+    optional arguments and are validated centrally before execution. It omits
+    the neutral `temperature` field because the configured GPT-5.6 Responses
+    model rejects that sampling parameter. All three choices remain confined
+    to the provider adapter.
 
 ## Consequences
 
@@ -111,6 +119,9 @@ They do not weaken a security requirement or an acceptance criterion.
 - Long-context and other tier-priced models must either declare the lower
   supported window or wait for a versioned tier-pricing schema; a flat estimate
   is never silently extrapolated.
+- Provider wire aliases and schema leniency cannot bypass the registry, policy,
+  or centralized argument validator because canonical names and arguments are
+  restored before the adapter emits a normalized tool call.
 
 ## Review resolutions
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -37,6 +40,44 @@ from agent_core.domain.messages import (
 )
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
+
+_OPENAI_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
+_OPENAI_ERROR_FIELD = re.compile(r"[A-Za-z0-9_.\[\]-]{1,128}")
+logger = logging.getLogger(__name__)
+
+
+def _wire_tool_name(name: str) -> str:
+    if _OPENAI_TOOL_NAME.fullmatch(name):
+        return name
+    stem = re.sub(r"[^A-Za-z0-9_-]", "_", name)[:31]
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:32]
+    return f"{stem}_{digest}"
+
+
+def _tool_name_maps(request: ModelRequest) -> tuple[dict[str, str], dict[str, str]]:
+    canonical_to_wire: dict[str, str] = {}
+    wire_to_canonical: dict[str, str] = {}
+    for tool in request.tools:
+        wire_name = _wire_tool_name(tool.name)
+        existing = wire_to_canonical.get(wire_name)
+        if existing is not None and existing != tool.name:
+            raise ValueError("OpenAI tool-name aliases collided")
+        canonical_to_wire[tool.name] = wire_name
+        wire_to_canonical[wire_name] = tool.name
+    return canonical_to_wire, wire_to_canonical
+
+
+def _status_error_field(error: APIStatusError, field: str) -> str | None:
+    body = error.body
+    if not isinstance(body, dict):
+        return None
+    nested_error = body.get("error", body)
+    if not isinstance(nested_error, dict):
+        return None
+    value = nested_error.get(field)
+    if not isinstance(value, str) or _OPENAI_ERROR_FIELD.fullmatch(value) is None:
+        return None
+    return value
 
 
 class OpenAIResponsesProvider:
@@ -127,13 +168,20 @@ class OpenAIResponsesProvider:
                     and internal_attempt < self._max_internal_attempts
                 ):
                     continue
+                provider_code = _status_error_field(exc, "code") or f"http_{exc.status_code}"
+                logger.warning(
+                    "openai_request_rejected status=%s code=%s parameter=%s",
+                    exc.status_code,
+                    provider_code,
+                    _status_error_field(exc, "param") or "none",
+                )
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
                     model=resolved.model,
                     sequence=emitted_count,
                     category="transient" if transient else "permanent",
-                    provider_code=f"http_{exc.status_code}",
+                    provider_code=provider_code,
                     http_status=exc.status_code,
                     stream_had_output=emitted_count > 0,
                 )
@@ -157,6 +205,18 @@ class OpenAIResponsesProvider:
         resolved: ResolvedModel,
         attempt: ModelAttempt,
     ) -> AsyncIterator[ModelEvent]:
+        try:
+            _, wire_to_canonical = _tool_name_maps(request)
+        except ValueError:
+            yield failed_event(
+                attempt=attempt,
+                provider=self.name,
+                model=resolved.model,
+                sequence=0,
+                category="protocol",
+                detail="OpenAI tool-name aliases collided",
+            )
+            return
         sequence = 0
         accumulator = ModelStreamAccumulator()
         tool_identity: dict[int, tuple[str, str]] = {}
@@ -176,7 +236,8 @@ class OpenAIResponsesProvider:
                 if isinstance(item, dict) and item.get("type") == "function_call":
                     item_index = int(raw.get("output_index", 0))
                     call_id = str(item.get("call_id", ""))
-                    name = str(item.get("name", ""))
+                    provider_name = str(item.get("name", ""))
+                    name = wire_to_canonical.get(provider_name, provider_name)
                     tool_identity[item_index] = (call_id, name)
                     tool_event = ToolCallDeltaEvent(
                         attempt_id=attempt.attempt_id,
@@ -365,6 +426,7 @@ class OpenAIResponsesProvider:
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)
+        canonical_to_wire, _ = _tool_name_maps(request)
         inputs: list[dict[str, Any]] = []
         for item in request.conversation:
             if isinstance(item, (SystemMessage, UserMessage, AssistantMessage)):
@@ -379,7 +441,7 @@ class OpenAIResponsesProvider:
                     {
                         "type": "function_call",
                         "call_id": item.call_id,
-                        "name": item.name,
+                        "name": canonical_to_wire.get(item.name, _wire_tool_name(item.name)),
                         "arguments": item.raw_arguments,
                     }
                 )
@@ -397,10 +459,16 @@ class OpenAIResponsesProvider:
                 provider_payload = dict(item.provider_payload)
                 provider_payload.pop("response_id", None)
                 inputs.append(provider_payload)
+        tool_definitions: list[dict[str, Any]] = []
+        for tool in request.tools:
+            definition = tool_definition(tool)
+            definition["name"] = canonical_to_wire[tool.name]
+            definition["strict"] = False
+            tool_definitions.append(definition)
         payload: dict[str, Any] = {
             "model": resolved.model,
             "input": inputs,
-            "tools": [tool_definition(tool) for tool in request.tools],
+            "tools": tool_definitions,
             "store": False,
             "timeout": request.timeout_seconds,
         }
@@ -408,8 +476,6 @@ class OpenAIResponsesProvider:
             payload["max_output_tokens"] = min(
                 request.maximum_output_tokens, resolved.limits.max_output_tokens
             )
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
         if request.response_schema is not None:
             payload["text"] = {
                 "format": {

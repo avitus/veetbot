@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-07 — OpenAI live-run compatibility
+
+- Made `VEETBOT_OPENAI_KEY` the canonical OpenAI credential, with
+  `OPENAI_API_KEY` retained as a compatibility fallback.
+- Added deterministic OpenAI-safe wire aliases for canonical dotted tool names
+  and restored canonical names before normalized tool calls leave the adapter.
+- Disabled OpenAI provider-strict function schemas while retaining centralized
+  JSON Schema validation, and omitted the unsupported `temperature` parameter
+  from Responses requests.
+- Verified the exact documented `agent run --model-policy balanced` command
+  against the live GPT-5.6 Sol Responses API through the durable worker.
+
 ## 2026-08-04 — Milestone 9 long-term memory and knowledge retrieval completed
 
 - Merged the reviewed Milestone 8 pull request after all hosted CircleCI lanes
