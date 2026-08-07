@@ -57,10 +57,13 @@ def router() -> StaticModelRouter:
 @pytest.mark.parametrize("vendor", ["openai", "anthropic"])
 async def test_vendor_one_call_smoke(vendor: str) -> None:
     live_enabled()
-    environment_name = "OPENAI_API_KEY" if vendor == "openai" else "ANTHROPIC_API_KEY"
+    environment_name = "VEETBOT_OPENAI_KEY" if vendor == "openai" else "ANTHROPIC_API_KEY"
     api_key = os.environ.get(environment_name)
+    if vendor == "openai" and not api_key:
+        api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        pytest.skip(f"{environment_name} is absent")
+        fallback = " or OPENAI_API_KEY" if vendor == "openai" else ""
+        pytest.skip(f"{environment_name}{fallback} is absent")
     policy = "balanced" if vendor == "openai" else "flagship"
     resolved = await router().resolve(policy, tenant_id="live")
     provider = (

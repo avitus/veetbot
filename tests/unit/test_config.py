@@ -184,12 +184,37 @@ def test_credentials_are_profile_keyed_and_repr_safe() -> None:
     settings = load_settings(
         {
             **base_environment(),
-            "OPENAI_API_KEY": "synthetic-openai-credential",
+            "VEETBOT_OPENAI_KEY": "synthetic-openai-credential",
             "ANTHROPIC_API_KEY": "synthetic-anthropic-credential",
         }
     )
     assert set(settings.credentials) == {"openai", "anthropic"}
     assert "synthetic-openai-credential" not in repr(settings)
+
+
+def test_veetbot_openai_credential_precedes_compatibility_fallback() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "VEETBOT_OPENAI_KEY": "synthetic-canonical-credential",
+            "OPENAI_API_KEY": "synthetic-compatibility-credential",
+        }
+    )
+
+    assert settings.credentials["openai"].get_secret_value() == ("synthetic-canonical-credential")
+
+
+def test_openai_compatibility_credential_remains_supported() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "OPENAI_API_KEY": "synthetic-compatibility-credential",
+        }
+    )
+
+    assert settings.credentials["openai"].get_secret_value() == (
+        "synthetic-compatibility-credential"
+    )
 
 
 def test_production_refuses_evaluation_identity() -> None:

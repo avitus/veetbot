@@ -165,6 +165,7 @@ def test_provider_sdks_are_isolated_to_their_own_adapter_modules() -> None:
 def test_live_provider_smokes_execute_as_clean_credential_skips() -> None:
     environment = os.environ.copy()
     environment["RUN_LIVE_MODEL_TESTS"] = "1"
+    environment.pop("VEETBOT_OPENAI_KEY", None)
     environment.pop("OPENAI_API_KEY", None)
     environment.pop("ANTHROPIC_API_KEY", None)
     result = subprocess.run(

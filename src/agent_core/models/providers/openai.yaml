@@ -3,7 +3,7 @@ profile: openai
 adapter: openai
 api: responses
 base_url: https://api.openai.com/v1
-credential_ref: OPENAI_API_KEY
+credential_ref: VEETBOT_OPENAI_KEY
 enabled: true
 capabilities:
   native_tool_calling: true

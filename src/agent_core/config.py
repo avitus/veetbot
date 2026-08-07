@@ -495,8 +495,11 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     credentials = {
         name.removesuffix("_API_KEY").lower(): SecretStr(value)
         for name, value in values.items()
-        if name.endswith("_API_KEY") and value.strip()
+        if name.endswith("_API_KEY") and name != "VEETBOT_OPENAI_KEY" and value.strip()
     }
+    veetbot_openai_key = values.get("VEETBOT_OPENAI_KEY", "").strip()
+    if veetbot_openai_key:
+        credentials["openai"] = SecretStr(veetbot_openai_key)
     interpolation = {"OPENAI_MODEL": values.get("OPENAI_MODEL", "")}
     raw_export_enabled = values.get("AGENT_TRAJECTORY_EXPORT_ENABLED", "0").strip()
     if raw_export_enabled not in {"0", "1"}:

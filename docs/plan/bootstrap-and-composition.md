@@ -456,7 +456,7 @@ AUTH_MODE=dev
 AUTH_TOKEN=
 
 # One per enabled provider profile. Never a real value in this file.
-OPENAI_API_KEY=
+VEETBOT_OPENAI_KEY=
 ANTHROPIC_API_KEY=
 
 # Interpolated into models/policies.yaml as ${OPENAI_MODEL}.
@@ -473,14 +473,16 @@ AGENT_CONFIG_DIR=
 RUN_LIVE_MODEL_TESTS=
 ```
 
-Ten names for eight fields, which is not a discrepancy. `OPENAI_API_KEY` and
-`ANTHROPIC_API_KEY` both populate the `credentials` mapping, which is keyed by
-provider profile name and so grows a name per profile without growing a field.
-`OPENAI_MODEL` populates `interpolation`. `RUN_LIVE_MODEL_TESTS` populates no
-`Settings` field at all: it is read by the test harness to enable the
-live-provider job, and it is listed here because the definition-of-done rule is
-that no configuration is undocumented, not that every name is a field. The
-remaining six names map one-to-one onto the six scalar fields.
+Ten canonical names for eight fields, which is not a discrepancy.
+`VEETBOT_OPENAI_KEY` and `ANTHROPIC_API_KEY` both populate the `credentials`
+mapping, which is keyed by provider profile name and so grows a name per
+profile without growing a field. `OPENAI_API_KEY` remains an accepted
+compatibility alias for the OpenAI profile; `VEETBOT_OPENAI_KEY` wins when both
+are present. `OPENAI_MODEL` populates `interpolation`. `RUN_LIVE_MODEL_TESTS`
+populates no `Settings` field at all: it is read by the test harness to enable
+the live-provider job, and it is listed here because the definition-of-done
+rule is that no configuration is undocumented, not that every name is a field.
+The remaining six names map one-to-one onto the six scalar fields.
 
 `DATABASE_URL` does not appear anywhere in the plan. The plan names PostgreSQL
 as the source of truth in Section 2, gives the schema in Section 14, and

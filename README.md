@@ -152,11 +152,12 @@ Production validation refuses development authentication and the `docker` or
 secret values and structured-log processors redact sensitive keys, provider-key
 prefixes, prompts, messages, reasoning, tool results, and large content.
 
-Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` only for the remote profiles you
-intend to use. Governed trajectory export is disabled by default. To opt a local
-deployment in, set `AGENT_TRAJECTORY_EXPORT_ENABLED=1` and choose an
-`AGENT_ARTIFACT_ROOT` outside the source tree. A principal grant is still
-required and is prospective:
+Set `VEETBOT_OPENAI_KEY` or `ANTHROPIC_API_KEY` only for the remote profiles you
+intend to use. `OPENAI_API_KEY` remains a compatibility fallback, but the
+Veetbot-specific name wins when both are present. Governed trajectory export is
+disabled by default. To opt a local deployment in, set
+`AGENT_TRAJECTORY_EXPORT_ENABLED=1` and choose an `AGENT_ARTIFACT_ROOT` outside
+the source tree. A principal grant is still required and is prospective:
 
 ```bash
 uv run agent session export-consent grant
