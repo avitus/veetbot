@@ -923,7 +923,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1047-1084` is
+family of the secret scanner at `bootstrap-and-composition.md:1073-1110` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1650,6 +1650,19 @@ in-band `<think>` scrubber, ADR-0012's XML `<tool_call>` parser for models
 without native tool calling, and no cache control. It exists because it makes
 a local Ollama endpoint a first-class test target, which is the no-cost live
 test path Milestone 3 asks for.
+
+The OpenAI Responses adapter owns three wire-only compatibility translations.
+Canonical tool names retain the platform's dotted namespace everywhere inside
+the system, but the adapter replaces a name that violates OpenAI's function-name
+grammar with a deterministic, collision-checked alias containing a readable
+stem and a SHA-256 suffix; returned calls are mapped back before leaving the
+adapter. Function schemas are sent with provider strict mode disabled because
+the platform permits optional arguments and applies its own JSON Schema
+validation before policy or execution. The adapter also omits `temperature`:
+the neutral request keeps the field for providers that accept it, while the
+configured OpenAI reasoning model rejects it. These translations change no
+tool identity, authorization, argument-validation, or replay semantics outside
+the provider boundary.
 
 ### The fake and the recorded adapters
 

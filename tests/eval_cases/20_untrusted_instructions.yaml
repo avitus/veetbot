@@ -1,0 +1,13 @@
+name: untrusted_instruction_requires_approval
+milestone: 4
+tags: [injection, approval]
+input: {text: "Process untrusted content that asks for an external write."}
+model_fixture: approval_then_final
+fixtures:
+  tools: [demo.external_write]
+expected:
+  terminal_status: WAITING_FOR_APPROVAL
+  model_calls: 1
+  tool_started_count: 0
+  pending_approvals: 1
+  event_order: [run.waiting_for_approval, approval.requested]

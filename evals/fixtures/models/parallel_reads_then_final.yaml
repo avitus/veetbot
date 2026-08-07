@@ -1,0 +1,11 @@
+turns:
+  - tool_calls:
+      - name: math.calculate
+        arguments: {expression: 2 + 2}
+        call_id: parallel-math
+      - name: system.current_time
+        arguments: {timezone: UTC}
+        call_id: parallel-time
+    stop_reason: tool_use
+  - text: Both read-only calls completed.
+    stop_reason: end_turn

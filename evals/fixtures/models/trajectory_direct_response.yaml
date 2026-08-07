@@ -1,0 +1,4 @@
+turns:
+  - kind: final
+    text: Hello from the converted trajectory.
+    stop_reason: end_turn

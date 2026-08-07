@@ -1,0 +1,12 @@
+name: unknown_tool_name
+milestone: 1
+tags: [tools, validation]
+input: {text: Call a tool that is not registered.}
+model_fixture: unknown_tool_then_answer
+fixtures:
+  tools: [math.calculate]
+expected:
+  terminal_status: COMPLETED
+  tool_started_count: 0
+  reason_codes: [policy.matrix.unknown_tool]
+  event_order: [run.queued, model.request.started, run.completed]

@@ -1,0 +1,14 @@
+name: step_limit_exceeded
+milestone: 1
+tags: [runtime, budget]
+input: {text: Keep using tools until the run limit stops execution.}
+model_fixture: step_limit_loop
+fixtures:
+  run_limits: {max_steps: 2, max_model_calls: 8, max_tool_calls: 8}
+expected:
+  terminal_status: FAILED
+  failure_reason: max_steps_exceeded
+  model_calls: 2
+  tool_started_count: 2
+  maximum_steps: 2
+  event_order: [tool.call.completed, tool.call.completed, run.failed]

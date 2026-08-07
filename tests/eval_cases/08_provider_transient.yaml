@@ -1,0 +1,11 @@
+name: provider_transient_failure
+milestone: 1
+tags: [runtime, provider, retry]
+input: {text: Recover from a transient provider failure.}
+model_fixture: transient_then_success
+expected:
+  terminal_status: COMPLETED
+  final_text: Recovered.
+  model_calls: 2
+  tool_started_count: 0
+  event_order: [model.request.started, model.request.started, run.completed]

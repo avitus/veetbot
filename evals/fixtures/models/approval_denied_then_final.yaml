@@ -1,0 +1,8 @@
+turns:
+  - tool_calls:
+      - name: demo.external_write
+        arguments: {destination: demo, content: hello}
+        call_id: approval-demo
+    stop_reason: tool_use
+  - text: The write was denied and was not performed.
+    stop_reason: end_turn

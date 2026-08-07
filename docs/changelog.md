@@ -4,6 +4,208 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-07 — Sandbox approval-resume resilience
+
+- Added a durable regression proving that an approved sandbox call resumes on a
+  different worker composition with a fresh lease-scoped workspace.
+- Normalized execution-service unavailability as a retryable transport outcome
+  instead of an opaque, non-retryable internal tool failure, matching the
+  sandbox isolation contract.
+- Added an ignore rule for the untracked local `.env` deployment file.
+
+## 2026-08-07 — OpenAI live-run compatibility
+
+- Made `VEETBOT_OPENAI_KEY` the canonical OpenAI credential, with
+  `OPENAI_API_KEY` retained as a compatibility fallback.
+- Added deterministic OpenAI-safe wire aliases for canonical dotted tool names
+  and restored canonical names before normalized tool calls leave the adapter.
+- Disabled OpenAI provider-strict function schemas while retaining centralized
+  JSON Schema validation, and omitted the unsupported `temperature` parameter
+  from Responses requests.
+- Verified the exact documented `agent run --model-policy balanced` command
+  against the live GPT-5.6 Sol Responses API through the durable worker.
+
+## 2026-08-04 — Milestone 9 long-term memory and knowledge retrieval completed
+
+- Merged the reviewed Milestone 8 pull request after all hosted CircleCI lanes
+  passed and every CodeRabbit thread was resolved.
+- Authorized implementation of long-term memory formation and retrieval,
+  user-managed beliefs, and knowledge-document ingestion and passage retrieval.
+  The 26 Milestone 9 gates bring the cumulative active gate count to 166.
+- Added provenance-bound explicit formation and deterministic consolidation,
+  correction tombstones, reinforcement and supersession, human CLI management,
+  expiry maintenance, hybrid structured/full-text recall, reciprocal-rank
+  fusion, frozen session snapshots, in-turn recall, episodic search, and
+  sensitivity-filtered faithful traces.
+- Added retained knowledge-source artifacts, normalized deterministic chunking,
+  versioned document ingestion, principal/project/tenant visibility, bounded
+  verbatim passage search with citations, and deletion that cascades through
+  chunks, bytes, and historical trace visibility.
+- Added the five memory and knowledge builtins to the centralized policy and
+  approval pipeline. Model-context provenance is checkpointed so snapshot and
+  in-turn memory cannot silently authorize a subsequent persistent write.
+- Added the Milestone 9 PostgreSQL migration and repository adapters, twelve new
+  port-contract suites, four adversarial/retrieval corpora, and deterministic
+  `carry: [memory]` evaluation with fresh source provenance in its isolated
+  second arm.
+- Proposed ADR-0045 for the reversible implementation seams. Passed all 526
+  non-live tests across the static, contract, PostgreSQL, resilience, and real
+  Docker partitions, all 166 cumulative gates, the strict documentation build,
+  and the clean Alembic metadata check.
+- Addressed all hosted CodeRabbit findings, including atomic session-close
+  consolidation, and resolved every review thread. The final incremental review
+  completed without a new finding. All four CircleCI lanes and GitGuardian
+  passed on pull request 10 commit `e5c2140`.
+
+## 2026-08-04 — Milestone 8 skills and MCP integration completed
+
+- Added validated immutable skill packages, content-addressed deterministic
+  archives, positive revision pinning, a capped metadata-only session catalog,
+  and selective body loading with checkpoint and process-reconstruction support.
+- Added official-SDK stdio and HTTP MCP adapters behind repository-owned ports,
+  normalized discovery, bounded authentication recovery, dynamic tool and prompt
+  registration, and ordinary centralized-pipeline execution.
+- Added a managed audited worker egress proxy for HTTP MCP and exact constructed
+  stdio child environments. Persisted destinations are revalidated against the
+  current deployment policy whenever a composition is reconstructed.
+- Added deterministic two-arm skill evaluation, scripted MCP round-trip and
+  disconnect cases, and the no-socket MCP harness gate. Activated all 17
+  Milestone 8 gates, bringing the cumulative active gate count to 140.
+- Proposed ADR-0044 for the reversible archive, pin reconstruction, prompt,
+  official-SDK, child-environment, proxy, evaluation, and trace choices forced by
+  the first implementation.
+- Passed `make check`, all 467 non-live tests against PostgreSQL 16 and Docker,
+  the 74-test PostgreSQL integration partition, strict documentation builds, and
+  all 140 cumulative gates.
+- Passed all four hosted CircleCI lanes on pull request 9. Addressed and resolved
+  all 19 initial CodeRabbit review threads and all three incremental findings;
+  the final hosted review completed without findings. Milestone 9 remains gated
+  on merging the reviewed Milestone 8 pull request into `dev`.
+
+## 2026-08-03 — Milestone 3 completed
+
+- Authorized Milestone 3 and began implementation of the normalized model
+  gateway, OpenAI Responses, Anthropic Messages, and OpenAI-compatible
+  chat-completions adapters.
+- Activated the work order for 15 new hard gates covering SDK isolation,
+  identical provider contracts, stream invariants, tool-call identity, secret
+  exclusion, malformed arguments, pinned resume, cost failure, Ollama,
+  provider metadata, profile validation, redacted export, consent, and
+  trajectory-sourced evaluations.
+- Installed the official OpenAI developer-documentation MCP server for future
+  sessions; this session uses the documented official-source fallback.
+- Added strict declarative provider profiles, collision-free aliases,
+  capability ceilings, immutable registry hashes, durable model pins, normalized
+  streams, exact Decimal price snapshots, failed-call accounting, and bounded
+  provider metadata with persistence and span mappings as its only readers.
+- Added OpenAI Responses, Anthropic Messages, OpenAI-compatible chat
+  completions/Ollama, recorded-stream, unavailable-credential, and upgraded fake
+  adapters behind one contract suite. Provider SDK imports remain adapter-only,
+  malformed tool arguments fail identically through every runtime path, and
+  provider-only reasoning continuation stays in checkpoints.
+- Added consent records, prospective run stamps, a fail-closed redaction and
+  verification pipeline, a narrow content-addressed trajectory artifact store,
+  30-day expiry and withdrawal sweeps, CLI grant/withdraw/export commands, and
+  conversion of already-redacted artifacts into trajectory-sourced eval cases.
+- Added the twelfth deterministic evaluation case and activated all 15
+  Milestone 3 hard gates, bringing the cumulative active gate count to 72.
+- Proposed ADR-0039 for the reversible provider, configuration, pinning,
+  metadata, fixture, and narrow artifact-store choices forced by the first
+  Milestone 3 implementation.
+- Passed Ruff, strict mypy, 145 static tests, 57 contracts, all 255 non-live
+  tests against PostgreSQL 16, both credentialed vendor smoke tests, strict
+  documentation and citation checks, and all 72 cumulative hard gates.
+- Addressed the complete CodeRabbit review and its incremental follow-ups
+  across the three stacked pull requests. CircleCI jobs 67, 68, and 69 passed
+  the static, integration, and contract partitions for pull request 4 commit
+  `6768e82`, closing the final acceptance gap.
+
+## 2026-08-03 — Milestone 2 completed
+
+- Authorized Milestone 2 and advanced the current milestone to PostgreSQL
+  persistence and the durable worker.
+- Began implementation against the 16 new gates for event sequencing,
+  projections, upcasting, migration round trips, checkpoint recovery, fenced
+  claiming, resume idempotency, transaction hygiene, and ORM confinement.
+- Added the linear durable-runtime migration, confined SQLAlchemy rows and
+  hand-written mappers, PostgreSQL repositories and short units of work,
+  atomic per-session event sequencing, version upcasting, watermarked session
+  history, trajectory scaffolding, referenced full/delta checkpoints, usage
+  records, the fenced `SKIP LOCKED` queue, and worker/maintenance process roles.
+- Refactored the shared session, run, executor, budget, and tool paths so state
+  changes and events commit together while provider and tool I/O occurs outside
+  transactions. Tool recovery now snapshots idempotency classification, uses an
+  effect watermark, and returns the exact persisted result on deduplication.
+- Activated all 16 Milestone 2 gates (57 cumulative) and added PostgreSQL race,
+  rollback, projection rebuild, checkpoint deletion, crash/reclaim, stale-fence,
+  migration, concurrent-tool, and fourteen-boundary recovery cases.
+- Proposed ADR-0038 with the durable seam and schema decisions that require
+  owner review.
+- Passed Ruff, strict mypy, 80 static tests, 29 contracts, all 138 non-live
+  tests, the clean Alembic metadata check, 123 citation checks, strict
+  documentation builds, and all 57 active gates. A separate worker process
+  completed the calculator flow and a repeated idempotency key returned the
+  same committed run.
+- CircleCI jobs 19, 20, and 21 passed the PostgreSQL integration, contract, and
+  static partitions for `dev` commit `75964a0`, closing the final acceptance
+  gap.
+
+## 2026-08-01 — Milestone 1 completed
+
+- Implemented the provider-neutral domain, ports, state machine, five in-memory
+  repositories, scripted fake model, minimal context builder, inline dispatcher
+  and runtime, and the shared session/run services.
+- Added the validated tool registry and execution pipeline plus the bounded
+  Decimal calculator and injected-clock current-time builtins.
+- Added the declarative evaluation schema, authored model fixtures, eleven
+  initial cases, CLI `agent run` and `agent eval run`, and shared contract suites
+  for every declared port.
+- Activated all 28 Milestone 1 hard gates. The 41 cumulative gates, 78 static
+  tests, 17 contracts, all 107 non-live tests, strict typing/linting, and
+  documentation checks pass locally.
+- Verified the required calculator CLI flow: stdout is exactly `391` plus a
+  newline and stderr contains the six progress lines in the specified order.
+- CircleCI's static, contract, and integration jobs passed for `dev` commit
+  `30664ed`, closing the final completion gap.
+- Proposed ADR-0037 and added review notes for the reversible decisions at the
+  in-memory/durable, pre-policy, fixture-shape, eval-loading, and cross-process
+  CLI seams.
+
+## 2026-07-31 — Milestone 0 completed
+
+- CircleCI pipeline 3 passed its hosted static, contract, and integration jobs
+  for `dev` commit `5b60bca`, closing the last recorded Milestone 0 gap.
+- Project state now records the repository and engineering foundation as
+  complete. Milestone 1 remains authorized but has not started.
+
+## 2026-07-31 — Milestone 0 defaults and CircleCI
+
+- Replaced the GitHub Actions workflow with a CircleCI 2.1 configuration that
+  retains the static, contract, integration, and live partitions. ADR-0035
+  records the provider change.
+- Expanded the six overlayable default documents and the frozen hardline rules.
+  The executable configuration inventory now resolves exactly 106 unique,
+  non-null knob paths. ADR-0036 records the five initial operational defaults
+  the corpus named but did not value.
+- Merged every change from `origin/docs/plan-completion` before applying the
+  implementation updates.
+
+## 2026-07-31 — Milestone 0 implementation started
+
+- Established the Python 3.12 `uv`/Hatch repository, `agent` CLI entry point,
+  typed settings, structured logging, configuration assets, and documented
+  security baseline.
+- Added the single-service PostgreSQL Compose stack, an empty Alembic revision,
+  the pinned expected revision, and the four CI partitions.
+- Materialized the 172-entry gate registry and made all 13 Milestone 0 gates
+  executable, including import boundaries, secret scanning, transaction
+  hygiene, migration-graph validation, and the six registry invariants.
+- Passed `make install`, `make check`, Docker Compose startup, and an
+  empty-database migration against the Compose PostgreSQL 16 service. The live
+  check exposed and corrected a Compose-version portability bug in the
+  Makefile's health poll. Milestone 0 remains in progress because hosted CI has
+  not yet supplied its own execution evidence.
+
 ## 2026-07-31 — The ledger now fingerprints the whole span
 
 - **A cited range was only ever checked on its first line.** `excerpt` is one

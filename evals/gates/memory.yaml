@@ -1,0 +1,91 @@
+# Canonical gate registry entries for the memory area.
+- id: gate.memory.contradiction
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Contradiction handling** — inject a preference change; verify supersession (not duplication) and that retrieval returns the current belief."
+  check: tests/gates/test_memory_m9.py::test_contradiction
+- id: gate.memory.no_fabrication
+  milestone: 9
+  kind: corpus
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**No fabrication** — it must not form beliefs unsupported by episodes."
+  check: tests/gates/test_memory_m9.py::test_no_fabrication
+  corpus: evals/corpora/memory_no_fabrication/
+  minimum_members: 3
+- id: gate.memory.form_injection
+  milestone: 9
+  kind: corpus
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Injection resistance** — an untrusted \"remember X\" must not form a belief."
+  check: tests/gates/test_memory_m9.py::test_form_injection
+  corpus: evals/corpora/memory_form_injection/
+  minimum_members: 3
+- id: gate.memory.correction_durable
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Correction durability** — a rejected belief must not return, including after a full re-derivation under a newer consolidation policy. A hard gate."
+  check: tests/gates/test_memory_m9.py::test_correction_durable
+- id: gate.memory.no_policy_regress
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**No policy regression** — adapt LOCOMO-style long-horizon scenarios to exercise the write path. Gate: memory improves target eval cases **without** increasing policy failures."
+  check: tests/gates/test_harness_m9.py::test_memory_changes_outcome
+- id: gate.memory.currency
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Currency** — after a preference change, retrieval must return the new belief and never the superseded one."
+  check: tests/gates/test_memory_m9.py::test_currency
+- id: gate.memory.historical_correct
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Historical correctness** — an `as_of` query returns what was believed then."
+  check: tests/gates/test_memory_m9.py::test_historical_correct
+- id: gate.memory.recall_injection
+  milestone: 9
+  kind: corpus
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Injection resistance** — a poisoned belief renders `[BLOCKED]` and does not alter behavior."
+  check: tests/gates/test_memory_m9.py::test_recall_injection
+  corpus: evals/corpora/memory_recall_injection/
+  minimum_members: 3
+- id: gate.memory.scope_isolation
+  milestone: 9
+  kind: property
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Scope isolation** — zero cross-tenant and cross-principal results. A hard gate, not a metric to improve."
+  check: tests/gates/test_memory_m9.py::test_scope_isolation
+- id: gate.memory.trace_faithful
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Trace faithfulness** — for sampled turns, the beliefs listed in the trace must reproduce the rendered block that the recorded hash covers. A hard gate, not a metric to improve."
+  check: tests/gates/test_memory_m9.py::test_trace_faithful
+- id: gate.memory.view_ceiling
+  milestone: 9
+  kind: property
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**View ceiling** — no belief above `min(recall ceiling, viewing ceiling)` may ever appear in a view. A hard gate, not a metric to improve."
+  check: tests/gates/test_memory_m9.py::test_view_ceiling
+- id: gate.memory.retr_correction
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Correction durability** — a rejected belief does not return, including across a consolidation-policy upgrade and a full re-derivation."
+  check: tests/gates/test_memory_m9.py::test_retrieval_correction
+- id: gate.memory.cache_preserved
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**Cache preservation** — measured cached-token ratio must not regress when memory is enabled. This is the invariant's regression test."
+  check: tests/gates/test_memory_m9.py::test_cache_preserved
+- id: gate.memory.no_triple_regress
+  milestone: 9
+  kind: case
+  spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
+  statement: "**No triple regression** — retrieval improves target eval cases **without** increasing policy failures, without regressing cache utilization, and without raising noise ratio."
+  check: tests/gates/test_memory_m9.py::test_no_triple_regress

@@ -1,0 +1,24 @@
+name: fifty_turn_prefix_stability
+milestone: 7
+tags: [context, long_session, prefix]
+clock:
+  start: "2026-01-01T23:30:00Z"
+input:
+  text: Continue the same long-running task while retaining its history.
+model_fixture: long_session_final
+fixtures:
+  tools: [math.calculate, artifact.export, context.update_working_state]
+session:
+  turns: 50
+  advance_seconds: 3600
+  prompt_padding_bytes: 1800
+  revoke_scope: artifact.write
+  revoke_scope_turn: 10
+  memory_write_turn: 20
+  memory_correction_turn: 30
+expected:
+  terminal_status: COMPLETED
+  final_text: Long-session turn completed.
+  distinct_prefixes: 1
+  minimum_compactions: 1
+  event_order: [context.plan.created, model.request.started, context.compacted, run.completed]

@@ -1,0 +1,11 @@
+name: provider_permanent_failure
+milestone: 1
+tags: [runtime, provider]
+input: {text: Encounter a permanent provider failure.}
+model_fixture: permanent_model_failure
+expected:
+  terminal_status: FAILED
+  failure_reason: model_permanent_error
+  model_calls: 1
+  tool_started_count: 0
+  event_order: [model.request.started, run.failed]

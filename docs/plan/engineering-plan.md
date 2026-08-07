@@ -142,7 +142,7 @@ Use:
 - OpenTelemetry for tracing, metrics, and log correlation
 - `pytest`, `pytest-asyncio`, `ruff`, and `mypy`
 - A Typer-based CLI
-- GitHub Actions or the existing CI system
+- CircleCI
 
 FastAPI supports asynchronous endpoints and streaming responses, making it appropriate for model and tool workloads that spend substantial time awaiting external systems. See the [FastAPI documentation](https://fastapi.tiangolo.com/).
 

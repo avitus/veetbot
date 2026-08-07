@@ -1,0 +1,24 @@
+name: external_writes_not_parallel
+milestone: 4
+tags: [parallel, approval]
+input: {text: "Propose two external writes."}
+model_fixture: two_external_writes
+approval_resolution: approve_once
+fixtures:
+  tools: [demo.external_write]
+expected:
+  terminal_status: COMPLETED
+  final_text: Both approved writes completed sequentially.
+  model_calls: 2
+  tool_started_count: 2
+  pending_approvals: 0
+  event_order:
+    - approval.requested
+    - approval.resolved
+    - tool.call.started
+    - tool.call.completed
+    - approval.requested
+    - approval.resolved
+    - tool.call.started
+    - tool.call.completed
+    - run.completed

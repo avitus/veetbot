@@ -1,0 +1,12 @@
+name: repeated_identical_call
+milestone: 1
+tags: [runtime, tools, breaker]
+input: {text: Repeat an identical tool call.}
+model_fixture: repeated_identical_call
+expected:
+  terminal_status: FAILED
+  failure_reason: tool_loop_detected
+  model_calls: 5
+  tool_started_count: 4
+  maximum_steps: 5
+  event_order: [tool.call.completed, tool.call.completed, tool.call.completed, tool.call.completed, run.failed]

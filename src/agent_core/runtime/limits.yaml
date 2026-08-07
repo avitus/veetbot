@@ -1,0 +1,24 @@
+schema_version: 1
+queue:
+  poll_interval_seconds: 0.25
+  max_attempts: 3
+  priorities:
+    interactive: 0
+    async: 10
+    maintenance: 20
+worker:
+  lease_seconds: 30.0
+  heartbeat_divisor: 3
+sweeps:
+  reclaim_expired_seconds: 5
+  approval_reaper_seconds: 30
+  checkpoint_prune_seconds: 300
+  projection_catch_up_seconds: 1
+model:
+  max_internal_attempts: 3
+context:
+  max_compactions_per_step: 2
+run_defaults:
+  max_steps: 32
+  max_model_calls: 16
+  max_tool_calls: 32

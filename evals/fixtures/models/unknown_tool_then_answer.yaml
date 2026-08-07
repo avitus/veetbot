@@ -1,0 +1,8 @@
+turns:
+  - kind: tool_call
+    tool_name: math.missing
+    arguments: {}
+    call_id: call_0001
+  - kind: final
+    text: That capability is unavailable.
+    stop_reason: end_turn

@@ -1,0 +1,10 @@
+name: two_sequential_read_only_tools
+milestone: 1
+tags: [runtime, tools]
+input: {text: Calculate an answer and report the current time.}
+model_fixture: two_read_only_tools
+expected:
+  terminal_status: COMPLETED
+  model_calls: 3
+  tool_started_count: 2
+  event_order: [tool.call.completed, tool.call.completed, run.completed]

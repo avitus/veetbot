@@ -1,0 +1,12 @@
+name: direct_response
+milestone: 1
+tags: [runtime, direct]
+input: {text: Say hello.}
+model_fixture: direct_response
+expected:
+  terminal_status: COMPLETED
+  final_text: Hello from the deterministic agent.
+  model_calls: 1
+  tool_started_count: 0
+  maximum_steps: 1
+  event_order: [run.queued, run.started, model.request.started, run.completed]

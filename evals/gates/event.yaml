@@ -1,0 +1,67 @@
+# Canonical gate registry entries for the event area.
+- id: gate.event.sequence_integrity
+  milestone: 2
+  kind: property
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Sequence integrity.** A fuzz test appending concurrently across sessions, with injected rollbacks, produces no duplicate `(session_id, sequence)` and no event that any projection failed to observe."
+  check: tests/integration/test_event_runtime_m2.py::test_sequence_integrity_with_concurrent_rollbacks_and_projection_observation
+- id: gate.event.projection_determ
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Projection determinism.** For every projection, rebuild-from-zero over a recorded log equals the incrementally built state, field for field, on the same `builder_version`."
+  check: tests/integration/test_event_runtime_m2.py::test_projection_rebuild_matches_incremental_state
+- id: gate.event.upcaster_totality
+  milestone: 2
+  kind: property
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Upcaster totality.** Every recorded historical fixture, at every version, decodes to the current shape. An unknown higher version raises."
+  check: tests/contract/test_upcaster_contract.py::test_upcaster_reaches_current_shape_and_rejects_future_versions
+- id: gate.event.exactly_once
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Exactly-once execution.** Two workers racing on one run: one executes, the other is fenced and writes nothing. Asserted with the sweeper's reclaim interval driven to zero."
+  check: tests/integration/test_event_runtime_m2.py::test_two_workers_race_but_only_one_claim_executes_and_releases
+- id: gate.event.crash_recovery
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Crash recovery.** Terminate a worker after a checkpoint; the run resumes and reaches the same terminal state. Section 14.2 already requires this; it is restated here because the delta-chain reconstruction is new and it is what the test now exercises."
+  check: tests/integration/test_event_runtime_m2.py::test_worker_crash_after_checkpoint_resumes_to_terminal_state
+- id: gate.event.checkpoint_dispensable
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Checkpoint dispensability.** Delete a run's non-terminal checkpoints, resume, and reach the same terminal state. Registered as `gate.event.checkpoint_dispensable`, which `runtime-loop.md` #9 restates: this document owns it."
+  check: tests/integration/test_event_runtime_m2.py::test_nonterminal_checkpoints_are_dispensible
+- id: gate.event.migration_clean
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Migrations upgrade from a clean database.** `upgrade head` against an empty database succeeds, and an autogenerate run against the resulting schema produces an empty diff. Section 24 states the criterion; this is what makes it decidable, and the empty diff is what keeps a hand-edited revision honest. Registered as `gate.event.migration_clean`."
+  check: tests/integration/test_migrations.py::test_migrations_upgrade_cleanly_and_match_metadata
+- id: gate.event.migration_stepwise
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Migrations upgrade from the previous revision.** For every revision, `upgrade` from its predecessor succeeds and `downgrade` back to the predecessor succeeds, against a database that already holds the earlier schema. Section 24's second migration criterion. Data revisions are exempt from the downgrade half by declaration, not by omission. Registered as `gate.event.migration_stepwise`."
+  check: tests/integration/test_migrations.py::test_migrations_round_trip_each_step_from_its_predecessor
+- id: gate.event.revision_pinned
+  milestone: 2
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**The pinned revision is refused, not repaired.** Started against a database at the wrong revision, the process exits non-zero naming both revisions, does not migrate, and does not serve a request first. ADR-0024 decision 6 requires the behavior; this asserts it. Registered as `gate.event.revision_pinned`."
+  check: tests/integration/test_event_runtime_m2.py::test_wrong_pinned_revision_is_refused_without_repair
+- id: gate.event.export_redacted
+  milestone: 3
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**The export is redacted, and refuses when it is not.** A run seeded with one instance of each of the scanner's five rule families, plus a tenant-declared pattern, exports with every one replaced by its placeholder and a clean verification scan over the finished document. A second case disables the replacement stage and asserts that the export raises `ExportRedactionError`, writes no artifact, and names the rule that fired without printing what it matched. Registered as `gate.event.export_redacted`."
+  check: tests/gates/test_trajectory_export_m3.py::test_export_replaces_all_rules_and_fails_closed
+- id: gate.event.export_consent
+  milestone: 3
+  kind: case
+  spec: docs/plan/event-log-and-persistence.md#hard-gates
+  statement: "**Consent is stamped forward and withdrawn backward.** Four states — tenant disabled, principal never granted, granted then withdrawn, both present — produce three refusals and one export. The withdrawal case additionally asserts that an export produced before the withdrawal has `expires_at` in the past and is gone after one sweeper pass, and that a grant made after a run does not make that run exportable. Registered as `gate.event.export_consent`."
+  check: tests/gates/test_trajectory_export_m3.py::test_consent_is_stamped_forward_and_withdrawn_backward

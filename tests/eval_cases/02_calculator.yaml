@@ -1,0 +1,20 @@
+name: one_calculator_call
+milestone: 1
+tags: [runtime, tools, calculator]
+input: {text: "What is 17 multiplied by 23?"}
+model_fixture: calculator_then_answer
+expected:
+  terminal_status: COMPLETED
+  final_text: "391"
+  model_calls: 2
+  tool_started_count: 1
+  event_order:
+    - run.queued
+    - run.started
+    - model.request.started
+    - tool.call.proposed
+    - tool.call.authorized
+    - tool.call.started
+    - tool.call.completed
+    - model.request.started
+    - run.completed

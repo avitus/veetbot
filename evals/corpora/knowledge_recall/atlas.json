@@ -1,0 +1,1 @@
+{"question":"How is Atlas restarted?","answer":"canary handoff","passage":"Atlas is restarted using a canary handoff after the health probe passes."}

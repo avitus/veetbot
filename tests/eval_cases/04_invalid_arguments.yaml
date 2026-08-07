@@ -1,0 +1,10 @@
+name: invalid_tool_arguments
+milestone: 1
+tags: [tools, validation]
+input: {text: Use the calculator with malformed arguments.}
+model_fixture: invalid_arguments_then_answer
+expected:
+  terminal_status: COMPLETED
+  tool_started_count: 0
+  reason_codes: [tool.arguments_invalid]
+  event_order: [run.queued, model.request.started, run.completed]

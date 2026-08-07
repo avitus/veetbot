@@ -1,0 +1,26 @@
+schema_version: 1
+output:
+  global_maximum_bytes: 4194304
+  hard_ceiling_multiplier: 4
+  excerpt_head_ratio: 0.6
+  excerpt_tail_ratio: 0.2
+circuit_breaker:
+  identical_denied_threshold: 3
+  identical_call_threshold: 5
+  uncertain_threshold: 1
+parallel:
+  maximum_calls: 8
+mcp:
+  connect_timeout_seconds: 10
+  request_timeout_seconds: 30
+  idle_timeout_seconds: 900
+  description_maximum_bytes: 1024
+  schema_maximum_depth: 16
+  schema_maximum_bytes: 32768
+  default_side_effect: external_write
+  default_risk: high
+  default_idempotency: non_idempotent
+  allow_parallel: false
+bridge:
+  approval_hold_seconds: 300
+  maximum_underlying_calls_per_turn: 64

@@ -27,6 +27,7 @@ Only live documents are scanned. Architecture decision records, the changelog,
 and existing entries in the review-questions file are records at a point in
 time and are deliberately not repaired.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -199,9 +200,7 @@ def load_ledger() -> dict[str, dict[str, str]]:
 
 def as_yaml_scalar(text: str) -> str:
     """``text`` as a one-line double-quoted YAML scalar, correctly escaped."""
-    return yaml.safe_dump(
-        text, default_style='"', allow_unicode=True, width=10**9
-    ).rstrip("\n")
+    return yaml.safe_dump(text, default_style='"', allow_unicode=True, width=10**9).rstrip("\n")
 
 
 def write_ledger(entries: list[dict]) -> None:
@@ -274,7 +273,7 @@ def check_bare_references() -> None:
                 line = text.count("\n", 0, m.start()) + 1
                 shown = " ".join(m.group(0).split())
                 errors.append(
-                    f"{rel}:{line} names a line as \"{shown}\", which the "
+                    f'{rel}:{line} names a line as "{shown}", which the '
                     f"ledger cannot check. Write it as `file.md:LINE` "
                     f"(or `file.md:LO-HI`) and re-resolve it by content."
                 )
@@ -296,8 +295,7 @@ def run_check(update: bool) -> None:
         bad = malformed_span(c)
         if bad:
             errors.append(
-                f"{c['source']}:{c['source_line']} cites {c['target']}:"
-                f"{span_of(c)}, but {bad}"
+                f"{c['source']}:{c['source_line']} cites {c['target']}:{span_of(c)}, but {bad}"
             )
             if k in ledger:
                 fresh[k] = ledger[k]
@@ -356,7 +354,7 @@ def run_check(update: bool) -> None:
         if len(hits) != 1:
             errors.append(
                 f"{where} no longer holds the text it cited, and that text "
-                f"{'is gone from' if not hits else 'appears %d times in' % len(hits)} "
+                f"{'is gone from' if not hits else f'appears {len(hits)} times in'} "
                 f"{c['target']}. Repoint it by hand."
             )
             fresh[k] = recorded
@@ -376,9 +374,7 @@ def run_check(update: bool) -> None:
         else:
             span = f"{new_line}-{new_line + (c['target_end'] - c['target_line'])}"
         new_raw = re.sub(r":\d+(-\d+)?", f":{span}", c["_raw"], count=1)
-        repairs.setdefault(c["source"], []).append(
-            (c["source_line"], c["_span"], new_raw)
-        )
+        repairs.setdefault(c["source"], []).append((c["source_line"], c["_span"], new_raw))
         notes.append(f"repaired {where} -> line {span}")
         # Record the digest at the location it moved to. Carrying `recorded`
         # through unchanged would leave a pre-digest entry with an empty digest

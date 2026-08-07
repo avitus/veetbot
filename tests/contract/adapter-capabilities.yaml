@@ -1,0 +1,13 @@
+in_memory:
+  supported:
+    - append_only_events
+    - guarded_transitions
+    - idempotency_lookup
+    - monotonic_event_sequence
+    - single_process_serialization
+    - tenant_scope
+  gaps:
+    - concurrent_idempotency_deduplication
+    - crash_recovery
+    - cross_process_durability
+    - cross_repository_transactions

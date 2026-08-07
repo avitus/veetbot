@@ -1,0 +1,37 @@
+schema_version: 1
+profile: anthropic
+adapter: anthropic
+api: messages
+base_url: https://api.anthropic.com
+credential_ref: ANTHROPIC_API_KEY
+enabled: true
+capabilities:
+  native_tool_calling: true
+  parallel_tool_calls: true
+  images: true
+  audio: false
+  files: true
+  reasoning: native
+  provider_managed_state: true
+  explicit_cache_control: true
+  structured_output: true
+  streaming: true
+limits:
+  max_cache_breakpoints: 4
+  default_output_reserve: 8192
+  max_tool_count: 128
+models:
+  - id: claude-opus-5
+    aliases: [opus, anthropic-default]
+    limits:
+      context_window_tokens: 1000000
+      max_output_tokens: 128000
+    pricing:
+      input_per_mtok: "5.00"
+      cached_input_per_mtok: "0.50"
+      cache_write_per_mtok: "6.25"
+      output_per_mtok: "25.00"
+      reasoning_per_mtok: null
+      reasoning_priced_separately: false
+      source: docs_snapshot
+      effective_at: "2026-08-03T00:00:00Z"

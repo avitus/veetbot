@@ -9,6 +9,7 @@ Produces two outputs from the canonical Markdown/YAML sources:
 Canonical sources under ``docs/`` are never modified by this script.
 Cross-platform (macOS/Linux); no shell-specific behaviour.
 """
+
 from __future__ import annotations
 
 import re
@@ -16,7 +17,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -58,15 +59,21 @@ def strip_front_matter(text: str) -> str:
     if text.startswith("---\n"):
         end = text.find("\n---\n", 4)
         if end != -1:
-            return text[end + 5:]
+            return text[end + 5 :]
     return text
 
 
 def git_commit() -> str:
     try:
+        git = shutil.which("git")
+        if git is None:
+            return "unknown"
         out = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=ROOT, capture_output=True, text=True, check=True,
+            [git, "rev-parse", "--short", "HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
         )
         return out.stdout.strip() or "unknown"
     except Exception:
@@ -114,7 +121,7 @@ def build_single_html(pandoc: str, manifest: dict) -> Path:
     if missing:
         fail("manifest sources missing: " + ", ".join(map(str, missing)))
 
-    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    date = datetime.now(UTC).strftime("%Y-%m-%d")
     parts = [f"*Generated {date} · commit {git_commit()}*", ""]
     for i, p in enumerate(sources):
         body = strip_front_matter(p.read_text(encoding="utf-8")).strip("\n")
@@ -130,12 +137,19 @@ def build_single_html(pandoc: str, manifest: dict) -> Path:
     tmp.write_text(combined, encoding="utf-8")
     try:
         cmd = [
-            pandoc, str(tmp), "-f", "gfm", "-o", str(out),
-            "--standalone",                 # self-contained (no external resources in sources)
-            "--wrap=none",                  # do not hard-wrap the generated HTML source
-            "--toc", "--toc-depth=3",
+            pandoc,
+            str(tmp),
+            "-f",
+            "gfm",
+            "-o",
+            str(out),
+            "--standalone",  # self-contained (no external resources in sources)
+            "--wrap=none",  # do not hard-wrap the generated HTML source
+            "--toc",
+            "--toc-depth=3",
             highlight_flag(pandoc),
-            "--metadata", f"title={manifest['title']}",
+            "--metadata",
+            f"title={manifest['title']}",
             # deliberately NOT --number-sections: the plan already carries visible numbering
         ]
         print(f"Building single HTML -> {out.relative_to(ROOT)} ...")
@@ -147,8 +161,13 @@ def build_single_html(pandoc: str, manifest: dict) -> Path:
 
 def main() -> None:
     manifest = load_manifest()
-    mkdocs = require_tool("mkdocs", "Install docs dependencies with `uv sync` or `pip install mkdocs mkdocs-material`.")
-    pandoc = require_tool("pandoc", "Install system Pandoc, e.g. `apt-get install pandoc` or `brew install pandoc`.")
+    mkdocs = require_tool(
+        "mkdocs",
+        "Install docs dependencies with `uv sync` or `pip install mkdocs mkdocs-material`.",
+    )
+    pandoc = require_tool(
+        "pandoc", "Install system Pandoc, e.g. `apt-get install pandoc` or `brew install pandoc`."
+    )
     build_site(mkdocs)
     out = build_single_html(pandoc, manifest)
     print(f"OK: built site/index.html and {out.relative_to(ROOT)}")

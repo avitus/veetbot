@@ -1,0 +1,55 @@
+schema_version: 1
+name: default
+default_effect: deny
+rules:
+  none:
+    decision: allow
+  workspace_read:
+    condition: path_inside_workspace
+    decision: allow
+    otherwise: deny
+  workspace_write:
+    condition: path_inside_workspace
+    decision: allow
+    otherwise: deny
+  network_read:
+    condition: host_on_allowlist
+    decision: allow
+    otherwise: deny
+  code_execution:
+    condition: target_isolated
+    decision: allow
+    otherwise: deny
+  package_install:
+    decision: deny
+  sandbox_network:
+    decision: deny
+  external_message:
+    decision: require_approval
+  external_write:
+    decision: require_approval
+  external_delete:
+    decision: require_approval
+  financial:
+    decision: require_approval
+  publication:
+    decision: require_approval
+  credential_access:
+    decision: deny
+  host_access:
+    decision: deny
+  privileged:
+    decision: deny
+unknown_tool:
+  decision: deny
+trust_overlay:
+  external_untrusted_requires_approval: true
+approval_expiry_seconds:
+  low: 86400
+  medium: 86400
+  high: 14400
+  critical: 3600
+self_approval:
+  enabled: true
+advisory:
+  enabled: false

@@ -1,0 +1,17 @@
+name: mcp_server_disconnects_mid_call
+milestone: 8
+tags: [mcp, resilience]
+input:
+  text: Use the documentation server twice and continue if it disconnects.
+model_fixture: mcp_disconnect_then_continue
+fixtures:
+  tools: [mcp.docs_disconnect.search]
+  mcp_servers: [docs_disconnect]
+expected:
+  terminal_status: COMPLETED
+  final_text: Continued after the server became unavailable.
+  model_calls: 3
+  tool_started_count: 2
+  reason_codes: [tool.server_unreachable]
+  event_order: [tool.call.completed, mcp.server.disconnected, tool.call.failed, run.completed]
+  absent_strings: [REMOTE_DISCONNECT_DETAIL_MUST_NOT_REACH_THE_MESSAGE]

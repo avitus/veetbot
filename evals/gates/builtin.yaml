@@ -1,0 +1,91 @@
+# Canonical gate registry entries for the builtin area.
+- id: gate.builtin.registration
+  milestone: 1
+  kind: structural
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "All seven registration steps pass for the checked-in builtin specs, asserted as a static test with nothing else constructed."
+  check: tests/gates/test_builtin_m1.py::test_registration
+- id: gate.builtin.reserved_domain
+  milestone: 1
+  kind: structural
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "A test registers a builtin whose domain is `mcp` and expects a startup error."
+  check: tests/gates/test_builtin_m1.py::test_reserved_domain
+- id: gate.builtin.demonstration
+  milestone: 1
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "`math.calculate` on `17 * 23` returns exactly `391` with `result_exact` true, asserted on the rendered bytes."
+  check: tests/gates/test_builtin_m1.py::test_demonstration
+- id: gate.builtin.parser_property
+  milestone: 1
+  kind: property
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "A property test over generated expressions asserts that every input either parses and evaluates within the bounds, or returns one of the eight reason codes — and never raises, never returns a non-`Decimal`, and never runs longer than the declared timeout."
+  check: tests/gates/test_builtin_m1.py::test_parser_property
+- id: gate.builtin.bounds_latency
+  milestone: 1
+  kind: property
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "`9**9**9`, `9^9^9`, a 1025-character expression, and a 33-deep nesting each return their specific reason code in under fifty milliseconds."
+  check: tests/gates/test_builtin_m1.py::test_bounds_latency
+- id: gate.builtin.int_differential
+  milestone: 1
+  kind: property
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "A differential test asserts `//` and `%` agree with Python's `int` operators on every combination of signs, which is the flooring semantics this document chose over `Decimal`'s."
+  check: tests/gates/test_builtin_m1.py::test_int_differential
+- id: gate.builtin.decimal_exact
+  milestone: 1
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "`0.1 + 0.2` returns exactly `0.3`. This is the regression test for the entire reason the numeric type is `Decimal`."
+  check: tests/gates/test_builtin_m1.py::test_decimal_exact
+- id: gate.builtin.clock_stability
+  milestone: 1
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "`system.current_time` under a fixed `Clock` returns identical bytes across two invocations, and the module containing it does not appear in the ambient-time static check's allowed set."
+  check: tests/gates/test_builtin_m1.py::test_clock_stability
+- id: gate.builtin.message_table
+  milestone: 1
+  kind: structural
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "Every `reason_code` this document declares has an entry in the checked-in outcome message table, and every entry's message contains no interpolation."
+  check: tests/gates/test_builtin_m1.py::test_message_table
+- id: gate.builtin.handle_only
+  milestone: 4
+  kind: structural
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "The three `workspace.` modules import no `os`, `os.path`, `pathlib`, `shutil`, or `glob`, call no `open`, and name no attribute of `ToolExecutionContext` other than `workspace` when they touch a file. Asserted over the import graph and the call graph, in the same walk the import-boundary check already performs."
+  check: tests/gates/test_builtin_m4.py::test_handle_only
+- id: gate.builtin.text_only
+  milestone: 4
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "`workspace.read_text` over a file whose bytes are `61 00 62` returns `not_text`, and over a file whose bytes are a valid UTF-8 sequence split across the reader's chunk boundary returns the decoded text. The second half is the one that regresses."
+  check: tests/gates/test_builtin_m4.py::test_text_only
+- id: gate.builtin.write_idempotent
+  milestone: 4
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "`workspace.write_text` called twice with identical `path` and `content` returns the identical `checksum` and `byte_count` both times, `created` true then false, and leaves one file."
+  check: tests/gates/test_builtin_m4.py::test_write_idempotent
+- id: gate.builtin.listing_stable
+  milestone: 4
+  kind: property
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "A property test over generated workspaces asserts that a listing is bytewise ascending on `path`, that a truncated listing is a prefix of the untruncated one, and that no entry names a symlink."
+  check: tests/gates/test_builtin_m4.py::test_listing_stable
+- id: gate.builtin.provenance
+  milestone: 4
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "A run writes `a.md` through `workspace.write_text` and reads both `a.md` and a `b.md` placed in the workspace by the fixture. The first read returns `output_trust = INTERNAL_TOOL`, the second `EXTERNAL_UNTRUSTED`, and a `list_files` that returns both is `EXTERNAL_UNTRUSTED`."
+  check: tests/gates/test_builtin_m4.py::test_provenance
+- id: gate.builtin.demo_records
+  milestone: 4
+  kind: case
+  spec: docs/plan/builtin-tools.md#hard-gates
+  statement: "An approved `demo.external_write` persists its record as the `structured` result on `tool_invocations` and writes to no other table, asserted by a row count over the schema before and after."
+  check: tests/gates/test_builtin_m4.py::test_demo_records

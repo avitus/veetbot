@@ -365,6 +365,30 @@ The two under `policy/` are already named by
 additions, and each one is a home for knobs a spec has already fixed a value
 for — none of them introduces a knob that does not already exist.
 
+The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
+`agent_core.config` names every operator-reviewable dotted path, and a static
+test resolves every path from its shipped YAML document, rejects null values,
+and asserts the total is 106. Schema versions, profile names, rule identifiers,
+model-catalog records, conditions, and frozen hardline predicates are metadata
+or invariants rather than knobs and are not counted.
+
+| File | Knobs |
+| --- | ---: |
+| `policy/default.yaml` | 23 |
+| `models/policies.yaml` | 4 |
+| `context/plan.yaml` | 26 |
+| `tools/limits.yaml` | 20 |
+| `runtime/limits.yaml` | 16 |
+| `memory/profiles.yaml` | 17 |
+| **Total** | **106** |
+
+Five required operational defaults had no numeric value in the corpus. ADR-0036
+sets the initial values: a 4 MiB global tool-output ceiling, a 30-second worker
+lease, and default run caps of 32 steps, 16 model calls, and 32 tool calls. The
+values are versioned alongside the 101 values already fixed by the specs, so a
+later evidence-backed change is an ordinary reviewed configuration diff rather
+than an environment override.
+
 `hardline.yaml` is the one file the overlay may not touch. Section 15 requires
 the hardline set to be frozen at load "so no configuration or in-process code
 can disable them", and an overlay is configuration. Attempting to overlay it
@@ -432,7 +456,7 @@ AUTH_MODE=dev
 AUTH_TOKEN=
 
 # One per enabled provider profile. Never a real value in this file.
-OPENAI_API_KEY=
+VEETBOT_OPENAI_KEY=
 ANTHROPIC_API_KEY=
 
 # Interpolated into models/policies.yaml as ${OPENAI_MODEL}.
@@ -449,14 +473,16 @@ AGENT_CONFIG_DIR=
 RUN_LIVE_MODEL_TESTS=
 ```
 
-Ten names for eight fields, which is not a discrepancy. `OPENAI_API_KEY` and
-`ANTHROPIC_API_KEY` both populate the `credentials` mapping, which is keyed by
-provider profile name and so grows a name per profile without growing a field.
-`OPENAI_MODEL` populates `interpolation`. `RUN_LIVE_MODEL_TESTS` populates no
-`Settings` field at all: it is read by the test harness to enable the
-live-provider job, and it is listed here because the definition-of-done rule is
-that no configuration is undocumented, not that every name is a field. The
-remaining six names map one-to-one onto the six scalar fields.
+Ten canonical names for eight fields, which is not a discrepancy.
+`VEETBOT_OPENAI_KEY` and `ANTHROPIC_API_KEY` both populate the `credentials`
+mapping, which is keyed by provider profile name and so grows a name per
+profile without growing a field. `OPENAI_API_KEY` remains an accepted
+compatibility alias for the OpenAI profile; `VEETBOT_OPENAI_KEY` wins when both
+are present. `OPENAI_MODEL` populates `interpolation`. `RUN_LIVE_MODEL_TESTS`
+populates no `Settings` field at all: it is read by the test harness to enable
+the live-provider job, and it is listed here because the definition-of-done
+rule is that no configuration is undocumented, not that every name is a field.
+The remaining six names map one-to-one onto the six scalar fields.
 
 `DATABASE_URL` does not appear anywhere in the plan. The plan names PostgreSQL
 as the source of truth in Section 2, gives the schema in Section 14, and

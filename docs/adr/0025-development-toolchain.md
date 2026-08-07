@@ -9,6 +9,7 @@
   monolith), ADR-0022 (the gate registry), ADR-0024 (the composition
   root)
 - Detailed design: `docs/plan/development-toolchain.md`
+- CI-provider amendment: ADR-0035
 
 ## Context
 

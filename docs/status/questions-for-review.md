@@ -19,6 +19,122 @@ schema that has not been written yet, so they are cheap now and expensive after
 Milestone 2 ships. Items marked **expensive** would require rewriting a
 committed spec and its dependents.
 
+## Milestone 4 implementation decisions
+
+ADR-0040 records the policy, approval, and workspace choices made during the
+autonomous implementation. The highest-value review points are:
+
+- **Narrow process-wide operational event stream (moderate):** the ruleset is
+  durably recorded in `policy_profiles`, and `policy.profile.loaded` is emitted
+  to a separate append-only `process_events` stream because a hidden session
+  would misstate ownership. Review whether later operational events should
+  reuse this deliberately small stream or receive a broader design.
+- **Approval HTTP binding waits for Milestone 5 (cheap):** Milestone 4 exposes
+  the complete transport-neutral application service and CLI. The HTTP route
+  will bind that service when the plan's server, authentication, request IDs,
+  and error envelope land together.
+- **Root listing uses the empty-path exception (cheap):** containment rejects
+  empty path components, but `workspace.list_files` interprets the schema's
+  default empty string as the workspace root.
+- **Restart lowers unproven file provenance (moderate):** a local handle labels
+  only paths written through that live handle as internal. Files recovered in a
+  later process are external-untrusted until durable provenance is designed.
+- **Effect watermarks favor uncertainty over replay (cheap):** every declared
+  side effect is marked sent before tool code begins, even if a particular
+  execution could finish without an external change.
+- **Mixed batches remain sequential (cheap):** concurrency is admitted only
+  when every call in the batch is an authorized, parallel-safe read.
+- **DNS protection is split across pure policy and future egress (moderate):**
+  literal protected addresses are denied by the frozen hardline rules. DNS is
+  not resolved during policy evaluation; no hostname is allowlisted in the M4
+  tier, and any later network adapter must enforce protected ranges against the
+  address actually connected.
+- **Legacy runs receive the pre-scope platform authority stamp (moderate):** the
+  M4 migration backfills existing runs with the 15 scopes that were implicit
+  before scope enforcement. Leaving the migration default `[]` would make every
+  pre-M4 run unable to resume.
+
+The complete rationale, consequences, and rejected alternatives are in
+[ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md).
+
+## Milestone 3 implementation decisions
+
+ADR-0039 records the provider and trajectory-export choices made while the
+owner was away. The highest-value review points are:
+
+- **Two-field settings extension (moderate):** Milestone 0 fixes an eight-field
+  environment object, while Milestone 3 requires operator-controlled tenant
+  export enablement and defines no tenant settings store. Export stays off by
+  default through two additional composition fields until that store exists.
+- **Narrow trajectory byte store before the general artifact milestone
+  (moderate):** export needs expiring content-addressed bytes now. The local
+  adapter implements only that port and must be replaced or adapted when
+  Milestone 6 adds streaming general artifacts.
+- **One enabled profile per adapter (moderate):** the normative resolved and
+  pinned types identify the adapter, while the registry version identifies the
+  profile. Supporting simultaneous endpoints behind one adapter needs a new
+  selection key rather than an implicit map collision.
+- **Remote credentials fail at selection (cheap):** startup installs an
+  unavailable provider when a remote key is absent, allowing fake/local work
+  while ensuring a selected remote policy fails closed.
+- **Single-tier prices restrict advertised windows (cheap):** the first profile
+  schema cannot express a long-context surcharge, so a profile declares only
+  the context range its immutable price covers.
+- **Tenant redaction regexes use a safe subset (cheap):** length, quantified
+  groups, wildcard repetition, lookaround, backreferences, and conditionals are
+  refused at construction to keep arbitrary exported text from causing
+  catastrophic backtracking.
+- **Provider metadata has two readers (moderate):** persistence flattening and
+  bounded span attributes are the only readers. Runtime continuation travels in
+  checkpoint-only provider-opaque items rather than creating a metadata
+  dependency.
+
+The complete rationale, local-review resolutions, consequences, and rejected
+alternatives are in
+[ADR-0039](../adr/0039-milestone-3-provider-and-export-seams.md).
+
+## Milestone 2 implementation decisions
+
+ADR-0038 records the implementation decisions made while the owner was away.
+The highest-value review points are:
+
+- **Usage schema now, provider behavior later (moderate):** the normative
+  Milestone 2 schema owns model-call and price tables, while the model-gateway
+  build sequence places real provider accounting in Milestone 3. The tables and
+  fake-attempt write path exist now; no real provider behavior was pulled
+  forward.
+- **Fixed PostgreSQL agent identity (cheap):** independent CLI and worker
+  compositions use one fixed UUID for the immutable built-in agent version.
+  The memory tier keeps injected identifiers.
+- **Text tenant and principal keys (expensive after deployment):** SQL follows
+  the current string domain and evaluation namespaces rather than one UUID-typed
+  pseudocode table.
+- **Additive read-model schema (moderate):** session-history items, trajectory
+  projection state, the pinned run seed sequence, final-message read model, and
+  exact tool result are persisted because the active gates require them and the
+  base schema is explicitly a minimum.
+- **Event-range checkpoint references (moderate):** portable conversation items
+  are projected from events through a pinned sequence rather than copied into
+  checkpoint JSON. This is what makes checkpoint deletion a tested recovery
+  path.
+- **Polling is the durable queue signal (cheap):** workers poll the committed
+  queue row at the configured interval. Notifications may reduce latency later,
+  but correctness does not depend on receiving one.
+- **One composed unit-of-work port (moderate):** application and runtime code
+  select transaction boundaries through a port that groups repository ports;
+  SQLAlchemy and row types remain confined to the persistence adapter.
+- **One injected checkpoint seeder (cheap):** creation and total-loss recovery
+  share the same event-prefix reconstruction callable, so the two required call
+  sites cannot drift.
+- **Projection failures remain hard errors (moderate):** a known event whose
+  current-schema payload is malformed blocks projection progress. Silently
+  skipping or quarantining it was rejected because the normative projection
+  and upcaster contracts require a surfaced error; an operator repair path can
+  be added only through an explicit later design.
+
+The complete rationale, consequences, and rejected alternatives are in
+[ADR-0038](../adr/0038-milestone-2-durable-runtime-seams.md).
+
 ## Process and environment
 
 ### The plan is committed but not pushed
@@ -6019,3 +6135,140 @@ the hand-off question should declare the enum in the same pass.
 adds only that answering it should produce a declaration.
 
 **Reversal cost:** none. Nothing was changed.
+
+## Milestone 1 implementation review
+
+### The in-memory tier stops at the five repositories the design names
+
+**Decided:** the running loop keeps its checkpoint materialized for one inline
+execution, records checkpoint and model-attempt evidence as events, and does not
+add checkpoint or model-call repositories before their Milestone 2 schema.
+Run state and event writes are sequential rather than cross-repository atomic in
+this tier.
+
+**Why:** bootstrap-and-composition.md names exactly five in-memory adapters and
+explicitly disclaims durability, recovery, and cross-repository transactions.
+Adding another store would make the demo look more durable while creating a
+persistence tier the plan never specifies.
+
+**Question for you:** confirm that event-backed attempt identity and an
+execution-lifetime checkpoint are the intended Milestone 1 interpretation.
+ADR-0037 records the exact boundary.
+
+**Reversal cost:** moderate before Milestone 2, expensive after its repository
+contracts and migration are committed.
+
+### The pre-policy pipeline permits only side-effect-free tools
+
+**Decided:** the authorization stage allows `SideEffectClass.NONE` and returns
+the fixed `policy.milestone1.non_pure` denial for every other classification.
+
+**Why:** the tool pipeline is Milestone 1 work and the policy engine is
+Milestone 4 work. Treating every registered tool as authorized would make the
+pipeline unsafe as soon as an effectful builtin appeared; implementing a small
+shadow policy engine would create behavior that Milestone 4 must later unwind.
+
+**Question for you:** confirm deny-by-default until the real policy port is
+wired.
+
+**Reversal cost:** cheap while the only Milestone 1 builtins are read-only.
+
+### Plan-shaped model fixtures translate into the canonical domain type
+
+**Decided:** the fixture loader accepts both the canonical `FakeModelScript`
+serialization and the evaluation-harness examples using
+`kind: tool_call | final | error`. The latter is translated at collection.
+
+**Why:** the prose says fixtures serialize `FakeModelScript`, but its worked
+YAML has a different, more concise shape than the domain declaration. Rejecting
+the worked form makes the documentation false; changing the domain type to the
+worked form weakens the provider-neutral model used by the runtime.
+
+**Question for you:** choose whether the concise YAML is a supported authoring
+format or whether the documentation should be rewritten to show canonical
+`ScriptedTurn` fields. The implementation currently supports both.
+
+**Reversal cost:** cheap; the eleven authored fixtures can be mechanically
+converted.
+
+### Eval loading is lazy and still uses the ordinary composition
+
+**Decided:** normal CLI startup does not import `agent_core.evals`. Invoking
+`agent eval run` loads the runner lazily; the runner asks the composition root
+for deterministic adapters and drives the same `RunService` as `agent run`.
+
+**Why:** the structural gate forbids production modules from reaching the eval
+package, while the harness requires the eval command to call normal application
+services and forbids a second loop. Lazy command loading satisfies both
+constraints without teaching the production composition about fixtures.
+
+**Question for you:** none unless you prefer a separate `agent-eval` executable,
+which would change the CLI spelling fixed by the plan.
+
+**Reversal cost:** cheap.
+
+### Cross-process reads remain unavailable until persistence exists
+
+**Decided:** `agent session create`, `agent run get`, and `agent run events`
+exist over application services, but the identifiers printed by one process are
+not visible to a later process in Milestone 1.
+
+**Why:** the CLI table schedules these commands for Milestone 1, while the
+in-memory tier explicitly loses all state on process exit. File or SQLite
+storage would be an undeclared persistence system and would undercut the
+PostgreSQL milestone.
+
+**Question for you:** confirm the command table means the service/command
+surface exists at Milestone 1, not that independent CLI invocations share state.
+
+**Reversal cost:** cheap before Milestone 2; that milestone resolves the
+limitation without changing the commands.
+
+## Milestone 5 implementation review
+
+### HTTP idempotency is database-scoped, not globally keyed
+
+**Decided:** changed the `idempotency_keys` primary key from the client string
+alone to `(tenant_id, principal_id, key)`.
+
+**Why:** the detailed API design requires two tenants using the same string not
+to collide and requires the concurrent insert to wait within that scope. A
+global primary key makes the first property impossible even when every query
+contains the tenant predicate. ADR-0041 records why the behavioral requirement
+and hard gate take precedence over the leftover table-key sentence.
+
+**Question for you:** confirm that the composite key is the intended correction
+to the detailed design's contradictory primary-key wording.
+
+**Reversal cost:** high after clients depend on cross-tenant key reuse; it would
+also weaken a tested isolation property.
+
+### Static token identity uses four explicit environment variables
+
+**Decided:** token mode requires `AUTH_TENANT_ID`, `AUTH_PRINCIPAL_ID`, and
+`AUTH_SCOPES`, and accepts optional `AUTH_ROLES`. Development mode retains its
+fixed local principal.
+
+**Why:** the design requires the matching token to bind one configured
+principal but does not name the environment variables. Defaulting token mode to
+the development identity and every platform scope would make a missing
+deployment setting silently over-privileged.
+
+**Question for you:** confirm these environment names before external operators
+script them.
+
+**Reversal cost:** cheap before the first token-mode deployment, moderate after.
+
+### The live stream buffer holds 256 notifications
+
+**Decided:** each SSE subscription has a 256-notification application buffer;
+overflow produces the specified unnumbered frame and closes the stream.
+
+**Why:** the design requires a finite bound and deliberately declines to make a
+number part of the public contract. This value is large enough to absorb short
+replay handoffs while remaining small and predictable per connection.
+
+**Question for you:** none unless deployment measurements justify making the
+bound configurable in a later milestone.
+
+**Reversal cost:** cheap; reconnect semantics do not depend on the number.

@@ -1,0 +1,28 @@
+schema_version: 1
+entries:
+  open-local-8b:
+    limits:
+      context_window_tokens: 32768
+      max_output_tokens: 4096
+    pricing:
+      input_per_mtok: "0"
+      cached_input_per_mtok: "0"
+      cache_write_per_mtok: null
+      output_per_mtok: "0"
+      reasoning_per_mtok: null
+      reasoning_priced_separately: false
+      source: model_catalog
+      effective_at: "2026-08-03T00:00:00Z"
+  deterministic:
+    limits:
+      context_window_tokens: 32768
+      max_output_tokens: 4096
+    pricing:
+      input_per_mtok: "0"
+      cached_input_per_mtok: "0"
+      cache_write_per_mtok: null
+      output_per_mtok: "0"
+      reasoning_per_mtok: null
+      reasoning_priced_separately: false
+      source: model_catalog
+      effective_at: "2026-07-31T00:00:00Z"

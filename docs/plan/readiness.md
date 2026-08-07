@@ -351,7 +351,7 @@ only at `engineering-plan.md:459`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:530` named `ApprovalService` as one of
+`bootstrap-and-composition.md:556` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -1228,7 +1228,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1462` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2450` against
-    `model-gateway.md:1765` and `milestone-map.md:910`. The map
+    `model-gateway.md:1778` and `milestone-map.md:910`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

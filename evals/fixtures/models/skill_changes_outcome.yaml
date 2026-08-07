@@ -1,0 +1,12 @@
+turns:
+  - kind: tool_call
+    tool_name: skill.load
+    arguments: {name: rel}
+    call_id: call_skill_load
+  - kind: final
+    context_contains: RELEASE_PROCEDURE_SENTINEL
+    text: READY_FOR_RELEASE
+    stop_reason: end_turn
+  - kind: error
+    error_class: permanent
+    message: The release procedure was unavailable.

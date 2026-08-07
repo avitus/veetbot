@@ -80,6 +80,10 @@ nav:
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
+  - Implementation:
+      - Architecture: architecture.md
+      - Events: events.md
+  - Security: security.md
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md
@@ -119,4 +123,15 @@ nav:
       - ADR-0032 Trajectory export, redaction, and consent: adr/0032-trajectory-export-redaction-and-consent.md
       - ADR-0033 Knowledge documents and passage retrieval: adr/0033-knowledge-documents.md
       - ADR-0034 Section 29 as an audited seam: adr/0034-multi-device-and-surfaces-seam.md
+      - ADR-0035 CircleCI hosted CI: adr/0035-circleci-hosted-ci.md
+      - ADR-0036 The executable configuration inventory: adr/0036-configuration-default-inventory.md
+      - ADR-0037 Milestone 1 in-memory seams: adr/0037-milestone-1-in-memory-seams.md
+      - ADR-0038 Milestone 2 durable runtime seams: adr/0038-milestone-2-durable-runtime-seams.md
+      - ADR-0039 Milestone 3 provider and export seams: adr/0039-milestone-3-provider-and-export-seams.md
+      - ADR-0040 Milestone 4 policy, approval, and workspace seams: adr/0040-milestone-4-policy-and-tool-seams.md
+      - ADR-0041 Milestone 5 API, identity, and streaming seams: adr/0041-milestone-5-api-and-streaming-seams.md
+      - ADR-0042 Milestone 6 sandbox, bridge, and artifact seams: adr/0042-milestone-6-sandbox-and-artifact-seams.md
+      - ADR-0043 Milestone 7 context-engine seams: adr/0043-milestone-7-context-engine-seams.md
+      - ADR-0044 Milestone 8 skill and MCP seams: adr/0044-milestone-8-skills-and-mcp-seams.md
+      - ADR-0045 Milestone 9 memory and knowledge seams: adr/0045-milestone-9-memory-and-knowledge-seams.md
   - Changelog: changelog.md
