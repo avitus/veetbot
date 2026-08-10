@@ -14,6 +14,9 @@ title: Changelog
   listeners and containers, reuse Docker and the active reverse proxy, choose a
   free loopback PostgreSQL port, preserve Docker daemon configuration, and
   verify existing applications after the `runsc` registration restart.
+- Corrected the production environment's initial scope grant to contain only
+  names from the executable closed platform vocabulary and added a regression
+  assertion over the template.
 
 ## 2026-08-07 — DigitalOcean production deployment assets
 

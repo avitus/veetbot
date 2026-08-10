@@ -19,6 +19,7 @@ from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import PersistedStreamFrame
+from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.conftest import NETWORK_MODE, _integration_endpoints
 from tests.contract.support import run
 
@@ -100,6 +101,12 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "REQUIRED_RANDOM_TOKEN" in environment
     assert "POSTGRES_PORT=REQUIRED_FREE_LOOPBACK_PORT" in environment
     assert environment.count("REQUIRED_FREE_LOOPBACK_PORT") == 2
+    configured_scopes = next(
+        line.removeprefix("AUTH_SCOPES=").split(",")
+        for line in environment.splitlines()
+        if line.startswith("AUTH_SCOPES=")
+    )
+    assert set(configured_scopes) <= PLATFORM_SCOPES
 
     production_compose = yaml.safe_load(
         (deploy / "docker-compose.production.yml").read_text(encoding="utf-8")
