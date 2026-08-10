@@ -101,6 +101,7 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "REQUIRED_RANDOM_TOKEN" in environment
     assert "POSTGRES_PORT=REQUIRED_FREE_LOOPBACK_PORT" in environment
     assert environment.count("REQUIRED_FREE_LOOPBACK_PORT") == 2
+    assert "PGSSLMODE=disable" in environment
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
         for line in environment.splitlines()

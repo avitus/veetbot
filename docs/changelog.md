@@ -17,6 +17,8 @@ title: Changelog
 - Corrected the production environment's initial scope grant to contain only
   names from the executable closed platform vocabulary and added a regression
   assertion over the template.
+- Disabled PostgreSQL TLS for the loopback-only production connection so
+  asyncpg does not probe a service account home hidden by systemd hardening.
 
 ## 2026-08-07 — DigitalOcean production deployment assets
 
