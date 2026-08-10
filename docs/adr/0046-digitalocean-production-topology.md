@@ -40,6 +40,11 @@ The initial production topology is host-native:
    that those controls lack value.
 8. Repository assets prove only their own presence and static correctness. Host
    and smoke-test checklist items require output from the actual deployment.
+9. On a shared Droplet, existing Docker and reverse-proxy installations are
+   reused. The operator inventories listeners and containers before changes,
+   chooses a free loopback PostgreSQL port, appends rather than replaces proxy
+   configuration, and verifies other containers after the Docker restart needed
+   to register `runsc`.
 
 ## Consequences
 

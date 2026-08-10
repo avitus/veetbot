@@ -33,15 +33,65 @@ the bearer token over plaintext HTTP.
 
 ## Minimum launch checklist
 
+### Inventory the shared Droplet first
+
+Do not reinstall or replace shared services blindly. Record the current state:
+
+```bash
+sudo ss -ltnp
+sudo systemctl --type=service --state=running
+sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}'
+docker --version || true
+docker compose version || true
+caddy version || true
+nginx -v || true
+python3.12 --version || true
+git --version || true
+uv --version || true
+df -h
+free -h
+```
+
+- [ ] Port 8000 is unused. Veetbot currently cannot select a different API
+  port; an existing listener there must move before launch.
+- [ ] Select an unused loopback port for Veetbot PostgreSQL. Put that same port
+  in both `POSTGRES_PORT` and `DATABASE_URL` in the production environment.
+- [ ] Confirm the Droplet has enough free memory and disk for another PostgreSQL
+  instance and concurrent sandbox containers.
+- [ ] Record existing Docker containers so they can be checked after gVisor's
+  required Docker restart.
+
 ### DigitalOcean
 
 - [ ] Point a domain or subdomain at the Droplet's public IP.
 - [ ] Confirm inbound TCP ports 22, 80, and 443 are reachable. No DigitalOcean
   Cloud Firewall is required by this runbook.
 
-### Install the host
+### Install only what is missing
 
-- [ ] Install Python 3.12, `uv`, Git, Docker Engine, Caddy, and stable `runsc`.
+- [ ] Install Python 3.12, `uv`, and Git only if their version checks above fail.
+- [ ] If Docker Engine and the Compose plugin already work, reuse them. Do not
+  remove `containerd`, `runc`, Docker packages, images, volumes, or networks used
+  by the other applications.
+- [ ] Install stable `runsc`. Before running `runsc install`, preserve any
+  existing Docker daemon configuration and schedule a short maintenance window:
+
+  ```bash
+  if sudo test -f /etc/docker/daemon.json; then
+    sudo cp -a /etc/docker/daemon.json /etc/docker/daemon.json.before-runsc
+  fi
+  sudo runsc install
+  sudo systemctl restart docker
+  sudo docker info --format '{{json .Runtimes}}'
+  sudo docker ps
+  ```
+
+  Confirm `runsc` appears in the runtime inventory and every pre-existing
+  container/application returned after the restart.
+
+- [ ] Reuse the reverse proxy already owning ports 80 and 443. Install Caddy
+  only if neither Caddy, Nginx, Apache, nor another proxy currently owns those
+  ports.
 - [ ] Create the service account and directories:
 
   ```bash
@@ -110,14 +160,19 @@ the bearer token over plaintext HTTP.
   sudo systemctl enable --now veetbot-maintenance veetbot-worker veetbot-api
   ```
 
-- [ ] Replace `agent.example.com` in `deploy/Caddyfile.example`, install it,
-  and reload Caddy:
+- [ ] Add the Veetbot hostname to the existing reverse proxy. If the Droplet
+  already uses Caddy, append the site block from `deploy/Caddyfile.example` to
+  the existing `/etc/caddy/Caddyfile`; do not overwrite the file. Then validate
+  and reload it:
 
   ```bash
-  sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
   sudo caddy validate --config /etc/caddy/Caddyfile
   sudo systemctl reload caddy
   ```
+
+  If another reverse proxy owns ports 80 and 443, configure the equivalent
+  hostname route to `127.0.0.1:8000`, disable response buffering for SSE, and
+  leave every existing virtual host unchanged.
 
 ### Confirm launch
 

@@ -10,6 +10,10 @@ title: Changelog
   load balancer, cloud-firewall requirement, monitoring requirement, backup
   requirement, or high-availability layer; the runbook records the accepted
   exposure and data-loss risks explicitly.
+- Made the runbook safe to apply on a shared Droplet: inventory existing
+  listeners and containers, reuse Docker and the active reverse proxy, choose a
+  free loopback PostgreSQL port, preserve Docker daemon configuration, and
+  verify existing applications after the `runsc` registration restart.
 
 ## 2026-08-07 — DigitalOcean production deployment assets
 

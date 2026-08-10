@@ -98,6 +98,8 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "SANDBOX_MECHANISM=gvisor" in environment
     assert "AGENT_ARTIFACT_ROOT=/var/lib/veetbot/artifacts" in environment
     assert "REQUIRED_RANDOM_TOKEN" in environment
+    assert "POSTGRES_PORT=REQUIRED_FREE_LOOPBACK_PORT" in environment
+    assert environment.count("REQUIRED_FREE_LOOPBACK_PORT") == 2
 
     production_compose = yaml.safe_load(
         (deploy / "docker-compose.production.yml").read_text(encoding="utf-8")
