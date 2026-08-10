@@ -4,6 +4,13 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-10 — Minimal single-Droplet launch path
+
+- Simplified the initial topology to one Droplet with local PostgreSQL and no
+  load balancer, cloud-firewall requirement, monitoring requirement, backup
+  requirement, or high-availability layer; the runbook records the accepted
+  exposure and data-loss risks explicitly.
+
 ## 2026-08-07 — DigitalOcean production deployment assets
 
 - Added the first production topology decision and operator runbook for a

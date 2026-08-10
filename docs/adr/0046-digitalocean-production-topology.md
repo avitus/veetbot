@@ -27,23 +27,27 @@ The initial production topology is host-native:
    the worker joins the `docker` group.
 3. Generated code runs in the existing sandbox image through Docker's `runsc`
    runtime. Ordinary Docker and the fake adapter remain forbidden in production.
-4. Caddy terminates TLS and proxies only to loopback port 8000 with immediate SSE
-   flushing. Port 8000 and PostgreSQL are never public.
-5. DigitalOcean Managed PostgreSQL 16 is preferred and restricted by trusted
-   sources. Migrations remain an explicit pre-start release step.
+4. Caddy terminates TLS directly on the Droplet and proxies to port 8000 with
+   immediate SSE flushing. There is no load balancer.
+5. PostgreSQL 16 runs from the repository's Compose file on the same Droplet and
+   binds to loopback. Migrations remain an explicit pre-start release step.
 6. Artifact bytes use a protected persistent host directory for the single-node
    deployment. Moving artifacts to shared object storage is required before
    horizontally scaling the API or workers.
-7. Repository assets prove only their own presence and static correctness.
-   Account, host, network, restore, and smoke-test checklist items require output
-   from the actual deployment before they may be checked.
+7. The initial launch does not require a DigitalOcean Cloud Firewall, VPC,
+   monitoring, alerts, backups, or a restore rehearsal. This is explicit human
+   acceptance of the security, durability, and operational risk, not a claim
+   that those controls lack value.
+8. Repository assets prove only their own presence and static correctness. Host
+   and smoke-test checklist items require output from the actual deployment.
 
 ## Consequences
 
-- The first deployment has one application-node failure domain; Droplet backups
-  and a tested reconstruction procedure are required.
-- Managed PostgreSQL separates durable database failure from the application
-  host, but the filesystem artifact store still prevents safe horizontal scale.
+- The application, database, and artifact store share one failure domain. Loss
+  of the Droplet may cause total and unrecoverable data loss.
+- No firewall requirement means unnecessary services accidentally bound to a
+  public interface may be reachable from the internet.
+- The filesystem artifact store and local database prevent horizontal scale.
 - Docker-group membership is root-equivalent host authority. It is confined to
   the worker account/process and must not be granted to the API or maintenance
   service.

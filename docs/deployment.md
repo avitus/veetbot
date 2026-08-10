@@ -2,117 +2,146 @@
 title: Production Deployment
 ---
 
-# Production deployment on a DigitalOcean Droplet
+# Minimal DigitalOcean launch
 
-This runbook deploys one release to an Ubuntu Droplet, uses DigitalOcean
-Managed PostgreSQL, runs the API, durable worker, and maintenance worker under
-systemd, terminates TLS with Caddy, and executes generated code with gVisor.
-ADR-0046 records why this is the first supported production topology.
+This is the shortest supported path to launch Veetbot on one Ubuntu Droplet.
+The Droplet runs PostgreSQL, the API, the durable worker, the maintenance worker,
+Caddy, Docker, and gVisor. There is no load balancer, managed database, cloud
+firewall requirement, monitoring requirement, backup requirement, or
+high-availability layer in this initial topology.
 
-The repository does not deploy itself and startup never runs migrations. An
-operator promotes an immutable commit, runs the migration, validates the host,
-and then restarts the three processes.
+Token authentication and gVisor remain mandatory because production startup
+refuses development authentication and ordinary Docker/fake sandboxes. Caddy
+provides the normal HTTPS endpoint. Without a firewall the API's direct port
+8000 is also publicly reachable; clients must not use it because doing so sends
+the bearer token over plaintext HTTP.
 
-## Evidence checklist
+## What is already done
 
-Checked entries are satisfied by versioned repository assets. Host and account
-entries stay unchecked until an operator records their output for the actual
-Droplet.
+- [x] Locked application dependencies.
+- [x] Production environment template.
+- [x] Single-node PostgreSQL restart overlay.
+- [x] API, worker, and maintenance systemd units.
+- [x] Caddy HTTPS/SSE proxy template.
+- [x] Production preflight command and `make production-check` target.
+- [x] gVisor is wired into the production composition.
+- [x] `make check` passes: formatting, linting, strict typing, 313 static tests,
+  134 contract tests, and documentation validation.
+- [x] All 533 non-live tests pass against PostgreSQL 16.
+- [x] All 10 Docker sandbox security tests pass locally. The Droplet must still
+  prove the same image runs with gVisor.
 
-### Release assets
+## Minimum launch checklist
 
-- [x] Locked Python dependency graph (`uv.lock`).
-- [x] Production environment template (`deploy/veetbot.env.example`).
-- [x] Separate API, worker, and maintenance systemd units (`deploy/systemd/`).
-- [x] HTTPS and SSE-aware Caddy template (`deploy/Caddyfile.example`).
-- [x] Production preflight command (`scripts/check_production_deployment.py`).
-- [x] Explicit `make production-check` operator target.
-- [x] gVisor-backed sandbox selection is wired through the composition root.
-- [x] Database migrations are separate from process startup.
-- [x] `make check` passes on the deployment branch (formatting, linting, strict
-  typing, 311 static tests, 134 contract tests, and documentation validation).
-- [x] `make test` passes against PostgreSQL 16 (533 non-live tests).
-- [x] `make test-sandbox` passes with the real Docker adapter (10 sandbox
-  security tests). The target Droplet must repeat these with gVisor.
-- [ ] Tag the exact reviewed commit selected for production.
-- [ ] Run the selected live-provider smoke test against the release.
+### DigitalOcean
 
-### DigitalOcean account and network
+- [ ] Point a domain or subdomain at the Droplet's public IP.
+- [ ] Confirm inbound TCP ports 22, 80, and 443 are reachable. No DigitalOcean
+  Cloud Firewall is required by this runbook.
 
-- [ ] Attach a Cloud Firewall: SSH only from administrator CIDRs; HTTP and HTTPS
-  from intended clients; never expose 5432 or 8000.
-- [ ] Enable VPC networking, Droplet backups, and the metrics agent.
-- [ ] Create CPU, load, memory, and disk alerts with an attended destination.
-- [ ] Create the DNS A/AAAA record for the production hostname.
-- [ ] Provision PostgreSQL 16 with automated backups and restrict its trusted
-  sources to the application Droplet or VPC.
-- [ ] Restore a database backup into a separate target and record the result.
+### Install the host
 
-### Host bootstrap
+- [ ] Install Python 3.12, `uv`, Git, Docker Engine, Caddy, and stable `runsc`.
+- [ ] Create the service account and directories:
 
-- [ ] Create a non-root `veetbot` service account and use key-only SSH.
-- [ ] Install Python 3.12, `uv`, Docker Engine, Caddy, and the stable `runsc`
-  package; enable unattended security updates.
-- [ ] Verify `docker run --rm --runtime=runsc hello-world`.
-- [ ] Create `/opt/veetbot/releases`, `/etc/veetbot`, and
-  `/var/lib/veetbot/artifacts`; make the last two accessible only to the
-  service account as appropriate.
-- [ ] Install the release at `/opt/veetbot/releases/<commit>` and atomically
-  point `/opt/veetbot/current` to it.
-- [ ] Run `uv sync --frozen` and build the production sandbox image:
-  `docker build -f execution/sandbox.Dockerfile -t agent-core-sandbox:production .`.
+  ```bash
+  sudo useradd --system --create-home --shell /usr/sbin/nologin veetbot
+  sudo usermod -aG docker veetbot
+  sudo mkdir -p /opt/veetbot/releases /etc/veetbot /var/lib/veetbot/artifacts
+  sudo chown -R veetbot:veetbot /opt/veetbot /var/lib/veetbot
+  sudo chmod 0700 /var/lib/veetbot/artifacts
+  ```
 
-### Configuration and start
+- [ ] Verify gVisor:
 
-- [ ] Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`, replace
-  every `REQUIRED_` value, set only necessary provider credentials, and set
-  mode `0600`.
-- [ ] Use a `postgresql+asyncpg://` database URL with TLS and verify the managed
-  database's certificate policy from the Droplet.
-- [ ] Run `uv run alembic upgrade head` as a distinct release step.
-- [ ] From the release directory, load the production environment and run
-  `uv run python scripts/check_production_deployment.py`.
-- [ ] Install the three units from `deploy/systemd/`, run `systemctl daemon-reload`,
-  enable them, and start maintenance, worker, then API.
-- [ ] Replace the hostname in `deploy/Caddyfile.example`, install it as
-  `/etc/caddy/Caddyfile`, validate it, and reload Caddy.
+  ```bash
+  docker run --rm --runtime=runsc hello-world
+  ```
 
-### Acceptance and recovery
+### Install Veetbot
 
-- [ ] `/health/live` and `/health/ready` return 200 through HTTPS.
-- [ ] Port 8000 is unreachable from the public internet.
-- [ ] An unauthenticated protected request is rejected and an authenticated run
-  completes through the separate worker.
-- [ ] SSE delivers events without proxy buffering.
-- [ ] Approval, cancellation, worker restart/resume, artifact authorization,
-  memory, and knowledge smoke tests pass with production identity.
-- [ ] A real generated-code call runs under `runsc`; the sandbox security suite
-  passes on the Droplet.
-- [ ] Logs contain no bearer token, provider key, prompt body, reasoning, or raw
-  tool result.
-- [ ] Stop and restore procedures have been rehearsed, including application
-  rollback and database restoration. Alembic downgrade is not the production
-  database rollback mechanism.
+- [ ] Clone this branch or the release tag into
+  `/opt/veetbot/releases/<commit>`, then create the active symlink:
 
-## Release sequence
+  ```bash
+  sudo ln -sfn "/opt/veetbot/releases/<commit>" /opt/veetbot/current
+  cd /opt/veetbot/current
+  uv sync --frozen
+  docker build -f execution/sandbox.Dockerfile \
+    -t agent-core-sandbox:production .
+  ```
 
-Run these from the immutable release directory after loading the protected
-environment file:
+- [ ] Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`. Replace
+  every `REQUIRED_` value, add the one model-provider key you will use, and
+  protect the file:
 
-```bash
-: "${PRODUCTION_HOSTNAME:?set PRODUCTION_HOSTNAME}"
-uv sync --frozen
-docker build -f execution/sandbox.Dockerfile -t agent-core-sandbox:production .
-uv run alembic upgrade head
-uv run python scripts/check_production_deployment.py
-sudo systemctl restart veetbot-maintenance veetbot-worker veetbot-api
-curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
-  --retry 12 --retry-delay 5 --retry-all-errors \
-  "https://${PRODUCTION_HOSTNAME}/health/live"
-curl --fail --silent --show-error --connect-timeout 5 --max-time 10 \
-  --retry 12 --retry-delay 5 --retry-all-errors \
-  "https://${PRODUCTION_HOSTNAME}/health/ready"
-```
+  ```bash
+  sudo chown root:veetbot /etc/veetbot/veetbot.env
+  sudo chmod 0640 /etc/veetbot/veetbot.env
+  ```
 
-Do not expose the service if the preflight command, readiness probe, sandbox
-runtime test, or restore rehearsal has not passed.
+### Start PostgreSQL and migrate
+
+- [ ] Start the repository's PostgreSQL 16 container using the protected
+  production environment. It binds only to loopback:
+
+  ```bash
+  cd /opt/veetbot/current
+  sudo docker compose --env-file /etc/veetbot/veetbot.env \
+    -f docker-compose.yml -f deploy/docker-compose.production.yml \
+    up -d postgres
+  sudo -u veetbot sh -c '
+    cd /opt/veetbot/current
+    set -a
+    . /etc/veetbot/veetbot.env
+    set +a
+    .venv/bin/alembic upgrade head
+    .venv/bin/python scripts/check_production_deployment.py
+  '
+  ```
+
+### Start the application
+
+- [ ] Install and start the three systemd units:
+
+  ```bash
+  sudo cp deploy/systemd/*.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now veetbot-maintenance veetbot-worker veetbot-api
+  ```
+
+- [ ] Replace `agent.example.com` in `deploy/Caddyfile.example`, install it,
+  and reload Caddy:
+
+  ```bash
+  sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
+  sudo caddy validate --config /etc/caddy/Caddyfile
+  sudo systemctl reload caddy
+  ```
+
+### Confirm launch
+
+- [ ] Both health probes return 200 through the public hostname:
+
+  ```bash
+  : "${PRODUCTION_HOSTNAME:?set PRODUCTION_HOSTNAME}"
+  curl --fail --show-error --connect-timeout 5 --max-time 10 \
+    "https://${PRODUCTION_HOSTNAME}/health/live"
+  curl --fail --show-error --connect-timeout 5 --max-time 10 \
+    "https://${PRODUCTION_HOSTNAME}/health/ready"
+  ```
+
+- [ ] An authenticated API request succeeds.
+- [ ] Submit one run and confirm the worker completes it.
+- [ ] Submit one generated-code task and confirm it executes with `runsc`.
+- [ ] Reboot the Droplet once and confirm PostgreSQL and all four services return.
+
+## Explicitly deferred launch protections
+
+This minimal release accepts a single-server failure domain and possible total
+data loss. Cloud firewalling, restricted SSH source ranges, off-host database,
+backups, restore rehearsal, monitoring, alerts, load balancing, rolling deploys,
+and high availability are deferred. Direct public access to port 8000 can expose
+the bearer token over plaintext HTTP, and any other accidentally listening
+service may also be reachable. Add network filtering before the deployment
+handles data or availability that cannot be recreated.

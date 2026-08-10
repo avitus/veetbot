@@ -99,6 +99,11 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "AGENT_ARTIFACT_ROOT=/var/lib/veetbot/artifacts" in environment
     assert "REQUIRED_RANDOM_TOKEN" in environment
 
+    production_compose = yaml.safe_load(
+        (deploy / "docker-compose.production.yml").read_text(encoding="utf-8")
+    )
+    assert production_compose == {"services": {"postgres": {"restart": "unless-stopped"}}}
+
     units = deploy / "systemd"
     api = (units / "veetbot-api.service").read_text(encoding="utf-8")
     worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
