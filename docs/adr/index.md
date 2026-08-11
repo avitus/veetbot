@@ -55,3 +55,5 @@ implementation without one.
 - [ADR-0044 — Milestone 8 skill and MCP seams (Proposed)](0044-milestone-8-skills-and-mcp-seams.md)
 - [ADR-0045 — Milestone 9 memory and knowledge seams (Proposed)](0045-milestone-9-memory-and-knowledge-seams.md)
 - [ADR-0046 — Host-native DigitalOcean production topology (Proposed)](0046-digitalocean-production-topology.md)
+- [ADR-0047 — Dependency-free downloadable thin client (Proposed)](0047-downloadable-thin-client.md)
+- [ADR-0048 — Atomic CircleCI production delivery (Proposed)](0048-atomic-circleci-production-delivery.md)

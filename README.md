@@ -69,7 +69,7 @@ make check
 ```
 
 It runs formatting validation, linting, strict type checking, the static and
-contract partitions, citation validation, the 172-entry gate-registry
+contract partitions, isolated deployment-script tests, citation validation, the 172-entry gate-registry
 reconciliation, and strict documentation builds. It requires neither a database
 nor a provider credential.
 
@@ -83,7 +83,8 @@ Additional targets are explicit about their requirements:
 | `make test-contract` | Run shared port contracts against in-memory/fake adapters |
 | `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
 | `make test-live` | Explicitly enable credentialed provider tests |
-| `make production-check` | Validate production config, gVisor, sandbox image, storage, and migration head |
+| `make test-deploy` | Exercise release and Nginx installers against isolated command stubs |
+| `make production-check` | Validate release identity, model credential, gVisor, sandbox image, storage, and migration head |
 | `make docs` | Build the MkDocs site and standalone HTML publication |
 | `make docs-check` | Validate citations, registry structure, and strict docs output |
 
@@ -135,9 +136,37 @@ process supervisor to start that role.
 
 Hosted checks use [CircleCI](https://circleci.com/) via
 `.circleci/config.yml`. Connect the repository as a CircleCI project for the
-static, contract, and integration workflow. Create a restricted context named
+static, contract, integration, and sandbox workflow. A successful `main`
+pipeline packages the tested commit and deploys it to `api.veetbot.com`; the
+versioned proxy site is reconciled after the application release. Create a
+restricted context named
 `live-model` for provider credentials; nightly runs and manually triggered
 pipelines with `run_live: true` are the only workflows that use it.
+
+## Downloadable API client
+
+Build the dependency-free terminal client with:
+
+```bash
+make client-build
+```
+
+The resulting `build/veetbot-client.pyz` needs Python 3.12 or newer but does
+not need the server package or its dependencies. It defaults to the loopback
+API; the API and worker must be started separately as described in
+[Run the durable agent](#run-the-durable-agent) and the [client guide](docs/client.md).
+For a deployment, export the URL and let the client request the bearer token
+through its interactive no-echo prompt:
+
+```bash
+export VEETBOT_API_URL=https://agent.example.com
+python build/veetbot-client.pyz
+```
+
+The client creates or resumes sessions, submits idempotently, reconnects and
+replays SSE, handles approvals and user questions, and reconciles transient
+output against the durable final message. See the
+[client guide](docs/client.md) for its commands and security boundary.
 
 ## Configuration
 
@@ -186,14 +215,14 @@ here so availability is not confused with implementation:
 | Run optional live-provider tests | Milestone 3 (implemented) |
 | Inspect normalized model usage and bounded provider metadata in persistence | Milestone 3 (implemented) |
 | Export a consent-gated redacted trajectory | Milestone 3 (implemented) |
-| Resolve an approval through the CLI | Milestone 4 |
-| Start the HTTP API | Milestone 5 |
+| Resolve an approval through the CLI | Milestone 4 (implemented) |
+| Start the HTTP API | Milestone 5 (implemented) |
 | Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
 
 `agent run`, `agent run export`, `agent session create`, `agent session
-export-consent`, `agent worker`, and `agent eval run` are available now. Do not
-invoke `agent api` or `agent chat`; their owning milestones have not been
-implemented.
+export-consent`, `agent worker`, `agent api`, and `agent eval run` are available
+now. The separately downloadable client provides interactive remote chat;
+`agent chat` itself remains unavailable.
 
 ## Documentation and governance
 
@@ -212,6 +241,6 @@ Security boundaries and the controls established so far are documented in
 [docs/security.md](docs/security.md).
 
 Production operators should follow the evidence-based
-[DigitalOcean deployment runbook](docs/deployment.md). It includes the checked-in
-systemd, Caddy, production environment, gVisor, and preflight assets and leaves
-server-specific steps unchecked until they are verified on the target host.
+[DigitalOcean deployment runbook](docs/deployment.md). It covers the checked-in
+atomic release script, systemd, Nginx, production environment, gVisor,
+CircleCI context, rollback procedure, and remaining host bootstrap work.

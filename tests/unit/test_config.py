@@ -40,6 +40,17 @@ def test_loads_frozen_settings() -> None:
         settings.auth_mode = AuthMode.TOKEN  # type: ignore[misc]
     assert settings.trajectory_export_enabled is False
     assert settings.artifact_root == Path(".agent/artifacts")
+    assert settings.release_id is None
+
+
+def test_release_identity_is_validated() -> None:
+    settings = load_settings(
+        {**base_environment(), "VEETBOT_RELEASE_ID": "20260810-152233-abcdef0"}
+    )
+    assert settings.release_id == "20260810-152233-abcdef0"
+
+    with pytest.raises(ConfigurationError, match="VEETBOT_RELEASE_ID"):
+        load_settings({**base_environment(), "VEETBOT_RELEASE_ID": "main-latest"})
 
 
 def test_trajectory_export_requires_explicit_operator_enablement() -> None:

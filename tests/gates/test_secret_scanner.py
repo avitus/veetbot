@@ -41,6 +41,34 @@ def test_scanner_reports_rule_without_echoing_secret_and_requires_reason(tmp_pat
     assert any("requires a prose reason" in error for error in errors)
 
 
+def test_scanner_covers_downloadable_client_sources(tmp_path: Path) -> None:
+    subprocess.run([_git_executable(), "init", "-q"], cwd=tmp_path, check=True)
+    source = tmp_path / "client" / "veetbot_client" / "leak.py"
+    source.parent.mkdir(parents=True)
+    synthetic_value = "sk-" + ("x" * 24)
+    source.write_text(f"consume('{synthetic_value}')\n", encoding="utf-8")
+
+    findings, errors = secret_findings(tmp_path)
+
+    assert errors == []
+    assert [finding.render() for finding in findings] == [
+        "client/veetbot_client/leak.py:1: provider_key"
+    ]
+
+
+def test_scanner_covers_deployment_sources(tmp_path: Path) -> None:
+    subprocess.run([_git_executable(), "init", "-q"], cwd=tmp_path, check=True)
+    source = tmp_path / "deploy" / "app" / "leak.env"
+    source.parent.mkdir(parents=True)
+    synthetic_value = "sk-" + ("x" * 24)
+    source.write_text(f"PROVIDER_KEY={synthetic_value}\n", encoding="utf-8")
+
+    findings, errors = secret_findings(tmp_path)
+
+    assert errors == []
+    assert [finding.render() for finding in findings] == ["deploy/app/leak.env:1: provider_key"]
+
+
 def test_secret_allowlist_suppresses_exact_match_and_reports_stale_entry(tmp_path: Path) -> None:
     subprocess.run([_git_executable(), "init", "-q"], cwd=tmp_path, check=True)
     source = tmp_path / "src" / "leak.py"

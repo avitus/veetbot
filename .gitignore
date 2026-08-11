@@ -1,6 +1,7 @@
 # Generated documentation outputs (canonical sources are Markdown/YAML).
 /site/
 /dist/
+/build/
 
 # Python
 __pycache__/

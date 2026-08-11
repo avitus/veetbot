@@ -4,6 +4,40 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-10 — Atomic production delivery
+
+- Adapted Mankunku's timestamped immutable-release, deployment-lock, exact
+  public revision check, bounded retention, and safe Nginx reload patterns to
+  Veetbot's `uv`, Alembic, systemd, PostgreSQL, and gVisor topology.
+- Added post-gate CircleCI packaging and `main` deployment jobs while preserving
+  the existing verification partitions and single configuration file.
+- Added `X-Veetbot-Release` to both health responses, production checks for the
+  release identity and default provider credential, and isolated shell tests for
+  application and proxy deployments.
+- Expanded committed-secret scanning to the deployment and CI surfaces and
+  proposed ADR-0048 for the privileged delivery boundary.
+- Bound the production API to loopback behind Nginx, required a dedicated
+  Veetbot deploy key, serialized proxy changes with application releases, and
+  refused stale concurrent-pipeline promotions.
+- Stripped terminal control sequences from remote client output and kept
+  interactive session commands recoverable after API failures.
+
+## 2026-08-10 — Downloadable API client
+
+- Added a dependency-free terminal client that creates and resumes sessions,
+  submits messages idempotently, reconnects SSE from the last persisted event,
+  reconciles durable final messages, and handles approvals and user questions.
+- Added an executable zipapp build and published the artifact from
+  the existing CircleCI static job.
+- Refused remote bearer tokens over plain HTTP, disabled redirects, retained
+  default TLS verification, and kept tokens memory-only.
+- Proposed ADR-0047 for the separate transport-only client and documented the
+  initial terminal scope and deferred GUI, native-binary, and credential-store
+  decisions.
+- Corrected the production composition default from the deterministic fake
+  policy to the declared `balanced` provider policy; development and tests keep
+  the fake default, and explicit policy selections remain authoritative.
+
 ## 2026-08-10 — Minimal single-Droplet launch path
 
 - Simplified the initial topology to one Droplet with local PostgreSQL and no

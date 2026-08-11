@@ -93,3 +93,27 @@ Milestone 3 hardens the real provider and export boundaries:
 
 Later controls remain requirements of their owning milestones and are not
 claimed as implemented here.
+
+## Production delivery controls
+
+The production delivery path is privileged supply-chain code. CircleCI packages
+the exact tested commit with `git archive`, records a SHA-256 checksum, and
+connects only with a Veetbot-specific project deploy key and a context-provided
+pinned host-key record. The production API binds to loopback so the Nginx TLS
+site is its only public HTTP entry point. The server serializes releases with
+`flock`, keeps dependencies and the sandbox image revision-specific until
+promotion, and requires the health probe to report the same release identity
+locally and through the public TLS endpoint.
+
+The committed-file secret scanner covers `.circleci/`, `deploy/`, `nginx/`, and
+`scripts/` in addition to application, client, test, migration, evaluation, and
+documentation sources. Production bearer tokens, provider keys, and database
+credentials remain in the protected server environment and are never passed
+through the CircleCI deployment context or the downloadable client artifact.
+The terminal client strips C0/C1 and ANSI/OSC control sequences from remote text
+before it writes output or displays an API-provided prompt.
+
+Nginx changes are backed up and must pass `nginx -t` before reload. Application
+promotion does not automatically roll back after a migration: reverting code
+across a potentially incompatible schema is an operator decision, not a safe
+automated response to a failed health check.

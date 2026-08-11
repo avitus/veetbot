@@ -1,8 +1,8 @@
 PYTHON ?= python
 
-.PHONY: install format lint typecheck test check db-up migrate \
+.PHONY: install format lint typecheck test check db-up migrate client-build \
 	test-static test-contract test-fast test-integration test-live \
-	test-sandbox sandbox-image \
+	test-sandbox test-deploy sandbox-image \
 	production-check \
 	docs docs-serve docs-check citations-fix
 
@@ -18,7 +18,10 @@ lint:
 	uv run ruff check .
 
 typecheck:
-	uv run mypy src tests
+	uv run mypy src client tests scripts/build_client.py
+
+client-build:
+	uv run $(PYTHON) scripts/build_client.py
 
 test:
 	uv run pytest -m "not live"
@@ -46,6 +49,10 @@ test-live:
 	@RUN_LIVE_MODEL_TESTS=1 uv run pytest -m live; \
 	status=$$?; test $$status -eq 0 -o $$status -eq 5
 
+test-deploy:
+	deploy/app/release.test.sh
+	deploy/nginx/deploy.test.sh
+
 production-check:
 	uv run python scripts/check_production_deployment.py
 
@@ -61,7 +68,7 @@ docs-check:
 citations-fix:
 	uv run $(PYTHON) scripts/check_citations.py --update
 
-check: lint typecheck test-fast docs-check
+check: lint typecheck test-fast test-deploy docs-check
 
 db-up:
 	docker compose up -d postgres

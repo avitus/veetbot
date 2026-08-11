@@ -275,15 +275,18 @@ now would be a service nobody starts and nobody maintains.
 
 ## The CI workflow
 
-One file, `.circleci/config.yml`, using CircleCI configuration version 2.1 and
-four jobs matching
-[evaluation-harness.md](evaluation-harness.md) exactly.
+One file, `.circleci/config.yml`, using CircleCI configuration version 2.1.
+The original four verification jobs match
+[evaluation-harness.md](evaluation-harness.md) exactly; the real-runtime
+sandbox lane and the post-gate production delivery jobs extend that file without
+changing the meaning of the original partitions or `make check`. ADR-0048 owns
+the delivery mechanics.
 
 ```text
 job           target invoked         needs     runs on
 ------------  ---------------------  --------  ----------------
 1 static      make lint typecheck    nothing   every push, PR
-              test-static docs
+              test-static test-deploy docs
 2 contract    make test-contract     nothing   every push, PR
 3 integration make test-integration  postgres  every push, PR
 4 live        make test-live         secrets   schedule, manual
@@ -323,7 +326,7 @@ Three workflow-level facts complete the definition:
     committed, so a cache miss is a dependency change and never a
     coincidence.
 
-A fifth job is not added for the documentation build. `make docs`
+No standalone job is added for the documentation build. `make docs`
 exists and `mkdocs build --strict` runs inside job 1, because the docs
 check the gate registry requires is a static check with no database
 and no fixtures, and giving it a job of its own would put a second
@@ -569,16 +572,18 @@ done badly.
 9.  **One compose service at Milestone 0.** PostgreSQL and nothing
     else. Artifacts are the filesystem, the queue is PostgreSQL, and a
     placeholder service is one nobody starts and nobody maintains.
-10. **One CircleCI configuration file, four jobs, one Python version.** No matrix:
-    the project pins `>=3.12` and runs one deployment, so a matrix
-    would test a configuration nothing runs. The `uv` cache keys on
+10. **One CircleCI configuration file and one Python version.** The four
+    original verification jobs retain their specified partitions. The later
+    sandbox and post-gate delivery jobs share the same file under ADR-0048. No
+    Python matrix is added: the project pins `>=3.12` and runs one deployment,
+    so a matrix would test a configuration nothing runs. The `uv` cache keys on
     `uv.lock`, so a cache miss means a dependency changed.
 11. **Job 4 does not run on pull requests.** Live tests need a
     credential a fork cannot have and cost money per run. Schedule and
     manual dispatch only, which is where `RUN_LIVE_MODEL_TESTS=1` is
     set.
 12. **`mkdocs build --strict` runs inside job 1.** The docs check is a
-    static check with no database and no fixtures; a fifth job would
+    static check with no database and no fixtures; a standalone job would
     put a second dependency install on the critical path to catch a
     broken link.
 13. **Structured logging is structlog, configured in phase 1 of the

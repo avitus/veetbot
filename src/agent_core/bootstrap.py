@@ -148,6 +148,7 @@ from agent_core.application.trajectory_service import (
 from agent_core.config import (
     PACKAGE_ROOT,
     ConfigurationError,
+    DeploymentMode,
     Settings,
     load_config_document,
     load_settings,
@@ -1004,6 +1005,19 @@ def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[s
     return providers
 
 
+def _effective_model_policy(
+    deployment_mode: DeploymentMode,
+    requested_policy: str | None,
+) -> str:
+    """Keep deterministic development while refusing a fake production default."""
+
+    if requested_policy is not None:
+        return requested_policy
+    if deployment_mode is DeploymentMode.PRODUCTION:
+        return "balanced"
+    return "fake-balanced"
+
+
 @asynccontextmanager
 async def build(
     *,
@@ -1110,7 +1124,10 @@ async def build(
 
     # Phase 3: resources. PostgreSQL is selected explicitly by normal process roles;
     # deterministic evaluation keeps the contract-backed in-memory tier.
-    effective_model_policy = model_policy or "fake-balanced"
+    effective_model_policy = _effective_model_policy(
+        effective_settings.deployment_mode,
+        model_policy,
+    )
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
         version=(
