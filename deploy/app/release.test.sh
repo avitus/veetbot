@@ -103,7 +103,9 @@ make_stage() {
 
 run_release() {
   local release_id="$1"
+  # CircleCI's BASH_ENV prepends the real uv path in each stub subprocess.
   PATH="$BIN_DIR:$PATH" \
+  BASH_ENV=/dev/null \
   VEETBOT_ROOT="$DEPLOY_ROOT" \
   VEETBOT_ENV_FILE="$ENV_FILE" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
