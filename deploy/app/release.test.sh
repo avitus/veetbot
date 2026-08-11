@@ -41,7 +41,15 @@ write_stub uv '
 '
 write_stub flock 'exit 0'
 write_stub mv '
-  if [[ "${1:-}" == -Tf ]]; then shift; /bin/mv -f "$@"; else /bin/mv "$@"; fi
+  if [[ "${1:-}" == -Tf ]]; then
+    shift
+    source="$1"
+    target="$2"
+    /bin/rm -f -- "$target"
+    /bin/mv "$source" "$target"
+  else
+    /bin/mv "$@"
+  fi
 '
 write_stub readlink '
   if [[ "${1:-}" == -f ]]; then
