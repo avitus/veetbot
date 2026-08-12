@@ -231,8 +231,12 @@ holds the same deployment lock from before the symlink change through readiness
 verification.
 
 ```bash
+set -euo pipefail
 exec 9>/opt/veetbot/shared/deploy.lock
-flock -w 900 9
+if ! flock -w 900 9; then
+  echo "Could not acquire /opt/veetbot/shared/deploy.lock" >&2
+  exit 1
+fi
 
 target_id=YYYYMMDD-HHMMSS-abcdef0
 target="/opt/veetbot/releases/$target_id"
