@@ -1,5 +1,6 @@
 """Deployment configuration validation tests."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +17,7 @@ from agent_core.config import (
     load_config_document,
     load_settings,
     validate_runtime_identity,
+    validate_settings,
 )
 
 
@@ -51,6 +53,13 @@ def test_release_identity_is_validated() -> None:
 
     with pytest.raises(ConfigurationError, match="VEETBOT_RELEASE_ID"):
         load_settings({**base_environment(), "VEETBOT_RELEASE_ID": "main-latest"})
+
+
+def test_prebuilt_settings_release_identity_is_validated() -> None:
+    settings = replace(load_settings(base_environment()), release_id="main-latest")
+
+    with pytest.raises(ConfigurationError, match="VEETBOT_RELEASE_ID"):
+        validate_settings(settings)
 
 
 def test_trajectory_export_requires_explicit_operator_enablement() -> None:

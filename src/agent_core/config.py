@@ -423,9 +423,18 @@ def load_config_document(settings: Settings, relative: str) -> dict[str, Any]:
     return merged
 
 
+def _validate_release_id(release_id: str | None) -> None:
+    if release_id is not None and RELEASE_ID_PATTERN.fullmatch(release_id) is None:
+        raise ConfigurationError(
+            "VEETBOT_RELEASE_ID must be YYYYMMDD-HHMMSS followed by a 7-40 character "
+            "lowercase hexadecimal revision"
+        )
+
+
 def validate_settings(settings: Settings) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
+    _validate_release_id(settings.release_id)
     if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE} and (
@@ -528,11 +537,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         if name.strip()
     )
     release_id = values.get("VEETBOT_RELEASE_ID", "").strip() or None
-    if release_id is not None and RELEASE_ID_PATTERN.fullmatch(release_id) is None:
-        raise ConfigurationError(
-            "VEETBOT_RELEASE_ID must be YYYYMMDD-HHMMSS followed by a 7-40 character "
-            "lowercase hexadecimal revision"
-        )
+    _validate_release_id(release_id)
     if auth_mode is AuthMode.DEV:
         auth_tenant_id = "local"
         auth_principal_id = "local-user"

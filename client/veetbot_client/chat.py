@@ -196,6 +196,7 @@ class ChatApplication:
         session_id: str | None = None,
         sleeper: Callable[[float], None] = time.sleep,
         max_reconnect_attempts: int = 8,
+        max_total_reconnects: int = 32,
     ) -> None:
         self.api = api
         self.console = console
@@ -203,6 +204,7 @@ class ChatApplication:
         self.session_id = session_id
         self._sleep = sleeper
         self._max_reconnect_attempts = max_reconnect_attempts
+        self._max_total_reconnects = max_total_reconnects
 
     @staticmethod
     def _required_string(payload: dict[str, object], field_name: str) -> str:
@@ -353,6 +355,7 @@ class ChatApplication:
     def watch_run(self, run_id: str) -> str:
         state = _WatchState()
         reconnect_attempts = 0
+        total_reconnects = 0
         while state.terminal_status is None:
             reconnect = False
             try:
@@ -371,7 +374,11 @@ class ChatApplication:
             if not reconnect:
                 continue
             reconnect_attempts += 1
-            if reconnect_attempts > self._max_reconnect_attempts:
+            total_reconnects += 1
+            if (
+                reconnect_attempts > self._max_reconnect_attempts
+                or total_reconnects > self._max_total_reconnects
+            ):
                 raise ConnectionFailureError("event stream reconnect limit exceeded")
             delay = min(0.25 * (2 ** (reconnect_attempts - 1)), 4.0)
             self.console.print(

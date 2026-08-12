@@ -188,4 +188,12 @@ fi
 grep -Fq "manual rollback target: $DEPLOY_ROOT/releases/$release_id" \
   "$TEST_ROOT/unhealthy.out"
 
+equal_timestamp_id="20260810-152255-0000000"
+make_stage "$equal_timestamp_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
+run_release "$equal_timestamp_id"
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
+  "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
+
 printf 'release script tests passed\n'

@@ -31,7 +31,10 @@ static + contract + integration + sandbox
       current symlink + systemd restart
                     |
                     v
- local release header -> public release header
+ release.sh: local release header
+                    |
+                    v
+ CircleCI: public release header
 ```
 
 Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
@@ -45,9 +48,14 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 6. applies `alembic upgrade head` and runs the production preflight;
 7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
    restarts all three systemd units;
-8. requires every process to run from the promoted directory and both local and
-   public readiness probes to return `X-Veetbot-Release: <release-id>`; and
+8. requires every process to run from the promoted directory and the local
+   readiness probe to return `X-Veetbot-Release: <release-id>`; and
 9. retains the five newest valid releases.
+
+A successful server release returns control to CircleCI, which polls the public
+TLS readiness endpoint until it reports the same release ID. Exhausting that
+bounded public-probe budget fails the CircleCI job after promotion; it is not a
+failure inside `deploy/app/release.sh`.
 
 A pre-promotion failure removes only its staged directory. A post-promotion
 failure remains visible for diagnosis and manual rollback. Database migrations
@@ -189,8 +197,11 @@ without extracting over the live source directory.
 
 The Nginx installer stores the prior Veetbot configuration under
 `/etc/nginx/veetbot-backups`, runs `nginx -t`, and reloads Nginx. Validation or
-reload failure restores the prior file. Application release success requires
-the public readiness endpoint to report the exact staged release ID.
+reload failure restores the prior file. So does a failure while installing the
+candidate file or activating its symlink. `deploy/app/release.sh` requires the
+local readiness header to identify the staged release; after it returns,
+CircleCI polls the public readiness endpoint for that exact identity. A public
+probe failure is therefore a post-promotion CircleCI failure boundary.
 
 The manual and nightly `live-model` workflows remain tests; they do not deploy.
 
@@ -215,9 +226,14 @@ units return.
 
 Choose a retained target only after checking that its code is compatible with
 the current database schema. Never run an automatic Alembic downgrade as part
-of rollback.
+of rollback. Run the complete block below in one shell so file descriptor 9
+holds the same deployment lock from before the symlink change through readiness
+verification.
 
 ```bash
+exec 9>/opt/veetbot/shared/deploy.lock
+flock -w 900 9
+
 target_id=YYYYMMDD-HHMMSS-abcdef0
 target="/opt/veetbot/releases/$target_id"
 test -d "$target"

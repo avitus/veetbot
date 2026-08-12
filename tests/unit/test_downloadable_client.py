@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+import getpass
 import io
 import subprocess
 import sys
 from collections.abc import Iterator
 from email.message import Message
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 import pytest
 
+from client.veetbot_client import __main__ as client_main
+from client.veetbot_client import __version__
 from client.veetbot_client.api import (
     ApiClient,
     ApiError,
@@ -95,15 +98,16 @@ def test_api_client_sends_bearer_auth_and_idempotent_message() -> None:
     assert create.get_method() == "POST"
     assert create.full_url == "https://agent.example/v1/sessions"
     assert create.get_header("Authorization") == f"Bearer {OPAQUE_AUTH_VALUE}"
+    assert create.get_header("User-agent") == f"veetbot-client/{__version__}"
     assert submit.get_header("Idempotency-key") == "message-key"
     assert submit.data == b'{"content":[{"text":"hello","type":"text"}]}'
 
 
 def test_api_client_refuses_remote_plaintext_bearer_token() -> None:
     with pytest.raises(ConfigurationError, match="require HTTPS"):
-        ApiClient("http://agent.example", token="unsafe-token")
+        ApiClient("http://agent.example", token="unsafe-token")  # noqa: S106
 
-    ApiClient("http://127.0.0.1:8000", token="local-token")
+    ApiClient("http://127.0.0.1:8000", token="local-token")  # noqa: S106
 
 
 def test_api_client_preserves_structured_errors_without_echoing_token() -> None:
@@ -127,6 +131,35 @@ def test_api_client_preserves_structured_errors_without_echoing_token() -> None:
     assert raised.value.code == "authentication_error"
     assert raised.value.request_id == "request-7"
     assert OPAQUE_AUTH_VALUE not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "read_error",
+    [OSError("socket failed"), TimeoutError("socket timed out"), URLError("read failed")],
+)
+def test_api_client_sanitizes_transport_failure_while_reading_error(
+    read_error: OSError,
+) -> None:
+    class FailingErrorBody:
+        def read(self, amount: int = -1) -> bytes:
+            del amount
+            raise read_error
+
+    error = HTTPError(
+        "https://agent.example/v1/sessions",
+        503,
+        "Unavailable",
+        Message(),
+        cast(Any, FailingErrorBody()),
+    )
+    client = ApiClient("https://agent.example", opener=FakeOpener([error]))
+
+    with pytest.raises(ApiError) as raised:
+        client.create_session()
+
+    assert raised.value.status == 503
+    assert raised.value.code == "http_503"
+    assert str(raised.value) == "http_503: API returned HTTP 503"
 
 
 def test_api_client_connection_error_names_the_api_and_required_action() -> None:
@@ -283,6 +316,34 @@ def test_chat_replays_resolves_suspensions_and_reconciles_final_message() -> Non
     assert "reconnecting from 1" in stderr.getvalue()
 
 
+def test_chat_bounds_total_reconnects_even_when_each_stream_yields_an_event() -> None:
+    class ReconnectingChatApi(ScriptedChatApi):
+        def stream_events(
+            self, run_id: str, last_event_id: int | None = None
+        ) -> Iterator[SSEEvent]:
+            del run_id
+            self.stream_calls.append(last_event_id)
+            yield SSEEvent(
+                "tool.call.started",
+                {"name": "math.calculate"},
+                len(self.stream_calls),
+            )
+
+    api = ReconnectingChatApi()
+    application = ChatApplication(
+        cast(ChatApi, api),
+        Console(io.StringIO(), io.StringIO()),
+        sleeper=lambda _seconds: None,
+        max_reconnect_attempts=1,
+        max_total_reconnects=3,
+    )
+
+    with pytest.raises(ConnectionFailureError, match="reconnect limit"):
+        application.watch_run("run-1")
+
+    assert api.stream_calls == [None, 1, 2, 3]
+
+
 def test_chat_renders_only_sanitized_provider_failure_diagnostics() -> None:
     class FailedChatApi(ScriptedChatApi):
         def stream_events(
@@ -401,7 +462,7 @@ def test_client_zipapp_builds_and_runs_without_project_dependencies(tmp_path: Pa
     artifact = build(tmp_path / "veetbot-client.pyz")
 
     result = subprocess.run(
-        [sys.executable, str(artifact), "--version"],
+        [sys.executable, "-I", str(artifact), "--version"],
         cwd=tmp_path,
         check=False,
         capture_output=True,
@@ -412,3 +473,41 @@ def test_client_zipapp_builds_and_runs_without_project_dependencies(tmp_path: Pa
     assert result.returncode == 0
     assert result.stdout.strip() == "0.1.0.dev0"
     assert artifact.stat().st_mode & 0o111
+
+
+def test_client_main_retries_only_readiness_before_running_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StubClient:
+        def __init__(self) -> None:
+            self.has_token = False
+            self.health_calls = 0
+            self.supplied_token: str | None = None
+
+        def health_ready(self) -> dict[str, object]:
+            self.health_calls += 1
+            if self.health_calls == 1:
+                raise ApiError(status=401, code="authentication_error", message="authenticate")
+            return {"status": "ready"}
+
+        def set_token(self, token: str | None) -> None:
+            self.supplied_token = token
+            self.has_token = bool(token)
+
+    client = StubClient()
+    run_calls: list[object] = []
+    monkeypatch.delenv("VEETBOT_API_TOKEN", raising=False)
+    monkeypatch.setattr(client_main, "ApiClient", lambda *_args, **_kwargs: client)
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: OPAQUE_AUTH_VALUE)
+    monkeypatch.setattr(sys, "stdin", type("TTY", (), {"isatty": lambda self: True})())
+
+    def run_once(args: object, api: object) -> int:
+        run_calls.append((args, api))
+        return 0
+
+    monkeypatch.setattr(client_main, "_run", run_once)
+
+    assert client_main.main(["--once", "hello"]) == 0
+    assert client.health_calls == 2
+    assert client.supplied_token == OPAQUE_AUTH_VALUE
+    assert len(run_calls) == 1

@@ -13,6 +13,8 @@ from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 from uuid import uuid4
 
+from . import __version__
+
 MAX_JSON_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_SSE_FRAME_BYTES = 1024 * 1024
 
@@ -245,7 +247,7 @@ class ApiClient:
     def _headers(self, extra: Mapping[str, str] | None = None) -> dict[str, str]:
         headers = {
             "Accept": "application/json",
-            "User-Agent": "veetbot-client/0.1",
+            "User-Agent": f"veetbot-client/{__version__}",
         }
         if self._token is not None:
             headers["Authorization"] = f"Bearer {self._token}"
@@ -275,7 +277,7 @@ class ApiClient:
                 details=details if isinstance(details, dict) else None,
                 request_id=request_id if isinstance(request_id, str) else None,
             )
-        except ProtocolError:
+        except (ProtocolError, OSError, TimeoutError, URLError):
             return ApiError(
                 status=error.code,
                 code=f"http_{error.code}",
@@ -311,7 +313,7 @@ class ApiClient:
                 sort_keys=True,
             ).encode("utf-8")
             request_headers["Content-Type"] = "application/json"
-        request = Request(
+        request = Request(  # noqa: S310 - ApiClient restricts base URLs to HTTP(S).
             self._url(path),
             data=encoded,
             headers=request_headers,
@@ -386,7 +388,7 @@ class ApiClient:
         headers = self._headers({"Accept": "text/event-stream"})
         if last_event_id is not None:
             headers["Last-Event-ID"] = str(last_event_id)
-        request = Request(
+        request = Request(  # noqa: S310 - ApiClient restricts base URLs to HTTP(S).
             self._url(f"/v1/runs/{quote(run_id, safe='')}/events"),
             headers=headers,
             method="GET",

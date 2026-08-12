@@ -290,14 +290,17 @@ job           target invoked         needs     runs on
 2 contract    make test-contract     nothing   every push, PR
 3 integration make test-integration  postgres  every push, PR
 4 live        make test-live         secrets   schedule, manual
+5 sandbox     make test-sandbox      machine   every push, PR
 ```
 
 Jobs 1 and 2 partition `make check`, split so the cheap one fails
 first. This is the only place where CI's shape differs from the
 Makefile's, and it differs in scheduling rather than in content: the
-union of the two jobs is exactly `make check`, no check appears in
-both, and a developer who runs `make check` locally has run both
-jobs' contents.
+union of the two jobs is exactly `make check`, including `test-deploy`
+in both the static lane and the local aggregate. No check appears in
+both jobs, and a developer who runs `make check` locally has run both
+jobs' contents. Job 5 is an additional real-runtime sandbox gate; it
+builds the gVisor image and is deliberately outside `make check`.
 
 Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
 than the compose file, because the compose file publishes a port on the
@@ -315,10 +318,11 @@ credentials without placing them in the configuration file.
 
 Three workflow-level facts complete the definition:
 
-1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 for ordinary VCS
-    pipelines, including pull-request branches. A pipeline with `run_live: true`
-    selects the manual live workflow instead. The fourth job also runs nightly
-    on `main` at 07:17 UTC.
+1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 plus the additional
+    sandbox job 5 for ordinary VCS pipelines, including pull-request branches.
+    A pipeline with `run_live: true` selects the manual live workflow instead.
+    The fourth job also runs nightly on `main` at 07:17 UTC. Production delivery
+    begins only after all four `verify` jobs pass.
 2.  **Python version.** A single version, 3.12, not a matrix. The
     project pins `requires-python >=3.12` and runs one deployment; a
     matrix here would test a configuration nothing runs.

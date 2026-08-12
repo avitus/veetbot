@@ -14,6 +14,8 @@ BACKUPS="$TEST_ROOT/backups"
 LOG_FILE="$TEST_ROOT/commands.log"
 FAIL_MARKER="$TEST_ROOT/nginx-failed"
 SYSTEMCTL_FAIL_MARKER="$TEST_ROOT/systemctl-failed"
+INSTALL_FAIL_MARKER="$TEST_ROOT/install-failed"
+SYMLINK_FAIL_MARKER="$TEST_ROOT/symlink-failed"
 SOURCE_CONFIG="$TEST_ROOT/candidate.conf"
 mkdir -p "$BIN_DIR" "$DEPLOY_ROOT/shared" "$(dirname "$AVAILABLE")" "$(dirname "$ENABLED")"
 : >"$LOG_FILE"
@@ -27,6 +29,17 @@ write_stub() {
 
 write_stub sudo '
   printf "sudo %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  if [[ "${VEETBOT_TEST_INSTALL_FAIL_ONCE:-0}" == 1 \
+    && "${1:-}" == install && " $* " == *" -m 0644 "* \
+    && ! -e "$VEETBOT_TEST_INSTALL_FAIL_MARKER" ]]; then
+    touch "$VEETBOT_TEST_INSTALL_FAIL_MARKER"
+    exit 1
+  fi
+  if [[ "${VEETBOT_TEST_SYMLINK_FAIL_ONCE:-0}" == 1 \
+    && "${1:-}" == ln && ! -e "$VEETBOT_TEST_SYMLINK_FAIL_MARKER" ]]; then
+    touch "$VEETBOT_TEST_SYMLINK_FAIL_MARKER"
+    exit 1
+  fi
   "$@"
 '
 write_stub flock 'exit 0'
@@ -54,6 +67,8 @@ run_deploy() {
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_FAIL_MARKER="$FAIL_MARKER" \
   VEETBOT_TEST_SYSTEMCTL_FAIL_MARKER="$SYSTEMCTL_FAIL_MARKER" \
+  VEETBOT_TEST_INSTALL_FAIL_MARKER="$INSTALL_FAIL_MARKER" \
+  VEETBOT_TEST_SYMLINK_FAIL_MARKER="$SYMLINK_FAIL_MARKER" \
     "$DEPLOY_SCRIPT" "${1:-$SOURCE_CONFIG}"
 }
 
@@ -97,5 +112,25 @@ if VEETBOT_TEST_SYSTEMCTL_FAIL_ONCE=1 run_deploy >/dev/null 2>&1; then
   exit 1
 fi
 grep -Fq 'return 201' "$AVAILABLE"
+
+printf 'server { return 202; }\n' >"$AVAILABLE"
+printf 'server { return 504; }\n' >"$SOURCE_CONFIG"
+rm -f -- "$INSTALL_FAIL_MARKER"
+if VEETBOT_TEST_INSTALL_FAIL_ONCE=1 run_deploy >/dev/null 2>&1; then
+  printf 'failed Nginx candidate install unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'return 202' "$AVAILABLE"
+[[ "$(readlink "$ENABLED")" == "$AVAILABLE" ]]
+
+printf 'server { return 203; }\n' >"$AVAILABLE"
+printf 'server { return 505; }\n' >"$SOURCE_CONFIG"
+rm -f -- "$SYMLINK_FAIL_MARKER"
+if VEETBOT_TEST_SYMLINK_FAIL_ONCE=1 run_deploy >/dev/null 2>&1; then
+  printf 'failed Nginx symlink activation unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'return 203' "$AVAILABLE"
+[[ "$(readlink "$ENABLED")" == "$AVAILABLE" ]]
 
 printf 'nginx deployment script tests passed\n'

@@ -288,11 +288,23 @@ def test_ci_has_the_required_partitions() -> None:
         "X-Veetbot-Release" not in command and "x-veetbot-release" in command
         for command in commands["deploy-app"]
     )
+    assert any(
+        "while (( attempt < max_attempts ))" in command
+        and "production did not report release" in command
+        for command in commands["deploy-app"]
+    )
     assert any("deploy/nginx/deploy.sh" in command for command in commands["deploy-nginx"])
-    assert any("VEETBOT_EXPECTED_RELEASE_ID" in command for command in commands["deploy-nginx"])
+    assert any(
+        "VEETBOT_EXPECTED_RELEASE_ID" in command
+        and '[[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]' in command
+        for command in commands["deploy-nginx"]
+    )
     assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
+    deployment_key_step = {
+        "add_ssh_keys": {"fingerprints": ["SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"]}
+    }
     for name in ("deploy-app", "deploy-nginx"):
-        assert {"add_ssh_keys": {}} in jobs[name]["steps"]
+        assert deployment_key_step in jobs[name]["steps"]
 
     workflows = config["workflows"]
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}

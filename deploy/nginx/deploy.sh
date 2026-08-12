@@ -76,21 +76,36 @@ rollback() {
   fi
 }
 
+ROLLBACK_PENDING=1
+RELOAD_ATTEMPTED=0
+rollback_on_exit() {
+  local status=$?
+  trap - EXIT
+  if (( status != 0 && ROLLBACK_PENDING == 1 )); then
+    set +e
+    rollback
+    sudo nginx -t || true
+    if (( RELOAD_ATTEMPTED == 1 )); then
+      sudo systemctl reload "$NGINX_SERVICE" || true
+    fi
+  fi
+  exit "$status"
+}
+trap rollback_on_exit EXIT
+
 sudo install -m 0644 "$SOURCE_CONFIG" "$AVAILABLE"
 sudo ln -sfn "$AVAILABLE" "$ENABLED"
 
 if ! sudo nginx -t; then
-  rollback
-  sudo nginx -t || true
   fail "nginx -t rejected the candidate; the previous configuration was restored"
 fi
 
+RELOAD_ATTEMPTED=1
 if ! sudo systemctl reload "$NGINX_SERVICE"; then
-  rollback
-  sudo nginx -t || true
-  sudo systemctl reload "$NGINX_SERVICE" || true
   fail "Nginx reload failed; the previous configuration was restored"
 fi
+ROLLBACK_PENDING=0
+trap - EXIT
 
 printf 'Nginx configuration installed, validated, and reloaded.\n'
 if [[ -n "$BACKUP" ]]; then

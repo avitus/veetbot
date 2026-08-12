@@ -132,7 +132,9 @@ jobs:
     steps:
       - attach_workspace:
           at: /tmp/veetbot-release
-      - add_ssh_keys: {}
+      - add_ssh_keys:
+          fingerprints:
+            - "SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"
       - run:
           name: Configure deployment SSH trust
           command: |
@@ -182,18 +184,31 @@ jobs:
             production_url="${PRODUCTION_URL:-https://api.veetbot.com}"
             headers="$(mktemp)"
             trap 'rm -f "$headers"' EXIT
-            curl --fail --silent --show-error \
-              --connect-timeout 5 --max-time 15 \
-              --dump-header "$headers" --output /dev/null \
-              "$production_url/health/ready"
-            awk -F ': *' -v expected="$VEETBOT_RELEASE_ID" '
-              BEGIN { IGNORECASE = 1 }
-              tolower($1) == "x-veetbot-release" {
-                sub(/\r$/, "", $2)
-                if ($2 == expected) found = 1
-              }
-              END { exit found ? 0 : 1 }
-            ' "$headers"
+            attempt=0
+            max_attempts=10
+            while (( attempt < max_attempts )); do
+              attempt=$((attempt + 1))
+              : >"$headers"
+              if curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --dump-header "$headers" --output /dev/null \
+                   "$production_url/health/ready" \
+                 && awk -F ': *' -v expected="$VEETBOT_RELEASE_ID" '
+                      BEGIN { IGNORECASE = 1 }
+                      tolower($1) == "x-veetbot-release" {
+                        sub(/\r$/, "", $2)
+                        if ($2 == expected) found = 1
+                      }
+                      END { exit found ? 0 : 1 }
+                    ' "$headers"; then
+                exit 0
+              fi
+              if (( attempt < max_attempts )); then
+                sleep 5
+              fi
+            done
+            echo "production did not report release $VEETBOT_RELEASE_ID" >&2
+            exit 1
 
   deploy-nginx:
     docker:
@@ -203,7 +218,9 @@ jobs:
       - checkout
       - attach_workspace:
           at: /tmp/veetbot-release
-      - add_ssh_keys: {}
+      - add_ssh_keys:
+          fingerprints:
+            - "SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"
       - run:
           name: Configure deployment SSH trust
           command: |
@@ -217,6 +234,7 @@ jobs:
           name: Validate and reload Nginx
           command: |
             expected_release_id="$(cat /tmp/veetbot-release/release-id)"
+            [[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
             remote_config="/tmp/veetbot-nginx-$CIRCLE_SHA1.conf"
             remote_script="/tmp/veetbot-nginx-$CIRCLE_SHA1.sh"
             scp -P "${DEPLOY_PORT:-22}" nginx/veetbot.conf \

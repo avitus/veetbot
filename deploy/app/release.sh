@@ -75,7 +75,10 @@ flock -w "$LOCK_WAIT_SECS" 9 || fail "timed out waiting for the deployment lock"
 
 ACTIVE_RELEASE="$(readlink -f "$CURRENT" 2>/dev/null || true)"
 ACTIVE_RELEASE_ID="$(basename "$ACTIVE_RELEASE" 2>/dev/null || true)"
-if [[ "$ACTIVE_RELEASE_ID" =~ $RELEASE_PATTERN && "$RELEASE_ID" < "$ACTIVE_RELEASE_ID" ]]; then
+RELEASE_TIMESTAMP="${RELEASE_ID:0:15}"
+ACTIVE_RELEASE_TIMESTAMP="${ACTIVE_RELEASE_ID:0:15}"
+if [[ "$ACTIVE_RELEASE_ID" =~ $RELEASE_PATTERN \
+  && "$RELEASE_TIMESTAMP" < "$ACTIVE_RELEASE_TIMESTAMP" ]]; then
   fail "refusing stale release $RELEASE_ID because $ACTIVE_RELEASE_ID is already active"
 fi
 if [[ "$RELEASE_ID" == "$ACTIVE_RELEASE_ID" ]]; then

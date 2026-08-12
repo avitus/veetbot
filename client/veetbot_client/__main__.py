@@ -35,9 +35,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _run(args: argparse.Namespace, client: ApiClient) -> int:
-    ready = client.health_ready()
-    if ready.get("status") != "ready":
-        raise ClientError("API is not ready")
     console = Console(sys.stdout, sys.stderr)
     application = ChatApplication(
         client,
@@ -48,19 +45,26 @@ def _run(args: argparse.Namespace, client: ApiClient) -> int:
     return application.run(once=str(args.once) if args.once is not None else None)
 
 
+def _check_readiness(client: ApiClient) -> None:
+    ready = client.health_ready()
+    if ready.get("status") != "ready":
+        raise ClientError("API is not ready")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     token = os.environ.get("VEETBOT_API_TOKEN")
     try:
         client = ApiClient(str(args.api_url), token=token)
         try:
-            return _run(args, client)
+            _check_readiness(client)
         except ApiError as exc:
             if exc.status != 401 or client.has_token or not sys.stdin.isatty():
                 raise
             supplied = getpass.getpass("API token: ")
             client.set_token(supplied)
-            return _run(args, client)
+            _check_readiness(client)
+        return _run(args, client)
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return 130
