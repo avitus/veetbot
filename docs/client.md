@@ -104,6 +104,11 @@ and can be approved once or denied. `WAITING_FOR_USER` questions are answered
 through the run-input endpoint. Artifact references in a final assistant message
 are displayed as opaque IDs.
 
+When a provider rejects a model request, the terminal failure may include its
+validated HTTP status, error code, and field path. The client displays only
+those closed-format diagnostics; it never renders the provider's raw response
+body.
+
 ## Initial limitations
 
 This release is deliberately a terminal client rather than a desktop GUI. It

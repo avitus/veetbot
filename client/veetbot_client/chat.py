@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import unicodedata
 from collections.abc import Callable, Iterator
@@ -12,6 +13,25 @@ from uuid import uuid4
 from .api import ApiError, ClientError, ConnectionFailureError, ProtocolError, SSEEvent
 
 TERMINAL_EVENTS = frozenset({"run.completed", "run.failed", "run.cancelled"})
+_SAFE_PROVIDER_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_SAFE_PROVIDER_PARAMETER = re.compile(r"[A-Za-z0-9_.\[\]-]{1,128}")
+
+
+def _provider_failure_suffix(failure: dict[str, object]) -> str:
+    details = failure.get("details")
+    if not isinstance(details, dict):
+        return ""
+    diagnostics: list[str] = []
+    status = details.get("http_status")
+    if type(status) is int and 100 <= status <= 599:
+        diagnostics.append(f"HTTP {status}")
+    code = details.get("provider_code")
+    if isinstance(code, str) and _SAFE_PROVIDER_CODE.fullmatch(code):
+        diagnostics.append(f"code={code}")
+    parameter = details.get("provider_parameter")
+    if isinstance(parameter, str) and _SAFE_PROVIDER_PARAMETER.fullmatch(parameter):
+        diagnostics.append(f"parameter={parameter}")
+    return "" if not diagnostics else f" ({'; '.join(diagnostics)})"
 
 
 def _terminal_safe(value: str) -> str:
@@ -314,8 +334,11 @@ class ChatApplication:
             failure = event.data.get("failure")
             message = failure.get("message") if isinstance(failure, dict) else None
             reason = failure.get("reason") if isinstance(failure, dict) else None
+            diagnostics = _provider_failure_suffix(failure) if isinstance(failure, dict) else ""
             self.console.print(
-                f"Run failed: {message if isinstance(message, str) else reason or 'unknown error'}",
+                "Run failed: "
+                f"{message if isinstance(message, str) else reason or 'unknown error'}"
+                f"{diagnostics}",
                 error=True,
             )
             state.terminal_status = "FAILED"

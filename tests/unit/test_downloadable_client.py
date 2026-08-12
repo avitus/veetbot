@@ -283,6 +283,43 @@ def test_chat_replays_resolves_suspensions_and_reconciles_final_message() -> Non
     assert "reconnecting from 1" in stderr.getvalue()
 
 
+def test_chat_renders_only_sanitized_provider_failure_diagnostics() -> None:
+    class FailedChatApi(ScriptedChatApi):
+        def stream_events(
+            self, run_id: str, last_event_id: int | None = None
+        ) -> Iterator[SSEEvent]:
+            del run_id, last_event_id
+            yield SSEEvent(
+                "run.failed",
+                {
+                    "failure": {
+                        "reason": "model_permanent_error",
+                        "message": "the model provider rejected the request",
+                        "details": {
+                            "http_status": 400,
+                            "provider_code": "missing_required_parameter",
+                            "provider_parameter": "input[12].summary",
+                            "ignored": "provider body must not be displayed",
+                        },
+                    }
+                },
+                1,
+            )
+
+    stderr = io.StringIO()
+    application = ChatApplication(
+        cast(ChatApi, FailedChatApi()),
+        Console(io.StringIO(), stderr),
+    )
+
+    assert application.run(once="help") == 1
+    assert stderr.getvalue() == (
+        "Run failed: the model provider rejected the request "
+        "(HTTP 400; code=missing_required_parameter; parameter=input[12].summary)\n"
+    )
+    assert "provider body" not in stderr.getvalue()
+
+
 def test_interactive_chat_reports_client_error_and_keeps_prompting() -> None:
     class FailingSubmitApi(ScriptedChatApi):
         def submit_message(

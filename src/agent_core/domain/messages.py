@@ -2,15 +2,31 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent_core.domain.policies import TrustLevel
+
+_SAFE_PROVIDER_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+_SAFE_PROVIDER_PARAMETER = re.compile(r"[A-Za-z0-9_.\[\]-]{1,128}")
+
+
+def sanitize_provider_code(value: str | None) -> str | None:
+    if value is None or _SAFE_PROVIDER_CODE.fullmatch(value):
+        return value
+    return "provider_error"
+
+
+def sanitize_provider_parameter(value: str | None) -> str | None:
+    if value is None or _SAFE_PROVIDER_PARAMETER.fullmatch(value):
+        return value
+    return None
 
 
 class TextPart(BaseModel):
@@ -189,6 +205,17 @@ class ModelError(BaseModel):
     message: str
     provider_code: str | None = None
     http_status: int | None = None
+    provider_parameter: str | None = None
+
+    @field_validator("provider_code")
+    @classmethod
+    def provider_code_is_safe(cls, value: str | None) -> str | None:
+        return sanitize_provider_code(value)
+
+    @field_validator("provider_parameter")
+    @classmethod
+    def provider_parameter_is_safe(cls, value: str | None) -> str | None:
+        return sanitize_provider_parameter(value)
 
 
 class ModelTransientError(ModelError):

@@ -37,12 +37,13 @@ from agent_core.domain.messages import (
     ToolCallItem,
     ToolResultItem,
     UserMessage,
+    sanitize_provider_code,
+    sanitize_provider_parameter,
 )
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
 
 _OPENAI_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
-_OPENAI_ERROR_FIELD = re.compile(r"[A-Za-z0-9_.\[\]-]{1,128}")
 logger = logging.getLogger(__name__)
 
 
@@ -75,9 +76,7 @@ def _status_error_field(error: APIStatusError, field: str) -> str | None:
     if not isinstance(nested_error, dict):
         return None
     value = nested_error.get(field)
-    if not isinstance(value, str) or _OPENAI_ERROR_FIELD.fullmatch(value) is None:
-        return None
-    return value
+    return value if isinstance(value, str) else None
 
 
 class OpenAIResponsesProvider:
@@ -168,12 +167,16 @@ class OpenAIResponsesProvider:
                     and internal_attempt < self._max_internal_attempts
                 ):
                     continue
-                provider_code = _status_error_field(exc, "code") or f"http_{exc.status_code}"
+                provider_code = (
+                    sanitize_provider_code(_status_error_field(exc, "code"))
+                    or f"http_{exc.status_code}"
+                )
+                provider_parameter = sanitize_provider_parameter(_status_error_field(exc, "param"))
                 logger.warning(
                     "openai_request_rejected status=%s code=%s parameter=%s",
                     exc.status_code,
                     provider_code,
-                    _status_error_field(exc, "param") or "none",
+                    provider_parameter or "none",
                 )
                 yield failed_event(
                     attempt=attempt,
@@ -183,6 +186,7 @@ class OpenAIResponsesProvider:
                     category="transient" if transient else "permanent",
                     provider_code=provider_code,
                     http_status=exc.status_code,
+                    provider_parameter=provider_parameter,
                     stream_had_output=emitted_count > 0,
                 )
                 return
@@ -308,8 +312,14 @@ class OpenAIResponsesProvider:
                 item = raw.get("item")
                 if isinstance(item, dict) and item.get("type") == "reasoning":
                     opaque = {
-                        key: item[key] for key in ("id", "type", "encrypted_content") if key in item
+                        key: item[key]
+                        for key in ("id", "type", "encrypted_content", "status")
+                        if key in item
                     }
+                    # Responses requires this array when the reasoning item is
+                    # replayed as input. Summaries are not requested, so retain
+                    # the required empty field without persisting reasoning text.
+                    opaque["summary"] = []
                     if response_id is not None:
                         opaque["response_id"] = response_id
                     if opaque:
@@ -360,6 +370,9 @@ class OpenAIResponsesProvider:
                 return
             elif event_type in {"response.failed", "error"}:
                 code = nested(raw, "response", "error", "code") or nested(raw, "error", "code")
+                parameter = nested(raw, "response", "error", "param") or nested(
+                    raw, "error", "param"
+                )
                 yield failed_event(
                     attempt=attempt,
                     provider=self.name,
@@ -367,6 +380,7 @@ class OpenAIResponsesProvider:
                     sequence=sequence,
                     category="permanent",
                     provider_code=None if code is None else str(code),
+                    provider_parameter=None if parameter is None else str(parameter),
                     stream_had_output=sequence > 0,
                 )
                 terminal = True

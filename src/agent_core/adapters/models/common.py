@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol, cast
 
@@ -17,12 +16,12 @@ from agent_core.domain.messages import (
     ModelProtocolError,
     ModelTransientError,
     TextPart,
+    sanitize_provider_code,
+    sanitize_provider_parameter,
 )
 from agent_core.domain.tools import ToolSpec
 
 type RawEventSource = Callable[[dict[str, Any]], AsyncIterator[dict[str, Any]]]
-
-SAFE_PROVIDER_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 
 
 class Dumpable(Protocol):
@@ -88,16 +87,14 @@ def failed_event(
     category: str,
     provider_code: str | None = None,
     http_status: int | None = None,
+    provider_parameter: str | None = None,
     stream_had_output: bool = False,
     detail: str | None = None,
 ) -> ModelFailedEvent:
     """Build a fixed-template failure that can never echo a raw response body."""
 
-    safe_code = (
-        provider_code
-        if provider_code is None or SAFE_PROVIDER_CODE.fullmatch(provider_code)
-        else "provider_error"
-    )
+    safe_code = sanitize_provider_code(provider_code)
+    safe_parameter = sanitize_provider_parameter(provider_parameter)
     error: ModelTransientError | ModelProtocolError | ModelPermanentError
     if category == "transient":
         error = ModelTransientError(
@@ -107,6 +104,7 @@ def failed_event(
             message="the model provider reported a transient failure",
             provider_code=safe_code,
             http_status=http_status,
+            provider_parameter=safe_parameter,
             stream_had_output=stream_had_output,
         )
     elif category == "protocol":
@@ -117,6 +115,7 @@ def failed_event(
             message="the model provider stream violated the normalized protocol",
             provider_code=safe_code,
             http_status=http_status,
+            provider_parameter=safe_parameter,
             detail=detail or "provider protocol violation",
         )
     else:
@@ -127,6 +126,7 @@ def failed_event(
             message="the model provider rejected the request",
             provider_code=safe_code,
             http_status=http_status,
+            provider_parameter=safe_parameter,
         )
     return ModelFailedEvent(
         attempt_id=attempt.attempt_id,
