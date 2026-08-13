@@ -17,6 +17,11 @@ venv/
 .hypothesis/
 .agent/
 
+# Swift / Xcode
+.build/
+DerivedData/
+xcuserdata/
+
 # uv
 # (uv.lock is intentionally allowed to be committed once generated.)
 
