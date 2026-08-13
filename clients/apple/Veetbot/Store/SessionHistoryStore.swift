@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 public struct SessionHistoryEntry: Codable, Identifiable, Hashable, Sendable {
     public let sessionID: UUID
@@ -33,17 +34,43 @@ public protocol SessionHistoryStore: Sendable {
     func delete(sessionID: UUID) async throws
 }
 
+extension Sequence where Element == SessionHistoryEntry {
+    func sortedForHistoryList() -> [SessionHistoryEntry] {
+        sorted {
+            if $0.updatedAt == $1.updatedAt {
+                return $0.sessionID.uuidString > $1.sessionID.uuidString
+            }
+            return $0.updatedAt > $1.updatedAt
+        }
+    }
+}
+
 public enum SessionHistoryStoreFactory {
+    private static let logger = Logger(
+        subsystem: "com.veetbot.apple",
+        category: "session-history"
+    )
+
     public static func makeDefault() -> any SessionHistoryStore {
-#if XCODE_BUILD
+        #if XCODE_BUILD
         if #available(iOS 17.0, macOS 14.0, *) {
-            if let store = try? SwiftDataSessionHistoryStore() {
+            do {
+                let store = try SwiftDataSessionHistoryStore()
                 return store
+            } catch {
+                logger.error(
+                    "SwiftData history initialization failed: \(error.localizedDescription, privacy: .public)"
+                )
             }
         }
-#endif
-        if let store = try? FileSessionHistoryStore() {
+        #endif
+        do {
+            let store = try FileSessionHistoryStore()
             return store
+        } catch {
+            logger.error(
+                "File history initialization failed: \(error.localizedDescription, privacy: .public)"
+            )
         }
         return VolatileSessionHistoryStore()
     }
@@ -55,12 +82,7 @@ public actor VolatileSessionHistoryStore: SessionHistoryStore {
     public init() {}
 
     public func list() -> [SessionHistoryEntry] {
-        entries.values.sorted {
-            if $0.updatedAt == $1.updatedAt {
-                return $0.sessionID.uuidString > $1.sessionID.uuidString
-            }
-            return $0.updatedAt > $1.updatedAt
-        }
+        entries.values.sortedForHistoryList()
     }
 
     public func upsert(_ entry: SessionHistoryEntry) {

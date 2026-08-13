@@ -54,9 +54,11 @@ public struct ConnectionConfiguration: Codable, Hashable, Sendable {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
             throw ConnectionConfigurationError.invalidURL
         }
-        let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let basePath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let routePath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.percentEncodedPath = "/" + [basePath, routePath]
+        components.path =
+            "/"
+            + [basePath, routePath]
             .filter { !$0.isEmpty }
             .joined(separator: "/")
         components.queryItems = queryItems.isEmpty ? nil : queryItems

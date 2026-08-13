@@ -1,5 +1,6 @@
 import Foundation
 import Security
+
 #if os(macOS)
 import LocalAuthentication
 #endif
@@ -18,15 +19,18 @@ public enum KeychainTokenStoreError: Error, LocalizedError {
         switch self {
         case .unexpectedData:
             return "The saved Veetbot token is not valid UTF-8."
-        case let .operationFailed(status):
+        case .operationFailed(let status):
             if status == errSecMissingEntitlement {
-                return "Veetbot cannot access Keychain because this build is not signed for an Apple development team. Select the Veetbot target in Xcode, open Signing & Capabilities, and choose your team."
+                return
+                    "Veetbot cannot access Keychain because this build is not signed for an Apple development team. Select the Veetbot target in Xcode, open Signing & Capabilities, and choose your team."
             }
             if status == errSecInteractionNotAllowed {
-                return "Keychain is locked or unavailable for interaction. Unlock the device or login Keychain and try again."
+                return
+                    "Keychain is locked or unavailable for interaction. Unlock the device or login Keychain and try again."
             }
             if status == errSecNotAvailable {
-                return "Keychain is not available. Unlock the device or login Keychain and try again."
+                return
+                    "Keychain is not available. Unlock the device or login Keychain and try again."
             }
             let message = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
             return "Keychain operation failed: \(message)"
@@ -52,13 +56,13 @@ public actor KeychainTokenStore: TokenStore {
         if status != errSecItemNotFound {
             throw KeychainTokenStoreError.operationFailed(status)
         }
-#if os(macOS)
+        #if os(macOS)
         if let legacyToken = try readLegacyTokenWithoutPrompt() {
             try saveToken(legacyToken)
             deleteLegacyTokenWithoutPrompt()
             return legacyToken
         }
-#endif
+        #endif
         return nil
     }
 
@@ -104,6 +108,12 @@ public actor KeychainTokenStore: TokenStore {
     }
 
     public func deleteToken() throws {
+        #if os(macOS)
+        let legacyStatus = SecItemDelete(legacyBaseQuery as CFDictionary)
+        guard legacyStatus == errSecSuccess || legacyStatus == errSecItemNotFound else {
+            throw KeychainTokenStoreError.operationFailed(legacyStatus)
+        }
+        #endif
         let status = SecItemDelete(baseQuery as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainTokenStoreError.operationFailed(status)
@@ -124,7 +134,7 @@ public actor KeychainTokenStore: TokenStore {
         ]
     }
 
-#if os(macOS)
+    #if os(macOS)
     private var legacyBaseQuery: [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -159,7 +169,7 @@ public actor KeychainTokenStore: TokenStore {
         query[kSecUseAuthenticationContext as String] = context
         return query
     }
-#endif
+    #endif
 }
 
 public actor InMemoryTokenStore: TokenStore {

@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import Testing
+
 @testable import VeetbotCore
 
 @Suite(.serialized) struct HTTPTransportTests {
@@ -15,6 +16,16 @@ import Testing
             Issue.record("unexpected error: \(error)")
         }
         _ = try ConnectionConfiguration(baseURLString: "https://host:8000")
+    }
+
+    @Test
+    func testRoutePathCharactersArePercentEncoded() throws {
+        let configuration = try ConnectionConfiguration(
+            baseURLString: "https://host.example/base%20path"
+        )
+        let url = try configuration.url(path: "/v1/artifacts/a value")
+
+        #expect(url.absoluteString == "https://host.example/base%20path/v1/artifacts/a%20value")
     }
 
     @Test
@@ -81,7 +92,10 @@ import Testing
 
         let captured = lock.withLock { requests }
         #expect(captured.count == 2)
-        #expect(captured.map { $0.value(forHTTPHeaderField: "Idempotency-Key") } == ["stable-key", "stable-key"])
+        #expect(
+            captured.map { $0.value(forHTTPHeaderField: "Idempotency-Key") } == [
+                "stable-key", "stable-key",
+            ])
         #expect(captured.last?.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
         #expect(captured.last?.value(forHTTPHeaderField: "Content-Type") == "application/json")
         #expect(captured.last?.value(forHTTPHeaderField: "X-Request-Id") != nil)
@@ -101,7 +115,9 @@ import Testing
             )
             return (
                 response,
-                Data(#"{"error":{"code":"authentication_error","message":"expired","details":{},"request_id":"req-401"}}"#.utf8)
+                Data(
+                    #"{"error":{"code":"authentication_error","message":"expired","details":{},"request_id":"req-401"}}"#
+                        .utf8)
             )
         }
         let client = try makeClient(token: "expired")
@@ -114,8 +130,50 @@ import Testing
         } catch {
             Issue.record("unexpected error: \(error)")
         }
-        let state = await client.transport.authorizationState()
-        #expect(state == .requiresReauthentication)
+        #expect(await client.transport.authorizationState() == .requiresReauthentication)
+    }
+
+    @Test
+    func testRetryableHTTPStatusUsesStableIdempotencyKey() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            let count = lock.withLock {
+                requests.append(request)
+                return requests.count
+            }
+            let status = count == 1 ? 429 : 202
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: status,
+                    httpVersion: "HTTP/1.1",
+                    headerFields: count == 1
+                        ? ["Retry-After": "0", "Content-Type": "application/json"]
+                        : ["Content-Type": "application/json"]
+                )
+            )
+            let data =
+                count == 1
+                ? Data(#"{"error":{"code":"rate_limited","message":"slow down"}}"#.utf8)
+                : Data(#"{"run_id":"00000000-0000-0000-0000-000000000002","status":"QUEUED"}"#.utf8)
+            return (response, data)
+        }
+        let client = try makeClient(token: "valid")
+        _ = try await client.submitMessage(
+            sessionID: UUID(),
+            content: [.text("hello")],
+            idempotencyKey: "retry-key"
+        )
+
+        let captured = lock.withLock { requests }
+        #expect(captured.count == 2)
+        #expect(
+            captured.allSatisfy {
+                $0.value(forHTTPHeaderField: "Idempotency-Key") == "retry-key"
+            })
+        #expect(await client.transport.authorizationState() == .authenticated)
     }
 
     @Test
@@ -123,11 +181,14 @@ import Testing
         defer { StubURLProtocol.handler = nil }
         StubURLProtocol.handler = { request in
             let response = try #require(
-                HTTPURLResponse(url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 403, httpVersion: nil, headerFields: nil)
             )
             return (
                 response,
-                Data(#"{"error":{"code":"authorization_error","message":"missing scope","details":{},"request_id":"req-403"}}"#.utf8)
+                Data(
+                    #"{"error":{"code":"authorization_error","message":"missing scope","details":{},"request_id":"req-403"}}"#
+                        .utf8)
             )
         }
         let client = try makeClient(token: "valid")
@@ -139,6 +200,7 @@ import Testing
         } catch {
             Issue.record("unexpected error: \(error)")
         }
+        #expect(await client.transport.authorizationState() == .authenticated)
     }
 
     private func makeClient(token: String) throws -> VeetbotAPIClient {
@@ -158,8 +220,8 @@ import Testing
 private final class StubURLProtocol: URLProtocol {
     static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override static func canInit(with request: URLRequest) -> Bool { true }
+    override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         guard let handler = Self.handler else {

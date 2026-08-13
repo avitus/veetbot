@@ -183,7 +183,8 @@ public final class RunStateReducer: ObservableObject {
         } else {
             pendingApprovalIDs.remove(approval.id)
         }
-        let associatedCallID = tools.last(where: { $0.approvalID == approval.id })?.callID
+        let associatedCallID =
+            tools.last(where: { $0.approvalID == approval.id })?.callID
             ?? tools.reversed().first(where: {
                 $0.name == approval.toolName
                     && $0.approvalID == nil
@@ -216,7 +217,7 @@ public final class RunStateReducer: ObservableObject {
         guard let text, !text.isEmpty else { return }
         reasoningActive = false
         if let streamingMessageID,
-           let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
+            let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
         {
             let previous = timeline[index].text
             timeline[index].content = [.text(previous + text)]
@@ -232,7 +233,7 @@ public final class RunStateReducer: ObservableObject {
     private func reconcileAssistantMessage(_ value: JSONValue, fallbackID: String) {
         guard let message = decode(AssistantMessagePayload.self, from: value) else { return }
         if let streamingMessageID,
-           let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
+            let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
         {
             timeline[index].content = message.content
             timeline[index].isStreaming = false
@@ -261,10 +262,15 @@ public final class RunStateReducer: ObservableObject {
     }
 
     private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
-        let callID = frame.data["call_id"]?.stringValue ?? "\(frame.event)-\(frameID(frame))"
-        let name = frame.data["name"]?.stringValue
+        let name =
+            frame.data["name"]?.stringValue
             ?? frame.data["tool_name"]?.stringValue
             ?? "tool"
+        let runID =
+            frame.data["run_id"]?.stringValue
+            ?? activeRunID?.uuidString
+            ?? "unknown-run"
+        let callID = frame.data["call_id"]?.stringValue ?? "tool-\(runID)-\(name)"
         ensureTool(callID: callID, name: name, status: status)
         updateTool(callID: callID) { tool in
             tool.status = status
@@ -277,7 +283,10 @@ public final class RunStateReducer: ObservableObject {
             if let value = frame.data["risk"]?.stringValue {
                 tool.risk = RiskLevel(rawValue: value.lowercased())
             }
-            if let result = frame.data["result_item"].flatMap({ decode(ToolResultPayload.self, from: $0) }) {
+            if let result = frame.data["result_item"].flatMap({
+                decode(ToolResultPayload.self, from: $0)
+            }
+            ) {
                 tool.result = ToolResultView(
                     content: result.content,
                     trust: result.trust,
@@ -314,7 +323,7 @@ public final class RunStateReducer: ObservableObject {
         guard let value, let state = decode(WorkingStateView.self, from: value) else { return }
         workingState = state
         if let prompt = clarifyingQuestion,
-           !state.openQuestions.contains(prompt.question)
+            !state.openQuestions.contains(prompt.question)
         {
             clarifyingQuestion = nil
         }
@@ -328,7 +337,8 @@ public final class RunStateReducer: ObservableObject {
             let questionID = UUID(uuidString: idString),
             let runID = runID ?? activeRunID
         else { return }
-        let question = frame.data["question"]?.stringValue
+        let question =
+            frame.data["question"]?.stringValue
             ?? workingState?.openQuestions.last
             ?? "The agent needs more information."
         clarifyingQuestion = ClarifyingQuestionPrompt(

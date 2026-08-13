@@ -1,24 +1,36 @@
 // swift-tools-version: 6.0
 
-import PackageDescription
 import Foundation
+import PackageDescription
 
 let commandLineDeveloper = "/Library/Developer/CommandLineTools"
 let testingFrameworks = "\(commandLineDeveloper)/Library/Developer/Frameworks"
 let testingLibraries = "\(commandLineDeveloper)/Library/Developer/usr/lib"
-let testingMacros = "\(commandLineDeveloper)/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib"
-let commandLineTestingFlags: [SwiftSetting] = FileManager.default.fileExists(atPath: testingMacros)
+let testingMacros =
+    "\(commandLineDeveloper)/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib"
+let selectedDeveloperDirectory = ProcessInfo.processInfo.environment["DEVELOPER_DIR"] ?? ""
+let fullXcodeFlags: [SwiftSetting] =
+    selectedDeveloperDirectory.contains(".app/Contents/Developer")
+    ? [.define("XCODE_BUILD")]
+    : []
+// Detect Command Line Tools versus full Xcode so cached manifests do not retain
+// incompatible test-runner flags; see the test-runner note in README.md.
+let commandLineTestingFlags: [SwiftSetting] =
+    FileManager.default.fileExists(atPath: testingMacros)
     ? [.unsafeFlags(["-F", testingFrameworks, "-load-plugin-library", testingMacros])]
     : []
-let commandLineTestingLinkerFlags: [LinkerSetting] = FileManager.default.fileExists(atPath: testingMacros)
-    ? [.unsafeFlags([
-        "-F", testingFrameworks,
-        "-framework", "Testing",
-        "-Xlinker", "-rpath",
-        "-Xlinker", testingFrameworks,
-        "-Xlinker", "-rpath",
-        "-Xlinker", testingLibraries,
-    ])]
+let commandLineTestingLinkerFlags: [LinkerSetting] =
+    FileManager.default.fileExists(atPath: testingMacros)
+    ? [
+        .unsafeFlags([
+            "-F", testingFrameworks,
+            "-framework", "Testing",
+            "-Xlinker", "-rpath",
+            "-Xlinker", testingFrameworks,
+            "-Xlinker", "-rpath",
+            "-Xlinker", testingLibraries,
+        ])
+    ]
     : []
 
 let package = Package(
@@ -28,7 +40,7 @@ let package = Package(
         .macOS(.v12),
     ],
     products: [
-        .library(name: "VeetbotCore", targets: ["VeetbotCore"]),
+        .library(name: "VeetbotCore", targets: ["VeetbotCore"])
     ],
     targets: [
         .target(
@@ -37,13 +49,14 @@ let package = Package(
             exclude: [
                 "Resources",
                 "VeetbotApp.swift",
-            ]
+            ],
+            swiftSettings: fullXcodeFlags
         ),
         .testTarget(
             name: "VeetbotCoreTests",
             dependencies: ["VeetbotCore"],
             path: "Tests/VeetbotCoreTests",
-            swiftSettings: commandLineTestingFlags,
+            swiftSettings: commandLineTestingFlags + fullXcodeFlags,
             linkerSettings: commandLineTestingLinkerFlags
         ),
     ],

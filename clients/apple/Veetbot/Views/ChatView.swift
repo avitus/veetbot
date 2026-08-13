@@ -4,8 +4,7 @@ public struct ChatView: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
     @State private var draft = ""
-    @State private var selectedArtifactID: UUID?
-    @State private var showingArtifact = false
+    @State private var artifactSelection: ArtifactSelection?
 
     public init(model: ChatViewModel) {
         self.model = model
@@ -16,22 +15,41 @@ public struct ChatView: View {
         VStack(spacing: 0) {
             header
             Divider()
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if let workingState = state.workingState {
-                        WorkingStatePanel(state: workingState)
-                    }
-                    ForEach(state.timeline) { item in
-                        TimelineBubble(item: item) { artifactID in
-                            selectedArtifactID = artifactID
-                            showingArtifact = true
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if let workingState = state.workingState {
+                            WorkingStatePanel(state: workingState)
                         }
-                    }
-                    ForEach(state.tools) { activity in
-                        ToolActivityCard(
-                            activity: activity,
-                            approval: state.approvals.first { $0.id == activity.approvalID },
-                            resolve: { approval, decision, reason in
+                        ForEach(state.timeline) { item in
+                            TimelineBubble(item: item) { artifactID in
+                                artifactSelection = ArtifactSelection(id: artifactID)
+                            }
+                        }
+                        ForEach(state.tools) { activity in
+                            ToolActivityCard(
+                                activity: activity,
+                                approval: state.approvals.first { $0.id == activity.approvalID },
+                                resolve: { approval, decision, reason in
+                                    Task {
+                                        await model.resolveApproval(
+                                            approval,
+                                            decision: decision,
+                                            reason: reason
+                                        )
+                                    }
+                                },
+                                openArtifact: { artifactID in
+                                    artifactSelection = ArtifactSelection(id: artifactID)
+                                }
+                            )
+                        }
+                        ForEach(
+                            state.approvals.filter { approval in
+                                !state.tools.contains { $0.approvalID == approval.id }
+                            }
+                        ) { approval in
+                            ApprovalCard(approval: approval) { decision, reason in
                                 Task {
                                     await model.resolveApproval(
                                         approval,
@@ -39,52 +57,37 @@ public struct ChatView: View {
                                         reason: reason
                                     )
                                 }
-                            },
-                            openArtifact: { artifactID in
-                                selectedArtifactID = artifactID
-                                showingArtifact = true
-                            }
-                        )
-                    }
-                    ForEach(state.approvals.filter { approval in
-                        !state.tools.contains { $0.approvalID == approval.id }
-                    }) { approval in
-                        ApprovalCard(approval: approval) { decision, reason in
-                            Task {
-                                await model.resolveApproval(
-                                    approval,
-                                    decision: decision,
-                                    reason: reason
-                                )
                             }
                         }
-                    }
-                    if state.runStatus == .running || state.runStatus == .queued {
-                        HStack(spacing: 8) {
-                            ProgressView()
-                            Text(state.reasoningActive ? "Reasoning…" : "Working…")
-                                .foregroundColor(.secondary)
+                        if state.runStatus == .running || state.runStatus == .queued {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                Text(state.reasoningActive ? "Reasoning…" : "Working…")
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.vertical, 8)
                         }
-                        .padding(.vertical, 8)
-                    }
-                    if let prompt = state.clarifyingQuestion {
-                        ClarifyingQuestionCard(prompt: prompt) { answer in
-                            Task { _ = await model.answerQuestion(prompt, answer: answer) }
+                        if let prompt = state.clarifyingQuestion {
+                            ClarifyingQuestionCard(prompt: prompt) { answer in
+                                await model.answerQuestion(prompt, answer: answer)
+                            }
                         }
+                        Color.clear.frame(height: 1).id(Self.bottomAnchorID)
                     }
+                    .padding()
+                    .frame(maxWidth: 900)
+                    .frame(maxWidth: .infinity)
                 }
-                .padding()
-                .frame(maxWidth: 900)
-                .frame(maxWidth: .infinity)
+                .onChange(of: scrollChangeToken) { _ in
+                    withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+                }
             }
             Divider()
             composer
         }
         .navigationTitle("Conversation")
-        .sheet(isPresented: $showingArtifact) {
-            if let selectedArtifactID {
-                ArtifactViewerView(model: model, artifactID: selectedArtifactID)
-            }
+        .sheet(item: $artifactSelection) { selection in
+            ArtifactViewerView(model: model, artifactID: selection.id)
         }
     }
 
@@ -139,6 +142,14 @@ public struct ChatView: View {
             && (!state.isRunActive || state.runStatus == .waitingForUser)
     }
 
+    private static let bottomAnchorID = "conversation-bottom"
+
+    private var scrollChangeToken: String {
+        let lastTextCount = state.timeline.last?.text.utf8.count ?? 0
+        return
+            "\(state.timeline.count):\(lastTextCount):\(state.tools.count):\(state.runStatus?.rawValue ?? "none")"
+    }
+
     private func submitDraft() {
         guard canSendDraft else { return }
         let message = draft
@@ -152,6 +163,10 @@ public struct ChatView: View {
     }
 }
 
+private struct ArtifactSelection: Identifiable {
+    let id: UUID
+}
+
 private struct TimelineBubble: View {
     let item: TimelineItem
     let openArtifact: (UUID) -> Void
@@ -162,11 +177,11 @@ private struct TimelineBubble: View {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(Array(item.content.enumerated()), id: \.offset) { _, block in
                     switch block {
-                    case let .text(text):
+                    case .text(let text):
                         Text(text).textSelection(.enabled)
-                    case let .image(artifactID, mediaType, _):
+                    case .image(let artifactID, let mediaType, _):
                         artifactButton("Image · \(mediaType)", id: artifactID)
-                    case let .file(artifactID, _, filename):
+                    case .file(let artifactID, _, let filename):
                         artifactButton(filename ?? "File", id: artifactID)
                     }
                 }
@@ -187,7 +202,9 @@ private struct TimelineBubble: View {
     }
 
     private func artifactButton(_ label: String, id: UUID) -> some View {
-        Button { openArtifact(id) } label: {
+        Button {
+            openArtifact(id)
+        } label: {
             Label(label, systemImage: "doc")
         }
     }

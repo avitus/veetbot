@@ -5,37 +5,134 @@ public enum SessionStatus: String, Codable, Sendable {
     case closed = "CLOSED"
 }
 
-public enum RunStatus: String, Codable, CaseIterable, Sendable {
-    case queued = "QUEUED"
-    case running = "RUNNING"
-    case waitingForApproval = "WAITING_FOR_APPROVAL"
-    case waitingForUser = "WAITING_FOR_USER"
-    case completed = "COMPLETED"
-    case failed = "FAILED"
-    case cancelled = "CANCELLED"
+public enum RunStatus: Hashable, Sendable {
+    case queued
+    case running
+    case waitingForApproval
+    case waitingForUser
+    case completed
+    case failed
+    case cancelled
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "QUEUED": self = .queued
+        case "RUNNING": self = .running
+        case "WAITING_FOR_APPROVAL": self = .waitingForApproval
+        case "WAITING_FOR_USER": self = .waitingForUser
+        case "COMPLETED": self = .completed
+        case "FAILED": self = .failed
+        case "CANCELLED": self = .cancelled
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .queued: return "QUEUED"
+        case .running: return "RUNNING"
+        case .waitingForApproval: return "WAITING_FOR_APPROVAL"
+        case .waitingForUser: return "WAITING_FOR_USER"
+        case .completed: return "COMPLETED"
+        case .failed: return "FAILED"
+        case .cancelled: return "CANCELLED"
+        case .unknown(let value): return value
+        }
+    }
 
     public var isTerminal: Bool {
         self == .completed || self == .failed || self == .cancelled
     }
 
-    public var isActive: Bool { !isTerminal }
+    public var isActive: Bool {
+        switch self {
+        case .queued, .running, .waitingForApproval, .waitingForUser: return true
+        case .completed, .failed, .cancelled, .unknown: return false
+        }
+    }
 }
 
-public enum FailureReason: String, Codable, Sendable {
-    case maxAttemptsExceeded = "max_attempts_exceeded"
-    case budgetExceeded = "budget_exceeded"
-    case deadlineExceeded = "deadline_exceeded"
-    case maxStepsExceeded = "max_steps_exceeded"
-    case toolLoopDetected = "tool_loop_detected"
-    case repeatedDenial = "repeated_denial"
-    case approvalExpired = "approval_expired"
-    case inputDeadlineExceeded = "input_deadline_exceeded"
-    case contextOverflow = "context_overflow"
-    case modelPermanentError = "model_permanent_error"
-    case emptyModelTurn = "empty_model_turn"
-    case authorizationError = "authorization_error"
-    case childRunFailed = "child_run_failed"
-    case internalError = "internal_error"
+extension RunStatus: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+public enum FailureReason: Hashable, Sendable {
+    case maxAttemptsExceeded
+    case budgetExceeded
+    case deadlineExceeded
+    case maxStepsExceeded
+    case toolLoopDetected
+    case repeatedDenial
+    case approvalExpired
+    case inputDeadlineExceeded
+    case contextOverflow
+    case modelPermanentError
+    case emptyModelTurn
+    case authorizationError
+    case childRunFailed
+    case internalError
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "max_attempts_exceeded": self = .maxAttemptsExceeded
+        case "budget_exceeded": self = .budgetExceeded
+        case "deadline_exceeded": self = .deadlineExceeded
+        case "max_steps_exceeded": self = .maxStepsExceeded
+        case "tool_loop_detected": self = .toolLoopDetected
+        case "repeated_denial": self = .repeatedDenial
+        case "approval_expired": self = .approvalExpired
+        case "input_deadline_exceeded": self = .inputDeadlineExceeded
+        case "context_overflow": self = .contextOverflow
+        case "model_permanent_error": self = .modelPermanentError
+        case "empty_model_turn": self = .emptyModelTurn
+        case "authorization_error": self = .authorizationError
+        case "child_run_failed": self = .childRunFailed
+        case "internal_error": self = .internalError
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .maxAttemptsExceeded: return "max_attempts_exceeded"
+        case .budgetExceeded: return "budget_exceeded"
+        case .deadlineExceeded: return "deadline_exceeded"
+        case .maxStepsExceeded: return "max_steps_exceeded"
+        case .toolLoopDetected: return "tool_loop_detected"
+        case .repeatedDenial: return "repeated_denial"
+        case .approvalExpired: return "approval_expired"
+        case .inputDeadlineExceeded: return "input_deadline_exceeded"
+        case .contextOverflow: return "context_overflow"
+        case .modelPermanentError: return "model_permanent_error"
+        case .emptyModelTurn: return "empty_model_turn"
+        case .authorizationError: return "authorization_error"
+        case .childRunFailed: return "child_run_failed"
+        case .internalError: return "internal_error"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+extension FailureReason: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public struct SessionView: Codable, Identifiable, Sendable {
@@ -262,15 +359,15 @@ public enum ContentBlock: Codable, Hashable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
-        case let .text(text):
+        case .text(let text):
             try container.encode("text", forKey: .type)
             try container.encode(text, forKey: .text)
-        case let .image(artifactID, mediaType, detail):
+        case .image(let artifactID, let mediaType, let detail):
             try container.encode("image", forKey: .type)
             try container.encode(artifactID, forKey: .artifactID)
             try container.encode(mediaType, forKey: .mediaType)
             try container.encode(detail, forKey: .detail)
-        case let .file(artifactID, mediaType, filename):
+        case .file(let artifactID, let mediaType, let filename):
             try container.encode("file", forKey: .type)
             try container.encode(artifactID, forKey: .artifactID)
             try container.encode(mediaType, forKey: .mediaType)
@@ -279,7 +376,7 @@ public enum ContentBlock: Codable, Hashable, Sendable {
     }
 
     public var text: String? {
-        guard case let .text(value) = self else { return nil }
+        guard case .text(let value) = self else { return nil }
         return value
     }
 
@@ -287,7 +384,7 @@ public enum ContentBlock: Codable, Hashable, Sendable {
         switch self {
         case .text:
             return nil
-        case let .image(artifactID, _, _), let .file(artifactID, _, _):
+        case .image(let artifactID, _, _), .file(let artifactID, _, _):
             return artifactID
         }
     }

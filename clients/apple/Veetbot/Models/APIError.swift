@@ -107,7 +107,7 @@ public enum APIErrorCode: Hashable, Sendable {
         case .payloadTooLarge: return "payload_too_large"
         case .rateLimited: return "rate_limited"
         case .internalError: return "internal_error"
-        case let .unknown(value): return value
+        case .unknown(let value): return value
         }
     }
 }
@@ -184,8 +184,10 @@ public struct APIError: Error, Codable, Sendable, LocalizedError {
         let nested = try root.nestedContainer(keyedBy: ErrorKeys.self, forKey: .error)
         code = try nested.decode(APIErrorCode.self, forKey: .code)
         message = try nested.decode(String.self, forKey: .message)
-        details = try nested.decode(APIErrorDetails.self, forKey: .details)
-        requestID = try nested.decode(String.self, forKey: .requestID)
+        details =
+            try nested.decodeIfPresent(APIErrorDetails.self, forKey: .details)
+            ?? APIErrorDetails()
+        requestID = try nested.decodeIfPresent(String.self, forKey: .requestID) ?? "unknown"
         statusCode = nil
     }
 

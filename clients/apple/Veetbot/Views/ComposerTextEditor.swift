@@ -159,21 +159,26 @@ struct ComposerTextEditor: UIViewRepresentable {
         ) -> Bool {
             guard replacement == "\n" || replacement == "\r" else { return true }
             guard textView.markedTextRange == nil else { return true }
+            if let composer = textView as? ComposerUITextView,
+                composer.isInsertingCommandNewline
+            {
+                return true
+            }
             parent.onSubmit()
             return false
         }
 
         func insertNewline(in textView: ComposerUITextView) {
-            let range = textView.selectedRange
-            textView.textStorage.replaceCharacters(in: range, with: "\n")
-            textView.selectedRange = NSRange(location: range.location + 1, length: 0)
-            textViewDidChange(textView)
+            textView.isInsertingCommandNewline = true
+            defer { textView.isInsertingCommandNewline = false }
+            textView.insertText("\n")
         }
     }
 }
 
 final class ComposerUITextView: UITextView {
     var commandReturnHandler: () -> Void = {}
+    var isInsertingCommandNewline = false
 
     override var keyCommands: [UIKeyCommand]? {
         let command = UIKeyCommand(

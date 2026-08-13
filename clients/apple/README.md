@@ -5,9 +5,11 @@ It is a transport-only client of the public `/v1` HTTP API; the shared core
 remains authoritative for sessions, runs, approvals, events, and artifacts.
 
 Open `Veetbot.xcodeproj` in a full Xcode installation and select an iOS or macOS
-destination. The target has no third-party dependencies. On first launch, enter
-an HTTPS API base URL and a static bearer token. The base URL is stored as a
-preference; the token is stored only in Keychain.
+destination. Before the first signed build, select the `Veetbot` target, open
+Signing & Capabilities, and choose your Apple development team. The target has
+no third-party dependencies. On first launch, enter an HTTPS API base URL and a
+static bearer token. The base URL is stored as a preference; the token is stored
+only in Keychain.
 
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its

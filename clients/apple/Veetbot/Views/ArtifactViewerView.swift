@@ -58,7 +58,11 @@ public struct ArtifactViewerView: View {
             document: artifact.map { ArtifactDocument(data: $0.data) },
             contentType: artifact.flatMap { UTType(mimeType: $0.metadata.mediaType) } ?? .data,
             defaultFilename: artifact?.metadata.name ?? "artifact"
-        ) { _ in }
+        ) { result in
+            if case .failure(let error) = result {
+                errorMessage = "The artifact could not be exported: \(error.localizedDescription)"
+            }
+        }
     }
 
     @ViewBuilder
@@ -67,24 +71,34 @@ public struct ArtifactViewerView: View {
             HStack {
                 Text(artifact.metadata.mediaType)
                 Spacer()
-                Text(ByteCountFormatter.string(
-                    fromByteCount: Int64(artifact.metadata.sizeBytes),
-                    countStyle: .file
-                ))
+                Text(
+                    ByteCountFormatter.string(
+                        fromByteCount: Int64(artifact.metadata.sizeBytes),
+                        countStyle: .file
+                    ))
             }
             .font(.caption)
             .foregroundColor(.secondary)
             .padding(.horizontal)
 
-            if artifact.metadata.mediaType.hasPrefix("text/"),
-               let text = String(data: artifact.data, encoding: .utf8)
-            {
+            if artifact.metadata.mediaType.hasPrefix("text/") {
+                let preview = textPreview(data: artifact.data)
                 ScrollView([.horizontal, .vertical]) {
-                    Text(text)
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(preview.text)
+                            .font(.system(.body, design: .monospaced))
+                            .textSelection(.enabled)
+                        if preview.isTruncated {
+                            Label(
+                                "Preview truncated. Download the artifact for the full content.",
+                                systemImage: "scissors"
+                            )
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
                 }
             } else if artifact.metadata.mediaType.hasPrefix("image/") {
                 image(data: artifact.data)
@@ -98,9 +112,18 @@ public struct ArtifactViewerView: View {
         }
     }
 
+    private func textPreview(data: Data) -> (text: String, isTruncated: Bool) {
+        let maximumPreviewBytes = 64 * 1_024
+        let bytes = data.prefix(maximumPreviewBytes)
+        return (
+            String(decoding: bytes, as: UTF8.self),
+            data.count > maximumPreviewBytes
+        )
+    }
+
     @ViewBuilder
     private func image(data: Data) -> some View {
-#if os(iOS)
+        #if os(iOS)
         if let image = UIImage(data: data) {
             ScrollView([.horizontal, .vertical]) {
                 Image(uiImage: image).resizable().scaledToFit().padding()
@@ -108,7 +131,7 @@ public struct ArtifactViewerView: View {
         } else {
             Text("The image data could not be decoded.")
         }
-#elseif os(macOS)
+        #elseif os(macOS)
         if let image = NSImage(data: data) {
             ScrollView([.horizontal, .vertical]) {
                 Image(nsImage: image).resizable().scaledToFit().padding()
@@ -116,7 +139,7 @@ public struct ArtifactViewerView: View {
         } else {
             Text("The image data could not be decoded.")
         }
-#endif
+        #endif
     }
 }
 

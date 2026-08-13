@@ -3,6 +3,7 @@ import SwiftUI
 public struct RootView: View {
     @ObservedObject var model: ChatViewModel
     @State private var showingSettings = false
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(model: ChatViewModel) {
         self.model = model
@@ -18,6 +19,14 @@ public struct RootView: View {
         }
         .sheet(isPresented: $showingSettings) {
             ConnectionSettingsView(model: model, embedded: false)
+        }
+        .onChange(of: model.requiresReauthentication) { required in
+            if required { showingSettings = true }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase != .active {
+                Task { await model.clearCachedArtifacts() }
+            }
         }
         .alert(
             "Veetbot",
@@ -120,7 +129,9 @@ private struct SessionSidebar: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button { showingSettings = true } label: {
+                Button {
+                    showingSettings = true
+                } label: {
                     Image(systemName: "gearshape")
                 }
                 .accessibilityLabel("Connection settings")

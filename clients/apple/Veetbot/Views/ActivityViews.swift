@@ -1,5 +1,14 @@
 import SwiftUI
 
+private enum ServerContractIdentifier {
+    static let sandboxRunCommand = "sandbox.run_command"
+    static let workspaceReadText = "workspace.read_text"
+    static let workspaceWriteText = "workspace.write_text"
+    static let taskCompleted = "completed"
+    static let taskInProgress = "in_progress"
+    static let taskBlocked = "blocked"
+}
+
 struct ToolActivityCard: View {
     let activity: ToolActivity
     let approval: ApprovalView?
@@ -9,7 +18,9 @@ struct ToolActivityCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button { expanded.toggle() } label: {
+            Button {
+                expanded.toggle()
+            } label: {
                 HStack(spacing: 10) {
                     Image(systemName: taxonomy.icon)
                         .foregroundColor(taxonomy.color)
@@ -32,10 +43,13 @@ struct ToolActivityCard: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
 
             if expanded {
                 if !activity.arguments.isEmpty {
-                    DetailBlock(title: "Arguments", text: JSONValue.object(activity.arguments).prettyPrinted)
+                    DetailBlock(
+                        title: "Arguments", text: JSONValue.object(activity.arguments).prettyPrinted
+                    )
                 }
                 if let result = activity.result {
                     ToolResultContent(
@@ -110,8 +124,9 @@ struct ApprovalCard: View {
 
 struct ClarifyingQuestionCard: View {
     let prompt: ClarifyingQuestionPrompt
-    let submit: (String) -> Void
+    let submit: (String) async -> Bool
     @State private var answer = ""
+    @State private var isSubmitting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -122,11 +137,19 @@ struct ClarifyingQuestionCard: View {
             TextField("Your answer", text: $answer)
             Button("Answer") {
                 let value = answer
-                answer = ""
-                submit(value)
+                Task {
+                    isSubmitting = true
+                    defer { isSubmitting = false }
+                    if await submit(value) {
+                        answer = ""
+                    }
+                }
             }
             .buttonStyle(.borderedProminent)
-            .disabled(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(
+                isSubmitting
+                    || answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            )
         }
         .padding(12)
         .background(Color.blue.opacity(0.08))
@@ -179,9 +202,9 @@ struct WorkingStatePanel: View {
 
     private func icon(for status: String) -> String {
         switch status {
-        case "completed": return "checkmark.circle.fill"
-        case "in_progress": return "arrow.triangle.2.circlepath"
-        case "blocked": return "exclamationmark.octagon"
+        case ServerContractIdentifier.taskCompleted: return "checkmark.circle.fill"
+        case ServerContractIdentifier.taskInProgress: return "arrow.triangle.2.circlepath"
+        case ServerContractIdentifier.taskBlocked: return "exclamationmark.octagon"
         default: return "circle"
         }
     }
@@ -203,18 +226,20 @@ private struct ToolResultContent: View {
                         .foregroundColor(trust == .externalUntrusted ? .orange : .secondary)
                 }
             }
-            if toolName == "sandbox.run_command" {
+            if toolName == ServerContractIdentifier.sandboxRunCommand {
                 terminalTranscript
-            } else if toolName == "workspace.read_text" || toolName == "workspace.write_text" {
+            } else if toolName == ServerContractIdentifier.workspaceReadText
+                || toolName == ServerContractIdentifier.workspaceWriteText
+            {
                 filePreview
             } else {
                 ForEach(Array(result.content.enumerated()), id: \.offset) { _, block in
                     switch block {
-                    case let .text(text):
+                    case .text(let text):
                         Text(text).textSelection(.enabled)
-                    case let .image(artifactID, mediaType, _):
+                    case .image(let artifactID, let mediaType, _):
                         artifactButton("Image · \(mediaType)", id: artifactID)
-                    case let .file(artifactID, _, filename):
+                    case .file(let artifactID, _, let filename):
                         artifactButton(filename ?? "File", id: artifactID)
                     }
                 }
@@ -223,14 +248,17 @@ private struct ToolResultContent: View {
     }
 
     private func artifactButton(_ label: String, id: UUID) -> some View {
-        Button { openArtifact(id) } label: {
+        Button {
+            openArtifact(id)
+        } label: {
             Label(label, systemImage: "doc")
         }
     }
 
     private var terminalTranscript: some View {
         VStack(alignment: .leading, spacing: 5) {
-            let stdout = result.structured?["stdout"]?.stringValue
+            let stdout =
+                result.structured?["stdout"]?.stringValue
                 ?? result.content.first?.text
                 ?? ""
             let stderr = result.structured?["stderr"]?.stringValue ?? ""
@@ -257,7 +285,8 @@ private struct ToolResultContent: View {
     }
 
     private var filePreview: some View {
-        let text = result.structured?["content"]?.stringValue
+        let text =
+            result.structured?["content"]?.stringValue
             ?? result.content.compactMap(\.text).joined(separator: "\n")
         return Text(text)
             .font(.system(.caption, design: .monospaced))

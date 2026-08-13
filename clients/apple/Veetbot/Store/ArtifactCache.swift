@@ -38,6 +38,12 @@ public actor ArtifactCache {
         recency.removeAll { $0 == artifactID }
     }
 
+    public func removeAll() {
+        values.removeAll(keepingCapacity: false)
+        recency.removeAll(keepingCapacity: false)
+        totalBytes = 0
+    }
+
     private func markMostRecent(_ artifactID: UUID) {
         recency.removeAll { $0 == artifactID }
         recency.append(artifactID)

@@ -22,7 +22,7 @@ public actor FileSessionHistoryStore: SessionHistoryStore {
             self.fileURL = directory.appendingPathComponent("session-history.json")
         }
         if let data = try? Data(contentsOf: self.fileURL),
-           let decoded = try? JSONDecoder.server.decode([SessionHistoryEntry].self, from: data)
+            let decoded = try? JSONDecoder.server.decode([SessionHistoryEntry].self, from: data)
         {
             entries = Dictionary(
                 decoded.map { ($0.sessionID, $0) },
@@ -38,10 +38,7 @@ public actor FileSessionHistoryStore: SessionHistoryStore {
     }
 
     public func list() -> [SessionHistoryEntry] {
-        entries.values.sorted {
-            if $0.updatedAt == $1.updatedAt { return $0.sessionID.uuidString > $1.sessionID.uuidString }
-            return $0.updatedAt > $1.updatedAt
-        }
+        entries.values.sortedForHistoryList()
     }
 
     public func upsert(_ entry: SessionHistoryEntry) throws {
@@ -60,6 +57,12 @@ public actor FileSessionHistoryStore: SessionHistoryStore {
 
     private func persist(_ updated: [UUID: SessionHistoryEntry]) throws {
         let data = try JSONEncoder.pretty.encode(Array(updated.values))
+        #if os(iOS)
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtection])
+        #else
+        // macOS protects Application Support through the user's Data Protection
+        // class; the iOS-only write option fails for arbitrary macOS test paths.
         try data.write(to: fileURL, options: .atomic)
+        #endif
     }
 }

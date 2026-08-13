@@ -56,9 +56,9 @@ public actor SwiftDataSessionHistoryStore: SessionHistoryStore {
 
     public func list() throws -> [SessionHistoryEntry] {
         let context = ModelContext(container)
-        var descriptor = FetchDescriptor<LocalSessionRecord>()
-        descriptor.sortBy = [SortDescriptor(\LocalSessionRecord.updatedAt, order: .reverse)]
-        return try context.fetch(descriptor).compactMap(\.entry)
+        return try context.fetch(FetchDescriptor<LocalSessionRecord>())
+            .compactMap(\.entry)
+            .sortedForHistoryList()
     }
 
     public func upsert(_ entry: SessionHistoryEntry) throws {

@@ -39,6 +39,7 @@ public struct TransportRequest: Sendable {
 }
 
 public enum HTTPTransportError: Error, LocalizedError {
+    case notConfigured
     case missingToken
     case invalidResponse
     case reauthenticationRequired(APIError)
@@ -48,15 +49,17 @@ public enum HTTPTransportError: Error, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
+        case .notConfigured:
+            return "Configure a Veetbot server connection first."
         case .missingToken:
             return "Enter a bearer token to connect."
         case .invalidResponse:
             return "The server returned an invalid HTTP response."
-        case let .reauthenticationRequired(error),
-             let .authorizationDenied(error),
-             let .api(error):
+        case .reauthenticationRequired(let error),
+            .authorizationDenied(let error),
+            .api(let error):
             return error.message
-        case let .connection(error):
+        case .connection(let error):
             return error.localizedDescription
         }
     }
@@ -121,17 +124,25 @@ public actor HTTPTransport {
     ) async throws -> (Data, HTTPURLResponse) {
         let urlRequest = try await makeURLRequest(request)
         var lastConnectionError: URLError?
-        for attempt in 1 ... request.retryAttempts {
+        for attempt in 1...request.retryAttempts {
             do {
                 let (data, response) = try await session.data(for: urlRequest)
                 guard let http = response as? HTTPURLResponse else {
                     throw HTTPTransportError.invalidResponse
                 }
-                if (200 ... 299).contains(http.statusCode)
+                if (200...299).contains(http.statusCode)
                     || additionalStatusCodes.contains(http.statusCode)
                 {
                     state = .authenticated
                     return (data, http)
+                }
+                if http.statusCode.isRetryableHTTPStatus,
+                    attempt < request.retryAttempts
+                {
+                    try await Task.sleep(
+                        nanoseconds: retryDelayNanoseconds(response: http, attempt: attempt)
+                    )
+                    continue
                 }
                 try throwAPIError(data: data, response: http)
             } catch is CancellationError {
@@ -192,11 +203,13 @@ public actor HTTPTransport {
     }
 
     private func throwAPIError(data: Data, response: HTTPURLResponse) throws -> Never {
-        var error = (try? JSONDecoder.server.decode(APIError.self, from: data)) ?? APIError(
-            code: .unknown("http_\(response.statusCode)"),
-            message: HTTPURLResponse.localizedString(forStatusCode: response.statusCode),
-            requestID: response.value(forHTTPHeaderField: "X-Request-Id") ?? "unknown"
-        )
+        var error =
+            (try? JSONDecoder.server.decode(APIError.self, from: data))
+            ?? APIError(
+                code: .unknown("http_\(response.statusCode)"),
+                message: HTTPURLResponse.localizedString(forStatusCode: response.statusCode),
+                requestID: response.value(forHTTPHeaderField: "X-Request-Id") ?? "unknown"
+            )
         error.statusCode = response.statusCode
         switch response.statusCode {
         case 401:
@@ -208,17 +221,47 @@ public actor HTTPTransport {
             throw HTTPTransportError.api(error)
         }
     }
+
+    private func retryDelayNanoseconds(response: HTTPURLResponse, attempt: Int) -> UInt64 {
+        let fallback = min(0.25 * pow(2, Double(attempt - 1)), 2)
+        guard let rawValue = response.value(forHTTPHeaderField: "Retry-After") else {
+            return UInt64(fallback * 1_000_000_000)
+        }
+        let delay: TimeInterval
+        if let seconds = TimeInterval(rawValue), seconds >= 0 {
+            delay = seconds
+        } else if let date = Self.httpDate(from: rawValue) {
+            delay = max(0, date.timeIntervalSinceNow)
+        } else {
+            delay = fallback
+        }
+        return UInt64(min(delay, 60) * 1_000_000_000)
+    }
+
+    private static func httpDate(from value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
+        return formatter.date(from: value)
+    }
 }
 
-private extension URLError {
-    var isRetryableConnectionFailure: Bool {
+extension URLError {
+    fileprivate var isRetryableConnectionFailure: Bool {
         switch code {
         case .timedOut, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
-             .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff,
-             .callIsActive, .dataNotAllowed:
+            .dnsLookupFailed, .notConnectedToInternet, .internationalRoamingOff,
+            .callIsActive, .dataNotAllowed:
             return true
         default:
             return false
         }
+    }
+}
+
+extension Int {
+    fileprivate var isRetryableHTTPStatus: Bool {
+        self == 429 || (500...599).contains(self)
     }
 }

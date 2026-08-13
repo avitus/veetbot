@@ -29,6 +29,7 @@ public final class ChatViewModel: ObservableObject {
     private var loadedApprovalIDs: Set<UUID> = []
     private var selectionRequestID: UUID?
     private var removedHistorySessionIDs: Set<UUID> = []
+    private var pendingSubmission: (text: String, key: String)?
 
     public init(
         tokenStore: any TokenStore = KeychainTokenStore(),
@@ -56,7 +57,7 @@ public final class ChatViewModel: ObservableObject {
                 throw HTTPTransportError.missingToken
             }
             await configurationStore.save(configuration)
-            install(configuration)
+            await install(configuration)
             requiresReauthentication = false
             errorMessage = nil
         } catch {
@@ -70,6 +71,7 @@ public final class ChatViewModel: ObservableObject {
         do { try await tokenStore.deleteToken() } catch { present(error) }
         api = nil
         eventStream = nil
+        await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
     }
@@ -80,6 +82,7 @@ public final class ChatViewModel: ObservableObject {
         selectedSessionID = nil
         sessionBusy = false
         loadedApprovalIDs.removeAll()
+        pendingSubmission = nil
         runState.reset()
     }
 
@@ -91,19 +94,22 @@ public final class ChatViewModel: ObservableObject {
         selectedSessionID = entry.sessionID
         sessionBusy = false
         loadedApprovalIDs.removeAll()
+        pendingSubmission = nil
         runState.reset()
         do {
             let session = try await api.getSession(entry.sessionID)
             guard selectionRequestID == requestID,
-                  !removedHistorySessionIDs.contains(entry.sessionID)
+                !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
             try await store(session: session, lastRunID: session.activeRunID ?? entry.lastRunID)
             guard selectionRequestID == requestID else {
                 if removedHistorySessionIDs.contains(entry.sessionID) {
                     try? await historyStore.delete(sessionID: entry.sessionID)
-                    history = (try? await historyStore.list()) ?? history.filter {
-                        $0.sessionID != entry.sessionID
-                    }
+                    history =
+                        (try? await historyStore.list())
+                        ?? history.filter {
+                            $0.sessionID != entry.sessionID
+                        }
                 }
                 return
             }
@@ -144,7 +150,7 @@ public final class ChatViewModel: ObservableObject {
 
         if runState.isRunActive {
             if runState.runStatus == .waitingForUser,
-               let prompt = runState.clarifyingQuestion
+                let prompt = runState.clarifyingQuestion
             {
                 return await answerQuestion(prompt, answer: text)
             } else {
@@ -157,6 +163,13 @@ public final class ChatViewModel: ObservableObject {
         isSending = true
         sessionBusy = false
         defer { isSending = false }
+        let idempotencyKey: String
+        if let pendingSubmission, pendingSubmission.text == text {
+            idempotencyKey = pendingSubmission.key
+        } else {
+            idempotencyKey = UUID().uuidString.lowercased()
+            pendingSubmission = (text, idempotencyKey)
+        }
         do {
             let session: SessionView
             if let selectedSessionID {
@@ -166,27 +179,34 @@ public final class ChatViewModel: ObservableObject {
                 selectedSessionID = session.id
                 try await store(session: session, lastRunID: nil, suggestedTitle: text)
             }
-            let idempotencyKey = UUID().uuidString.lowercased()
             let submit = try await api.submitMessage(
                 sessionID: session.id,
                 content: [.text(text)],
                 idempotencyKey: idempotencyKey
             )
             runState.begin(runID: submit.runID, status: submit.status)
-            try await store(
-                session: session,
-                lastRunID: submit.runID,
-                suggestedTitle: text,
-                touchedNow: true
-            )
+            do {
+                try await store(
+                    session: session,
+                    lastRunID: submit.runID,
+                    suggestedTitle: text,
+                    touchedNow: true
+                )
+            } catch {
+                // The server accepted the message; a local cache failure must
+                // not invite a second submission with a new idempotency key.
+                present(error)
+            }
             watch(runID: submit.runID)
+            pendingSubmission = nil
             return true
         } catch {
             if let apiError = apiError(from: error),
-               apiError.code == .conflict,
-               apiError.details.reason == "active_run_exists",
-               let runID = apiError.details.runID
+                apiError.code == .conflict,
+                apiError.details.reason == "active_run_exists",
+                let runID = apiError.details.runID
             {
+                pendingSubmission = nil
                 sessionBusy = true
                 errorMessage = "This session is busy; attached to its active run."
                 do {
@@ -254,12 +274,13 @@ public final class ChatViewModel: ObservableObject {
             runState.mergeApproval(stored)
         } catch {
             if let apiError = apiError(from: error),
-               apiError.code == .conflict,
-               apiError.details.reason == "approval_already_resolved"
+                apiError.code == .conflict,
+                apiError.details.reason == "approval_already_resolved"
             {
                 do {
                     runState.mergeApproval(try await api.getApproval(approval.id))
-                    errorMessage = "This approval was already resolved; the first decision is shown."
+                    errorMessage =
+                        "This approval was already resolved; the first decision is shown."
                 } catch {
                     present(error)
                 }
@@ -293,19 +314,19 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func loadArtifact(_ artifactID: UUID) async throws -> LoadedArtifact {
-        guard let api else { throw HTTPTransportError.missingToken }
+        guard let api else { throw HTTPTransportError.notConfigured }
         let metadata = try await api.getArtifact(artifactID)
         let cached = await artifactCache.value(for: artifactID)
         let response = try await api.getArtifactContent(artifactID, etag: cached?.etag)
         switch response {
-        case let .content(data, etag):
+        case .content(let data, let etag):
             let value = CachedArtifactContent(data: data, etag: etag)
             await artifactCache.insert(value, for: artifactID)
             return LoadedArtifact(metadata: metadata, data: data)
         case .notModified:
             if let cached { return LoadedArtifact(metadata: metadata, data: cached.data) }
             let retry = try await api.getArtifactContent(artifactID)
-            guard case let .content(data, etag) = retry else {
+            guard case .content(let data, let etag) = retry else {
                 throw HTTPTransportError.invalidResponse
             }
             await artifactCache.insert(
@@ -318,20 +339,30 @@ public final class ChatViewModel: ObservableObject {
 
     public func clearError() { errorMessage = nil }
 
+    public func clearCachedArtifacts() async {
+        await artifactCache.removeAll()
+    }
+
     private func bootstrap() async {
         do {
             history = try await historyStore.list()
+        } catch {
+            present(error)
+        }
+        do {
             if let configuration = await configurationStore.load(),
-               try await tokenStore.readToken() != nil
+                try await tokenStore.readToken() != nil
             {
-                install(configuration)
+                await install(configuration)
             }
         } catch {
             present(error)
         }
     }
 
-    private func install(_ configuration: ConnectionConfiguration) {
+    private func install(_ configuration: ConnectionConfiguration) async {
+        await artifactCache.removeAll()
+        pendingSubmission = nil
         let transport = HTTPTransport(configuration: configuration, tokenStore: tokenStore)
         api = VeetbotAPIClient(transport: transport)
         eventStream = ReconnectingEventStream(reader: SSEReader(transport: transport))
@@ -380,15 +411,8 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func refreshHistoryAfterRun(_ runID: UUID) async {
-        guard let selectedSessionID,
-              let index = history.firstIndex(where: { $0.sessionID == selectedSessionID })
-        else { return }
-        var entry = history[index]
-        entry.updatedAt = Date()
-        entry.lastRunID = runID
         do {
-            try await historyStore.upsert(entry)
-            history = try await historyStore.list()
+            try await updateSelectedHistory(lastRunID: runID)
         } catch {
             present(error)
         }
@@ -419,7 +443,8 @@ public final class ChatViewModel: ObservableObject {
         suggestedTitle: String?,
         touchedAt: Date?
     ) -> SessionHistoryEntry {
-        let title = session.title
+        let title =
+            session.title
             ?? existing?.title
             ?? suggestedTitle.map(Self.title(from:))
             ?? "New conversation"
@@ -434,8 +459,12 @@ public final class ChatViewModel: ObservableObject {
     }
 
     private func touchSelectedHistory(lastRunID: UUID) async throws {
+        try await updateSelectedHistory(lastRunID: lastRunID)
+    }
+
+    private func updateSelectedHistory(lastRunID: UUID) async throws {
         guard let selectedSessionID,
-              var entry = history.first(where: { $0.sessionID == selectedSessionID })
+            var entry = history.first(where: { $0.sessionID == selectedSessionID })
         else { return }
         entry.updatedAt = Date()
         entry.lastRunID = lastRunID
@@ -450,9 +479,9 @@ public final class ChatViewModel: ObservableObject {
 
     private func apiError(from error: Error) -> APIError? {
         switch error {
-        case let HTTPTransportError.api(value),
-             let HTTPTransportError.reauthenticationRequired(value),
-             let HTTPTransportError.authorizationDenied(value):
+        case HTTPTransportError.api(let value),
+            HTTPTransportError.reauthenticationRequired(let value),
+            HTTPTransportError.authorizationDenied(let value):
             return value
         default:
             return nil
@@ -467,6 +496,7 @@ public final class ChatViewModel: ObservableObject {
     }
 }
 
+/// Main-actor callers own all task reads and writes; `deinit` may only cancel off-actor.
 private final class WatchTaskBox: @unchecked Sendable {
     var task: Task<Void, Never>?
 

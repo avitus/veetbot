@@ -33,15 +33,15 @@ public enum JSONValue: Codable, Hashable, Sendable {
     public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         switch self {
-        case let .string(value):
+        case .string(let value):
             try container.encode(value)
-        case let .number(value):
+        case .number(let value):
             try container.encode(value)
-        case let .bool(value):
+        case .bool(let value):
             try container.encode(value)
-        case let .object(value):
+        case .object(let value):
             try container.encode(value)
-        case let .array(value):
+        case .array(let value):
             try container.encode(value)
         case .null:
             try container.encodeNil()
@@ -49,27 +49,27 @@ public enum JSONValue: Codable, Hashable, Sendable {
     }
 
     public var stringValue: String? {
-        guard case let .string(value) = self else { return nil }
+        guard case .string(let value) = self else { return nil }
         return value
     }
 
     public var intValue: Int? {
-        guard case let .number(value) = self, value.rounded() == value else { return nil }
-        return Int(value)
+        guard case .number(let value) = self, value.rounded() == value else { return nil }
+        return Int(exactly: value)
     }
 
     public var boolValue: Bool? {
-        guard case let .bool(value) = self else { return nil }
+        guard case .bool(let value) = self else { return nil }
         return value
     }
 
     public var objectValue: [String: JSONValue]? {
-        guard case let .object(value) = self else { return nil }
+        guard case .object(let value) = self else { return nil }
         return value
     }
 
     public var arrayValue: [JSONValue]? {
-        guard case let .array(value) = self else { return nil }
+        guard case .array(let value) = self else { return nil }
         return value
     }
 
@@ -121,23 +121,21 @@ extension JSONDecoder {
 }
 
 private enum ServerDates {
-    private static let fractional: ISO8601DateFormatter = {
+    private static func formatter(fractionalSeconds: Bool) -> ISO8601DateFormatter {
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.formatOptions =
+            fractionalSeconds
+            ? [.withInternetDateTime, .withFractionalSeconds]
+            : [.withInternetDateTime]
         return formatter
-    }()
-
-    private static let wholeSeconds: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
+    }
 
     static func date(from value: String) -> Date? {
-        fractional.date(from: value) ?? wholeSeconds.date(from: value)
+        formatter(fractionalSeconds: true).date(from: value)
+            ?? formatter(fractionalSeconds: false).date(from: value)
     }
 
     static func string(from date: Date) -> String {
-        fractional.string(from: date)
+        formatter(fractionalSeconds: true).string(from: date)
     }
 }

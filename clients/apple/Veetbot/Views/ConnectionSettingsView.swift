@@ -30,11 +30,11 @@ public struct ConnectionSettingsView: View {
         Form {
             Section("Server") {
                 TextField("https://agent.example.com", text: $baseURL)
-#if os(iOS)
-                    .textContentType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .keyboardType(.URL)
-#endif
+                    #if os(iOS)
+                .textContentType(.URL)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                    #endif
                 Text("HTTPS is required. Plaintext http:// targets are rejected.")
                     .font(.caption)
                     .foregroundColor(.secondary)
@@ -54,7 +54,10 @@ public struct ConnectionSettingsView: View {
                 Button("Save connection") {
                     Task {
                         await model.configure(baseURLString: baseURL, token: token)
-                        if model.isConfigured && !embedded { dismiss() }
+                        if model.isConfigured {
+                            token = ""
+                            if !embedded { dismiss() }
+                        }
                     }
                 }
                 .disabled(baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)

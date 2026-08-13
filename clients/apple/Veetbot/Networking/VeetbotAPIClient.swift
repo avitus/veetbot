@@ -59,6 +59,8 @@ public struct VeetbotAPIClient: Sendable {
         content: [ContentBlock],
         questionID: UUID
     ) async throws -> SubmitResult {
+        // This route is idempotent on (run_id, question_id); the server does not
+        // consume Idempotency-Key here, so retries reuse the same question ID.
         try await transport.send(
             TransportRequest(
                 method: .post,
@@ -112,6 +114,8 @@ public struct VeetbotAPIClient: Sendable {
         decision: ApprovalDecision,
         reason: String? = nil
     ) async throws -> ApprovalView {
+        // Approval resolution is first-decision-wins. A replay returns the
+        // stored conflict, which ChatViewModel reconciles by reloading the item.
         try await transport.send(
             TransportRequest(
                 method: .post,

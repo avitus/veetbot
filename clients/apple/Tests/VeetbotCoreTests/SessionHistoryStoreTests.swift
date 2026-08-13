@@ -1,8 +1,53 @@
 import Foundation
 import Testing
+
 @testable import VeetbotCore
 
 @Suite struct SessionHistoryStoreTests {
+    @Test(arguments: HistoryBackend.allCases)
+    func testEqualTimestampsUseTheSameDeterministicOrder(
+        backend: HistoryBackend
+    ) async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store: any SessionHistoryStore =
+            switch backend {
+            case .file:
+                try FileSessionHistoryStore(
+                    fileURL: directory.appendingPathComponent("history.json")
+                )
+            case .volatile:
+                VolatileSessionHistoryStore()
+            #if XCODE_BUILD
+            case .swiftData:
+                if #available(macOS 14.0, *) {
+                    try SwiftDataSessionHistoryStore(inMemory: true)
+                } else {
+                    VolatileSessionHistoryStore()
+                }
+            #endif
+            }
+        let timestamp = Date(timeIntervalSince1970: 10)
+        let lowerID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+        let higherID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+        for id in [lowerID, higherID] {
+            try await store.upsert(
+                SessionHistoryEntry(
+                    sessionID: id,
+                    title: id.uuidString,
+                    agentID: "general",
+                    createdAt: timestamp,
+                    updatedAt: timestamp,
+                    lastRunID: nil
+                )
+            )
+        }
+
+        #expect(try await store.list().map(\.sessionID) == [higherID, lowerID])
+    }
+
     @Test
     func testFileStorePersistsAndSortsLocalHistory() async throws {
         let directory = FileManager.default.temporaryDirectory
@@ -161,9 +206,13 @@ import Testing
         let secondID = UUID()
         let cache = ArtifactCache(maximumBytes: 5)
         await cache.insert(CachedArtifactContent(data: Data([1, 2, 3]), etag: "one"), for: firstID)
-        await cache.insert(CachedArtifactContent(data: Data([4, 5, 6]), etag: "two"), for: secondID)
+        await cache.insert(
+            CachedArtifactContent(data: Data([4, 5, 6]), etag: "two"), for: secondID)
         #expect(await cache.value(for: firstID) == nil)
         #expect(await cache.value(for: secondID)?.etag == "two")
+
+        await cache.removeAll()
+        #expect(await cache.value(for: secondID) == nil)
     }
 
     @Test
@@ -173,7 +222,8 @@ import Testing
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let unwritableTarget = directory.appendingPathComponent("directory", isDirectory: true)
-        try FileManager.default.createDirectory(at: unwritableTarget, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: unwritableTarget, withIntermediateDirectories: true)
         let store = try FileSessionHistoryStore(fileURL: unwritableTarget)
         let entry = SessionHistoryEntry(
             sessionID: UUID(),
@@ -190,4 +240,12 @@ import Testing
             #expect(await store.list().isEmpty)
         }
     }
+}
+
+enum HistoryBackend: CaseIterable, Sendable {
+    case file
+    case volatile
+    #if XCODE_BUILD
+    case swiftData
+    #endif
 }

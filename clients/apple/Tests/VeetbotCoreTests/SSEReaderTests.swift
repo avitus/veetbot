@@ -1,32 +1,33 @@
 import Testing
+
 @testable import VeetbotCore
 
 @Suite struct SSEReaderTests {
     @Test
     func testByteDecoderPreservesBlankSSEFrameBoundaries() throws {
         let payload = """
-        id: 2\r
-        event: run.queued\r
-        data: {"run_id":"r-1"}\r
-        \r
-        id: 3\r
-        event: run.completed\r
-        data: {"run_id":"r-1"}\r
-        \r
-        """
+            id: 2\r
+            event: run.queued\r
+            data: {"run_id":"r-1"}\r
+            \r
+            id: 3\r
+            event: run.completed\r
+            data: {"run_id":"r-1"}\r
+            \r
+            """
         var decoder = SSEByteLineDecoder()
         var parser = SSEFrameParser()
         var frames: [SSEFrame] = []
 
         for byte in payload.utf8 {
             if let line = try decoder.consume(byte: byte),
-               let frame = try parser.consume(line: line)
+                let frame = try parser.consume(line: line)
             {
                 frames.append(frame)
             }
         }
         if let line = try decoder.finishAtEOF(),
-           let frame = try parser.consume(line: line)
+            let frame = try parser.consume(line: line)
         {
             frames.append(frame)
         }
@@ -102,5 +103,19 @@ import Testing
             lastError: "The event stream returned invalid JSON data."
         )
         #expect(error.localizedDescription.contains("invalid JSON data"))
+    }
+
+    @Test
+    func testReconnectAccountingCountsEveryAttemptAndRepeatedOverflow() {
+        var counter = ReconnectAttemptCounter()
+
+        counter.record(durableProgress: true, overflow: false)
+        #expect(counter.total == 1)
+        #expect(counter.consecutive == 0)
+
+        counter.record(durableProgress: true, overflow: true)
+        counter.record(durableProgress: false, overflow: true)
+        #expect(counter.total == 3)
+        #expect(counter.consecutive == 2)
     }
 }

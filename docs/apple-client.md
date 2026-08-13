@@ -25,9 +25,9 @@ Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
 The base URL may be stored in preferences. The token is stored as a
 device-local generic Keychain password and is never written to `UserDefaults`.
 The app uses the local Data Protection Keychain under its team-signed
-application identifier, with synchronization disabled. The project is
-configured for the repository owner's development team; another developer must
-select their own team under the target's Signing & Capabilities settings. A
+application identifier, with synchronization disabled. The tracked project does
+not pin a development team; each developer must select their own team under the
+target's Signing & Capabilities settings. A
 macOS upgrade from the earlier file-based Keychain item is attempted without
 displaying an authentication prompt; if its ad-hoc signature no longer has
 access, the user must enter the token once in the signed build. The transport
@@ -75,9 +75,12 @@ driven by effect and risk taxonomy rather than a per-tool icon table. Structured
 sandbox and workspace results receive terminal and file-preview treatments when
 those fields are present. Approval rule internals are intentionally not shown.
 
-Artifact metadata and bytes are fetched separately. The in-memory content cache
-sends `If-None-Match` and reuses bytes on `304`; artifacts can be previewed or
-exported through the operating system file picker.
+Artifact metadata and bytes are fetched separately. The process-local content
+cache sends `If-None-Match` and reuses bytes on `304`, retains at most 32 MiB,
+and evicts least-recently-used values. It is cleared when the app leaves the
+foreground, the connection changes, or credentials are forgotten; it never
+writes artifact bytes to disk. Artifacts can be previewed or exported through
+the operating system file picker.
 
 The current public SSE contract exposes tool result content and trust but does
 not expose every invocation's stored `structured_result`, effect classification,
