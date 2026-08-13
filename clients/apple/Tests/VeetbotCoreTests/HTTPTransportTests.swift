@@ -96,9 +96,18 @@ import Testing
             captured.map { $0.value(forHTTPHeaderField: "Idempotency-Key") } == [
                 "stable-key", "stable-key",
             ])
-        #expect(captured.last?.value(forHTTPHeaderField: "Authorization") == "Bearer secret")
-        #expect(captured.last?.value(forHTTPHeaderField: "Content-Type") == "application/json")
-        #expect(captured.last?.value(forHTTPHeaderField: "X-Request-Id") != nil)
+        #expect(
+            captured.allSatisfy {
+                $0.value(forHTTPHeaderField: "Authorization") == "Bearer secret"
+            })
+        #expect(
+            captured.allSatisfy {
+                $0.value(forHTTPHeaderField: "Content-Type") == "application/json"
+            })
+        #expect(
+            captured.allSatisfy {
+                $0.value(forHTTPHeaderField: "X-Request-Id") != nil
+            })
     }
 
     @Test
