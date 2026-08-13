@@ -15,6 +15,7 @@ from typer.testing import CliRunner
 import agent_core.cli.main as cli_main
 import scripts.check_production_deployment as production_check
 from agent_core.cli.main import app
+from agent_core.config import load_settings
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
@@ -82,7 +83,9 @@ def test_required_make_targets_exist() -> None:
         "test-fast",
         "test-integration",
         "test-live",
+        "test-deploy",
         "production-check",
+        "client-build",
         "docs",
     ):
         assert f"{target}:" in text
@@ -101,6 +104,7 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "REQUIRED_RANDOM_TOKEN" in environment
     assert "POSTGRES_PORT=REQUIRED_FREE_LOOPBACK_PORT" in environment
     assert environment.count("REQUIRED_FREE_LOOPBACK_PORT") == 2
+    assert "COMPOSE_PROJECT_NAME=veetbot" in environment
     assert "PGSSLMODE=disable" in environment
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
@@ -119,6 +123,7 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
     assert "agent api" in api
+    assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
     assert "agent worker --role worker" in worker
     assert "SupplementaryGroups=docker" in worker
@@ -127,10 +132,26 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert all(
         "EnvironmentFile=/etc/veetbot/veetbot.env" in unit for unit in (api, worker, maintenance)
     )
+    assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
 
-    caddy = (deploy / "Caddyfile.example").read_text(encoding="utf-8")
-    assert "reverse_proxy 127.0.0.1:8000" in caddy
-    assert "flush_interval -1" in caddy
+    release = (deploy / "app" / "release.sh").read_text(encoding="utf-8")
+    assert "flock -w" in release
+    assert '"$STAGE/.venv/bin/alembic" upgrade head' in release
+    assert "X-Veetbot-Release" not in release
+    assert "VEETBOT_RELEASE_ID" in release
+    assert "systemctl enable --now" in release
+    assert "VEETBOT_KEEP_RELEASES:-5" in release
+    assert '--project-name "$COMPOSE_PROJECT_NAME"' in release
+
+    nginx = (ROOT / "nginx" / "veetbot.conf").read_text(encoding="utf-8")
+    assert "server_name api.veetbot.com" in nginx
+    assert "proxy_pass http://127.0.0.1:8000" in nginx
+    assert "proxy_buffering off" in nginx
+    nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
+    assert "nginx -t" in nginx_deploy
+    assert "rollback" in nginx_deploy
+    assert "flock -w" in nginx_deploy
+    assert "VEETBOT_EXPECTED_RELEASE_ID" in nginx_deploy
 
 
 def test_production_preflight_normalizes_missing_executable(
@@ -157,6 +178,26 @@ def test_production_preflight_normalizes_command_timeout(
     result = production_check._run("slow-command", timeout=1)
     assert result.returncode == 124
     assert "timed out" in result.stderr
+
+
+def test_production_preflight_requires_the_balanced_provider_credential(tmp_path: Path) -> None:
+    environment = {
+        "DATABASE_URL": "postgresql+asyncpg://" + "agent:agent@localhost:5432/agent",
+        "DEPLOYMENT_MODE": "development",
+        "AUTH_MODE": "dev",
+        "SANDBOX_MECHANISM": "docker",
+    }
+    assert production_check._model_policy_failures(load_settings(environment)) == [
+        "production model provider credential is missing: openai"
+    ]
+    configured = load_settings({**environment, "VEETBOT_OPENAI_KEY": "synthetic-key"})
+    assert production_check._model_policy_failures(configured) == []
+
+    overlay = tmp_path / "models" / "policies.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("model_policies:\n  balanced:\n    provider: ollama\n", encoding="utf-8")
+    local = load_settings({**environment, "AGENT_CONFIG_DIR": str(tmp_path)})
+    assert production_check._model_policy_failures(local) == []
 
 
 def test_compose_has_one_healthy_postgres_service() -> None:
@@ -191,12 +232,26 @@ def test_ci_has_the_required_partitions() -> None:
     config = yaml.safe_load((ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8"))
     assert config["version"] == 2.1
     jobs = config["jobs"]
-    assert set(jobs) == {"static", "contract", "integration", "sandbox", "live"}
+    assert set(jobs) == {
+        "static",
+        "contract",
+        "integration",
+        "sandbox",
+        "live",
+        "package-release",
+        "deploy-app",
+        "deploy-nginx",
+    }
     for name, job in jobs.items():
         if name == "sandbox":
             assert job["machine"] == {"image": "ubuntu-2404:current"}
             continue
-        assert job["docker"][0]["image"] == "cimg/python:3.12"
+        expected_image = (
+            "cimg/base:stable"
+            if name in {"package-release", "deploy-app", "deploy-nginx"}
+            else "cimg/python:3.12"
+        )
+        assert job["docker"][0]["image"] == expected_image
 
     postgres = jobs["integration"]["docker"][1]
     assert postgres == {
@@ -215,18 +270,71 @@ def test_ci_has_the_required_partitions() -> None:
             for step in job["steps"]
             if isinstance(step, dict) and "run" in step
         ]
-    assert "make lint typecheck test-static docs-check" in commands["static"]
+    assert "make lint typecheck test-static test-deploy docs-check" in commands["static"]
+    assert "make client-build" in commands["static"]
     assert "make test-contract" in commands["contract"]
     assert "make migrate test-integration" in commands["integration"]
     assert "make test-sandbox" in commands["sandbox"]
     assert "make test-live" in commands["live"]
+    assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
+    package_workspace = next(
+        step["persist_to_workspace"]
+        for step in jobs["package-release"]["steps"]
+        if isinstance(step, dict) and "persist_to_workspace" in step
+    )
+    assert "release-id" in package_workspace["paths"]
+    assert any("deploy/app/release.sh" in command for command in commands["deploy-app"])
+    assert any(
+        "X-Veetbot-Release" not in command and "x-veetbot-release" in command
+        for command in commands["deploy-app"]
+    )
+    assert any(
+        "while (( attempt < max_attempts ))" in command
+        and "production did not report release" in command
+        for command in commands["deploy-app"]
+    )
+    assert any("deploy/nginx/deploy.sh" in command for command in commands["deploy-nginx"])
+    assert any(
+        "VEETBOT_EXPECTED_RELEASE_ID" in command
+        and '[[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]' in command
+        for command in commands["deploy-nginx"]
+    )
+    assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
+    deployment_key_step = {
+        "add_ssh_keys": {"fingerprints": ["SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"]}
+    }
+    for name in ("deploy-app", "deploy-nginx"):
+        assert deployment_key_step in jobs[name]["steps"]
 
     workflows = config["workflows"]
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
-    assert workflows["verify"] == {
-        "unless": "<< pipeline.parameters.run_live >>",
-        "jobs": ["static", "contract", "integration", "sandbox"],
+    verify = workflows["verify"]
+    assert verify["unless"] == "<< pipeline.parameters.run_live >>"
+    assert verify["jobs"][:4] == ["static", "contract", "integration", "sandbox"]
+    delivery_jobs = {
+        next(iter(job)): next(iter(job.values()))
+        for job in verify["jobs"][4:]
+        if isinstance(job, dict)
     }
+    assert set(delivery_jobs) == {"package-release", "deploy-app", "deploy-nginx"}
+    assert delivery_jobs["package-release"]["requires"] == [
+        "static",
+        "contract",
+        "integration",
+        "sandbox",
+    ]
+    assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
+    assert delivery_jobs["deploy-app"]["context"] == "veetbot-production"
+    assert delivery_jobs["deploy-app"]["serial-group"] == (
+        "<< pipeline.project.slug >>/veetbot-production"
+    )
+    assert delivery_jobs["deploy-nginx"]["requires"] == ["deploy-app"]
+    assert delivery_jobs["deploy-nginx"]["context"] == "veetbot-production"
+    assert delivery_jobs["deploy-nginx"]["serial-group"] == (
+        "<< pipeline.project.slug >>/veetbot-production"
+    )
+    for name, job in delivery_jobs.items():
+        assert job["filters"] == {"branches": {"only": "main"}}, name
     assert workflows["live_manual"]["when"] == "<< pipeline.parameters.run_live >>"
     nightly = workflows["live_nightly"]
     assert nightly["triggers"] == [

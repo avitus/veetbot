@@ -455,7 +455,9 @@ def create_app(
         )
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
-    async def health_live() -> dict[str, str]:
+    async def health_live(response: Response) -> dict[str, str]:
+        if settings.release_id is not None:
+            response.headers["X-Veetbot-Release"] = settings.release_id
         return {"status": "ok"}
 
     @app.get("/health/ready", openapi_extra={"required_scope": None})
@@ -464,6 +466,11 @@ def create_app(
         return JSONResponse(
             status_code=200 if ready else 503,
             content={"status": "ready" if ready else "not_ready"},
+            headers=(
+                {"X-Veetbot-Release": settings.release_id}
+                if settings.release_id is not None
+                else None
+            ),
         )
 
     return app

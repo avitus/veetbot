@@ -392,6 +392,24 @@ async def test_every_route_declares_exactly_one_scope_except_health(tmp_path: Pa
             assert declared in PLATFORM_SCOPES
 
 
+async def test_health_probes_report_the_active_release_without_changing_bodies(
+    tmp_path: Path,
+) -> None:
+    async with _composition(tmp_path) as composition:
+        released = replace(
+            composition,
+            settings=replace(composition.settings, release_id="20260810-152233-abcdef0"),
+        )
+        async with _client(released) as client:
+            live = await client.get("/health/live")
+            ready = await client.get("/health/ready")
+
+    assert live.json() == {"status": "ok"}
+    assert ready.json() == {"status": "ready"}
+    assert live.headers["X-Veetbot-Release"] == "20260810-152233-abcdef0"
+    assert ready.headers["X-Veetbot-Release"] == "20260810-152233-abcdef0"
+
+
 async def test_cross_tenant_resource_routes_return_404(tmp_path: Path) -> None:
     async with _composition(tmp_path) as composition:
         async with _client(composition) as owner:

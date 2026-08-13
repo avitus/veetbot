@@ -2,201 +2,267 @@
 title: Production Deployment
 ---
 
-# Minimal DigitalOcean launch
+# Atomic DigitalOcean deployment
 
-This is the shortest supported path to launch Veetbot on one Ubuntu Droplet.
-The Droplet runs PostgreSQL, the API, the durable worker, the maintenance worker,
-Caddy, Docker, and gVisor. There is no load balancer, managed database, cloud
-firewall requirement, monitoring requirement, backup requirement, or
-high-availability layer in this initial topology.
+Veetbot deploys to one Ubuntu Droplet at `api.veetbot.com`. PostgreSQL, the API,
+the durable worker, the maintenance worker, Docker with gVisor, and Nginx share
+that host. CircleCI packages the tested `main` commit and promotes an immutable
+release below `/opt/veetbot/releases`.
 
-Token authentication and gVisor remain mandatory because production startup
-refuses development authentication and ordinary Docker/fake sandboxes. Caddy
-provides the normal HTTPS endpoint. Without a firewall the API's direct port
-8000 is also publicly reachable; clients must not use it because doing so sends
-the bearer token over plaintext HTTP.
+The flow adapts the useful deployment invariants from
+[avitus/mankunku](https://github.com/avitus/mankunku) to Veetbot's Python and
+systemd runtime. ADR-0048 records the differences and security boundary.
 
-## What is already done
+## Release flow
 
-- [x] Locked application dependencies.
-- [x] Production environment template.
-- [x] Single-node PostgreSQL restart overlay.
-- [x] API, worker, and maintenance systemd units.
-- [x] Caddy HTTPS/SSE proxy template.
-- [x] Production preflight command and `make production-check` target.
-- [x] gVisor is wired into the production composition.
-- [x] `make check` passes: formatting, linting, strict typing, 313 static tests,
-  134 contract tests, and documentation validation.
-- [x] All 533 non-live tests pass against PostgreSQL 16.
-- [x] All 10 Docker sandbox security tests pass locally. The Droplet must still
-  prove the same image runs with gVisor.
+```text
+static + contract + integration + sandbox
+                    |
+                    v
+          package tested commit
+                    |
+                    v
+        SSH stage + checksum verify
+                    |
+                    v
+ lock -> uv sync -> image -> PostgreSQL -> migrate -> preflight
+                    |
+                    v
+      current symlink + systemd restart
+                    |
+                    v
+ release.sh: local release header
+                    |
+                    v
+ CircleCI: public release header
+```
 
-## Minimum launch checklist
+Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 
-### Inventory the shared Droplet first
+1. takes `/opt/veetbot/shared/deploy.lock`;
+2. refuses a timestamped release older than the currently active release;
+3. installs a release-local `.venv` from `uv.lock` using a shared download
+   cache;
+4. builds `agent-core-sandbox:<release-id>`;
+5. ensures the local PostgreSQL service is running;
+6. applies `alembic upgrade head` and runs the production preflight;
+7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
+   restarts all three systemd units;
+8. requires every process to run from the promoted directory and the local
+   readiness probe to return `X-Veetbot-Release: <release-id>`; and
+9. retains the five newest valid releases.
 
-Do not reinstall or replace shared services blindly. Record the current state:
+A successful server release returns control to CircleCI, which polls the public
+TLS readiness endpoint until it reports the same release ID. Exhausting that
+bounded public-probe budget fails the CircleCI job after promotion; it is not a
+failure inside `deploy/app/release.sh`.
+
+A pre-promotion failure removes only its staged directory. A post-promotion
+failure remains visible for diagnosis and manual rollback. Database migrations
+are never downgraded automatically.
+
+## One-time host preparation
+
+Inventory the shared Droplet before changing it:
 
 ```bash
 sudo ss -ltnp
 sudo systemctl --type=service --state=running
 sudo docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}'
-docker --version || true
-docker compose version || true
-caddy version || true
-nginx -v || true
-python3.12 --version || true
-git --version || true
-uv --version || true
+docker --version
+docker compose version
+nginx -v
+uv --version
 df -h
 free -h
 ```
 
-- [ ] Port 8000 is unused. Veetbot currently cannot select a different API
-  port; an existing listener there must move before launch.
-- [ ] Select an unused loopback port for Veetbot PostgreSQL. Put that same port
-  in both `POSTGRES_PORT` and `DATABASE_URL` in the production environment.
-- [ ] Confirm the Droplet has enough free memory and disk for another PostgreSQL
-  instance and concurrent sandbox containers.
-- [ ] Record existing Docker containers so they can be checked after gVisor's
-  required Docker restart.
+Confirm port 8000 is free, choose a free loopback PostgreSQL port, and record all
+existing Docker containers. Reuse the existing Docker and Nginx installations;
+do not replace services used by other applications on the Droplet.
 
-### DigitalOcean
+Create the service/deploy account and persistent paths:
 
-- [ ] Point a domain or subdomain at the Droplet's public IP.
-- [ ] Confirm inbound TCP ports 22, 80, and 443 are reachable. No DigitalOcean
-  Cloud Firewall is required by this runbook.
+```bash
+sudo useradd --system --create-home --shell /bin/bash veetbot
+sudo usermod -aG docker veetbot
+sudo mkdir -p \
+  /opt/veetbot/releases \
+  /opt/veetbot/shared/uv-cache \
+  /etc/veetbot \
+  /var/lib/veetbot/artifacts
+sudo chown -R veetbot:veetbot /opt/veetbot /var/lib/veetbot
+sudo chmod 0700 /var/lib/veetbot/artifacts
+```
 
-### Install only what is missing
+The deploy key must log in as this account, so the account needs an executable
+shell. Restrict that key in `authorized_keys` to the CircleCI source and disable
+port, agent, and X11 forwarding. Give the account a reviewed, non-interactive
+sudo policy for the exact install, systemd, Nginx validation, backup, symlink,
+and reload commands used by `deploy/app/release.sh` and
+`deploy/nginx/deploy.sh`. That authority is effectively host administration;
+do not reuse the key for application clients or interactive users.
 
-- [ ] Install Python 3.12, `uv`, and Git only if their version checks above fail.
-- [ ] If Docker Engine and the Compose plugin already work, reuse them. Do not
-  remove `containerd`, `runc`, Docker packages, images, volumes, or networks used
-  by the other applications.
-- [ ] Install stable `runsc`. Before running `runsc install`, preserve any
-  existing Docker daemon configuration and schedule a short maintenance window:
+Install stable `runsc` if it is not already registered. Preserve the existing
+Docker configuration before the required daemon restart and verify all previous
+containers afterward:
 
-  ```bash
-  if sudo test -f /etc/docker/daemon.json; then
-    sudo cp -a /etc/docker/daemon.json /etc/docker/daemon.json.before-runsc
-  fi
-  sudo runsc install
-  sudo systemctl restart docker
-  sudo docker info --format '{{json .Runtimes}}'
-  sudo docker ps
-  ```
+```bash
+if sudo test -f /etc/docker/daemon.json; then
+  sudo cp -a /etc/docker/daemon.json /etc/docker/daemon.json.before-runsc
+fi
+sudo runsc install
+sudo systemctl restart docker
+sudo docker info --format '{{json .Runtimes}}'
+sudo docker ps
+docker run --rm --runtime=runsc hello-world
+```
 
-  Confirm `runsc` appears in the runtime inventory and every pre-existing
-  container/application returned after the restart.
+Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`, replace every
+`REQUIRED_` value, select the free PostgreSQL port in both locations, and add
+`VEETBOT_OPENAI_KEY` for the shipped production `balanced` policy. A reviewed
+model-policy overlay may instead retarget `balanced` to another configured
+provider.
 
-- [ ] Reuse the reverse proxy already owning ports 80 and 443. Install Caddy
-  only if neither Caddy, Nginx, Apache, nor another proxy currently owns those
-  ports.
-- [ ] Create the service account and directories:
+Run `docker compose ls` before the first automated release. If an existing
+Veetbot PostgreSQL container was created under a Compose project name other than
+`veetbot`, set `COMPOSE_PROJECT_NAME` to that exact existing name. Changing it
+silently selects a different named volume and therefore an empty database.
 
-  ```bash
-  sudo useradd --system --create-home --shell /usr/sbin/nologin veetbot
-  sudo usermod -aG docker veetbot
-  sudo mkdir -p /opt/veetbot/releases /etc/veetbot /var/lib/veetbot/artifacts
-  sudo chown -R veetbot:veetbot /opt/veetbot /var/lib/veetbot
-  sudo chmod 0700 /var/lib/veetbot/artifacts
-  ```
+```bash
+sudo chown root:veetbot /etc/veetbot/veetbot.env
+sudo chmod 0640 /etc/veetbot/veetbot.env
+```
 
-- [ ] Verify gVisor:
+Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
+it to `/opt/veetbot/current/.release.env`, which only the API systemd unit loads.
 
-  ```bash
-  docker run --rm --runtime=runsc hello-world
-  ```
+The committed Nginx virtual host expects the existing Let's Encrypt certificate
+at `/etc/letsencrypt/live/api.veetbot.com/`. Issue or renew that certificate
+before its first deployment. The Nginx installer changes only Veetbot's
+`sites-available` and `sites-enabled` entries; it preserves other virtual hosts.
 
-### Install Veetbot
+## CircleCI setup
 
-- [ ] Clone this branch or the release tag into
-  `/opt/veetbot/releases/<commit>`, then create the active symlink:
+Generate a Veetbot-only Ed25519 deploy key on a protected operator machine:
 
-  ```bash
-  sudo ln -sfn "/opt/veetbot/releases/<commit>" /opt/veetbot/current
-  cd /opt/veetbot/current
-  uv sync --frozen
-  docker build -f execution/sandbox.Dockerfile \
-    -t agent-core-sandbox:production .
-  ```
+```bash
+umask 077
+ssh-keygen -t ed25519 -N '' -f veetbot-circleci -C veetbot-circleci-production
+ssh-keygen -lf veetbot-circleci.pub
+```
 
-- [ ] Copy `deploy/veetbot.env.example` to `/etc/veetbot/veetbot.env`. Replace
-  every `REQUIRED_` value, add the one model-provider key you will use, and
-  protect the file:
+Install only the public key for the `veetbot` account, using the restricted
+`authorized_keys` options described above. Add the private key to the Veetbot
+CircleCI project's SSH keys and do not add the Mankunku key or any personal key
+to this project. The deployment jobs intentionally load the project's attached
+keys, so the dedicated Veetbot key must be the only one present. Store and
+rotate it independently from every other application on the Droplet.
 
-  ```bash
-  sudo chown root:veetbot /etc/veetbot/veetbot.env
-  sudo chmod 0640 /etc/veetbot/veetbot.env
-  ```
+Create a restricted CircleCI context named `veetbot-production` with:
 
-### Start PostgreSQL and migrate
+| Variable | Value |
+| --- | --- |
+| `DEPLOY_HOST` | SSH hostname or IP for the Droplet |
+| `DEPLOY_USER` | Dedicated deploy account, normally `veetbot` |
+| `DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH known-hosts record verified out of band |
+| `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
+| `PRODUCTION_URL` | Optional public origin; defaults to `https://api.veetbot.com` |
 
-- [ ] Start the repository's PostgreSQL 16 container using the protected
-  production environment. It binds only to loopback:
+Obtain the public host-key record from the server or provider console and verify
+its fingerprint through a second trusted channel before placing it in the
+context. Do not treat an unverified `ssh-keyscan` response as identity proof.
 
-  ```bash
-  cd /opt/veetbot/current
-  sudo docker compose --env-file /etc/veetbot/veetbot.env \
-    -f docker-compose.yml -f deploy/docker-compose.production.yml \
-    up -d postgres
-  sudo -u veetbot sh -c '
-    cd /opt/veetbot/current
-    set -a
-    . /etc/veetbot/veetbot.env
-    set +a
-    .venv/bin/alembic upgrade head
-    .venv/bin/python scripts/check_production_deployment.py
-  '
-  ```
+The context does not contain the API bearer token, database password, or model
+provider keys. Those stay in the protected server environment. Restrict context
+use to the repository and protected `main` branch.
 
-### Start the application
+## Automatic delivery
 
-- [ ] Install and start the three systemd units:
+An ordinary branch or pull request runs verification only. On `main`, after all
+four required verification lanes pass:
 
-  ```bash
-  sudo cp deploy/systemd/*.service /etc/systemd/system/
-  sudo systemctl daemon-reload
-  sudo systemctl enable --now veetbot-maintenance veetbot-worker veetbot-api
-  ```
+- `package-release` archives the exact tested commit and records its SHA-256;
+- `deploy-app` stages the archive, verifies the checksum, and executes the
+  locked server release; and
+- `deploy-nginx` follows a successful application release, takes the same host
+  lock, and reconciles the versioned virtual host. If a newer pipeline has
+  already promoted another application release, the older proxy job detects the
+  release-identity mismatch and exits without overwriting the newer config.
 
-- [ ] Add the Veetbot hostname to the existing reverse proxy. If the Droplet
-  already uses Caddy, append the site block from `deploy/Caddyfile.example` to
-  the existing `/etc/caddy/Caddyfile`; do not overwrite the file. Then validate
-  and reload it:
+Both deployment jobs use CircleCI's shared production serial group in addition
+to the server lock. The release ID is created with the packaged artifact and
+reused by failed-job reruns. A rerun of an already active release verifies it
+without extracting over the live source directory.
 
-  ```bash
-  sudo caddy validate --config /etc/caddy/Caddyfile
-  sudo systemctl reload caddy
-  ```
+The Nginx installer stores the prior Veetbot configuration under
+`/etc/nginx/veetbot-backups`, runs `nginx -t`, and reloads Nginx. Validation or
+reload failure restores the prior file. So does a failure while installing the
+candidate file or activating its symlink. `deploy/app/release.sh` requires the
+local readiness header to identify the staged release; after it returns,
+CircleCI polls the public readiness endpoint for that exact identity. A public
+probe failure is therefore a post-promotion CircleCI failure boundary.
 
-  If another reverse proxy owns ports 80 and 443, configure the equivalent
-  hostname route to `127.0.0.1:8000`, disable response buffering for SSE, and
-  leave every existing virtual host unchanged.
+The manual and nightly `live-model` workflows remain tests; they do not deploy.
 
-### Confirm launch
+## Verification
 
-- [ ] Both health probes return 200 through the public hostname:
+After the first successful pipeline, verify the active revision and services:
 
-  ```bash
-  : "${PRODUCTION_HOSTNAME:?set PRODUCTION_HOSTNAME}"
-  curl --fail --show-error --connect-timeout 5 --max-time 10 \
-    "https://${PRODUCTION_HOSTNAME}/health/live"
-  curl --fail --show-error --connect-timeout 5 --max-time 10 \
-    "https://${PRODUCTION_HOSTNAME}/health/ready"
-  ```
+```bash
+curl --fail --show-error --dump-header - --output /dev/null \
+  https://api.veetbot.com/health/ready
+ssh veetbot@api.veetbot.com 'readlink -f /opt/veetbot/current'
+ssh veetbot@api.veetbot.com \
+  'systemctl is-active veetbot-api veetbot-worker veetbot-maintenance'
+```
 
-- [ ] An authenticated API request succeeds.
-- [ ] Submit one run and confirm the worker completes it.
-- [ ] Submit one generated-code task and confirm it executes with `runsc`.
-- [ ] Reboot the Droplet once and confirm PostgreSQL and all four services return.
+Then make an authenticated API request, submit a run, confirm the worker
+completes it with a real provider, and run one generated-code task through
+`runsc`. Reboot once and confirm PostgreSQL, Nginx, and all three application
+units return.
 
-## Explicitly deferred launch protections
+## Manual rollback
 
-This minimal release accepts a single-server failure domain and possible total
-data loss. Cloud firewalling, restricted SSH source ranges, off-host database,
-backups, restore rehearsal, monitoring, alerts, load balancing, rolling deploys,
-and high availability are deferred. Direct public access to port 8000 can expose
-the bearer token over plaintext HTTP, and any other accidentally listening
-service may also be reachable. Add network filtering before the deployment
-handles data or availability that cannot be recreated.
+Choose a retained target only after checking that its code is compatible with
+the current database schema. Never run an automatic Alembic downgrade as part
+of rollback. Run the complete block below in one shell so file descriptor 9
+holds the same deployment lock from before the symlink change through readiness
+verification.
+
+```bash
+set -euo pipefail
+exec 9>/opt/veetbot/shared/deploy.lock
+if ! flock -w 900 9; then
+  echo "Could not acquire /opt/veetbot/shared/deploy.lock" >&2
+  exit 1
+fi
+
+target_id=YYYYMMDD-HHMMSS-abcdef0
+target="/opt/veetbot/releases/$target_id"
+test -d "$target"
+test -f "$target/.release.env"
+ln -s "$target" "/opt/veetbot/.rollback-$target_id"
+mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current
+docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
+sudo systemctl restart veetbot-maintenance veetbot-worker veetbot-api
+curl --fail --show-error --dump-header - --output /dev/null \
+  http://127.0.0.1:8000/health/ready
+```
+
+The returned `X-Veetbot-Release` must equal `target_id`, and each unit's
+`MainPID` working directory must resolve to `target`. If the older release image
+was pruned, rebuild it from that retained source tree before switching.
+
+Nginx backups are independent. To recover one, copy the selected file from
+`/etc/nginx/veetbot-backups` to `/etc/nginx/sites-available/veetbot`, run
+`sudo nginx -t`, and reload Nginx.
+
+## Accepted limitations
+
+This is still a single-server failure domain with no required cloud firewall,
+off-host database, backup, restore rehearsal, monitoring, load balancer, rolling
+deployment, or high availability. Loss of the Droplet may mean unrecoverable
+data loss. The API binds port 8000 only on loopback, so remote clients must use
+the Nginx TLS hostname. A firewall is still recommended to contain any unrelated
+service that is accidentally bound to a public interface.

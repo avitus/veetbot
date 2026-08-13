@@ -64,7 +64,18 @@ def _candidate_files(root: Path) -> list[Path]:
         if not path.is_file():
             continue
         if relative == ".env.example" or relative.startswith(
-            ("src/", "tests/", "evals/", "migrations/", "docs/")
+            (
+                ".circleci/",
+                "src/",
+                "client/",
+                "tests/",
+                "evals/",
+                "migrations/",
+                "docs/",
+                "deploy/",
+                "nginx/",
+                "scripts/",
+            )
         ):
             candidates.append(path)
     return sorted(candidates)

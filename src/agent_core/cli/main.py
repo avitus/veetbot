@@ -47,6 +47,7 @@ from agent_core.domain.views import (
 
 RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
 RUN_WAIT_TIMEOUT_SECONDS = 30.0
+API_BIND_HOST = "127.0.0.1"
 
 
 class WorkerRole(StrEnum):
@@ -402,7 +403,6 @@ def worker_command(
 
 async def _serve_api() -> None:
     async with build(storage="postgres") as composition:
-        host = "127.0.0.1" if composition.settings.auth_mode.value == "dev" else "0.0.0.0"
         api = create_app(
             composition.services,
             composition.settings,
@@ -410,7 +410,7 @@ async def _serve_api() -> None:
             composition.new_request_id,
             composition.readiness_probe,
         )
-        server = uvicorn.Server(uvicorn.Config(api, host=host, port=8000, log_config=None))
+        server = uvicorn.Server(uvicorn.Config(api, host=API_BIND_HOST, port=8000, log_config=None))
         await server.serve()
 
 

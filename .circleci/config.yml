@@ -40,7 +40,13 @@ jobs:
           command: sudo apt-get update && sudo apt-get install -y pandoc
       - run:
           name: Static checks
-          command: make lint typecheck test-static docs-check
+          command: make lint typecheck test-static test-deploy docs-check
+      - run:
+          name: Build downloadable client
+          command: make client-build
+      - store_artifacts:
+          path: build/veetbot-client.pyz
+          destination: veetbot-client.pyz
 
   contract:
     docker:
@@ -96,6 +102,150 @@ jobs:
           name: Live provider tests
           command: make test-live
 
+  package-release:
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: Package immutable source release
+          command: |
+            mkdir -p build/release
+            git archive --format=tar.gz \
+              --output=build/release/veetbot-server.tar.gz "$CIRCLE_SHA1"
+            release_id="$(date -u +%Y%m%d-%H%M%S)-${CIRCLE_SHA1:0:7}"
+            printf '%s\n' "$release_id" > build/release/release-id
+            cd build/release
+            sha256sum veetbot-server.tar.gz > veetbot-server.tar.gz.sha256
+      - persist_to_workspace:
+          root: build/release
+          paths:
+            - veetbot-server.tar.gz
+            - veetbot-server.tar.gz.sha256
+            - release-id
+
+  deploy-app:
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - attach_workspace:
+          at: /tmp/veetbot-release
+      - add_ssh_keys:
+          fingerprints:
+            - "SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"
+      - run:
+          name: Configure deployment SSH trust
+          command: |
+            : "${DEPLOY_HOST:?set DEPLOY_HOST in the veetbot-production context}"
+            : "${DEPLOY_USER:?set DEPLOY_USER in the veetbot-production context}"
+            : "${DEPLOY_KNOWN_HOSTS:?set DEPLOY_KNOWN_HOSTS in the veetbot-production context}"
+            install -d -m 0700 "$HOME/.ssh"
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+            chmod 0600 "$HOME/.ssh/known_hosts"
+            release_id="$(cat /tmp/veetbot-release/release-id)"
+            [[ "$release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
+            printf 'export VEETBOT_RELEASE_ID=%q\n' "$release_id" >> "$BASH_ENV"
+      - run:
+          name: Stage and release application
+          command: |
+            stage="/opt/veetbot/releases/$VEETBOT_RELEASE_ID"
+            set +e
+            ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "if grep -Fqx 'VEETBOT_RELEASE_ID=$VEETBOT_RELEASE_ID' \
+                 /opt/veetbot/current/.release.env 2>/dev/null; then \
+                 exit 42; \
+               fi; \
+               mkdir -p '$stage'"
+            stage_status=$?
+            set -e
+            if [[ "$stage_status" == 42 ]]; then
+              echo "$VEETBOT_RELEASE_ID is already active; verifying it without restaging."
+            elif [[ "$stage_status" != 0 ]]; then
+              exit "$stage_status"
+            else
+              scp -P "${DEPLOY_PORT:-22}" \
+                /tmp/veetbot-release/veetbot-server.tar.gz \
+                /tmp/veetbot-release/veetbot-server.tar.gz.sha256 \
+                "$DEPLOY_USER@$DEPLOY_HOST:$stage/"
+              ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+                "cd '$stage' || exit 1; \
+                 if ! sha256sum --check veetbot-server.tar.gz.sha256 || \
+                    ! tar -xzf veetbot-server.tar.gz; then \
+                   cd / && rm -rf -- '$stage'; exit 1; \
+                 fi; \
+                 rm -f veetbot-server.tar.gz veetbot-server.tar.gz.sha256; \
+                 bash deploy/app/release.sh '$VEETBOT_RELEASE_ID'"
+            fi
+      - run:
+          name: Verify public release identity
+          command: |
+            production_url="${PRODUCTION_URL:-https://api.veetbot.com}"
+            headers="$(mktemp)"
+            trap 'rm -f "$headers"' EXIT
+            attempt=0
+            max_attempts=10
+            while (( attempt < max_attempts )); do
+              attempt=$((attempt + 1))
+              : >"$headers"
+              if curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   --dump-header "$headers" --output /dev/null \
+                   "$production_url/health/ready" \
+                 && awk -F ': *' -v expected="$VEETBOT_RELEASE_ID" '
+                      BEGIN { IGNORECASE = 1 }
+                      tolower($1) == "x-veetbot-release" {
+                        sub(/\r$/, "", $2)
+                        if ($2 == expected) found = 1
+                      }
+                      END { exit found ? 0 : 1 }
+                    ' "$headers"; then
+                exit 0
+              fi
+              if (( attempt < max_attempts )); then
+                sleep 5
+              fi
+            done
+            echo "production did not report release $VEETBOT_RELEASE_ID" >&2
+            exit 1
+
+  deploy-nginx:
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - checkout
+      - attach_workspace:
+          at: /tmp/veetbot-release
+      - add_ssh_keys:
+          fingerprints:
+            - "SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"
+      - run:
+          name: Configure deployment SSH trust
+          command: |
+            : "${DEPLOY_HOST:?set DEPLOY_HOST in the veetbot-production context}"
+            : "${DEPLOY_USER:?set DEPLOY_USER in the veetbot-production context}"
+            : "${DEPLOY_KNOWN_HOSTS:?set DEPLOY_KNOWN_HOSTS in the veetbot-production context}"
+            install -d -m 0700 "$HOME/.ssh"
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+            chmod 0600 "$HOME/.ssh/known_hosts"
+      - run:
+          name: Validate and reload Nginx
+          command: |
+            expected_release_id="$(cat /tmp/veetbot-release/release-id)"
+            [[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
+            remote_config="/tmp/veetbot-nginx-$CIRCLE_SHA1.conf"
+            remote_script="/tmp/veetbot-nginx-$CIRCLE_SHA1.sh"
+            scp -P "${DEPLOY_PORT:-22}" nginx/veetbot.conf \
+              "$DEPLOY_USER@$DEPLOY_HOST:$remote_config"
+            scp -P "${DEPLOY_PORT:-22}" deploy/nginx/deploy.sh \
+              "$DEPLOY_USER@$DEPLOY_HOST:$remote_script"
+            ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "VEETBOT_EXPECTED_RELEASE_ID='$expected_release_id' \
+               bash '$remote_script' '$remote_config'; \
+               status=\$?; rm -f '$remote_script' '$remote_config'; exit \$status"
+
 workflows:
   verify:
     unless: << pipeline.parameters.run_live >>
@@ -104,6 +254,31 @@ workflows:
       - contract
       - integration
       - sandbox
+      - package-release:
+          requires:
+            - static
+            - contract
+            - integration
+            - sandbox
+          filters:
+            branches:
+              only: main
+      - deploy-app:
+          context: veetbot-production
+          serial-group: << pipeline.project.slug >>/veetbot-production
+          requires:
+            - package-release
+          filters:
+            branches:
+              only: main
+      - deploy-nginx:
+          context: veetbot-production
+          serial-group: << pipeline.project.slug >>/veetbot-production
+          requires:
+            - deploy-app
+          filters:
+            branches:
+              only: main
 
   live_manual:
     when: << pipeline.parameters.run_live >>

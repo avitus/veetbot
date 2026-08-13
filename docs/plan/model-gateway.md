@@ -328,6 +328,7 @@ class ModelError(BaseModel):
     message: str                 # redacted; never the raw provider body
     provider_code: str | None    # provider's own code, for diagnosis
     http_status: int | None
+    provider_parameter: str | None  # provider field path after closed-character validation
 
 class ModelTransientError(ModelError):
     kind: Literal["transient"] = "transient"
@@ -347,6 +348,13 @@ criterion is that no API keys or raw authorization headers enter logs or
 events, and a provider error body is the most common way one does: it echoes
 the request. The adapter builds the message from a fixed template plus the
 provider's own error code, never from the response body.
+
+`provider_code` and `provider_parameter` are accepted only through closed
+character grammars before they enter an event. The runtime copies those values
+and `http_status` into `RunFailure.details` for model failures so event-stream
+clients can diagnose a rejected field without receiving the provider's raw
+response body. The public `RunView` continues to omit `details` as required by
+the HTTP boundary.
 
 `stream_had_output` is what resolves the retry-ownership question below.
 

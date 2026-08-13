@@ -17,6 +17,7 @@ and must never be edited by hand.
 - [Current milestone](plan/current-milestone.md) — the work currently authorized.
 - [Project state](status/index.md) — machine-readable execution state.
 - [Architecture decisions](adr/index.md) — approved ADRs.
+- [Downloadable client](client.md) — build, connection, and security guidance.
 - [Changelog](changelog.md) — notable documentation changes.
 
 Archive provenance: the plan was converted from an archived Word document at
@@ -25,10 +26,10 @@ as an archival record.
 
 ## Current status
 
-Milestones 0, 1, and 2 are complete. Milestone 2's PostgreSQL persistence and
-durable-worker implementation passed its local and hosted acceptance evidence.
-Milestone 3's normalized model gateway and real provider adapters are in
-progress. No later milestone is authorized. See the
+Milestones 0 through 9 are complete. The shared core, HTTP API, sandbox,
+context engine, skills and MCP, and long-term memory and knowledge retrieval
+have passed their recorded acceptance evidence. Milestone 10 remains an
+unauthorized open direction. See the
 [current milestone](plan/current-milestone.md) and
 [project state](status/index.md) pages for recorded evidence.
 

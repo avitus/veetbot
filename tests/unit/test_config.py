@@ -1,5 +1,6 @@
 """Deployment configuration validation tests."""
 
+from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
@@ -16,6 +17,7 @@ from agent_core.config import (
     load_config_document,
     load_settings,
     validate_runtime_identity,
+    validate_settings,
 )
 
 
@@ -40,6 +42,24 @@ def test_loads_frozen_settings() -> None:
         settings.auth_mode = AuthMode.TOKEN  # type: ignore[misc]
     assert settings.trajectory_export_enabled is False
     assert settings.artifact_root == Path(".agent/artifacts")
+    assert settings.release_id is None
+
+
+def test_release_identity_is_validated() -> None:
+    settings = load_settings(
+        {**base_environment(), "VEETBOT_RELEASE_ID": "20260810-152233-abcdef0"}
+    )
+    assert settings.release_id == "20260810-152233-abcdef0"
+
+    with pytest.raises(ConfigurationError, match="VEETBOT_RELEASE_ID"):
+        load_settings({**base_environment(), "VEETBOT_RELEASE_ID": "main-latest"})
+
+
+def test_prebuilt_settings_release_identity_is_validated() -> None:
+    settings = replace(load_settings(base_environment()), release_id="main-latest")
+
+    with pytest.raises(ConfigurationError, match="VEETBOT_RELEASE_ID"):
+        validate_settings(settings)
 
 
 def test_trajectory_export_requires_explicit_operator_enablement() -> None:

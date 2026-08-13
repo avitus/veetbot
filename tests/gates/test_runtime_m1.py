@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +26,7 @@ from agent_core.domain.messages import (
     FakeModelScript,
     ModelAttempt,
     ModelEvent,
+    ModelPermanentError,
     ModelRequest,
     ModelTransientError,
     ModelUsage,
@@ -220,6 +222,71 @@ async def test_event_after_terminal_is_a_model_protocol_failure(
     assert failed.status is RunStatus.FAILED
     assert failed.failure is not None
     assert failed.failure.reason is FailureReason.MODEL_PERMANENT_ERROR
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_diagnostics_reach_the_terminal_event_safely() -> None:
+    permanent = ModelPermanentError(
+        provider="fake",
+        model="scripted",
+        attempt_id=SequenceIdFactory().new_id(),
+        message="the model provider rejected the request",
+        provider_code="missing_required_parameter",
+        http_status=400,
+        provider_parameter="input[12].summary",
+    )
+    async with build(
+        settings=_development_settings(),
+        script=FakeModelScript(turns=[ScriptedTurn(fail_with=permanent)]),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        run_id = await composition.runs.submit("exercise provider diagnostics")
+        failed = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+    assert failed.failure is not None
+    expected = {
+        "provider": "fake",
+        "provider_code": "missing_required_parameter",
+        "http_status": 400,
+        "provider_parameter": "input[12].summary",
+    }
+    assert failed.failure.details == expected
+    response_failure = next(
+        event for event in events if event.event_type == "model.response.failed"
+    )
+    assert {key: response_failure.payload[key] for key in expected} == expected
+    terminal = next(event for event in events if event.event_type == "run.failed")
+    assert terminal.payload["failure"]["details"] == expected
+
+
+@pytest.mark.asyncio
+async def test_direct_model_error_cannot_persist_an_unsafe_provider_parameter() -> None:
+    unsafe_parameter = "input[12].summary\nprovider body"
+    permanent = ModelPermanentError(
+        provider="fake",
+        model="scripted",
+        attempt_id=SequenceIdFactory().new_id(),
+        message="the model provider rejected the request",
+        provider_code="missing_required_parameter",
+        http_status=400,
+        provider_parameter=unsafe_parameter,
+    )
+    assert permanent.provider_parameter is None
+
+    async with build(
+        settings=_development_settings(),
+        script=FakeModelScript(turns=[ScriptedTurn(fail_with=permanent)]),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(),
+    ) as composition:
+        run_id = await composition.runs.submit("reject unsafe provider diagnostics")
+        failed = await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+    assert failed.failure is not None
+    assert "provider_parameter" not in failed.failure.details
+    serialized = json.dumps([event.model_dump(mode="json") for event in events])
+    assert unsafe_parameter not in serialized
 
 
 @pytest.mark.asyncio

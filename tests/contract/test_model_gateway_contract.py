@@ -14,6 +14,7 @@ import pytest
 from anthropic import APIConnectionError, APIResponseValidationError, APIStatusError
 from openai import APIConnectionError as OpenAIAPIConnectionError
 from openai import APIResponseValidationError as OpenAIAPIResponseValidationError
+from openai import APIStatusError as OpenAIAPIStatusError
 from pydantic import ValidationError
 
 from agent_core.adapters.determinism import FixedClock
@@ -332,7 +333,13 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
     reasoning = {
         "type": "response.output_item.done",
         "output_index": 0,
-        "item": {"type": "reasoning", "id": "reasoning-item", "encrypted_content": "opaque"},
+        "item": {
+            "type": "reasoning",
+            "id": "reasoning-item",
+            "summary": [],
+            "encrypted_content": "opaque",
+            "status": "completed",
+        },
     }
     first_source = ScriptedRawSource([[reasoning, *openai_tool_events(ARGUMENTS)]])
     first = OpenAIResponsesProvider(event_source=first_source)
@@ -342,6 +349,8 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
         "id": "reasoning-item",
         "type": "reasoning",
         "encrypted_content": "opaque",
+        "status": "completed",
+        "summary": [],
         "response_id": "resp-tool",
     }
 
@@ -360,6 +369,8 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
         "id": "reasoning-item",
         "type": "reasoning",
         "encrypted_content": "opaque",
+        "status": "completed",
+        "summary": [],
     }
     assert second_turn.provider_metadata is not None
     assert second_turn.provider_metadata.previous_response_id == "resp-tool"
@@ -419,6 +430,76 @@ async def test_openai_midstream_sdk_error_is_normalized_without_losing_sequence(
     assert isinstance(events[-1], ModelFailedEvent)
     assert events[-1].error.kind == "permanent"
     assert events[-1].error.provider_code == "sdk_error"
+
+
+async def test_openai_status_error_preserves_only_safe_diagnostics() -> None:
+    async def rejected(_request: dict[str, Any]) -> Any:
+        request_value = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        raise OpenAIAPIStatusError(
+            "missing field",
+            response=httpx.Response(400, request=request_value),
+            body={
+                "error": {
+                    "code": "missing_required_parameter",
+                    "param": "input[12].summary",
+                    "message": "unsafe provider body must not be retained",
+                }
+            },
+        )
+        yield {}
+
+    provider = OpenAIResponsesProvider(event_source=rejected)
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("openai"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+    assert len(events) == 1
+    assert isinstance(events[0], ModelFailedEvent)
+    assert events[0].error.kind == "permanent"
+    assert events[0].error.http_status == 400
+    assert events[0].error.provider_code == "missing_required_parameter"
+    assert events[0].error.provider_parameter == "input[12].summary"
+    assert "unsafe provider body" not in events[0].model_dump_json()
+
+
+async def test_openai_status_error_sanitizes_parameter_before_logging(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    unsafe_parameter = "input[12].summary\nprovider body"
+
+    async def rejected(_request: dict[str, Any]) -> Any:
+        request_value = httpx.Request("POST", "https://api.openai.com/v1/responses")
+        raise OpenAIAPIStatusError(
+            "missing field",
+            response=httpx.Response(400, request=request_value),
+            body={
+                "error": {
+                    "code": "missing_required_parameter",
+                    "param": unsafe_parameter,
+                }
+            },
+        )
+        yield {}
+
+    caplog.set_level("WARNING", logger="agent_core.adapters.models.openai_responses")
+    provider = OpenAIResponsesProvider(event_source=rejected)
+    events = []
+    try:
+        async for event in validated_stream(
+            provider.stream(request(), resolved("openai"), ATTEMPT)
+        ):
+            events.append(event)
+    finally:
+        await provider.close()
+    assert len(events) == 1
+    assert isinstance(events[0], ModelFailedEvent)
+    assert events[0].error.provider_parameter is None
+    assert "parameter=none" in caplog.text
+    assert unsafe_parameter not in caplog.text
 
 
 def test_provider_usage_counters_are_clamped_to_their_totals() -> None:

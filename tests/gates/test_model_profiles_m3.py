@@ -13,6 +13,8 @@ import yaml
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
+from agent_core.bootstrap import _effective_model_policy
+from agent_core.config import DeploymentMode
 from agent_core.model.registry import (
     PROFILE_VALIDATION_RULES,
     ProfileValidationError,
@@ -24,6 +26,23 @@ from tests.contract.support import NOW
 ROOT = Path(__file__).resolve().parents[2]
 MODELS = ROOT / "src/agent_core/models"
 CORPUS = ROOT / "tests/fixtures/models/invalid-profiles.yaml"
+
+
+@pytest.mark.parametrize(
+    ("deployment_mode", "requested_policy", "expected"),
+    [
+        (DeploymentMode.DEVELOPMENT, None, "fake-balanced"),
+        (DeploymentMode.PRODUCTION, None, "balanced"),
+        (DeploymentMode.DEVELOPMENT, "local", "local"),
+        (DeploymentMode.PRODUCTION, "flagship", "flagship"),
+    ],
+)
+def test_effective_model_policy_never_defaults_production_to_fake(
+    deployment_mode: DeploymentMode,
+    requested_policy: str | None,
+    expected: str,
+) -> None:
+    assert _effective_model_policy(deployment_mode, requested_policy) == expected
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

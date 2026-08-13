@@ -60,6 +60,7 @@ class Settings:
     auth_scopes: frozenset[str] = frozenset()
     sandbox_image: str = "agent-core-sandbox:dev"
     sandbox_passthrough: tuple[str, ...] = ()
+    release_id: str | None = None
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -204,6 +205,7 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
 )
 FROZEN_CONFIG = "policy/hardline.yaml"
 INTERPOLATION = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
+RELEASE_ID_PATTERN = re.compile(r"[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}")
 MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
     {
         "runtime/limits.yaml:model.max_internal_attempts": 1,
@@ -421,9 +423,18 @@ def load_config_document(settings: Settings, relative: str) -> dict[str, Any]:
     return merged
 
 
+def _validate_release_id(release_id: str | None) -> None:
+    if release_id is not None and RELEASE_ID_PATTERN.fullmatch(release_id) is None:
+        raise ConfigurationError(
+            "VEETBOT_RELEASE_ID must be YYYYMMDD-HHMMSS followed by a 7-40 character "
+            "lowercase hexadecimal revision"
+        )
+
+
 def validate_settings(settings: Settings) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
+    _validate_release_id(settings.release_id)
     if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE} and (
@@ -525,6 +536,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         for name in values.get("AGENT_SANDBOX_PASSTHROUGH", "").split(",")
         if name.strip()
     )
+    release_id = values.get("VEETBOT_RELEASE_ID", "").strip() or None
+    _validate_release_id(release_id)
     if auth_mode is AuthMode.DEV:
         auth_tenant_id = "local"
         auth_principal_id = "local-user"
@@ -549,6 +562,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         auth_scopes=auth_scopes,
         sandbox_image=sandbox_image,
         sandbox_passthrough=sandbox_passthrough,
+        release_id=release_id,
     )
     validate_settings(settings)
     return settings

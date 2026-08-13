@@ -19,6 +19,7 @@ from agent_core.domain.messages import (
     ModelCompletedEvent,
     ModelEvent,
     ModelFailedEvent,
+    ModelFailure,
     ModelRequest,
     ModelTransientError,
     ModelTurn,
@@ -249,6 +250,7 @@ def _failure(
     error_class: str,
     message: str,
     step: Step | None,
+    details: dict[str, Any] | None = None,
 ) -> RunOutcome:
     return RunOutcome(
         kind=OutcomeKind.FAILED,
@@ -259,8 +261,20 @@ def _failure(
             step_number=None if step is None else step.step_number,
             attempt_number=None if step is None else step.attempt_count,
             occurred_at=context.clock.now(),
+            details={} if details is None else details,
         ),
     )
+
+
+def _provider_failure_details(error: ModelFailure) -> dict[str, Any]:
+    details: dict[str, Any] = {"provider": error.provider}
+    if error.provider_code is not None:
+        details["provider_code"] = error.provider_code
+    if error.http_status is not None:
+        details["http_status"] = error.http_status
+    if error.provider_parameter is not None:
+        details["provider_parameter"] = error.provider_parameter
+    return details
 
 
 def select_final_message(turn: ModelTurn) -> AssistantMessage | None:
@@ -425,6 +439,7 @@ async def _invoke_model(
                 step,
             )
         if isinstance(terminal, ModelFailedEvent):
+            provider_details = _provider_failure_details(terminal.error)
             await _append_event(
                 context,
                 "model.response.failed",
@@ -432,6 +447,7 @@ async def _invoke_model(
                     "attempt_id": str(attempt.attempt_id),
                     "step_number": step.step_number,
                     "error_class": type(terminal.error).__name__,
+                    **provider_details,
                 },
             )
             failure_usage = (
@@ -474,6 +490,7 @@ async def _invoke_model(
                 type(terminal.error).__name__,
                 terminal.error.message,
                 step,
+                provider_details,
             )
         await _append_event(
             context,

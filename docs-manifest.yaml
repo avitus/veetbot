@@ -10,3 +10,6 @@ sources:
   - docs/changelog.md
   - docs/deployment.md
   - docs/adr/0046-digitalocean-production-topology.md
+  - docs/client.md
+  - docs/adr/0047-downloadable-thin-client.md
+  - docs/adr/0048-atomic-circleci-production-delivery.md

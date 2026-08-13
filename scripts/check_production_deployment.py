@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 
-from agent_core.config import load_settings
+from agent_core.config import Settings, load_config_document, load_settings
 
 
 def _run(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[str]:
@@ -28,6 +28,20 @@ def _run(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[st
             exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
         )
         return subprocess.CompletedProcess(command, 124, stdout or "", f"timed out: {exc}")
+
+
+def _model_policy_failures(settings: Settings) -> list[str]:
+    policies = load_config_document(settings, "models/policies.yaml")
+    model_policies = policies.get("model_policies")
+    if not isinstance(model_policies, dict):
+        return ["models/policies.yaml does not declare model_policies"]
+    balanced = model_policies.get("balanced")
+    if not isinstance(balanced, dict) or not isinstance(balanced.get("provider"), str):
+        return ["production default model policy 'balanced' is not declared"]
+    provider = balanced["provider"]
+    if provider in {"openai", "anthropic"} and provider not in settings.credentials:
+        return [f"production model provider credential is missing: {provider}"]
+    return []
 
 
 def main() -> int:
@@ -53,6 +67,9 @@ def main() -> int:
             failures.append("AGENT_ARTIFACT_ROOT must be an absolute path")
         elif not settings.artifact_root.is_dir():
             failures.append(f"artifact directory does not exist: {settings.artifact_root}")
+        if settings.release_id is None:
+            failures.append("VEETBOT_RELEASE_ID must identify the staged release")
+        failures.extend(_model_policy_failures(settings))
 
     available: dict[str, bool] = {}
     for executable in ("docker", "runsc", "uv"):
@@ -87,7 +104,10 @@ def main() -> int:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
-    print("OK: production configuration, gVisor, sandbox image, storage, and database")
+    print(
+        "OK: production configuration, release identity, model credential, gVisor, "
+        "sandbox image, storage, and database"
+    )
     return 0
 
 
