@@ -140,7 +140,10 @@ public actor HTTPTransport {
                     attempt < request.retryAttempts
                 {
                     try await Task.sleep(
-                        nanoseconds: retryDelayNanoseconds(response: http, attempt: attempt)
+                        nanoseconds: Self.retryDelayNanoseconds(
+                            response: http,
+                            attempt: attempt
+                        )
                     )
                     continue
                 }
@@ -222,7 +225,11 @@ public actor HTTPTransport {
         }
     }
 
-    private func retryDelayNanoseconds(response: HTTPURLResponse, attempt: Int) -> UInt64 {
+    static func retryDelayNanoseconds(
+        response: HTTPURLResponse,
+        attempt: Int,
+        now: Date = Date()
+    ) -> UInt64 {
         let fallback = min(0.25 * pow(2, Double(attempt - 1)), 2)
         guard let rawValue = response.value(forHTTPHeaderField: "Retry-After") else {
             return UInt64(fallback * 1_000_000_000)
@@ -231,7 +238,7 @@ public actor HTTPTransport {
         if let seconds = TimeInterval(rawValue), seconds >= 0 {
             delay = seconds
         } else if let date = Self.httpDate(from: rawValue) {
-            delay = max(0, date.timeIntervalSinceNow)
+            delay = max(0, date.timeIntervalSince(now))
         } else {
             delay = fallback
         }
@@ -239,11 +246,22 @@ public actor HTTPTransport {
     }
 
     private static func httpDate(from value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss z"
-        return formatter.date(from: value)
+        let formats = [
+            "EEE',' dd MMM yyyy HH':'mm':'ss z",
+            "EEEE',' dd'-'MMM'-'yy HH':'mm':'ss z",
+            "EEE MMM d HH':'mm':'ss yyyy",
+        ]
+        for format in formats {
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) {
+                return date
+            }
+        }
+        return nil
     }
 }
 

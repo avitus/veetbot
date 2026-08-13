@@ -108,7 +108,8 @@ import Testing
         )
 
         #expect(status == .unknown("PAUSED_BY_SERVER"))
-        #expect(!status.isActive)
+        #expect(status.isActive)
+        #expect(!status.isTerminal)
         #expect(reason == .unknown("future_failure"))
     }
 }

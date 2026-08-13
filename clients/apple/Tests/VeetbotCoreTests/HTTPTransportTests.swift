@@ -176,6 +176,33 @@ import Testing
         #expect(await client.transport.authorizationState() == .authenticated)
     }
 
+    @Test(arguments: [
+        "Sun, 06 Nov 1994 08:49:37 GMT",
+        "Sunday, 06-Nov-94 08:49:37 GMT",
+        "Sun Nov  6 08:49:37 1994",
+    ])
+    func testRetryAfterAcceptsEveryHTTPDateFormat(value: String) throws {
+        let response = try #require(
+            HTTPURLResponse(
+                url: URL(string: "https://veetbot.test")!,
+                statusCode: 503,
+                httpVersion: "HTTP/1.1",
+                headerFields: ["Retry-After": value]
+            )
+        )
+        let now = try #require(
+            ISO8601DateFormatter().date(from: "1994-11-06T08:49:27Z")
+        )
+
+        #expect(
+            HTTPTransport.retryDelayNanoseconds(
+                response: response,
+                attempt: 1,
+                now: now
+            ) == 10_000_000_000
+        )
+    }
+
     @Test
     func test403RemainsAuthorizationDenied() async throws {
         defer { StubURLProtocol.handler = nil }

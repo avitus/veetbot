@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -124,22 +125,45 @@ public struct ArtifactViewerView: View {
     @ViewBuilder
     private func image(data: Data) -> some View {
         #if os(iOS)
-        if let image = UIImage(data: data) {
+        if let thumbnail = ArtifactImageDecoder.thumbnail(from: data) {
             ScrollView([.horizontal, .vertical]) {
-                Image(uiImage: image).resizable().scaledToFit().padding()
+                Image(uiImage: UIImage(cgImage: thumbnail))
+                    .resizable().scaledToFit().padding()
             }
         } else {
             Text("The image data could not be decoded.")
         }
         #elseif os(macOS)
-        if let image = NSImage(data: data) {
+        if let thumbnail = ArtifactImageDecoder.thumbnail(from: data) {
             ScrollView([.horizontal, .vertical]) {
-                Image(nsImage: image).resizable().scaledToFit().padding()
+                Image(nsImage: NSImage(cgImage: thumbnail, size: .zero))
+                    .resizable().scaledToFit().padding()
             }
         } else {
             Text("The image data could not be decoded.")
         }
         #endif
+    }
+}
+
+enum ArtifactImageDecoder {
+    static let maximumPreviewDimension = 2_048
+
+    static func thumbnail(from data: Data) -> CGImage? {
+        guard
+            let source = CGImageSourceCreateWithData(
+                data as CFData,
+                [kCGImageSourceShouldCache: false] as CFDictionary
+            )
+        else { return nil }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maximumPreviewDimension,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }
 

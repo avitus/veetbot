@@ -47,8 +47,8 @@ public enum RunStatus: Hashable, Sendable {
 
     public var isActive: Bool {
         switch self {
-        case .queued, .running, .waitingForApproval, .waitingForUser: return true
-        case .completed, .failed, .cancelled, .unknown: return false
+        case .queued, .running, .waitingForApproval, .waitingForUser, .unknown: return true
+        case .completed, .failed, .cancelled: return false
         }
     }
 }

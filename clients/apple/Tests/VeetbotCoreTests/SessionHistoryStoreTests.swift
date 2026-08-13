@@ -22,7 +22,7 @@ import Testing
                 VolatileSessionHistoryStore()
             #if XCODE_BUILD
             case .swiftData:
-                if #available(macOS 14.0, *) {
+                if #available(macOS 14.0, iOS 17.0, *) {
                     try SwiftDataSessionHistoryStore(inMemory: true)
                 } else {
                     VolatileSessionHistoryStore()
