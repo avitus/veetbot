@@ -57,3 +57,4 @@ implementation without one.
 - [ADR-0046 — Host-native DigitalOcean production topology (Proposed)](0046-digitalocean-production-topology.md)
 - [ADR-0047 — Dependency-free downloadable thin client (Proposed)](0047-downloadable-thin-client.md)
 - [ADR-0048 — Atomic CircleCI production delivery (Proposed)](0048-atomic-circleci-production-delivery.md)
+- [ADR-0049 — Native Apple client as a secure transport-only surface (Proposed)](0049-native-apple-client.md)

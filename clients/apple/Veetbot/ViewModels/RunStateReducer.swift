@@ -1,0 +1,377 @@
+import Combine
+import Foundation
+
+public struct TimelineItem: Identifiable, Sendable {
+    public enum Role: Sendable { case user, assistant }
+
+    public let id: String
+    public let role: Role
+    public var content: [ContentBlock]
+    public var isStreaming: Bool
+
+    public init(id: String, role: Role, content: [ContentBlock], isStreaming: Bool = false) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.isStreaming = isStreaming
+    }
+
+    public var text: String {
+        content.compactMap(\.text).joined(separator: "\n")
+    }
+}
+
+public enum ToolActivityStatus: String, Sendable {
+    case queued
+    case running
+    case awaitingApproval = "awaiting approval"
+    case completed
+    case failed
+    case denied
+    case uncertain
+}
+
+public struct ToolActivity: Identifiable, Sendable {
+    public let callID: String
+    public var name: String
+    public var status: ToolActivityStatus
+    public var arguments: [String: JSONValue]
+    public var result: ToolResultView?
+    public var sideEffect: SideEffectClass?
+    public var risk: RiskLevel?
+    public var approvalID: UUID?
+
+    public var id: String { callID }
+}
+
+public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
+    public let questionID: UUID
+    public let runID: UUID
+    public let question: String
+
+    public var id: UUID { questionID }
+}
+
+@MainActor
+public final class RunStateReducer: ObservableObject {
+    @Published public private(set) var timeline: [TimelineItem] = []
+    @Published public private(set) var tools: [ToolActivity] = []
+    @Published public private(set) var approvals: [ApprovalView] = []
+    @Published public private(set) var workingState: WorkingStateView?
+    @Published public private(set) var clarifyingQuestion: ClarifyingQuestionPrompt?
+    @Published public private(set) var runStatus: RunStatus?
+    @Published public private(set) var activeRunID: UUID?
+    @Published public private(set) var reasoningActive = false
+    @Published public private(set) var failure: RunFailureView?
+
+    private var persistedSequences: Set<Int> = []
+    private var streamingMessageID: String?
+    private var toolIndex: [String: Int] = [:]
+    private var pendingApprovalIDs: Set<UUID> = []
+
+    public init() {}
+
+    public var isRunActive: Bool { runStatus?.isActive == true }
+    public var needsApprovalIDs: [UUID] { Array(pendingApprovalIDs) }
+
+    public func reset() {
+        timeline = []
+        tools = []
+        approvals = []
+        workingState = nil
+        clarifyingQuestion = nil
+        runStatus = nil
+        activeRunID = nil
+        reasoningActive = false
+        failure = nil
+        persistedSequences = []
+        streamingMessageID = nil
+        toolIndex = [:]
+        pendingApprovalIDs = []
+    }
+
+    public func seed(run: RunView) {
+        activeRunID = run.id
+        runStatus = run.status
+        failure = run.failure
+        if run.status != .waitingForUser { clarifyingQuestion = nil }
+    }
+
+    public func begin(runID: UUID, status: RunStatus) {
+        activeRunID = runID
+        runStatus = status
+        failure = nil
+    }
+
+    public func reduce(_ frame: SSEFrame) {
+        if let id = frame.id {
+            guard persistedSequences.insert(id).inserted else { return }
+        }
+        let runID = frame.data["run_id"]?.stringValue.flatMap(UUID.init(uuidString:))
+        if let runID { activeRunID = runID }
+
+        switch frame.event {
+        case "session.created":
+            break
+        case "user.message.created":
+            appendUserMessage(frame)
+        case "run.queued":
+            runStatus = .queued
+        case "run.started", "run.resumed", "run.claimed":
+            runStatus = .running
+        case "message.delta":
+            appendDelta(frame.data["text"]?.stringValue)
+        case "reasoning.delta", "reasoning.summary.delta":
+            // Raw reasoning text is intentionally discarded at the reducer boundary.
+            reasoningActive = true
+        case "assistant.message.completed":
+            reasoningActive = false
+            if let message = frame.data["message"] {
+                reconcileAssistantMessage(message, fallbackID: frameID(frame))
+            }
+        case "model.response.completed":
+            reasoningActive = false
+            reduceModelResponse(frame)
+        case "tool.call.proposed":
+            updateTool(from: frame, status: .queued)
+        case "tool.call.authorized", "tool.call.started":
+            updateTool(from: frame, status: .running)
+        case "tool.call.completed":
+            updateTool(from: frame, status: .completed)
+        case "tool.call.failed":
+            updateTool(from: frame, status: .failed)
+        case "tool.call.denied":
+            updateTool(from: frame, status: .denied)
+        case "tool.call.uncertain":
+            updateTool(from: frame, status: .uncertain)
+        case "approval.requested":
+            if let id = approvalID(from: frame.data) { pendingApprovalIDs.insert(id) }
+        case "approval.resolved":
+            if let id = approvalID(from: frame.data) { pendingApprovalIDs.remove(id) }
+        case "context.working_state.updated":
+            reduceWorkingState(frame.data["working_state"])
+        case "run.waiting_for_approval":
+            runStatus = .waitingForApproval
+            if let id = approvalID(from: frame.data) { pendingApprovalIDs.insert(id) }
+        case "run.waiting_for_user":
+            runStatus = .waitingForUser
+            reduceQuestion(frame, runID: runID)
+        case "run.completed":
+            if let final = frame.data["final_message"] {
+                reconcileAssistantMessage(final, fallbackID: frameID(frame))
+            }
+            transitionToTerminal(.completed)
+        case "run.failed":
+            failure = frame.data["failure"].flatMap { decode(RunFailureView.self, from: $0) }
+            transitionToTerminal(.failed)
+        case "run.cancelled":
+            transitionToTerminal(.cancelled)
+        default:
+            break
+        }
+    }
+
+    public func mergeApproval(_ approval: ApprovalView) {
+        if let index = approvals.firstIndex(where: { $0.id == approval.id }) {
+            approvals[index] = approval
+        } else {
+            approvals.append(approval)
+            approvals.sort { $0.createdAt < $1.createdAt }
+        }
+        if approval.status.isPending {
+            pendingApprovalIDs.insert(approval.id)
+        } else {
+            pendingApprovalIDs.remove(approval.id)
+        }
+        let associatedCallID = tools.last(where: { $0.approvalID == approval.id })?.callID
+            ?? tools.reversed().first(where: {
+                $0.name == approval.toolName
+                    && $0.approvalID == nil
+                    && [.queued, .running, .awaitingApproval].contains($0.status)
+            })?.callID
+        if let callID = associatedCallID {
+            updateTool(callID: callID) { tool in
+                tool.status = approval.status.isPending ? .awaitingApproval : tool.status
+                tool.arguments = approval.arguments
+                tool.risk = RiskLevel(rawValue: approval.risk.lowercased())
+                tool.approvalID = approval.id
+            }
+        }
+    }
+
+    public func removeApproval(_ approvalID: UUID) {
+        pendingApprovalIDs.remove(approvalID)
+        approvals.removeAll { $0.id == approvalID }
+    }
+
+    private func appendUserMessage(_ frame: SSEFrame) {
+        guard let content = frame.data["content"].flatMap({ decode([ContentBlock].self, from: $0) })
+        else { return }
+        timeline.append(
+            TimelineItem(id: frameID(frame), role: .user, content: content)
+        )
+    }
+
+    private func appendDelta(_ text: String?) {
+        guard let text, !text.isEmpty else { return }
+        reasoningActive = false
+        if let streamingMessageID,
+           let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
+        {
+            let previous = timeline[index].text
+            timeline[index].content = [.text(previous + text)]
+        } else {
+            let id = "transient-assistant-\(UUID().uuidString)"
+            streamingMessageID = id
+            timeline.append(
+                TimelineItem(id: id, role: .assistant, content: [.text(text)], isStreaming: true)
+            )
+        }
+    }
+
+    private func reconcileAssistantMessage(_ value: JSONValue, fallbackID: String) {
+        guard let message = decode(AssistantMessagePayload.self, from: value) else { return }
+        if let streamingMessageID,
+           let index = timeline.firstIndex(where: { $0.id == streamingMessageID })
+        {
+            timeline[index].content = message.content
+            timeline[index].isStreaming = false
+            self.streamingMessageID = nil
+            return
+        }
+        guard !timeline.contains(where: { $0.role == .assistant && $0.content == message.content })
+        else { return }
+        timeline.append(
+            TimelineItem(id: fallbackID, role: .assistant, content: message.content)
+        )
+    }
+
+    private func reduceModelResponse(_ frame: SSEFrame) {
+        guard let items = frame.data["conversation_items"]?.arrayValue else { return }
+        for item in items {
+            guard let object = item.objectValue, object["kind"]?.stringValue == "tool_call" else {
+                continue
+            }
+            let callID = object["call_id"]?.stringValue ?? "tool-\(tools.count)"
+            let name = object["name"]?.stringValue ?? "tool"
+            let arguments = object["arguments"]?.objectValue ?? [:]
+            ensureTool(callID: callID, name: name, status: .queued)
+            updateTool(callID: callID) { $0.arguments = arguments }
+        }
+    }
+
+    private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
+        let callID = frame.data["call_id"]?.stringValue ?? "\(frame.event)-\(frameID(frame))"
+        let name = frame.data["name"]?.stringValue
+            ?? frame.data["tool_name"]?.stringValue
+            ?? "tool"
+        ensureTool(callID: callID, name: name, status: status)
+        updateTool(callID: callID) { tool in
+            tool.status = status
+            if let arguments = frame.data["arguments"]?.objectValue {
+                tool.arguments = arguments
+            }
+            if let value = frame.data["side_effect"]?.stringValue {
+                tool.sideEffect = SideEffectClass(rawValue: value)
+            }
+            if let value = frame.data["risk"]?.stringValue {
+                tool.risk = RiskLevel(rawValue: value.lowercased())
+            }
+            if let result = frame.data["result_item"].flatMap({ decode(ToolResultPayload.self, from: $0) }) {
+                tool.result = ToolResultView(
+                    content: result.content,
+                    trust: result.trust,
+                    isError: result.isError,
+                    structured: frame.data["structured_result"]?.objectValue
+                )
+            }
+        }
+    }
+
+    private func ensureTool(callID: String, name: String, status: ToolActivityStatus) {
+        guard toolIndex[callID] == nil else { return }
+        toolIndex[callID] = tools.count
+        tools.append(
+            ToolActivity(
+                callID: callID,
+                name: name,
+                status: status,
+                arguments: [:],
+                result: nil,
+                sideEffect: nil,
+                risk: nil,
+                approvalID: nil
+            )
+        )
+    }
+
+    private func updateTool(callID: String, update: (inout ToolActivity) -> Void) {
+        guard let index = toolIndex[callID], tools.indices.contains(index) else { return }
+        update(&tools[index])
+    }
+
+    private func reduceWorkingState(_ value: JSONValue?) {
+        guard let value, let state = decode(WorkingStateView.self, from: value) else { return }
+        workingState = state
+        if let prompt = clarifyingQuestion,
+           !state.openQuestions.contains(prompt.question)
+        {
+            clarifyingQuestion = nil
+        }
+    }
+
+    private func reduceQuestion(_ frame: SSEFrame, runID: UUID?) {
+        let nested = frame.data["suspension"]?.objectValue
+        guard
+            let idString = frame.data["question_id"]?.stringValue
+                ?? nested?["question_id"]?.stringValue,
+            let questionID = UUID(uuidString: idString),
+            let runID = runID ?? activeRunID
+        else { return }
+        let question = frame.data["question"]?.stringValue
+            ?? workingState?.openQuestions.last
+            ?? "The agent needs more information."
+        clarifyingQuestion = ClarifyingQuestionPrompt(
+            questionID: questionID,
+            runID: runID,
+            question: question
+        )
+    }
+
+    private func transitionToTerminal(_ status: RunStatus) {
+        runStatus = status
+        reasoningActive = false
+        clarifyingQuestion = nil
+        pendingApprovalIDs.removeAll()
+    }
+
+    private func approvalID(from data: [String: JSONValue]) -> UUID? {
+        let direct = data["approval_id"]?.stringValue
+        let nested = data["suspension"]?.objectValue?["approval_id"]?.stringValue
+        return (direct ?? nested).flatMap(UUID.init(uuidString:))
+    }
+
+    private func frameID(_ frame: SSEFrame) -> String {
+        frame.id.map { "event-\($0)" } ?? "transient-\(UUID().uuidString)"
+    }
+
+    private func decode<Value: Decodable>(_ type: Value.Type, from value: JSONValue) -> Value? {
+        guard let data = try? JSONEncoder.server.encode(value) else { return nil }
+        return try? JSONDecoder.server.decode(Value.self, from: data)
+    }
+}
+
+private struct AssistantMessagePayload: Decodable {
+    let content: [ContentBlock]
+}
+
+private struct ToolResultPayload: Decodable {
+    let content: [ContentBlock]
+    let isError: Bool
+    let trust: TrustLabel?
+
+    enum CodingKeys: String, CodingKey {
+        case content, trust
+        case isError = "is_error"
+    }
+}
