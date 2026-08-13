@@ -104,10 +104,15 @@ import Testing
             captured.allSatisfy {
                 $0.value(forHTTPHeaderField: "Content-Type") == "application/json"
             })
+        let requestIDs = captured.compactMap {
+            $0.value(forHTTPHeaderField: "X-Request-Id")
+        }
+        #expect(requestIDs.count == captured.count)
         #expect(
-            captured.allSatisfy {
-                $0.value(forHTTPHeaderField: "X-Request-Id") != nil
+            requestIDs.allSatisfy {
+                !$0.isEmpty && UUID(uuidString: $0) != nil
             })
+        #expect(Set(requestIDs).count == 1)
     }
 
     @Test
