@@ -81,7 +81,7 @@ private struct SessionSidebar: View {
                                 Text(entry.title)
                                     .lineLimit(2)
                                     .foregroundColor(.primary)
-                                Text(entry.updatedAt, style: .relative)
+                                ConversationAgeText(updatedAt: entry.updatedAt)
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
@@ -136,6 +136,65 @@ private struct SessionSidebar: View {
                 }
                 .accessibilityLabel("Connection settings")
             }
+        }
+    }
+}
+
+private struct ConversationAgeText: View {
+    let updatedAt: Date
+
+    var body: some View {
+        TimelineView(ConversationAgeSchedule(updatedAt: updatedAt)) { context in
+            Text(
+                ConversationAgeFormatter.string(
+                    since: updatedAt,
+                    relativeTo: context.date
+                )
+            )
+        }
+    }
+}
+
+enum ConversationAgeFormatter {
+    static func string(
+        since updatedAt: Date,
+        relativeTo now: Date,
+        locale: Locale = .current
+    ) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.dateTimeStyle = .numeric
+        formatter.unitsStyle = .abbreviated
+        formatter.locale = locale
+        return formatter.localizedString(for: updatedAt, relativeTo: now)
+    }
+}
+
+private struct ConversationAgeSchedule: TimelineSchedule {
+    let updatedAt: Date
+
+    func entries(from startDate: Date, mode: Mode) -> Entries {
+        Entries(nextDate: startDate, updatedAt: updatedAt)
+    }
+
+    struct Entries: Sequence, IteratorProtocol {
+        var nextDate: Date
+        let updatedAt: Date
+
+        mutating func next() -> Date? {
+            let result = nextDate
+            let elapsed = Swift.max(0, result.timeIntervalSince(updatedAt))
+            let refreshInterval: TimeInterval
+            if elapsed < 60 {
+                refreshInterval = 1
+            } else if elapsed < 3_600 {
+                refreshInterval = 60
+            } else if elapsed < 86_400 {
+                refreshInterval = 3_600
+            } else {
+                refreshInterval = 86_400
+            }
+            nextDate.addTimeInterval(refreshInterval)
+            return result
         }
     }
 }

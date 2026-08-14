@@ -63,9 +63,10 @@ Application Support file behind the same store protocol. Both contain only
 `session_id`, title, agent identity, timestamps, and the last known run ID; a
 selected session is refreshed from the server without changing its position in
 the list. Conversation activity, not selection, updates the history ordering.
-Each row can be removed from the device-local history after confirmation. The
-API has no session-delete route, so this action does not delete authoritative
-server data.
+Each row's activity timer shows seconds only during its first minute, then uses
+minute-or-larger relative units. Rows can be removed from the device-local
+history after confirmation. The API has no session-delete route, so this action
+does not delete authoritative server data.
 
 ## Agent activity and artifacts
 
