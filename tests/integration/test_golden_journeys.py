@@ -220,7 +220,7 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
             for event in events
             if event.event_type == "tool.call.failed"
         )
-        == "tool.output_invalid"
+        == "tool.arguments_invalid"
     )
     assert _tool_names(events, "tool.call.completed") == ["memory.remember"]
     assert explicit in {memory.statement for memory in memories}
@@ -519,7 +519,6 @@ async def test_openai_reasoning_and_tool_replay_use_the_serialized_sdk_request_p
         "id": "golden-reasoning-item",
         "type": "reasoning",
         "encrypted_content": "opaque-golden-reasoning-state",
-        "status": "completed",
         "summary": [],
     }
     assert function_call["call_id"] == "golden-openai-tool-call"
