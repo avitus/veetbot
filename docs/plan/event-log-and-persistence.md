@@ -86,7 +86,7 @@ BEGIN;
 
 UPDATE sessions
    SET next_event_sequence = next_event_sequence + 1,
-       updated_at = $event_created_at
+       updated_at = GREATEST(updated_at, $event_created_at)
  WHERE id = $session_id
 RETURNING next_event_sequence - 1 AS sequence;
 

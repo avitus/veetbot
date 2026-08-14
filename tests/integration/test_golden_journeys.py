@@ -25,7 +25,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.runs import RunStatus
 from agent_core.runtime.worker import DurableWorker
 from tests.contract.model_fixtures import openai_text_events
-from tests.integration.m2_support import database_settings
+from tests.integration.m2_support import database_settings, memory_settings
 
 
 @asynccontextmanager
@@ -220,7 +220,7 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
             for event in events
             if event.event_type == "tool.call.failed"
         )
-        == "tool.arguments_invalid"
+        == "tool.trust_rejected"
     )
     assert _tool_names(events, "tool.call.completed") == ["memory.remember"]
     assert explicit in {memory.statement for memory in memories}
@@ -389,7 +389,7 @@ async def test_final_message_is_delivered_through_the_swift_api_sse_path() -> No
         assert submitted.status_code == 202, submitted.text
         run_id = UUID(submitted.json()["run_id"])
         await _run_worker(worker_composition, "golden-swift-sse-worker")
-        stream = await client.get(f"/v1/runs/{run_id}/events")
+        stream = await client.get(f"/v1/runs/{run_id}/events", timeout=10.0)
         run = await client.get(f"/v1/runs/{run_id}")
 
     assert stream.status_code == 200, stream.text
@@ -414,6 +414,7 @@ class _OpenAIWire:
         payload = json.loads(request.content)
         assert isinstance(payload, dict)
         self.requests.append(payload)
+        assert len(self.requests) <= len(self._streams), "unexpected extra provider request"
         events = deepcopy(self._streams[len(self.requests) - 1])
         if len(self.requests) == 1:
             wire_name = str(payload["tools"][0]["name"])
@@ -494,7 +495,7 @@ async def test_openai_reasoning_and_tool_replay_use_the_serialized_sdk_request_p
         )
         provider = OpenAIResponsesProvider(client=client)
         async with build(
-            settings=database_settings(),
+            settings=memory_settings(),
             storage="memory",
             model_policy="balanced",
             model_provider_overrides={"openai": provider},

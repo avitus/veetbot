@@ -29,6 +29,8 @@ public final class ChatViewModel: ObservableObject {
     private var loadedApprovalIDs: Set<UUID> = []
     private var selectionRequestID: UUID?
     private var removedHistorySessionIDs: Set<UUID> = []
+    private var deletingHistorySessionIDs: Set<UUID> = []
+    private var historyReconciliationID: UUID?
     private var pendingSubmission: (text: String, key: String)?
 
     public init(
@@ -46,7 +48,8 @@ public final class ChatViewModel: ObservableObject {
         Task { await bootstrap() }
     }
 
-    public func configure(baseURLString: String, token: String) async {
+    @discardableResult
+    public func configure(baseURLString: String, token: String) async -> Bool {
         do {
             let configuration = try ConnectionConfiguration(baseURLString: baseURLString)
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -60,13 +63,16 @@ public final class ChatViewModel: ObservableObject {
             await install(configuration)
             requiresReauthentication = false
             errorMessage = nil
+            return true
         } catch {
             present(error)
+            return false
         }
     }
 
     public func forgetCredentials() async {
         selectionRequestID = nil
+        historyReconciliationID = nil
         watchTasks.cancel()
         do { try await tokenStore.deleteToken() } catch { present(error) }
         api = nil
@@ -131,9 +137,13 @@ public final class ChatViewModel: ObservableObject {
 
     public func deleteSessionEverywhere(_ entry: SessionHistoryEntry) async {
         guard let api else { return }
+        historyReconciliationID = nil
+        deletingHistorySessionIDs.insert(entry.sessionID)
+        defer { deletingHistorySessionIDs.remove(entry.sessionID) }
         do {
             try await api.deleteSession(entry.sessionID)
             removedHistorySessionIDs.insert(entry.sessionID)
+            historyReconciliationID = nil
             if selectedSessionID == entry.sessionID { newSession() }
             try await historyStore.delete(sessionID: entry.sessionID)
             history = try await historyStore.list()
@@ -145,21 +155,32 @@ public final class ChatViewModel: ObservableObject {
 
     public func synchronizeHistory() async {
         guard let api else { return }
+        let reconciliationID = UUID()
+        historyReconciliationID = reconciliationID
+        defer {
+            if historyReconciliationID == reconciliationID {
+                historyReconciliationID = nil
+            }
+        }
         let locallyKnownAtStart = Set(history.map(\.sessionID))
         do {
             var cursor: String?
-            var pageCount = 0
+            var seenCursors: Set<String> = []
             var serverSessions: [SessionView] = []
             repeat {
                 let page = try await api.listSessions(cursor: cursor)
+                guard historyReconciliationID == reconciliationID else { return }
                 serverSessions.append(contentsOf: page.items)
-                cursor = page.nextCursor
-                pageCount += 1
-            } while cursor != nil && pageCount < 100
-            guard cursor == nil else { throw HTTPTransportError.invalidResponse }
+                cursor = try Self.nextHistoryCursor(page.nextCursor, seen: &seenCursors)
+            } while cursor != nil
+            guard historyReconciliationID == reconciliationID else { return }
 
             let serverIDs = Set(serverSessions.map(\.id))
-            for session in serverSessions where !removedHistorySessionIDs.contains(session.id) {
+            for session in serverSessions
+            where !removedHistorySessionIDs.contains(session.id)
+                && !deletingHistorySessionIDs.contains(session.id)
+            {
+                guard historyReconciliationID == reconciliationID else { return }
                 let existing = history.first { $0.sessionID == session.id }
                 let entry = Self.mergedHistoryEntry(
                     session: session,
@@ -168,25 +189,42 @@ public final class ChatViewModel: ObservableObject {
                     suggestedTitle: nil,
                     touchedAt: session.updatedAt
                 )
+                guard historyReconciliationID == reconciliationID else { return }
                 try await historyStore.upsert(entry)
+                guard historyReconciliationID == reconciliationID else {
+                    await discardSuccessfullyDeletedHistory()
+                    return
+                }
             }
             var prunedHistory = false
             for sessionID in locallyKnownAtStart.subtracting(serverIDs) {
+                guard historyReconciliationID == reconciliationID else { return }
                 do {
                     let session = try await api.getSession(sessionID)
+                    guard historyReconciliationID == reconciliationID else { return }
+                    guard !removedHistorySessionIDs.contains(session.id),
+                        !deletingHistorySessionIDs.contains(session.id)
+                    else { continue }
                     let existing = history.first { $0.sessionID == session.id }
-                    try await historyStore.upsert(
-                        Self.mergedHistoryEntry(
-                            session: session,
-                            existing: existing,
-                            lastRunID: session.lastRunID,
-                            suggestedTitle: nil,
-                            touchedAt: session.updatedAt
-                        )
+                    let entry = Self.mergedHistoryEntry(
+                        session: session,
+                        existing: existing,
+                        lastRunID: session.lastRunID,
+                        suggestedTitle: nil,
+                        touchedAt: session.updatedAt
                     )
+                    guard historyReconciliationID == reconciliationID else { return }
+                    try await historyStore.upsert(entry)
+                    guard historyReconciliationID == reconciliationID else {
+                        await discardSuccessfullyDeletedHistory()
+                        return
+                    }
                 } catch let error as HTTPTransportError {
+                    guard historyReconciliationID == reconciliationID else { return }
                     if case .api(let apiError) = error, apiError.statusCode == 404 {
+                        guard historyReconciliationID == reconciliationID else { return }
                         try await historyStore.delete(sessionID: sessionID)
+                        guard historyReconciliationID == reconciliationID else { return }
                         prunedHistory = true
                         if selectedSessionID == sessionID { newSession() }
                     } else {
@@ -194,16 +232,43 @@ public final class ChatViewModel: ObservableObject {
                     }
                 }
             }
-            history = try await historyStore.list()
-            if prunedHistory { await artifactCache.removeAll() }
+            guard historyReconciliationID == reconciliationID else { return }
+            let reconciledHistory = try await historyStore.list()
+            guard historyReconciliationID == reconciliationID else { return }
+            history = reconciledHistory
+            if prunedHistory {
+                await artifactCache.removeAll()
+                guard historyReconciliationID == reconciliationID else { return }
+            }
         } catch let error as VeetbotAPIClientError {
-            present(error)
+            if historyReconciliationID == reconciliationID { present(error) }
         } catch let error as HTTPTransportError {
-            if case .reauthenticationRequired = error { present(error) }
+            if historyReconciliationID == reconciliationID,
+                case .reauthenticationRequired = error
+            {
+                present(error)
+            }
         } catch {
             // Background reconciliation is best effort; direct user actions
             // still surface their own failures.
         }
+    }
+
+    private func discardSuccessfullyDeletedHistory() async {
+        for sessionID in removedHistorySessionIDs {
+            try? await historyStore.delete(sessionID: sessionID)
+        }
+    }
+
+    static func nextHistoryCursor(
+        _ cursor: String?,
+        seen: inout Set<String>
+    ) throws -> String? {
+        guard let cursor else { return nil }
+        guard seen.insert(cursor).inserted else {
+            throw HTTPTransportError.invalidResponse
+        }
+        return cursor
     }
 
     @discardableResult

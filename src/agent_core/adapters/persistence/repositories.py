@@ -490,7 +490,7 @@ class PostgresEventRepository:
             .where(SessionRow.id == event.session_id)
             .values(
                 next_event_sequence=SessionRow.next_event_sequence + 1,
-                updated_at=occurred_at,
+                updated_at=func.greatest(SessionRow.updated_at, occurred_at),
             )
             .returning(SessionRow.next_event_sequence - 1)
         )

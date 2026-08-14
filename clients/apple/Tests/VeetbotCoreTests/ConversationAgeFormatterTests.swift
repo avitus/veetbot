@@ -25,6 +25,17 @@ import Testing
         #expect(formattedAge(seconds: seconds) == expected)
     }
 
+    @Test
+    func testFutureUpdatesAreClampedToNow() {
+        #expect(
+            ConversationAgeFormatter.string(
+                since: now.addingTimeInterval(60),
+                relativeTo: now,
+                locale: locale
+            ) == "now"
+        )
+    }
+
     private func formattedAge(seconds: Int) -> String {
         ConversationAgeFormatter.string(
             since: now.addingTimeInterval(-Double(seconds)),

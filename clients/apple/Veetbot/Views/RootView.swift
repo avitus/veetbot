@@ -24,17 +24,19 @@ public struct RootView: View {
             if required { showingSettings = true }
         }
         .onChange(of: scenePhase) { phase in
-            if phase == .active {
-                Task { await model.synchronizeHistory() }
-            } else {
+            if phase != .active {
                 Task { await model.clearCachedArtifacts() }
             }
         }
-        .task(id: model.isConfigured) {
-            guard model.isConfigured else { return }
+        .task(id: model.isConfigured && scenePhase == .active) {
+            guard model.isConfigured, scenePhase == .active else { return }
             while !Task.isCancelled {
                 await model.synchronizeHistory()
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    return
+                }
             }
         }
         .alert(
@@ -185,7 +187,7 @@ enum ConversationAgeFormatter {
         formatter.dateTimeStyle = .numeric
         formatter.unitsStyle = .abbreviated
         formatter.locale = locale
-        return formatter.localizedString(for: updatedAt, relativeTo: now)
+        return formatter.localizedString(for: min(updatedAt, now), relativeTo: now)
     }
 }
 

@@ -9,9 +9,10 @@ title: Changelog
 - Added a principal-scoped, paginated server session index with latest-run
   identity and activity ordering so client history is a mirror rather than a
   device-local source of truth.
-- Added idempotent `Delete Everywhere` semantics that reject active work, purge
-  the durable conversation graph, retain only a content-free ownership
-  tombstone, and retry external artifact-byte deletion through maintenance.
+- Made idempotent `Delete Everywhere` the default destructive action. It rejects
+  active work, purges the durable conversation graph, retains only a
+  content-free ownership tombstone, and retries external artifact-byte deletion
+  through maintenance.
 - Updated the Apple client to reconcile history on connect, foreground entry,
   and a periodic poll, and to remove local state only after authoritative
   deletion succeeds.
@@ -21,6 +22,15 @@ title: Changelog
 - Added a post-promotion authenticated session-index probe so a server release
   cannot pass deployment verification while omitting the API used by the Apple
   client.
+- Fenced in-flight and background reconciliation so it cannot restore a session
+  after Delete Everywhere succeeds, and stopped polling while the app is not
+  active.
+- Hardened session cursors, kept activity timestamps monotonic, aligned the
+  deterministic deletion and run-index adapters with PostgreSQL, and made
+  connection settings report the result of the current save attempt.
+- Removed the Apple history page cap and rejected cursor loops, tightened
+  release-probe URL and status validation, and gave memory origin-trust
+  rejections their own stable tool reason code.
 - Proposed ADR-0050 for the two-route post-Milestone 9 extension and its
   deletion, synchronization, and artifact-lifecycle boundaries.
 

@@ -469,6 +469,10 @@ async def test_session_index_and_delete_are_authoritative_and_idempotent(
         assert len(first_page.json()["items"]) == 1
         cursor = first_page.json()["next_cursor"]
         assert cursor is not None
+        invalid_cursor = await client.get(
+            "/v1/sessions", params={"limit": 1, "cursor": f"{cursor}!"}
+        )
+        assert invalid_cursor.status_code == 400
         second_page = await client.get("/v1/sessions", params={"limit": 1, "cursor": cursor})
         assert second_page.status_code == 200
         listed = {

@@ -152,7 +152,9 @@ class InMemorySessionRepository:
                 session = self._sessions[session_id]
             except KeyError as exc:
                 raise NotFoundError("session not found") from exc
-            self._sessions[session_id] = session.model_copy(update={"updated_at": touched_at})
+            self._sessions[session_id] = session.model_copy(
+                update={"updated_at": max(session.updated_at, touched_at)}
+            )
 
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
@@ -225,7 +227,10 @@ class InMemoryRunRepository:
     ) -> dict[UUID, Run]:
         authorized_ids: set[UUID] = set()
         for session_id in session_ids:
-            await self._sessions.get(session_id, principal)
+            try:
+                await self._sessions.get(session_id, principal)
+            except NotFoundError:
+                continue
             authorized_ids.add(session_id)
         async with self._lock:
             latest: dict[UUID, Run] = {}

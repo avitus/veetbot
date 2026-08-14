@@ -49,6 +49,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["session_id"],
             ["session_deletions.session_id"],
+            name=op.f("fk_session_deletion_artifacts_session_id_session_deletions"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint(

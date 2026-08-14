@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -230,25 +231,68 @@ class InMemorySessionDeletionRepository:
         self._memories = memories
         self._traces = traces
         self._knowledge = knowledge
+        self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
 
     async def delete(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
+        # Every collaborator normally protects its state with its own lock. Take
+        # those locks in one stable order so cross-repository discovery and
+        # erasure form one deterministic in-memory transaction.
+        locks = sorted(
+            {
+                id(lock): lock
+                for lock in (
+                    self._lock,
+                    self._sessions._lock,
+                    self._runs._lock,
+                    self._events._lock,
+                    self._invocations._lock,
+                    self._approvals._lock,
+                    self._checkpoints._lock,
+                    self._idempotency._lock,
+                    self._usage._lock,
+                    self._trajectory_exports._lock,
+                    self._artifacts._lock,
+                    self._memories._lock,
+                    self._traces._lock,
+                    self._knowledge._lock,
+                )
+            }.values(),
+            key=id,
+        )
+        for lock in locks:
+            await lock.acquire()
         try:
-            await self._sessions.get(session_id, principal)
-        except NotFoundError:
+            return self._delete_locked(session_id, principal, deleted_at)
+        finally:
+            for lock in reversed(locks):
+                lock.release()
+
+    def _delete_locked(self, session_id: UUID, principal: Principal, deleted_at: datetime) -> bool:
+        session = self._sessions._sessions.get(session_id)
+        if session is None or (
+            session.tenant_id != principal.tenant_id
+            or session.principal_id != principal.principal_id
+        ):
             if self._tombstones.get(session_id, ())[:2] == (
                 principal.tenant_id,
                 principal.principal_id,
             ):
                 return False
-            raise
-        active = await self._runs.active_for_session(session_id, principal)
-        if active is not None:
+            raise NotFoundError("session not found")
+        active = [
+            run
+            for run in self._runs._runs.values()
+            if run.session_id == session_id and run.status not in TERMINAL_RUN_STATUSES
+        ]
+        if len(active) > 1:
+            raise ConflictError("session has multiple active runs")
+        if active:
             raise ConflictError(
                 "An active run must be stopped before deleting the conversation.",
                 reason="active_run_exists",
-                details={"run_id": str(active.id)},
+                details={"run_id": str(active[0].id)},
             )
         run_ids = {
             run_id for run_id, run in self._runs._runs.items() if run.session_id == session_id
@@ -333,7 +377,7 @@ class InMemorySessionDeletionRepository:
         self._invocations._idempotency = {
             key: value
             for key, value in self._invocations._idempotency.items()
-            if key[0] not in run_ids
+            if value in self._invocations._invocations
         }
         self._checkpoints._checkpoints = {
             key: value
@@ -351,7 +395,7 @@ class InMemorySessionDeletionRepository:
         self._trajectory_exports._rows = {
             key: value
             for key, value in self._trajectory_exports._rows.items()
-            if key not in run_ids
+            if value.run_id not in run_ids
         }
         self._artifacts._rows = {
             key: value for key, value in self._artifacts._rows.items() if key not in artifact_ids
@@ -382,25 +426,28 @@ class InMemorySessionDeletionRepository:
         *,
         limit: int,
     ) -> list[ArtifactRef]:
-        self._require_tombstone(session_id, principal)
-        rows = sorted(self._pending.get(session_id, {}).values(), key=lambda row: row.id.int)
-        return [row.model_copy(deep=True) for row in rows[:limit]]
+        async with self._lock:
+            self._require_tombstone(session_id, principal)
+            rows = sorted(self._pending.get(session_id, {}).values(), key=lambda row: row.id.int)
+            return [row.model_copy(deep=True) for row in rows[:limit]]
 
     async def acknowledge_artifact(
         self, session_id: UUID, artifact_id: UUID, principal: Principal
     ) -> None:
-        self._require_tombstone(session_id, principal)
-        self._pending.get(session_id, {}).pop(artifact_id, None)
+        async with self._lock:
+            self._require_tombstone(session_id, principal)
+            self._pending.get(session_id, {}).pop(artifact_id, None)
 
     async def pending_sessions(self, principal: Principal, *, limit: int) -> list[UUID]:
-        rows = [
-            session_id
-            for session_id, artifacts in self._pending.items()
-            if artifacts
-            and self._tombstones.get(session_id, ())[:2]
-            == (principal.tenant_id, principal.principal_id)
-        ]
-        return sorted(rows, key=lambda value: value.int)[:limit]
+        async with self._lock:
+            rows = [
+                session_id
+                for session_id, artifacts in self._pending.items()
+                if artifacts
+                and self._tombstones.get(session_id, ())[:2]
+                == (principal.tenant_id, principal.principal_id)
+            ]
+            return sorted(rows, key=lambda value: value.int)[:limit]
 
     def _require_tombstone(self, session_id: UUID, principal: Principal) -> None:
         if self._tombstones.get(session_id, ())[:2] != (

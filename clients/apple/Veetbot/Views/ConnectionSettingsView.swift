@@ -136,6 +136,7 @@ public struct ConnectionSettingsView: View {
                 }
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
+                .disabled(isSaving)
             }
 
             Button {
@@ -165,9 +166,9 @@ public struct ConnectionSettingsView: View {
     private func saveConnection() {
         isSaving = true
         Task {
-            await model.configure(baseURLString: baseURL, token: token)
+            let configured = await model.configure(baseURLString: baseURL, token: token)
             isSaving = false
-            if model.isConfigured {
+            if configured {
                 token = ""
                 if !embedded { dismiss() }
             }

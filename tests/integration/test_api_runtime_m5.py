@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any, cast
 from uuid import UUID
 
@@ -138,7 +139,7 @@ async def test_postgres_session_delete_cascades_and_clears_artifact_work() -> No
             sha256=hashlib.sha256(content).hexdigest(),
             size_bytes=len(content),
             trust=TrustLevel.EXTERNAL_UNTRUSTED,
-            expires_at=composition.clock.now(),
+            expires_at=composition.clock.now() + timedelta(days=1),
             created_at=composition.clock.now(),
         )
         store = LocalTrajectoryArtifactStore(composition.settings.artifact_root)

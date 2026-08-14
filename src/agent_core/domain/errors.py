@@ -75,6 +75,10 @@ class ToolValidationError(AgentCoreError):
         self.errors = errors or []
 
 
+class ToolTrustRejectedError(ToolValidationError):
+    """A tool rejected content because its provenance trust was insufficient."""
+
+
 class ToolNotFoundError(AgentCoreError):
     """A requested tool is not registered."""
 

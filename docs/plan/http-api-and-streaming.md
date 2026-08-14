@@ -500,7 +500,7 @@ readable by a client that kept its own records.
   "id": "uuid",
   "status": "ACTIVE",
   "agent_id": "general",
-  "agent_version": 1,
+  "agent_version": "1",
   "title": null,
   "metadata": {},
   "created_at": "2026-01-01T00:00:00Z",

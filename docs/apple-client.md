@@ -69,8 +69,10 @@ SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
 versions predate SwiftData, so iOS 15–16 and macOS 12–13 use an atomic
 Application Support file behind the same store protocol. Both contain only
 `session_id`, title, agent identity, timestamps, and the last known run ID. The
-client reconciles the complete server index after connecting, whenever it
-returns to the foreground, and every 30 seconds while it remains open. Server
+client follows pagination until the server returns no next cursor, rejects a
+repeated cursor as an invalid response, and reconciles that complete index after
+connecting, whenever it returns to the foreground, and every 30 seconds while
+it remains open. Server
 sessions are inserted or refreshed and local rows absent from the authoritative
 index are verified with a scoped point read before they are pruned. That point
 read prevents activity-driven movement between keyset pages from looking like a
@@ -84,10 +86,12 @@ first asks the server to delete the session and its associated conversation
 data, then removes the local history row and cached artifact bytes only after a
 successful response. A session with an active run returns `409`; the user must
 stop that run before deleting. The same principal may safely repeat a completed
-delete. Other open clients remove the row on foreground reconciliation or their
-next periodic poll. A server release that predates the history routes produces
-an explicit server-upgrade message during reconciliation or deletion rather
-than the generic unsupported-request response.
+delete. Starting deletion fences in-flight reconciliation, and a successfully
+deleted identifier remains excluded from later stale responses. Other open
+clients remove the row on foreground reconciliation or their next active-phase
+poll. A server release that predates the history routes produces an explicit
+server-upgrade message during reconciliation or deletion rather than the generic
+unsupported-request response.
 
 ## Agent activity and artifacts
 

@@ -226,7 +226,7 @@ def _decode_session_cursor(value: str | None) -> SessionCursor | None:
         return None
     try:
         padded = value + "=" * (-len(value) % 4)
-        raw = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        raw = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8"))
         if not isinstance(raw, dict) or set(raw) != {"k", "i"}:
             raise ValueError
         if not isinstance(raw["k"], str) or not isinstance(raw["i"], str):

@@ -26,6 +26,7 @@ from agent_core.domain.errors import (
     ConflictError,
     NotFoundError,
     RunCancelledError,
+    ToolTrustRejectedError,
     ToolValidationError,
     UserInputRequiredError,
     WorkspaceEscape,
@@ -949,6 +950,17 @@ class ToolPipeline:
             async with asyncio.timeout(effective_timeout):
                 try:
                     result = await tool.execute(arguments, execution_context)
+                except ToolTrustRejectedError:
+                    result = ToolResult(
+                        ok=False,
+                        content=[],
+                        failure=ToolFailure(
+                            kind=ToolFailureKind.INVALID_ARGUMENTS,
+                            reason_code="tool.trust_rejected",
+                            detail="tool rejected content with insufficient provenance trust",
+                            retryable=False,
+                        ),
+                    )
                 except ToolValidationError:
                     result = ToolResult(
                         ok=False,

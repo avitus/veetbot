@@ -255,7 +255,10 @@ def create_app(
         limit: Annotated[int, Query(ge=1)] = 50,
         cursor: str | None = None,
     ) -> Page[SessionView]:
-        return await services.sessions.list(authenticated, limit, cursor)
+        try:
+            return await services.sessions.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("session cursor is malformed") from exc
 
     @app.get(
         "/v1/sessions/{session_id}",

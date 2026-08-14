@@ -9,11 +9,11 @@ import AppKit
 
 enum AppTheme {
     static let turquoise = Color(
-        red: 45.0 / 255.0,
-        green: 204.0 / 255.0,
-        blue: 190.0 / 255.0
+        red: 0,
+        green: 112.0 / 255.0,
+        blue: 109.0 / 255.0
     )
-    static let orange = Color(red: 1, green: 163.0 / 255.0, blue: 10.0 / 255.0)
+    static let orange = Color(red: 167.0 / 255.0, green: 62.0 / 255.0, blue: 0)
     static let ink = Color(
         red: 13.0 / 255.0,
         green: 23.0 / 255.0,
