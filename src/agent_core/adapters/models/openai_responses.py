@@ -470,8 +470,11 @@ class OpenAIResponsesProvider:
             elif isinstance(item, ProviderReasoningItem):
                 if item.provider != "openai":
                     raise ModelStreamError("reasoning continuation belongs to another provider")
-                provider_payload = dict(item.provider_payload)
-                provider_payload.pop("response_id", None)
+                provider_payload = {
+                    key: item.provider_payload[key]
+                    for key in ("id", "type", "encrypted_content", "summary")
+                    if key in item.provider_payload
+                }
                 inputs.append(provider_payload)
         tool_definitions: list[dict[str, Any]] = []
         for tool in request.tools:

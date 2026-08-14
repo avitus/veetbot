@@ -369,7 +369,6 @@ async def test_openai_encrypted_reasoning_round_trips_for_stateless_continuation
         "id": "reasoning-item",
         "type": "reasoning",
         "encrypted_content": "opaque",
-        "status": "completed",
         "summary": [],
     }
     assert second_turn.provider_metadata is not None
