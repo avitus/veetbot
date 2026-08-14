@@ -145,6 +145,36 @@ async def test_form_injection() -> None:
     assert await service.list_memories() == []
 
 
+async def test_explicit_write_allows_recalled_memory_alongside_user_source() -> None:
+    _clock, factory, service, _retriever = await _stack()
+    sequence = await _user_event(factory, "Please remember my concise answer preference")
+    belief = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers",
+        subject="answer style",
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        source_event_ids=[sequence],
+        origin_trust=TrustLevel.MEMORY,
+        explicit=True,
+    )
+
+    assert belief.status is MemoryStatus.ACTIVE
+    with pytest.raises(ToolValidationError):
+        await service.remember(
+            session_id=SESSION_ID,
+            run_id=None,
+            statement="User prefers detailed answers",
+            subject="answer style",
+            scope="project-a",
+            belief_type=BeliefType.PREFERENCE,
+            source_event_ids=[sequence],
+            origin_trust=TrustLevel.MEMORY,
+            explicit=False,
+        )
+
+
 async def test_correction_durable() -> None:
     _clock, factory, service, retriever = await _stack()
     value = await _remember(factory, service, "User prefers concise answers")
