@@ -75,7 +75,6 @@ public struct ChatView: View {
                         Color.clear.frame(height: 1).id(Self.bottomAnchorID)
                     }
                     .padding()
-                    .frame(maxWidth: 900)
                     .frame(maxWidth: .infinity)
                 }
                 .onChange(of: scrollChangeToken) { _ in
@@ -145,9 +144,9 @@ public struct ChatView: View {
     private static let bottomAnchorID = "conversation-bottom"
 
     private var scrollChangeToken: String {
-        let lastTextCount = state.timeline.last?.text.utf8.count ?? 0
-        return
-            "\(state.timeline.count):\(lastTextCount):\(state.tools.count):\(state.runStatus?.rawValue ?? "none")"
+        // Follow newly inserted activity, but leave the viewport fixed while an
+        // existing assistant message grows so its beginning remains readable.
+        "\(state.timeline.count):\(state.tools.count)"
     }
 
     private func submitDraft() {
@@ -172,33 +171,30 @@ private struct TimelineBubble: View {
     let openArtifact: (UUID) -> Void
 
     var body: some View {
-        HStack {
-            if item.role == .user { Spacer(minLength: 0) }
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(item.content.enumerated()), id: \.offset) { _, block in
-                    switch block {
-                    case .text(let text):
-                        Text(text).textSelection(.enabled)
-                    case .image(let artifactID, let mediaType, _):
-                        artifactButton("Image · \(mediaType)", id: artifactID)
-                    case .file(let artifactID, _, let filename):
-                        artifactButton(filename ?? "File", id: artifactID)
-                    }
-                }
-                if item.isStreaming {
-                    ProgressView().controlSize(.small)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(item.content.enumerated()), id: \.offset) { _, block in
+                switch block {
+                case .text(let text):
+                    MarkdownContentView(text: text)
+                case .image(let artifactID, let mediaType, _):
+                    artifactButton("Image · \(mediaType)", id: artifactID)
+                case .file(let artifactID, _, let filename):
+                    artifactButton(filename ?? "File", id: artifactID)
                 }
             }
-            .padding(12)
-            .background(
-                item.role == .user
-                    ? Color.accentColor.opacity(0.16)
-                    : Color.secondary.opacity(0.10)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .frame(maxWidth: 680, alignment: .leading)
-            if item.role == .assistant { Spacer(minLength: 0) }
+            if item.isStreaming {
+                ProgressView().controlSize(.small)
+            }
         }
+        .padding(item.role == .user ? 12 : 0)
+        .background {
+            if item.role == .user {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color.accentColor.opacity(0.16))
+            }
+        }
+        .frame(maxWidth: item.role == .user ? 680 : .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: item.role == .user ? .trailing : .leading)
     }
 
     private func artifactButton(_ label: String, id: UUID) -> some View {
