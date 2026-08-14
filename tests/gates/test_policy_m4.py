@@ -137,6 +137,31 @@ class _RecordingTool:
         return ToolResult(ok=True, content=[TextPart(text="ok")], structured={})
 
 
+class _ExecutionValidationTool:
+    spec = _RecordingTool.spec.model_copy(
+        update={
+            "name": "demo.execution_validation",
+            "output_schema": {
+                "type": "object",
+                "properties": {"accepted": {"type": "boolean"}},
+                "required": ["accepted"],
+                "additionalProperties": False,
+            },
+        }
+    )
+
+    def __init__(self, *, reject_arguments: bool) -> None:
+        self.reject_arguments = reject_arguments
+
+    async def execute(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> ToolResult:
+        del arguments, context
+        if self.reject_arguments:
+            raise ToolValidationError("semantic arguments rejected")
+        return ToolResult(ok=True, content=[TextPart(text="bad output")], structured={})
+
+
 class _SchedulingTool:
     def __init__(self, *, name: str, side_effect: SideEffectClass, parallel: bool) -> None:
         self.spec = ToolSpec(
@@ -389,6 +414,63 @@ async def test_modification_rekeys_before_persistence(tmp_path: Path) -> None:
     assert invocation.idempotency_key != _idempotency_key(
         active_run, step, call, registry.get(tool.spec.name), proposed_hash
     )
+
+
+@pytest.mark.parametrize(
+    ("reject_arguments", "expected_reason"),
+    [(True, "tool.arguments_invalid"), (False, "tool.output_invalid")],
+)
+async def test_execution_validation_is_distinct_from_output_validation(
+    tmp_path: Path,
+    reject_arguments: bool,
+    expected_reason: str,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _ExecutionValidationTool(reject_arguments=reject_arguments)
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    async with build(settings=_settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("prepare a validation classification test")
+        active_run = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            active_checkpoint = await uow.checkpoints.latest(run_id)
+        assert active_checkpoint is not None
+        active_agent = active_agent.model_copy(
+            update={"enabled_tools": [tool.spec.name]}, deep=True
+        )
+        pipeline = ToolPipeline(
+            registry,
+            app.uow_factory,
+            app.clock,
+            ids(),
+            policy=_AllowPolicy(),
+        )
+        result = await pipeline.dispatch(
+            run=active_run,
+            checkpoint=active_checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="validation-call",
+                    item_index=0,
+                    name=tool.spec.name,
+                    arguments={"value": "candidate"},
+                    raw_arguments='{"value":"candidate"}',
+                )
+            ],
+            principal=app.principal,
+            step=Step(run_id=run_id, step_number=2, started_at=app.clock.now()),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, None),
+        )
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, app.principal))[0]
+
+    assert result[0].is_error is True
+    assert invocation.outcome is not None
+    assert invocation.outcome.reason_code == expected_reason
 
 
 async def test_parallel_reads_overlap_and_external_writes_settle_sequentially(

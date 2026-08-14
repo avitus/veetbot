@@ -947,7 +947,19 @@ class ToolPipeline:
             if tool.spec.side_effect is not SideEffectClass.NONE:
                 await mark_effect_sent()
             async with asyncio.timeout(effective_timeout):
-                result = await tool.execute(arguments, execution_context)
+                try:
+                    result = await tool.execute(arguments, execution_context)
+                except ToolValidationError:
+                    result = ToolResult(
+                        ok=False,
+                        content=[],
+                        failure=ToolFailure(
+                            kind=ToolFailureKind.INVALID_ARGUMENTS,
+                            reason_code="tool.arguments_invalid",
+                            detail="tool rejected the validated arguments",
+                            retryable=False,
+                        ),
+                    )
             if result.ok:
                 validate_output(result.structured, tool.spec.output_schema)
                 if progress[-1] == 10:

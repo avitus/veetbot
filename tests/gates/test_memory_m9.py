@@ -26,6 +26,7 @@ from agent_core.domain.memory import (
     EpisodeQuery,
     MemoryRecord,
     MemoryStatus,
+    Portability,
     RejectionKind,
     Sensitivity,
 )
@@ -33,11 +34,14 @@ from agent_core.domain.messages import TextPart, ToolResultItem, UserMessage
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.domain.sessions import SessionStatus
+from agent_core.domain.tools import ToolFailureKind
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.retrieval import EventEpisodeSearch, HybridMemoryRetriever, render_memory
 from agent_core.tools.executor import _turn_origin_trust
+from agent_core.tools.memory_remember import MemoryRememberTool
+from agent_core.tools.messages import message_for
 from tests.contract.memory_fixtures import memory, recall_query
-from tests.contract.support import NOW, SESSION_ID, agent, memory_stack, principal
+from tests.contract.support import NOW, SESSION_ID, agent, memory_stack, principal, tool_context
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -127,6 +131,27 @@ async def test_no_fabrication() -> None:
     assert result.beliefs == []
 
 
+async def test_remember_tool_explains_portability_ceiling() -> None:
+    _clock, _factory, service, _retriever = await _stack()
+    result = await MemoryRememberTool(service).execute(
+        {
+            "statement": "Andy is interested in building a custom game engine.",
+            "subject": "Andy's game-engine project interest",
+            "scope": "veetbot",
+            "belief_type": BeliefType.FACT.value,
+            "portability": Portability.PORTABLE.value,
+        },
+        tool_context(),
+    )
+
+    assert result.ok is False
+    assert result.failure is not None
+    assert result.failure.kind is ToolFailureKind.INVALID_ARGUMENTS
+    assert result.failure.reason_code == "tool.invalid_arguments.portability_ceiling"
+    assert result.failure.retryable is True
+    assert "user_model_attr" in message_for(result.failure.reason_code)
+
+
 async def test_form_injection() -> None:
     _clock, factory, service, _retriever = await _stack()
     corpus = ROOT / "evals/corpora/memory_form_injection"
@@ -143,6 +168,36 @@ async def test_form_injection() -> None:
                 origin_trust=TrustLevel.EXTERNAL_UNTRUSTED,
             )
     assert await service.list_memories() == []
+
+
+async def test_explicit_write_allows_recalled_memory_alongside_user_source() -> None:
+    _clock, factory, service, _retriever = await _stack()
+    sequence = await _user_event(factory, "Please remember my concise answer preference")
+    belief = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers",
+        subject="answer style",
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        source_event_ids=[sequence],
+        origin_trust=TrustLevel.MEMORY,
+        explicit=True,
+    )
+
+    assert belief.status is MemoryStatus.ACTIVE
+    with pytest.raises(ToolValidationError):
+        await service.remember(
+            session_id=SESSION_ID,
+            run_id=None,
+            statement="User prefers detailed answers",
+            subject="answer style",
+            scope="project-a",
+            belief_type=BeliefType.PREFERENCE,
+            source_event_ids=[sequence],
+            origin_trust=TrustLevel.MEMORY,
+            explicit=False,
+        )
 
 
 async def test_correction_durable() -> None:

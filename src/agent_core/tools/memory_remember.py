@@ -7,7 +7,13 @@ from typing import Any
 from agent_core.domain.memory import BeliefType, Portability, Sensitivity
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.tools import ToolExecutionContext, ToolResult, ToolSpec
+from agent_core.domain.tools import (
+    ToolExecutionContext,
+    ToolFailure,
+    ToolFailureKind,
+    ToolResult,
+    ToolSpec,
+)
 from agent_core.memory.formation import GovernedMemoryService
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -34,7 +40,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 class MemoryRememberTool:
     spec = ToolSpec(
         name="memory.remember",
-        version="1.0.0",
+        version="1.0.1",
         description="Persist one user-sourced belief with provenance and governance metadata.",
         input_schema=INPUT_SCHEMA,
         output_schema=OUTPUT_SCHEMA,
@@ -55,18 +61,34 @@ class MemoryRememberTool:
         statement_trust = context.origin_trust
         if statement_trust is not TrustLevel.USER:
             statement_trust = context.argument_trust.get("statement", statement_trust)
+        belief_type = BeliefType(str(arguments.get("belief_type", BeliefType.FACT.value)))
+        portability = (
+            None
+            if arguments.get("portability") is None
+            else Portability(str(arguments["portability"]))
+        )
+        if portability is Portability.PORTABLE and belief_type in {
+            BeliefType.FACT,
+            BeliefType.RELATIONSHIP,
+        }:
+            return ToolResult(
+                ok=False,
+                content=[],
+                failure=ToolFailure(
+                    kind=ToolFailureKind.INVALID_ARGUMENTS,
+                    reason_code="tool.invalid_arguments.portability_ceiling",
+                    detail="portable exceeds the selected belief type's portability ceiling",
+                    retryable=True,
+                ),
+            )
         belief = await self._service.remember(
             session_id=context.session_id,
             run_id=context.run_id,
             statement=str(arguments["statement"]),
             subject=str(arguments["subject"]),
             scope=str(arguments["scope"]),
-            belief_type=BeliefType(str(arguments.get("belief_type", BeliefType.FACT.value))),
-            portability=(
-                None
-                if arguments.get("portability") is None
-                else Portability(str(arguments["portability"]))
-            ),
+            belief_type=belief_type,
+            portability=portability,
             sensitivity=Sensitivity(str(arguments.get("sensitivity", Sensitivity.INTERNAL.value))),
             origin_trust=statement_trust,
         )

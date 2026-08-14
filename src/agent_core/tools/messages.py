@@ -24,7 +24,11 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.invalid_arguments.unknown_timezone": (
         "Unknown timezone. Provide an IANA name such as UTC, America/New_York, or Europe/London."
     ),
-    "tool.arguments_invalid": "The tool arguments did not match the declared schema.",
+    "tool.invalid_arguments.portability_ceiling": (
+        "Portable memory is valid only for a preference, user_model_attr, or "
+        "procedure_pointer. Use contextual or local portability for a fact or relationship."
+    ),
+    "tool.arguments_invalid": "The tool arguments were invalid.",
     "tool.output_invalid": "The tool returned data outside its declared contract.",
     "tool.timeout": "The tool did not finish within its allowed time.",
     "tool.internal_error": "The tool could not complete because of an internal error.",

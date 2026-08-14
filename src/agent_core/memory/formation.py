@@ -118,7 +118,9 @@ class GovernedMemoryService:
         authority: MemoryAuthority = MemoryAuthority.USER,
         trigger: str = "explicit",
     ) -> MemoryRecord:
-        if origin_trust is not TrustLevel.USER:
+        if origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY} or (
+            origin_trust is TrustLevel.MEMORY and not explicit
+        ):
             raise ToolValidationError("external content cannot directly write persistent memory")
         clean_statement = " ".join(statement.split())
         clean_subject = " ".join(subject.split())
