@@ -37,6 +37,14 @@ re-authentication while preserving `403` as an authorization failure.
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 
+Settings use a scrollable, resizable surface with a persistent action bar, so
+connection actions remain visible as new settings sections are added. Appearance
+preferences include app-wide text sizing and system, rounded, serif, or
+monospaced typography. They are stored in device preferences, apply immediately,
+and preserve the system Dynamic Type setting by default. The interface palette
+uses the app icon's turquoise, orange, and navy while retaining semantic colors
+for errors, approvals, and tool risk.
+
 ## Runtime behavior
 
 One submitted message creates one run. A stable idempotency key is reused across
@@ -56,17 +64,28 @@ suspension keeps the logical stream alive, and only completed, failed, or
 cancelled run events close it. Raw reasoning text is discarded at the reducer
 boundary and represented by a compact activity indicator.
 
-The sidebar is local because the API has no list-sessions route. SwiftData
-stores the session-history index on iOS 17+/macOS 14+. The minimum supported OS
+The sidebar mirrors the server's authoritative, paginated session index.
+SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS
 versions predate SwiftData, so iOS 15–16 and macOS 12–13 use an atomic
 Application Support file behind the same store protocol. Both contain only
-`session_id`, title, agent identity, timestamps, and the last known run ID; a
-selected session is refreshed from the server without changing its position in
-the list. Conversation activity, not selection, updates the history ordering.
-Each row's activity timer shows seconds only during its first minute, then uses
-minute-or-larger relative units. Rows can be removed from the device-local
-history after confirmation. The API has no session-delete route, so this action
-does not delete authoritative server data.
+`session_id`, title, agent identity, timestamps, and the last known run ID. The
+client reconciles the complete server index after connecting, whenever it
+returns to the foreground, and every 30 seconds while it remains open. Server
+sessions are inserted or refreshed and local rows absent from the authoritative
+index are verified with a scoped point read before they are pruned. That point
+read prevents activity-driven movement between keyset pages from looking like a
+deletion. Confirmed pruning also clears the process-local artifact cache.
+Conversation activity, not selection, updates the server
+ordering. Each row's activity timer shows seconds only during its first minute,
+then uses minute-or-larger relative units.
+
+Deleting a row is an irreversible `Delete Everywhere` operation. The client
+first asks the server to delete the session and its associated conversation
+data, then removes the local history row and cached artifact bytes only after a
+successful response. A session with an active run returns `409`; the user must
+stop that run before deleting. The same principal may safely repeat a completed
+delete. Other open clients remove the row on foreground reconciliation or their
+next periodic poll.
 
 ## Agent activity and artifacts
 
@@ -74,7 +93,9 @@ The timeline includes generic, collapsible tool activity, approval checkpoints,
 clarifying questions, working state, and artifact links. Tool presentation is
 driven by effect and risk taxonomy rather than a per-tool icon table. Structured
 sandbox and workspace results receive terminal and file-preview treatments when
-those fields are present. Approval rule internals are intentionally not shown.
+those fields are present. Messages and tool calls retain their first-seen event
+order as later status events update an existing tool card. Approval rule
+internals are intentionally not shown.
 
 Artifact metadata and bytes are fetched separately. The process-local content
 cache sends `If-None-Match` and reuses bytes on `304`, retains at most 32 MiB,
@@ -87,4 +108,6 @@ The current public SSE contract exposes tool result content and trust but does
 not expose every invocation's stored `structured_result`, effect classification,
 or a general tool-detail route. The client therefore renders those richer
 specializations when the event payload contains them and otherwise falls back
-to the public content/trust view. No server route was added for this client.
+to the public content/trust view. The server additions for authoritative history
+and deletion are limited to the session list and delete routes described by
+ADR-0050; no richer tool-detail route was added.

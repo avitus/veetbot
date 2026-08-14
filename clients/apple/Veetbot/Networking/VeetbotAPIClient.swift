@@ -32,6 +32,29 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    public func listSessions(
+        limit: Int = 100,
+        cursor: String? = nil
+    ) async throws -> Page<SessionView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(
+            TransportRequest(method: .get, path: "/v1/sessions", queryItems: query)
+        )
+    }
+
+    public func deleteSession(_ sessionID: UUID) async throws {
+        _ = try await transport.sendData(
+            TransportRequest(
+                method: .delete,
+                path: "/v1/sessions/\(sessionID.uuidString)",
+                retryAttempts: 2
+            )
+        )
+    }
+
     public func submitMessage(
         sessionID: UUID,
         content: [ContentBlock],

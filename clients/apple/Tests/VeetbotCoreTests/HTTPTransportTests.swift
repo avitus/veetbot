@@ -244,6 +244,33 @@ import Testing
         #expect(await client.transport.authorizationState() == .authenticated)
     }
 
+    @Test
+    func testDeleteSessionUsesTheAuthoritativeDeleteRoute() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var captured: URLRequest?
+        StubURLProtocol.handler = { request in
+            lock.withLock { captured = request }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (response, Data())
+        }
+        let client = try makeClient(token: "valid")
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")
+        )
+
+        try await client.deleteSession(sessionID)
+
+        let request = try #require(lock.withLock { captured })
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.path == "/v1/sessions/\(sessionID.uuidString)")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer valid")
+    }
+
     private func makeClient(token: String) throws -> VeetbotAPIClient {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
         let sessionConfiguration = URLSessionConfiguration.ephemeral

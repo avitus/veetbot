@@ -101,7 +101,10 @@ public final class ChatViewModel: ObservableObject {
             guard selectionRequestID == requestID,
                 !removedHistorySessionIDs.contains(entry.sessionID)
             else { return }
-            try await store(session: session, lastRunID: session.activeRunID ?? entry.lastRunID)
+            try await store(
+                session: session,
+                lastRunID: session.activeRunID ?? session.lastRunID ?? entry.lastRunID
+            )
             guard selectionRequestID == requestID else {
                 if removedHistorySessionIDs.contains(entry.sessionID) {
                     try? await historyStore.delete(sessionID: entry.sessionID)
@@ -113,7 +116,7 @@ public final class ChatViewModel: ObservableObject {
                 }
                 return
             }
-            if let runID = session.activeRunID ?? entry.lastRunID {
+            if let runID = session.activeRunID ?? session.lastRunID ?? entry.lastRunID {
                 let run = try await api.getRun(runID)
                 guard selectionRequestID == requestID else { return }
                 runState.seed(run: run)
@@ -126,19 +129,78 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    public func removeSessionFromHistory(_ entry: SessionHistoryEntry) async {
-        removedHistorySessionIDs.insert(entry.sessionID)
-        history.removeAll { $0.sessionID == entry.sessionID }
-        if selectedSessionID == entry.sessionID {
-            newSession()
-        }
+    public func deleteSessionEverywhere(_ entry: SessionHistoryEntry) async {
+        guard let api else { return }
         do {
+            try await api.deleteSession(entry.sessionID)
+            removedHistorySessionIDs.insert(entry.sessionID)
+            if selectedSessionID == entry.sessionID { newSession() }
             try await historyStore.delete(sessionID: entry.sessionID)
             history = try await historyStore.list()
+            await artifactCache.removeAll()
         } catch {
-            removedHistorySessionIDs.remove(entry.sessionID)
-            history = (try? await historyStore.list()) ?? history
             present(error)
+        }
+    }
+
+    public func synchronizeHistory() async {
+        guard let api else { return }
+        let locallyKnownAtStart = Set(history.map(\.sessionID))
+        do {
+            var cursor: String?
+            var pageCount = 0
+            var serverSessions: [SessionView] = []
+            repeat {
+                let page = try await api.listSessions(cursor: cursor)
+                serverSessions.append(contentsOf: page.items)
+                cursor = page.nextCursor
+                pageCount += 1
+            } while cursor != nil && pageCount < 100
+            guard cursor == nil else { throw HTTPTransportError.invalidResponse }
+
+            let serverIDs = Set(serverSessions.map(\.id))
+            for session in serverSessions where !removedHistorySessionIDs.contains(session.id) {
+                let existing = history.first { $0.sessionID == session.id }
+                let entry = Self.mergedHistoryEntry(
+                    session: session,
+                    existing: existing,
+                    lastRunID: session.lastRunID,
+                    suggestedTitle: nil,
+                    touchedAt: session.updatedAt
+                )
+                try await historyStore.upsert(entry)
+            }
+            var prunedHistory = false
+            for sessionID in locallyKnownAtStart.subtracting(serverIDs) {
+                do {
+                    let session = try await api.getSession(sessionID)
+                    let existing = history.first { $0.sessionID == session.id }
+                    try await historyStore.upsert(
+                        Self.mergedHistoryEntry(
+                            session: session,
+                            existing: existing,
+                            lastRunID: session.lastRunID,
+                            suggestedTitle: nil,
+                            touchedAt: session.updatedAt
+                        )
+                    )
+                } catch let error as HTTPTransportError {
+                    if case .api(let apiError) = error, apiError.statusCode == 404 {
+                        try await historyStore.delete(sessionID: sessionID)
+                        prunedHistory = true
+                        if selectedSessionID == sessionID { newSession() }
+                    } else {
+                        throw error
+                    }
+                }
+            }
+            history = try await historyStore.list()
+            if prunedHistory { await artifactCache.removeAll() }
+        } catch let error as HTTPTransportError {
+            if case .reauthenticationRequired = error { present(error) }
+        } catch {
+            // Background reconciliation is best effort; direct user actions
+            // still surface their own failures.
         }
     }
 
@@ -368,6 +430,7 @@ public final class ChatViewModel: ObservableObject {
         eventStream = ReconnectingEventStream(reader: SSEReader(transport: transport))
         baseURL = configuration.baseURL
         isConfigured = true
+        await synchronizeHistory()
     }
 
     private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true) {
@@ -454,7 +517,7 @@ public final class ChatViewModel: ObservableObject {
             agentID: session.agentID,
             createdAt: session.createdAt,
             updatedAt: touchedAt ?? existing?.updatedAt ?? session.updatedAt,
-            lastRunID: lastRunID ?? existing?.lastRunID
+            lastRunID: lastRunID ?? session.lastRunID ?? existing?.lastRunID
         )
     }
 

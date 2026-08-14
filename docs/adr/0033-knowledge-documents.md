@@ -78,8 +78,9 @@ area from a document that already owned all four.
     resolve to its source is not a citation, and extraction is the
     step most likely to be wrong.
 6.  **Ingestion is one tool, `knowledge.ingest`.** Not a route: the
-    API is closed at fourteen and states that an artifact is not
-    uploaded through it in 0.1. Not a thirteenth CLI noun. Subject
+    Milestone 5 API baseline was closed at fourteen and states that an artifact
+    is not uploaded through it in 0.1. ADR-0050's later session routes do not
+    add an upload surface. Not a thirteenth CLI noun. Subject
     specifications declaring their own tools is the established
     pattern — `memory.search`, `skill.load`, and `skill_manage` are
     all outside the builtin roster, whose count is unchanged.
@@ -236,8 +237,9 @@ area from a document that already owned all four.
   was. Nothing in 0.1 would check it, and a scope nobody checks gets
   granted by default and audited as though it meant something.
 - **A `POST /v1/knowledge` route**: rejected for 0.1. The route table
-  is closed at fourteen and the API explicitly does not accept
-  artifact uploads in this version, so the route would need an upload
+  was closed at fourteen for the Milestone 5 baseline and the API explicitly
+  does not accept artifact uploads in this version. ADR-0050's later session
+  routes do not change that, so a knowledge route would need an upload
   path built first, for a milestone that does not need it.
 - **Deleting documents with a bespoke deletion routine rather than
   the artifact sweeper**: rejected. A second deletion path is written

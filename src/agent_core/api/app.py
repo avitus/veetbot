@@ -247,6 +247,17 @@ def create_app(
         return await services.sessions.create(authenticated, body.agent_id, body.metadata)
 
     @app.get(
+        "/v1/sessions",
+        openapi_extra={"required_scope": "session.read"},
+    )
+    async def list_sessions(
+        authenticated: Annotated[Principal, secured("session.read")],
+        limit: Annotated[int, Query(ge=1)] = 50,
+        cursor: str | None = None,
+    ) -> Page[SessionView]:
+        return await services.sessions.list(authenticated, limit, cursor)
+
+    @app.get(
         "/v1/sessions/{session_id}",
         openapi_extra={"required_scope": "session.read"},
     )
@@ -255,6 +266,18 @@ def create_app(
         authenticated: Annotated[Principal, secured("session.read")],
     ) -> SessionView:
         return await services.sessions.get(authenticated, session_id)
+
+    @app.delete(
+        "/v1/sessions/{session_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "session.write"},
+    )
+    async def delete_session(
+        session_id: UUID,
+        authenticated: Annotated[Principal, secured("session.write")],
+    ) -> Response:
+        await services.sessions.delete(authenticated, session_id)
+        return Response(status_code=204)
 
     @app.post(
         "/v1/sessions/{session_id}/messages",

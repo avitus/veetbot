@@ -8,6 +8,7 @@ public enum AuthorizationState: Equatable, Sendable {
 public enum HTTPMethod: String, Sendable {
     case get = "GET"
     case post = "POST"
+    case delete = "DELETE"
 }
 
 public struct TransportRequest: Sendable {

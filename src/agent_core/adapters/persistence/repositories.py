@@ -87,7 +87,7 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.sessions import Session, SessionCursor, SessionStatus
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -196,6 +196,32 @@ class PostgresSessionRepository:
             raise NotFoundError("session not found")
         return session_to_domain(row)
 
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int,
+        cursor: SessionCursor | None = None,
+    ) -> list[Session]:
+        predicates: list[Any] = [
+            SessionRow.tenant_id == principal.tenant_id,
+            SessionRow.principal_id == principal.principal_id,
+        ]
+        if cursor is not None:
+            predicates.append(
+                (SessionRow.updated_at < cursor.updated_at)
+                | ((SessionRow.updated_at == cursor.updated_at) & (SessionRow.id < cursor.id))
+            )
+        rows = (
+            await self._session.scalars(
+                select(SessionRow)
+                .where(*predicates)
+                .order_by(SessionRow.updated_at.desc(), SessionRow.id.desc())
+                .limit(limit)
+            )
+        ).all()
+        return [session_to_domain(row) for row in rows]
+
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
     ) -> tuple[Session, bool]:
@@ -273,6 +299,38 @@ class PostgresRunRepository:
         if len(rows) > 1:
             raise ConflictError("session has multiple active runs")
         return None if not rows else run_to_domain(rows[0])
+
+    async def latest_for_session(self, session_id: UUID, principal: Principal) -> Run | None:
+        await PostgresSessionRepository(self._session).get(session_id, principal)
+        row = (
+            await self._session.scalars(
+                select(RunRow)
+                .where(RunRow.session_id == session_id)
+                .order_by(RunRow.created_at.desc(), RunRow.id.desc())
+                .limit(1)
+            )
+        ).one_or_none()
+        return None if row is None else run_to_domain(row)
+
+    async def latest_for_sessions(
+        self, session_ids: list[UUID], principal: Principal
+    ) -> dict[UUID, Run]:
+        if not session_ids:
+            return {}
+        rows = (
+            await self._session.scalars(
+                select(RunRow)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    RunRow.session_id.in_(session_ids),
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .distinct(RunRow.session_id)
+                .order_by(RunRow.session_id, RunRow.created_at.desc(), RunRow.id.desc())
+            )
+        ).all()
+        return {row.session_id: run_to_domain(row) for row in rows}
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         statement = (
@@ -426,10 +484,14 @@ class PostgresEventRepository:
             if existing is not None:
                 return event_to_domain(existing, self._upcasters)
 
+        occurred_at = self._clock.now()
         allocation = (
             update(SessionRow)
             .where(SessionRow.id == event.session_id)
-            .values(next_event_sequence=SessionRow.next_event_sequence + 1)
+            .values(
+                next_event_sequence=SessionRow.next_event_sequence + 1,
+                updated_at=occurred_at,
+            )
             .returning(SessionRow.next_event_sequence - 1)
         )
         sequence = (await self._session.execute(allocation)).scalar_one_or_none()
@@ -437,7 +499,7 @@ class PostgresEventRepository:
             raise NotFoundError("session not found")
         statement = (
             pg_insert(EventRow)
-            .values(**event_values(event, sequence=sequence, created_at=self._clock.now()))
+            .values(**event_values(event, sequence=sequence, created_at=occurred_at))
             .returning(EventRow)
         )
         row = (await self._session.scalars(statement)).one()

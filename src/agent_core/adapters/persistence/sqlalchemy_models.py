@@ -88,6 +88,31 @@ class SessionRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class SessionDeletionRow(Base):
+    __tablename__ = "session_deletions"
+    __table_args__ = (
+        Index("ix_session_deletions_tenant_principal", "tenant_id", "principal_id", "deleted_at"),
+    )
+
+    session_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SessionDeletionArtifactRow(Base):
+    __tablename__ = "session_deletion_artifacts"
+
+    session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("session_deletions.session_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    artifact_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    artifact: Mapped[dict[str, Any]] = mapped_column(JSONB)
+
+
 class RunRow(Base):
     __tablename__ = "runs"
     __table_args__ = (

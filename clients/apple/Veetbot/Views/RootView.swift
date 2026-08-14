@@ -24,8 +24,17 @@ public struct RootView: View {
             if required { showingSettings = true }
         }
         .onChange(of: scenePhase) { phase in
-            if phase != .active {
+            if phase == .active {
+                Task { await model.synchronizeHistory() }
+            } else {
                 Task { await model.clearCachedArtifacts() }
+            }
+        }
+        .task(id: model.isConfigured) {
+            guard model.isConfigured else { return }
+            while !Task.isCancelled {
+                await model.synchronizeHistory()
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
             }
         }
         .alert(
@@ -61,15 +70,23 @@ public struct RootView: View {
 private struct SessionSidebar: View {
     @ObservedObject var model: ChatViewModel
     @Binding var showingSettings: Bool
-    @State private var removalCandidate: SessionHistoryEntry?
+    @State private var deletionCandidate: SessionHistoryEntry?
 
     var body: some View {
         List {
             Button {
                 model.newSession()
             } label: {
-                Label("New conversation", systemImage: "square.and.pencil")
+                HStack(spacing: 10) {
+                    Image(systemName: "square.and.pencil")
+                        .foregroundColor(AppTheme.orange)
+                    Text("New conversation")
+                        .appFont(.headline)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
             }
+            .listRowBackground(AppTheme.brandGradient)
 
             Section("History") {
                 ForEach(model.history) { entry in
@@ -82,7 +99,7 @@ private struct SessionSidebar: View {
                                     .lineLimit(2)
                                     .foregroundColor(.primary)
                                 ConversationAgeText(updatedAt: entry.updatedAt)
-                                    .font(.caption)
+                                    .appFont(.caption)
                                     .foregroundColor(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,17 +107,17 @@ private struct SessionSidebar: View {
                         .buttonStyle(.plain)
 
                         Button(role: .destructive) {
-                            removalCandidate = entry
+                            deletionCandidate = entry
                         } label: {
                             Image(systemName: "trash")
                                 .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Remove \(entry.title) from history")
+                        .accessibilityLabel("Delete \(entry.title) everywhere")
                     }
                     .listRowBackground(
                         entry.sessionID == model.selectedSessionID
-                            ? Color.accentColor.opacity(0.12)
+                            ? AppTheme.turquoise.opacity(0.15)
                             : Color.clear
                     )
                 }
@@ -109,23 +126,25 @@ private struct SessionSidebar: View {
         .listStyle(.sidebar)
         .navigationTitle("Veetbot")
         .confirmationDialog(
-            "Remove conversation from history?",
+            "Delete conversation everywhere?",
             isPresented: Binding(
-                get: { removalCandidate != nil },
-                set: { if !$0 { removalCandidate = nil } }
+                get: { deletionCandidate != nil },
+                set: { if !$0 { deletionCandidate = nil } }
             ),
             titleVisibility: .visible,
-            presenting: removalCandidate
+            presenting: deletionCandidate
         ) { entry in
-            Button("Remove from History", role: .destructive) {
-                removalCandidate = nil
-                Task { await model.removeSessionFromHistory(entry) }
+            Button("Delete Everywhere", role: .destructive) {
+                deletionCandidate = nil
+                Task { await model.deleteSessionEverywhere(entry) }
             }
             Button("Cancel", role: .cancel) {
-                removalCandidate = nil
+                deletionCandidate = nil
             }
         } message: { _ in
-            Text("This removes the conversation from this device. Server data is not deleted.")
+            Text(
+                "This permanently deletes the conversation and its associated data from the server and all synchronized devices. This cannot be undone."
+            )
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -133,8 +152,9 @@ private struct SessionSidebar: View {
                     showingSettings = true
                 } label: {
                     Image(systemName: "gearshape")
+                        .foregroundColor(AppTheme.orange)
                 }
-                .accessibilityLabel("Connection settings")
+                .accessibilityLabel("Settings")
             }
         }
     }

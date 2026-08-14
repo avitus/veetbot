@@ -106,6 +106,10 @@ from agent_core.adapters.persistence.repositories import (
     PostgresTrajectoryExportRepository,
     PostgresUsageRepository,
 )
+from agent_core.adapters.persistence.session_deletions import (
+    InMemorySessionDeletionRepository,
+    PostgresSessionDeletionRepository,
+)
 from agent_core.adapters.persistence.skills import PostgresSkillRepository
 from agent_core.adapters.persistence.unit_of_work import (
     MemoryUnitOfWorkFactory,
@@ -381,23 +385,44 @@ def _memory_uow_repositories(
     memories = memories or InMemoryMemoryStore(clock)
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
+    checkpoints = InMemoryCheckpointRepository()
+    idempotency = InMemoryIdempotencyRepository(clock)
+    usage = InMemoryUsageRepository(runs)
+    trajectory_exports = InMemoryTrajectoryExportRepository()
+    artifacts = InMemoryArtifactRepository()
+    session_deletions = InMemorySessionDeletionRepository(
+        sessions=sessions,
+        runs=runs,
+        events=events,
+        invocations=invocations,
+        approvals=approvals,
+        checkpoints=checkpoints,
+        idempotency=idempotency,
+        usage=usage,
+        trajectory_exports=trajectory_exports,
+        artifacts=artifacts,
+        memories=memories,
+        traces=traces,
+        knowledge=knowledge,
+    )
     return UnitOfWorkRepositories(
         agents=agents,
         approvals=approvals,
         policy_profiles=InMemoryPolicyProfileRepository(),
         process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
+        session_deletions=session_deletions,
         runs=runs,
         events=events,
         invocations=invocations,
-        checkpoints=InMemoryCheckpointRepository(),
-        idempotency=InMemoryIdempotencyRepository(clock),
-        usage=InMemoryUsageRepository(runs),
+        checkpoints=checkpoints,
+        idempotency=idempotency,
+        usage=usage,
         history=InMemorySessionHistoryRepository(events),
         trajectory=InMemoryTrajectoryProjectionRepository(events),
         export_consent=InMemoryExportConsentRepository(),
-        trajectory_exports=InMemoryTrajectoryExportRepository(),
-        artifacts=InMemoryArtifactRepository(),
+        trajectory_exports=trajectory_exports,
+        artifacts=artifacts,
         maintenance=InMemoryMaintenanceRepository(),
         skills=skills,
         mcp_servers=mcp_servers,
@@ -439,6 +464,7 @@ def _postgres_repository_factory(
             policy_profiles=PostgresPolicyProfileRepository(session),
             process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
+            session_deletions=PostgresSessionDeletionRepository(session),
             runs=runs,
             events=events,
             invocations=invocations,
@@ -880,7 +906,13 @@ async def _compose(
             activate_session=mcp_runtime.activate_session,
             close_session=mcp_runtime.close_session,
             on_session_closed=consolidate_closed_session,
+            trajectory_artifacts=trajectory_artifact_store,
+            general_artifacts=general_artifact_store,
         )
+
+        async def sweep_session_deletions() -> int:
+            return await public_session_service.purge_pending_artifacts(principal)
+
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -942,6 +974,7 @@ async def _compose(
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
+                    sweep_session_deletions=sweep_session_deletions,
                 ),
                 sandbox=sandbox_manager,
                 mcp=mcp_runtime,

@@ -14,7 +14,9 @@ of the kind Section 15 already sanctions when it says to create migrations for
 
 Recorded as [ADR-0003](../adr/0003-event-log-and-projections.md),
 [ADR-0004](../adr/0004-postgres-run-queue.md), and
-[ADR-0031](../adr/0031-persistence-authoring.md).
+[ADR-0031](../adr/0031-persistence-authoring.md). ADR-0050 later extends the
+schema and append projection for authoritative conversation history and
+deletion without changing the Milestone 2 guarantees.
 
 ## Why persistence is not a persistence problem
 
@@ -83,7 +85,8 @@ and no I/O:
 BEGIN;
 
 UPDATE sessions
-   SET next_event_sequence = next_event_sequence + 1
+   SET next_event_sequence = next_event_sequence + 1,
+       updated_at = $event_created_at
  WHERE id = $session_id
 RETURNING next_event_sequence - 1 AS sequence;
 
@@ -118,6 +121,12 @@ normal; missing writes are not" below rests on it.
 The state change that an event describes belongs in the same transaction as the
 event. An event that says `run.completed` while the `runs` row still says
 `RUNNING` is a lie the log tells forever.
+
+The same statement advances `sessions.updated_at` to the persisted event's
+timestamp. ADR-0050 makes that field the authoritative conversation-history
+sort key, so activity ordering is a projection of committed events rather than
+client selection or a later best-effort write. A transaction that rolls back
+the event also rolls back the timestamp.
 
 The guard by itself does not prevent that lie, and it is worth being exact about
 why. The state change is a conditional `UPDATE` guarded by expected status and
@@ -182,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:537`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:607`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -827,6 +836,36 @@ carrying a *different* body is a `ConflictError` rather than a silent return of
 an unrelated run. Section 16 requires that a repeated key return the original
 run; it does not say what a reused key with new content means, and returning
 someone else's run because a client reused a key is worse than an error.
+
+### Post-Milestone 9 deletion records
+
+ADR-0050 adds two small tables. They are not session projections and do not
+retain conversation content:
+
+```text
+session_deletions
+  session_id      UUID PRIMARY KEY
+  tenant_id       TEXT NOT NULL
+  principal_id    TEXT NOT NULL
+  deleted_at      TIMESTAMPTZ NOT NULL
+  INDEX (tenant_id, principal_id, deleted_at)
+
+session_deletion_artifacts
+  session_id      UUID NOT NULL REFERENCES session_deletions ON DELETE CASCADE
+  artifact_id     UUID NOT NULL
+  tenant_id       TEXT NOT NULL
+  artifact        JSONB NOT NULL
+  PRIMARY KEY (session_id, artifact_id)
+```
+
+Both tables have forced tenant row-level security. `session_deletions` is the
+content-free ownership tombstone that makes a repeated delete idempotent.
+`session_deletion_artifacts` is a transactional outbox containing the minimum
+serialized artifact reference needed to remove bytes from external storage.
+The delete request tries every queued reference after commit; the maintenance
+worker retries remaining rows and deletes each row only after byte deletion
+succeeds. Removing a tombstone cascades its pending queue, although normal
+operation retains the tombstone.
 
 ## Authoring migrations
 
@@ -1484,6 +1523,12 @@ checkpoint bytes per run, and rebuild duration per projection.
 32. **Promotion is the durable step and the export is perishable**, so the
     undeleted set is a thirty-day window rather than a history of every
     conversation the platform has held.
+33. **A persisted event advances its session's activity timestamp in the append
+    transaction.** History ordering therefore cannot claim activity that did
+    not commit and cannot miss activity because a later projection failed.
+34. **Authoritative session deletion uses a content-free tombstone and an
+    artifact-deletion outbox.** The database graph disappears atomically while
+    external byte deletion remains retryable across process failure.
 
 ## Open questions
 

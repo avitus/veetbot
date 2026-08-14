@@ -4,6 +4,20 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-14 — Authoritative conversation history and deletion
+
+- Added a principal-scoped, paginated server session index with latest-run
+  identity and activity ordering so client history is a mirror rather than a
+  device-local source of truth.
+- Added idempotent `Delete Everywhere` semantics that reject active work, purge
+  the durable conversation graph, retain only a content-free ownership
+  tombstone, and retry external artifact-byte deletion through maintenance.
+- Updated the Apple client to reconcile history on connect, foreground entry,
+  and a periodic poll, and to remove local state only after authoritative
+  deletion succeeds.
+- Proposed ADR-0050 for the two-route post-Milestone 9 extension and its
+  deletion, synchronization, and artifact-lifecycle boundaries.
+
 ## 2026-08-10 — Atomic production delivery
 
 - Adapted Mankunku's timestamped immutable-release, deployment-lock, exact

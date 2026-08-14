@@ -52,6 +52,9 @@ class MemoryRememberTool:
         self._service = service
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
+        statement_trust = context.origin_trust
+        if statement_trust is not TrustLevel.USER:
+            statement_trust = context.argument_trust.get("statement", statement_trust)
         belief = await self._service.remember(
             session_id=context.session_id,
             run_id=context.run_id,
@@ -65,7 +68,7 @@ class MemoryRememberTool:
                 else Portability(str(arguments["portability"]))
             ),
             sensitivity=Sensitivity(str(arguments.get("sensitivity", Sensitivity.INTERNAL.value))),
-            origin_trust=context.origin_trust,
+            origin_trust=statement_trust,
         )
         structured = {"belief_id": str(belief.id), "status": belief.status.value}
         return ToolResult(

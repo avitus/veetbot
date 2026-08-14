@@ -153,4 +153,81 @@ import Testing
         #expect(reducer.tools.first { $0.callID == "call-2" }?.status == .awaitingApproval)
         #expect(reducer.needsApprovalIDs.contains(approval.id))
     }
+
+    @Test
+    func testToolActivityKeepsItsFirstSeenPositionBetweenMessages() {
+        let reducer = RunStateReducer()
+        reducer.reduce(
+            SSEFrame(
+                id: 1,
+                event: "user.message.created",
+                data: [
+                    "content": .array([
+                        .object(["type": .string("text"), "text": .string("Start")]),
+                    ]),
+                ]
+            )
+        )
+        reducer.reduce(assistantMessageFrame(id: 2, text: "I will check."))
+        reducer.reduce(
+            SSEFrame(
+                id: 3,
+                event: "tool.call.proposed",
+                data: [
+                    "call_id": .string("call-1"),
+                    "name": .string("workspace.read_text"),
+                ]
+            )
+        )
+        reducer.reduce(assistantMessageFrame(id: 4, text: "The check is complete."))
+
+        #expect(
+            reducer.activityTimeline.map(\.id) == [
+                "message:event-1",
+                "message:event-2",
+                "tool:call-1",
+                "message:event-4",
+            ]
+        )
+
+        reducer.reduce(
+            SSEFrame(
+                id: 5,
+                event: "tool.call.completed",
+                data: [
+                    "call_id": .string("call-1"),
+                    "name": .string("workspace.read_text"),
+                ]
+            )
+        )
+
+        #expect(
+            reducer.activityTimeline.map(\.id) == [
+                "message:event-1",
+                "message:event-2",
+                "tool:call-1",
+                "message:event-4",
+            ]
+        )
+        let toolStatuses: [ToolActivityStatus] = reducer.activityTimeline.compactMap { item in
+            guard case .tool(let activity) = item else { return nil }
+            return activity.status
+        }
+        #expect(toolStatuses == [.completed])
+    }
+
+    private func assistantMessageFrame(id: Int, text: String) -> SSEFrame {
+        SSEFrame(
+            id: id,
+            event: "assistant.message.completed",
+            data: [
+                "message": .object([
+                    "kind": .string("assistant"),
+                    "content": .array([
+                        .object(["kind": .string("text"), "text": .string(text)]),
+                    ]),
+                ]),
+            ]
+        )
+    }
 }

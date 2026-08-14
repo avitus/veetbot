@@ -11,6 +11,11 @@ no third-party dependencies. On first launch, enter an HTTPS API base URL and a
 static bearer token. The base URL is stored as a preference; the token is stored
 only in Keychain.
 
+The resizable settings surface keeps connection actions pinned below its
+scrolling content and includes device-local text-size and font-style controls.
+Appearance changes apply immediately throughout the client; system text sizing
+remains the default.
+
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its
 wire, transport, reducer, SSE, and local-history tests:
@@ -23,7 +28,11 @@ swift test --package-path clients/apple
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
 same `SessionHistoryStore` contract backed by an atomic Application Support JSON
-file. Neither store is authoritative server state.
+file. Neither store is authoritative server state. The app reconciles both from
+the paginated server session index on connect, foreground entry, and a periodic
+poll. The row action is `Delete Everywhere`: it deletes the authoritative
+session first and removes local state only after the server succeeds. Active
+runs must be stopped before their session can be deleted.
 
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute

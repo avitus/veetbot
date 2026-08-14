@@ -46,6 +46,12 @@ Three things follow.
     is the right shape for this subject because the obligation that
     is actually due is already discharged.
 
+ADR-0050 later adds an authoritative session index and session deletion as a
+separately authorized post-Milestone 9 API extension. Those operations reinforce
+the seam audited here: conversation history remains principal-scoped server
+state and every local history store is a cache. They require no Device identity,
+pairing, presence, notification, hand-off, or device-scoped tool mechanism.
+
 ## The three subsections that need nothing
 
 Sections 29.1 through 29.3 — one shared core, what must be

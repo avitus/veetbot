@@ -21,12 +21,13 @@ import Testing
     @Test
     func testSessionAndRunViewsDecodeServerShape() throws {
         let sessionData = Data(
-            #"{"id":"00000000-0000-0000-0000-000000000001","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"source":"test"},"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01.123Z","active_run_id":null}"#
+            #"{"id":"00000000-0000-0000-0000-000000000001","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"source":"test"},"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01.123Z","active_run_id":null,"last_run_id":"00000000-0000-0000-0000-000000000009"}"#
                 .utf8
         )
         let session = try JSONDecoder.server.decode(SessionView.self, from: sessionData)
         #expect(session.agentID == "general")
         #expect(session.metadata["source"] == .string("test"))
+        #expect(session.lastRunID?.uuidString == "00000000-0000-0000-0000-000000000009")
 
         let runData = Data(
             #"{"id":"00000000-0000-0000-0000-000000000002","session_id":"00000000-0000-0000-0000-000000000001","parent_run_id":null,"status":"RUNNING","step_count":1,"model_call_count":2,"tool_call_count":3,"usage":{"input_tokens":10,"output_tokens":4,"cost_usd":"0.01"},"limits":{"max_steps":12,"deadline_at":null,"max_cost_usd":"1.00"},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-12T12:00:00Z","updated_at":"2026-08-12T12:00:01Z"}"#

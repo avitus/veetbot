@@ -267,6 +267,27 @@ def _turn_origin_trust(checkpoint: RunCheckpoint) -> TrustLevel:
     return origin_trust
 
 
+def _argument_trust(arguments: dict[str, Any], checkpoint: RunCheckpoint) -> dict[str, TrustLevel]:
+    """Raise long verbatim values only when the active user message supplied them."""
+
+    trust = dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED)
+    current_user = next(
+        (
+            item
+            for item in reversed(checkpoint.conversation)
+            if isinstance(item, UserMessage) and item.trust is TrustLevel.USER
+        ),
+        None,
+    )
+    if current_user is None:
+        return trust
+    user_text = [part.text for part in current_user.content if isinstance(part, TextPart)]
+    for name, value in arguments.items():
+        if isinstance(value, str) and len(value) >= 16 and any(value in text for text in user_text):
+            trust[name] = TrustLevel.USER
+    return trust
+
+
 async def authorize_tool_invocation(
     repository: ToolInvocationRepository,
     invocation: ToolInvocation,
@@ -564,7 +585,15 @@ class ToolPipeline:
                 updated_at=now,
             )
         if not approval_granted and decision is None:
-            action = self._proposed_action(run, step, tool, candidate, arguments, arguments_hash)
+            action = self._proposed_action(
+                run,
+                checkpoint,
+                step,
+                tool,
+                candidate,
+                arguments,
+                arguments_hash,
+            )
             decision = await self._policy.evaluate(action, principal, run)
             progress.extend((6, 7))
             effective_hash = arguments_hash
@@ -904,6 +933,7 @@ class ToolPipeline:
             loaded_skills=tuple(body.model_dump(mode="json") for body in checkpoint.loaded_skills),
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),
             origin_trust=invocation.origin_trust,
+            argument_trust=_argument_trust(arguments, checkpoint),
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
@@ -1131,6 +1161,7 @@ class ToolPipeline:
     def _proposed_action(
         self,
         run: Run,
+        checkpoint: RunCheckpoint,
         step: Step,
         tool: Tool,
         invocation: ToolInvocation,
@@ -1153,7 +1184,7 @@ class ToolPipeline:
             required_scopes=set(tool.spec.required_scopes),
             arguments=arguments,
             normalized_arguments_hash=arguments_hash,
-            argument_trust=dict.fromkeys(arguments, TrustLevel.EXTERNAL_UNTRUSTED),
+            argument_trust=_argument_trust(arguments, checkpoint),
             origin_trust=invocation.origin_trust,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
@@ -1267,7 +1298,15 @@ class ToolPipeline:
                 },
                 deep=True,
             )
-        action = self._proposed_action(run, step, tool, invocation, arguments, arguments_hash)
+        action = self._proposed_action(
+            run,
+            checkpoint,
+            step,
+            tool,
+            invocation,
+            arguments,
+            arguments_hash,
+        )
         revalidated = await self._policy.evaluate(action, current, run)
         async with self._uow_factory() as uow:
             approval = await uow.approvals.record_revalidation(
