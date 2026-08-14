@@ -10,6 +10,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+from openai import AsyncOpenAI
 
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.bootstrap import Composition, build
@@ -404,13 +405,15 @@ async def test_final_message_is_delivered_through_the_swift_api_sse_path() -> No
     assert durable_message["id"] < terminal["id"]
 
 
-class _CapturingResponses:
+class _OpenAIWire:
     def __init__(self, streams: list[list[dict[str, Any]]]) -> None:
         self._streams = streams
         self.requests: list[dict[str, Any]] = []
 
-    async def create(self, **payload: Any) -> AsyncIterator[dict[str, Any]]:
-        self.requests.append(deepcopy(payload))
+    async def __call__(self, request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert isinstance(payload, dict)
+        self.requests.append(payload)
         events = deepcopy(self._streams[len(self.requests) - 1])
         if len(self.requests) == 1:
             wire_name = str(payload["tools"][0]["name"])
@@ -418,17 +421,14 @@ class _CapturingResponses:
                 item = event.get("item")
                 if isinstance(item, dict) and item.get("type") == "function_call":
                     item["name"] = wire_name
-
-        async def stream() -> AsyncIterator[dict[str, Any]]:
-            for event in events:
-                yield event
-
-        return stream()
-
-
-class _CapturingOpenAIClient:
-    def __init__(self, streams: list[list[dict[str, Any]]]) -> None:
-        self.responses = _CapturingResponses(streams)
+        body = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+        body += "data: [DONE]\n\n"
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content=body,
+            request=request,
+        )
 
 
 def _openai_reasoning_tool_events() -> list[dict[str, Any]]:
@@ -484,22 +484,29 @@ def _openai_reasoning_tool_events() -> list[dict[str, Any]]:
 
 
 async def test_openai_reasoning_and_tool_replay_use_the_serialized_sdk_request_path() -> None:
-    client = _CapturingOpenAIClient([_openai_reasoning_tool_events(), openai_text_events("391")])
-    provider = OpenAIResponsesProvider(client=client)
-    async with build(
-        settings=database_settings(),
-        storage="memory",
-        model_policy="balanced",
-        model_provider_overrides={"openai": provider},
-        enabled_tools=["math.calculate"],
-    ) as composition:
-        run_id = await composition.runs.submit("Calculate 17 * 23 with reasoning.")
-        run = await composition.runs.get(run_id)
+    wire = _OpenAIWire([_openai_reasoning_tool_events(), openai_text_events("391")])
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as http_client:
+        client = AsyncOpenAI(
+            api_key="test",
+            base_url="https://openai.test/v1",
+            http_client=http_client,
+            max_retries=0,
+        )
+        provider = OpenAIResponsesProvider(client=client)
+        async with build(
+            settings=database_settings(),
+            storage="memory",
+            model_policy="balanced",
+            model_provider_overrides={"openai": provider},
+            enabled_tools=["math.calculate"],
+        ) as composition:
+            run_id = await composition.runs.submit("Calculate 17 * 23 with reasoning.")
+            run = await composition.runs.get(run_id)
 
     assert run.status is RunStatus.COMPLETED
     assert run.final_message == "391"
-    assert len(client.responses.requests) == 2
-    first, second = client.responses.requests
+    assert len(wire.requests) == 2
+    first, second = wire.requests
     assert first["stream"] is True
     assert second["stream"] is True
     assert first["store"] is False
