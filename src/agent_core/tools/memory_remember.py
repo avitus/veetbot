@@ -95,3 +95,9 @@ class MemoryRememberTool:
             content=[TextPart(text=f"Remembered as [m:{str(belief.id)[:8]}].")],
             structured=structured,
         )
+
+
+class LegacyMemoryRememberTool(MemoryRememberTool):
+    """Compatibility registration for sessions pinned before the 1.0.1 patch."""
+
+    spec = MemoryRememberTool.spec.model_copy(update={"version": "1.0.0"}, deep=True)

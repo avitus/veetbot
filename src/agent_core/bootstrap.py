@@ -224,7 +224,7 @@ from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from agent_core.tools.knowledge_search import KnowledgeSearchTool
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
-from agent_core.tools.memory_remember import MemoryRememberTool
+from agent_core.tools.memory_remember import LegacyMemoryRememberTool, MemoryRememberTool
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
@@ -629,6 +629,10 @@ async def _compose(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
     registry.register(ArtifactExportTool())
+    # A session keeps the exact tool version it was shown. Retain compatible
+    # builtin history so a process upgrade cannot turn an advertised tool into
+    # an unknown capability for an existing session.
+    registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
     registry.register(MemorySearchTool(memory_retriever))
     registry.register(MemoryRecallEpisodesTool(episode_search))
