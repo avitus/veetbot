@@ -10,6 +10,7 @@ PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
 KEEP_RELEASES="${VEETBOT_KEEP_RELEASES:-5}"
 LOCK_WAIT_SECS="${VEETBOT_DEPLOY_LOCK_WAIT_SECS:-900}"
 HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
+API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
 UNITS=(veetbot-maintenance veetbot-worker veetbot-api)
@@ -29,6 +30,8 @@ fail() {
   "VEETBOT_DEPLOY_LOCK_WAIT_SECS must be a positive integer"
 [[ "$HEALTH_TIMEOUT_SECS" =~ ^[1-9][0-9]*$ ]] || fail \
   "VEETBOT_HEALTH_TIMEOUT_SECS must be a positive integer"
+[[ "$API_BASE_URL" =~ ^https?://[^[:space:]]+$ ]] || fail \
+  "VEETBOT_API_BASE_URL must be an HTTP(S) URL without whitespace"
 
 RELEASES_DIR="$DEPLOY_ROOT/releases"
 SHARED_DIR="$DEPLOY_ROOT/shared"
@@ -164,6 +167,15 @@ done
 rm -f -- "$HEALTH_HEADERS"
 HEALTH_HEADERS=""
 (( healthy == 1 )) || fail "the local readiness probe did not report $RELEASE_ID"
+
+[[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
+if ! printf 'Authorization: %s %s\n' Bearer "$AUTH_TOKEN" \
+  | curl --fail --silent --show-error \
+    --connect-timeout 2 --max-time 5 --header @- --output /dev/null \
+    "$API_BASE_URL/v1/sessions?limit=1"
+then
+  fail "the promoted API does not expose the authoritative session index"
+fi
 
 for unit in "${UNITS[@]}"; do
   sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"

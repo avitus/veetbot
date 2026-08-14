@@ -196,6 +196,8 @@ public final class ChatViewModel: ObservableObject {
             }
             history = try await historyStore.list()
             if prunedHistory { await artifactCache.removeAll() }
+        } catch let error as VeetbotAPIClientError {
+            present(error)
         } catch let error as HTTPTransportError {
             if case .reauthenticationRequired = error { present(error) }
         } catch {

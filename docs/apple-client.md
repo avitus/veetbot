@@ -85,7 +85,9 @@ data, then removes the local history row and cached artifact bytes only after a
 successful response. A session with an active run returns `409`; the user must
 stop that run before deleting. The same principal may safely repeat a completed
 delete. Other open clients remove the row on foreground reconciliation or their
-next periodic poll.
+next periodic poll. A server release that predates the history routes produces
+an explicit server-upgrade message during reconciliation or deletion rather
+than the generic unsupported-request response.
 
 ## Agent activity and artifacts
 

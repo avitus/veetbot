@@ -78,8 +78,15 @@ write_stub curl '
   while (($#)); do
     if [[ "$1" == --dump-header ]]; then headers="$2"; shift 2; else shift; fi
   done
-  if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
-  printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" "$VEETBOT_TEST_RELEASE" >"$headers"
+  if [[ -n "$headers" ]]; then
+    printf "curl health\n" >>"$VEETBOT_TEST_LOG"
+    if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
+    printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" "$VEETBOT_TEST_RELEASE" >"$headers"
+  else
+    cat >/dev/null
+    printf "curl session-index\n" >>"$VEETBOT_TEST_LOG"
+    if [[ "${VEETBOT_TEST_FAIL_SESSION_INDEX:-0}" == 1 ]]; then exit 1; fi
+  fi
 '
 
 make_stage() {
@@ -146,6 +153,7 @@ grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
 grep -Fq 'systemctl restart veetbot-maintenance veetbot-worker veetbot-api' "$LOG_FILE"
+grep -Fq 'curl session-index' "$LOG_FILE"
 [[ ! -d "$DEPLOY_ROOT/releases/20260809-120001-0000001" ]]
 
 if run_release "$release_id" >"$TEST_ROOT/active.out" 2>&1; then
@@ -165,6 +173,20 @@ fi
 grep -Fq 'refusing stale release' "$TEST_ROOT/stale.out"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 
+unsupported_id="20260810-152239-bcdef00"
+make_stage "$unsupported_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$unsupported_id" "$PROCESS_ROOT/4242/cwd"
+if VEETBOT_TEST_FAIL_SESSION_INDEX=1 run_release "$unsupported_id" \
+  >"$TEST_ROOT/unsupported.out" 2>&1; then
+  printf 'release without the session index unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ -d "$DEPLOY_ROOT/releases/$unsupported_id" ]]
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$unsupported_id" ]]
+grep -Fq 'promoted API does not expose the authoritative session index' \
+  "$TEST_ROOT/unsupported.out"
+
 failed_id="20260810-152244-bcdef01"
 make_stage "$failed_id"
 if VEETBOT_TEST_FAIL_UV=1 run_release "$failed_id" >/dev/null 2>&1; then
@@ -172,7 +194,7 @@ if VEETBOT_TEST_FAIL_UV=1 run_release "$failed_id" >/dev/null 2>&1; then
   exit 1
 fi
 [[ ! -e "$DEPLOY_ROOT/releases/$failed_id" ]]
-[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$unsupported_id" ]]
 
 unhealthy_id="20260810-152255-cdef012"
 make_stage "$unhealthy_id"
@@ -185,7 +207,7 @@ if VEETBOT_TEST_FAIL_HEALTH=1 run_release "$unhealthy_id" \
 fi
 [[ -d "$DEPLOY_ROOT/releases/$unhealthy_id" ]]
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$unhealthy_id" ]]
-grep -Fq "manual rollback target: $DEPLOY_ROOT/releases/$release_id" \
+grep -Fq "manual rollback target: $DEPLOY_ROOT/releases/$unsupported_id" \
   "$TEST_ROOT/unhealthy.out"
 
 equal_timestamp_id="20260810-152255-0000000"

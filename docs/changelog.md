@@ -15,6 +15,12 @@ title: Changelog
 - Updated the Apple client to reconcile history on connect, foreground entry,
   and a periodic poll, and to remove local state only after authoritative
   deletion succeeds.
+- Reported a specific server-upgrade error when a client reaches a deployment
+  that predates the history routes, instead of surfacing the generic unsupported
+  HTTP-request response.
+- Added a post-promotion authenticated session-index probe so a server release
+  cannot pass deployment verification while omitting the API used by the Apple
+  client.
 - Proposed ADR-0050 for the two-route post-Milestone 9 extension and its
   deletion, synchronization, and artifact-lifecycle boundaries.
 
