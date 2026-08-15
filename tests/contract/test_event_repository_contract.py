@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 
 from agent_core.domain.events import NewEvent
@@ -36,6 +38,22 @@ async def test_event_repository_reads_an_idempotent_derivation_key() -> None:
     loaded = await repository.get_by_derivation("contract:derived", principal())
     assert loaded == first == second
     assert await repository.get_by_derivation("contract:missing", principal()) is None
+
+
+async def test_event_append_never_regresses_session_activity_time() -> None:
+    clock, sessions, _runs, repository = await memory_stack()
+    clock.advance(-timedelta(minutes=1))
+
+    await repository.append(
+        NewEvent(
+            session_id=SESSION_ID,
+            run_id=None,
+            event_type="late-observed",
+            actor_type="contract",
+        )
+    )
+
+    assert (await sessions.get(SESSION_ID, principal())).updated_at > clock.now()
 
 
 async def test_event_repository_reads_the_latest_typed_event_before_a_sequence() -> None:

@@ -24,6 +24,7 @@ from agent_core.ports.repositories import (
     MaintenanceRepository,
     PolicyProfileRepository,
     RunRepository,
+    SessionDeletionRepository,
     SessionHistoryRepository,
     SessionRepository,
     ToolInvocationRepository,
@@ -40,6 +41,7 @@ class RepositoryUnitOfWork(Protocol):
     policy_profiles: PolicyProfileRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
+    session_deletions: SessionDeletionRepository
     runs: RunRepository
     events: EventRepository
     checkpoints: CheckpointRepository

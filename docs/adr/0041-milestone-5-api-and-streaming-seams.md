@@ -11,12 +11,15 @@
 ## Context
 
 Milestone 5 is the first public transport over the application core. The plan
-fixes its fourteen routes, principal-first service signatures, status and error
+fixes its fourteen-route baseline, principal-first service signatures, status and error
 vocabulary, replay behavior, request identifiers, authentication modes, and
 durable cancellation semantics. The implementation still has to choose concrete
 environment names, a bounded in-process queue size, and how to reconcile one
 literal table-key sentence with the behavioral requirement that HTTP
 idempotency keys are scoped to a tenant principal.
+
+ADR-0050 later adds two separately authorized post-Milestone 9 session-history
+routes. That extension does not rewrite this ADR's completed milestone census.
 
 These choices are proposed for owner review. They preserve the route table,
 authorization order, tenant concealment, durable event log, and hard gates.

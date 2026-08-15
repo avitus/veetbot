@@ -5,6 +5,17 @@ public enum ArtifactContentResponse: Sendable {
     case notModified
 }
 
+public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
+    case serverUpgradeRequired
+
+    public var errorDescription: String? {
+        switch self {
+        case .serverUpgradeRequired:
+            return "This server is running an older Veetbot API that does not support synchronized conversation history or Delete Everywhere. Update the server and try again."
+        }
+    }
+}
+
 public struct VeetbotAPIClient: Sendable {
     public let transport: HTTPTransport
 
@@ -30,6 +41,37 @@ public struct VeetbotAPIClient: Sendable {
         try await transport.send(
             TransportRequest(method: .get, path: "/v1/sessions/\(sessionID.uuidString)")
         )
+    }
+
+    public func listSessions(
+        limit: Int = 100,
+        cursor: String? = nil
+    ) async throws -> Page<SessionView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/sessions", queryItems: query)
+            )
+        } catch {
+            throw historyCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func deleteSession(_ sessionID: UUID) async throws {
+        do {
+            _ = try await transport.sendData(
+                TransportRequest(
+                    method: .delete,
+                    path: "/v1/sessions/\(sessionID.uuidString)",
+                    retryAttempts: 2
+                )
+            )
+        } catch {
+            throw historyCompatibilityError(from: error) ?? error
+        }
     }
 
     public func submitMessage(
@@ -151,6 +193,18 @@ public struct VeetbotAPIClient: Sendable {
         if response.statusCode == 304 { return .notModified }
         return .content(data: data, etag: response.value(forHTTPHeaderField: "ETag"))
     }
+}
+
+private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 405
+        || (apiError.statusCode == 400
+            && apiError.code == .malformedRequest
+            && apiError.message == "The HTTP request is not supported.")
+    {
+        return .serverUpgradeRequired
+    }
+    return nil
 }
 
 private struct CreateSessionBody: Encodable {

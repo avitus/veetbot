@@ -20,7 +20,7 @@ from agent_core.application.public_services import PublicSessionService
 from agent_core.bootstrap import _memory_uow_repositories, build
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.context.rendering import build_prefix, prefix_bytes
-from agent_core.domain.errors import ConflictError, ToolValidationError
+from agent_core.domain.errors import ConflictError, ToolTrustRejectedError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
@@ -250,7 +250,7 @@ async def test_form_injection() -> None:
     corpus = ROOT / "evals/corpora/memory_form_injection"
     for member in sorted(corpus.iterdir()):
         sequence = await _user_event(factory, member.read_text(encoding="utf-8"))
-        with pytest.raises(ToolValidationError):
+        with pytest.raises(ToolTrustRejectedError):
             await service.remember(
                 session_id=SESSION_ID,
                 run_id=None,
@@ -279,7 +279,7 @@ async def test_explicit_write_allows_recalled_memory_alongside_user_source() -> 
     )
 
     assert belief.status is MemoryStatus.ACTIVE
-    with pytest.raises(ToolValidationError):
+    with pytest.raises(ToolTrustRejectedError):
         await service.remember(
             session_id=SESSION_ID,
             run_id=None,
@@ -310,7 +310,7 @@ async def test_correction_durable() -> None:
 async def test_no_policy_regress() -> None:
     _clock, factory, service, _retriever = await _stack()
     source = await _user_event(factory, "Please remember my preference")
-    with pytest.raises(ToolValidationError):
+    with pytest.raises(ToolTrustRejectedError):
         await service.remember(
             session_id=SESSION_ID,
             run_id=None,

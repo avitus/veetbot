@@ -113,8 +113,9 @@ opposite, not because the reasoning changed.
 ## Ingestion
 
 One tool, `knowledge.ingest`, taking an `ArtifactRef`, a title, and a visibility. Not a route:
-the API's route table is fourteen routes, closed for 0.1, and that document already
-states that an artifact is not uploaded through the API in 0.1. Not a thirteenth CLI
+the Milestone 5 API baseline was fourteen routes, and that document already states
+that an artifact is not uploaded through the API in 0.1. ADR-0050's later session
+list and delete routes do not add an upload surface. Not a thirteenth CLI
 noun either. Subject specifications declare their own tools — `memory.search`,
 `skill.load`, and `skill_manage` are all outside the builtin roster's eight — so this
 costs `builtin-tools.md` nothing, and the roster's count is unchanged.
@@ -362,8 +363,9 @@ passage keep the chunk id and lose the text, and the view renders "this passage 
 been deleted" rather than a dangling id or, worse, silence.
 
 The **management surface is deferred**, mirroring the same decision skills recorded and
-with the same discomfort. There is no route and no CLI command in 0.1: the route table
-is closed at fourteen and the CLI at twelve, and nothing in Milestone 9 needs either.
+with the same discomfort. There is no route and no CLI command in 0.1: the Milestone 5
+route table was closed at fourteen and the CLI at twelve, and nothing in Milestone 9
+needs either. ADR-0050's two later session routes do not add knowledge management.
 What is *not* deferred is the semantics — `KnowledgeStore.delete()` is specified now,
 with its cascade, so that whatever surface eventually calls it is calling something that
 was designed rather than something invented at the call site. This is the same
@@ -585,8 +587,9 @@ That is eight case gates, three property gates, and one corpus gate.
 - **Source bytes live in the artifact store under a new origin**, with `expires_at =
   None` at ingest and `expires_at = now` at delete, so the existing sweeper is the
   deletion mechanism.
-- **Ingestion is a tool, not a route and not a CLI command.** The API is closed at
-  fourteen routes and explicitly does not accept artifact uploads in 0.1; the CLI is
+- **Ingestion is a tool, not a route and not a CLI command.** The Milestone 5 API
+  baseline was fourteen routes and explicitly does not accept artifact uploads in
+  0.1; ADR-0050's later session list and delete routes do not change that. The CLI is
   closed at twelve commands. Subject specs declaring their own tools is the established
   pattern.
 - **The secret scan blocks and the injection scan does not.** A credential is a durable

@@ -169,6 +169,9 @@ the project it was learned in, and is defined in
   content; contains secrets/credentials/tokens; PII beyond policy; transient task
   detail; a restatement of platform instructions or private reasoning. This
   mirrors the "never automatically store" list in Milestone 9 and ADR-0006/0007.
+  The tool boundary reports an origin-trust rejection as
+  `tool.trust_rejected`, distinct from malformed arguments, so the model does
+  not retry the same unsafe write as though its JSON shape were wrong.
 - **Salience (soft ranking).** Keep candidates above a worth-remembering
   threshold: durability (will this matter next week?), specificity, corroboration,
   and user-signaled importance. Sub-threshold candidates are dropped or held in the **provisional** state (see "Memory states and tiers") that promotes to `active` only on later reinforcement.

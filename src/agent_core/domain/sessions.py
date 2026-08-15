@@ -26,3 +26,10 @@ class Session(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+class SessionCursor(BaseModel):
+    """Repository-level keyset cursor after API decoding."""
+
+    updated_at: datetime
+    id: UUID

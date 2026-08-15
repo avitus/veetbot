@@ -17,6 +17,8 @@ import AppKit
 struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
+    @Environment(\.appFontStyle) private var appFontStyle
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -34,7 +36,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.string = text
-        textView.font = .systemFont(ofSize: NSFont.systemFontSize)
+        applyFont(to: textView)
         textView.isRichText = false
         textView.importsGraphics = false
         textView.allowsUndo = true
@@ -57,9 +59,17 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         textView.onSubmit = onSubmit
+        applyFont(to: textView)
         if textView.string != text {
             textView.string = text
         }
+    }
+
+    private func applyFont(to textView: NSTextView) {
+        let pointSize = NSFont.systemFontSize * dynamicTypeSize.appScaleFactor
+        let base = NSFont.systemFont(ofSize: pointSize)
+        let descriptor = base.fontDescriptor.withDesign(appFontStyle.nsDesign)
+        textView.font = descriptor.flatMap { NSFont(descriptor: $0, size: pointSize) } ?? base
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -104,6 +114,8 @@ import UIKit
 struct ComposerTextEditor: UIViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
+    @Environment(\.appFontStyle) private var appFontStyle
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -114,8 +126,8 @@ struct ComposerTextEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
         textView.text = text
-        textView.font = .preferredFont(forTextStyle: .body)
-        textView.adjustsFontForContentSizeCategory = true
+        applyFont(to: textView)
+        textView.adjustsFontForContentSizeCategory = false
         textView.backgroundColor = .clear
         textView.isScrollEnabled = true
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 10, bottom: 8, right: 10)
@@ -126,9 +138,22 @@ struct ComposerTextEditor: UIViewRepresentable {
     func updateUIView(_ textView: ComposerUITextView, context: Context) {
         context.coordinator.parent = self
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
+        applyFont(to: textView)
         if textView.text != text {
             textView.text = text
         }
+    }
+
+    private func applyFont(to textView: UITextView) {
+        let traits = UITraitCollection(
+            preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
+        )
+        let preferred = UIFontDescriptor.preferredFontDescriptor(
+            withTextStyle: .body,
+            compatibleWith: traits
+        )
+        let descriptor = preferred.withDesign(appFontStyle.uiDesign) ?? preferred
+        textView.font = UIFont(descriptor: descriptor, size: 0)
     }
 
     private func installCommandReturnHandler(

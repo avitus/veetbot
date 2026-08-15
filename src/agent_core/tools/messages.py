@@ -29,6 +29,9 @@ TOOL_MESSAGES: dict[str, str] = {
         "procedure_pointer. Use contextual or local portability for a fact or relationship."
     ),
     "tool.arguments_invalid": "The tool arguments were invalid.",
+    "tool.trust_rejected": (
+        "The tool rejected content whose provenance was not trusted for this operation."
+    ),
     "tool.output_invalid": "The tool returned data outside its declared contract.",
     "tool.timeout": "The tool did not finish within its allowed time.",
     "tool.internal_error": "The tool could not complete because of an internal error.",

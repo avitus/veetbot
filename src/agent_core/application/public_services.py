@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -40,7 +41,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.persistence import IdempotencyRecord
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
-from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.sessions import Session, SessionCursor, SessionStatus
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.domain.views import (
@@ -97,7 +98,8 @@ async def _notify_session_closed(
     )
 
 
-def _session_view(session: Session, active: Run | None) -> SessionView:
+def _session_view(session: Session, latest: Run | None) -> SessionView:
+    active = latest if latest is not None and latest.status not in TERMINAL_RUN_STATUSES else None
     return SessionView(
         id=session.id,
         status=session.status,
@@ -108,6 +110,7 @@ def _session_view(session: Session, active: Run | None) -> SessionView:
         created_at=session.created_at,
         updated_at=session.updated_at,
         active_run_id=None if active is None else active.id,
+        last_run_id=None if latest is None else latest.id,
     )
 
 
@@ -211,6 +214,38 @@ def _wire_content(content: list[ContentBlock]) -> list[dict[str, object]]:
     return [block.model_dump(mode="json") for block in content]
 
 
+def _encode_session_cursor(row: Session) -> str:
+    payload = json.dumps(
+        {"k": row.updated_at.isoformat(), "i": str(row.id)}, separators=(",", ":")
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_session_cursor(value: str | None) -> SessionCursor | None:
+    if value is None:
+        return None
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        raw = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8"))
+        if not isinstance(raw, dict) or set(raw) != {"k", "i"}:
+            raise ValueError
+        if not isinstance(raw["k"], str) or not isinstance(raw["i"], str):
+            raise ValueError
+        updated_at = datetime.fromisoformat(raw["k"])
+        if updated_at.tzinfo is None or updated_at.utcoffset() is None:
+            raise ValueError
+        return SessionCursor(updated_at=updated_at, id=UUID(raw["i"]))
+    except (
+        binascii.Error,
+        ValueError,
+        TypeError,
+        KeyError,
+        UnicodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("session cursor is malformed") from exc
+
+
 class PublicSessionService:
     def __init__(
         self,
@@ -222,6 +257,8 @@ class PublicSessionService:
         activate_session: Callable[[UUID], Awaitable[None]] | None = None,
         close_session: Callable[[UUID], Awaitable[None]] | None = None,
         on_session_closed: Callable[[UUID], Awaitable[None]] | None = None,
+        trajectory_artifacts: TrajectoryArtifactStore | None = None,
+        general_artifacts: ArtifactStore | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -231,6 +268,8 @@ class PublicSessionService:
         self._activate_session = activate_session
         self._close_session = close_session
         self._on_session_closed = on_session_closed
+        self._trajectory_artifacts = trajectory_artifacts
+        self._general_artifacts = general_artifacts
 
     async def _resolve_agent(self, uow: RepositoryUnitOfWork, agent_id: str) -> AgentSpec:
         if agent_id in {"general", str(self._default_agent.id)}:
@@ -302,8 +341,107 @@ class PublicSessionService:
         require_scope(principal, "session.read")
         async with self._uow_factory() as uow:
             session = await uow.sessions.get(session_id, principal)
-            active = await uow.runs.active_for_session(session_id, principal)
-        return _session_view(session, active)
+            latest = await uow.runs.latest_for_session(session_id, principal)
+        return _session_view(session, latest)
+
+    async def list(
+        self,
+        principal: Principal,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[SessionView]:
+        require_scope(principal, "session.read")
+        effective_limit = min(max(limit, 1), 200)
+        decoded = _decode_session_cursor(cursor)
+        async with self._uow_factory() as uow:
+            rows = await uow.sessions.list(
+                principal,
+                limit=effective_limit + 1,
+                cursor=decoded,
+            )
+            latest_runs = await uow.runs.latest_for_sessions(
+                [row.id for row in rows[:effective_limit]], principal
+            )
+        has_more = len(rows) > effective_limit
+        page_rows = rows[:effective_limit]
+        return Page[SessionView](
+            items=[_session_view(session, latest_runs.get(session.id)) for session in page_rows],
+            next_cursor=(_encode_session_cursor(page_rows[-1]) if has_more and page_rows else None),
+        )
+
+    async def delete(self, principal: Principal, session_id: UUID) -> None:
+        require_scope(principal, "session.write")
+        async with self._uow_factory() as uow:
+            await uow.session_deletions.delete(session_id, principal, self._clock.now())
+        if self._close_session is not None:
+            try:
+                await self._close_session(session_id)
+            except Exception:
+                logger.exception("deleted_session_runtime_cleanup_failed")
+        if self._catalogs is not None:
+            try:
+                await self._catalogs.discard(session_id)
+            except Exception:
+                logger.exception("deleted_session_catalog_cleanup_failed")
+        try:
+            await self.purge_pending_artifacts(principal, session_id=session_id)
+        except Exception:
+            logger.exception("deleted_session_artifact_cleanup_failed")
+
+    async def purge_pending_artifacts(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None = None,
+        limit: int = 100,
+    ) -> int:
+        if self._trajectory_artifacts is None or self._general_artifacts is None:
+            return 0
+        if session_id is None:
+            async with self._uow_factory() as uow:
+                session_ids = await uow.session_deletions.pending_sessions(principal, limit=limit)
+        else:
+            session_ids = [session_id]
+        removed = 0
+        for pending_session_id in session_ids:
+            async with self._uow_factory() as uow:
+                artifacts = await uow.session_deletions.pending_artifacts(
+                    pending_session_id,
+                    principal,
+                    limit=limit,
+                )
+            for artifact in artifacts:
+                try:
+                    if artifact.origin == "trajectory_export":
+                        await self._trajectory_artifacts.delete(artifact)
+                    else:
+                        await self._general_artifacts.delete(
+                            StoredArtifactRef(
+                                artifact_id=artifact.id,
+                                sha256=artifact.sha256,
+                                size_bytes=artifact.size_bytes,
+                                media_type=artifact.media_type,
+                            ),
+                            tenant_id=artifact.tenant_id,
+                        )
+                except Exception as exc:
+                    logger.warning(
+                        "session_artifact_delete_failed",
+                        extra={
+                            "session_id": str(pending_session_id),
+                            "artifact_id": str(artifact.id),
+                            "error_class": type(exc).__name__,
+                        },
+                    )
+                    continue
+                async with self._uow_factory() as uow:
+                    await uow.session_deletions.acknowledge_artifact(
+                        pending_session_id,
+                        artifact.id,
+                        principal,
+                    )
+                removed += 1
+        return removed
 
     async def close(self, principal: Principal, session_id: UUID) -> SessionView:
         require_scope(principal, "session.write")

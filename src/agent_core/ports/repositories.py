@@ -33,7 +33,7 @@ from agent_core.domain.persistence import (
 )
 from agent_core.domain.policies import PolicyProfileRecord
 from agent_core.domain.runs import BudgetScope, Run, RunCheckpoint, RunStatus, RunUsage, Step
-from agent_core.domain.sessions import Session
+from agent_core.domain.sessions import Session, SessionCursor
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 
@@ -51,6 +51,14 @@ class SessionRepository(Protocol):
 
     async def get(self, session_id: UUID, principal: Principal) -> Session: ...
 
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int,
+        cursor: SessionCursor | None = None,
+    ) -> list[Session]: ...
+
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
     ) -> tuple[Session, bool]: ...
@@ -62,6 +70,12 @@ class RunRepository(Protocol):
     async def get(self, run_id: UUID, principal: Principal) -> Run: ...
 
     async def active_for_session(self, session_id: UUID, principal: Principal) -> Run | None: ...
+
+    async def latest_for_session(self, session_id: UUID, principal: Principal) -> Run | None: ...
+
+    async def latest_for_sessions(
+        self, session_ids: list[UUID], principal: Principal
+    ) -> dict[UUID, Run]: ...
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run: ...
 
@@ -285,3 +299,23 @@ class MaintenanceRepository(Protocol):
     async def trajectory_runs(self, limit: int) -> list[UUID]: ...
 
     async def checkpoint_runs(self, limit: int) -> list[tuple[UUID, bool]]: ...
+
+
+class SessionDeletionRepository(Protocol):
+    async def delete(
+        self, session_id: UUID, principal: Principal, deleted_at: datetime
+    ) -> bool: ...
+
+    async def pending_artifacts(
+        self,
+        session_id: UUID,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[ArtifactRef]: ...
+
+    async def acknowledge_artifact(
+        self, session_id: UUID, artifact_id: UUID, principal: Principal
+    ) -> None: ...
+
+    async def pending_sessions(self, principal: Principal, *, limit: int) -> list[UUID]: ...

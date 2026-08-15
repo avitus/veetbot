@@ -38,7 +38,7 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session, SessionStatus
+from agent_core.domain.sessions import Session, SessionCursor, SessionStatus
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -124,6 +124,38 @@ class InMemorySessionRepository:
                 raise NotFoundError("session not found")
             return session.model_copy(deep=True)
 
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int,
+        cursor: SessionCursor | None = None,
+    ) -> list[Session]:
+        async with self._lock:
+            rows = [
+                session.model_copy(deep=True)
+                for session in self._sessions.values()
+                if session.tenant_id == principal.tenant_id
+                and session.principal_id == principal.principal_id
+                and (
+                    cursor is None
+                    or session.updated_at < cursor.updated_at
+                    or (session.updated_at == cursor.updated_at and session.id.int < cursor.id.int)
+                )
+            ]
+        rows.sort(key=lambda session: (session.updated_at, session.id.int), reverse=True)
+        return rows[:limit]
+
+    async def touch(self, session_id: UUID, touched_at: datetime) -> None:
+        async with self._lock:
+            try:
+                session = self._sessions[session_id]
+            except KeyError as exc:
+                raise NotFoundError("session not found") from exc
+            self._sessions[session_id] = session.model_copy(
+                update={"updated_at": max(session.updated_at, touched_at)}
+            )
+
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
     ) -> tuple[Session, bool]:
@@ -179,6 +211,39 @@ class InMemoryRunRepository:
         if len(rows) > 1:
             raise ConflictError("session has multiple active runs")
         return rows[0] if rows else None
+
+    async def latest_for_session(self, session_id: UUID, principal: Principal) -> Run | None:
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            rows = [
+                run.model_copy(deep=True)
+                for run in self._runs.values()
+                if run.session_id == session_id
+            ]
+        return max(rows, key=lambda run: (run.created_at, run.id.int), default=None)
+
+    async def latest_for_sessions(
+        self, session_ids: list[UUID], principal: Principal
+    ) -> dict[UUID, Run]:
+        authorized_ids: set[UUID] = set()
+        for session_id in session_ids:
+            try:
+                await self._sessions.get(session_id, principal)
+            except NotFoundError:
+                continue
+            authorized_ids.add(session_id)
+        async with self._lock:
+            latest: dict[UUID, Run] = {}
+            for run in self._runs.values():
+                if run.session_id not in authorized_ids:
+                    continue
+                current = latest.get(run.session_id)
+                if current is None or (run.created_at, run.id.int) > (
+                    current.created_at,
+                    current.id.int,
+                ):
+                    latest[run.session_id] = run.model_copy(deep=True)
+        return latest
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         async with self._lock:
@@ -300,6 +365,7 @@ class InMemoryEventRepository:
     async def append(self, event: NewEvent, *, lease: WorkerLease | None = None) -> EventEnvelope:
         if lease is not None:
             raise NotImplementedError("the in-memory repository does not support worker leases")
+        occurred_at = self._clock.now()
         async with self._lock:
             if event.derivation_key is not None:
                 existing = self._derived.get(event.derivation_key)
@@ -309,14 +375,17 @@ class InMemoryEventRepository:
             envelope = EventEnvelope(
                 id=self._next_id,
                 sequence=len(stream) + 1,
-                created_at=self._clock.now(),
+                created_at=occurred_at,
                 **event.model_dump(),
             )
             self._next_id += 1
             stream.append(envelope)
             if event.derivation_key is not None:
                 self._derived[event.derivation_key] = envelope
-            return envelope.model_copy(deep=True)
+        touch = getattr(self._sessions, "touch", None)
+        if touch is not None:
+            await touch(event.session_id, occurred_at)
+        return envelope.model_copy(deep=True)
 
     async def list_after(
         self,

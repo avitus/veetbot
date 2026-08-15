@@ -28,6 +28,7 @@ from agent_core.ports.repositories import (
     MaintenanceRepository,
     PolicyProfileRepository,
     RunRepository,
+    SessionDeletionRepository,
     SessionHistoryRepository,
     SessionRepository,
     ToolInvocationRepository,
@@ -60,6 +61,7 @@ class UnitOfWorkRepositories:
     policy_profiles: PolicyProfileRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
+    session_deletions: SessionDeletionRepository
     runs: RunRepository
     events: EventRepository
     invocations: ToolInvocationRepository
@@ -102,6 +104,7 @@ class MemoryUnitOfWork:
         self.policy_profiles = repositories.policy_profiles
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
+        self.session_deletions = repositories.session_deletions
         self.runs = repositories.runs
         self.events = repositories.events
         self.invocations = repositories.invocations
@@ -194,6 +197,7 @@ class PostgresUnitOfWork:
         self.policy_profiles = repositories.policy_profiles
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
+        self.session_deletions = repositories.session_deletions
         self.runs = repositories.runs
         self.events = repositories.events
         self.history = repositories.history

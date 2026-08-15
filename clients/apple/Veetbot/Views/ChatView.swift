@@ -21,28 +21,32 @@ public struct ChatView: View {
                         if let workingState = state.workingState {
                             WorkingStatePanel(state: workingState)
                         }
-                        ForEach(state.timeline) { item in
-                            TimelineBubble(item: item) { artifactID in
-                                artifactSelection = ArtifactSelection(id: artifactID)
-                            }
-                        }
-                        ForEach(state.tools) { activity in
-                            ToolActivityCard(
-                                activity: activity,
-                                approval: state.approvals.first { $0.id == activity.approvalID },
-                                resolve: { approval, decision, reason in
-                                    Task {
-                                        await model.resolveApproval(
-                                            approval,
-                                            decision: decision,
-                                            reason: reason
-                                        )
-                                    }
-                                },
-                                openArtifact: { artifactID in
+                        ForEach(state.activityTimeline) { item in
+                            switch item {
+                            case .message(let message):
+                                TimelineBubble(item: message) { artifactID in
                                     artifactSelection = ArtifactSelection(id: artifactID)
                                 }
-                            )
+                            case .tool(let activity):
+                                ToolActivityCard(
+                                    activity: activity,
+                                    approval: state.approvals.first {
+                                        $0.id == activity.approvalID
+                                    },
+                                    resolve: { approval, decision, reason in
+                                        Task {
+                                            await model.resolveApproval(
+                                                approval,
+                                                decision: decision,
+                                                reason: reason
+                                            )
+                                        }
+                                    },
+                                    openArtifact: { artifactID in
+                                        artifactSelection = ArtifactSelection(id: artifactID)
+                                    }
+                                )
+                            }
                         }
                         ForEach(
                             state.approvals.filter { approval in
@@ -94,10 +98,10 @@ public struct ChatView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.selectedSessionID == nil ? "New conversation" : "Conversation")
-                    .font(.headline)
+                    .appFont(.headline)
                 if let status = state.runStatus {
                     Text(status.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
-                        .font(.caption)
+                        .appFont(.caption)
                         .foregroundColor(.secondary)
                 }
             }
@@ -112,6 +116,7 @@ public struct ChatView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
+        .background(AppTheme.brandGradient.opacity(0.42))
     }
 
     private var composer: some View {
@@ -120,19 +125,20 @@ public struct ChatView: View {
                 .frame(minHeight: 42, maxHeight: 120)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.3))
+                        .stroke(AppTheme.turquoise.opacity(0.42))
                 )
                 .accessibilityLabel("Message")
             Button(action: submitDraft) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.title2)
+                    .foregroundColor(canSendDraft ? AppTheme.orange : .secondary)
             }
             .buttonStyle(.plain)
             .disabled(!canSendDraft)
             .accessibilityLabel("Send")
         }
         .padding()
-        .background(Color.secondary.opacity(0.04))
+        .background(AppTheme.turquoise.opacity(0.055))
     }
 
     private var canSendDraft: Bool {
@@ -190,7 +196,7 @@ private struct TimelineBubble: View {
         .background {
             if item.role == .user {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.accentColor.opacity(0.16))
+                    .fill(AppTheme.turquoise.opacity(0.18))
             }
         }
         .frame(maxWidth: item.role == .user ? 680 : .infinity, alignment: .leading)

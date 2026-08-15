@@ -7,7 +7,12 @@ import re
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
+from agent_core.domain.errors import (
+    ConflictError,
+    NotFoundError,
+    ToolTrustRejectedError,
+    ToolValidationError,
+)
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     BeliefRejection,
@@ -121,7 +126,7 @@ class GovernedMemoryService:
         if origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY} or (
             origin_trust is TrustLevel.MEMORY and not explicit
         ):
-            raise ToolValidationError("external content cannot directly write persistent memory")
+            raise ToolTrustRejectedError("external content cannot directly write persistent memory")
         clean_statement = " ".join(statement.split())
         clean_subject = " ".join(subject.split())
         if not clean_subject or not self._salience.eligible(clean_statement, explicit=explicit):

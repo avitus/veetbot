@@ -28,6 +28,17 @@ public struct RootView: View {
                 Task { await model.clearCachedArtifacts() }
             }
         }
+        .task(id: model.isConfigured && scenePhase == .active) {
+            guard model.isConfigured, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.synchronizeHistory()
+                do {
+                    try await Task.sleep(nanoseconds: 30_000_000_000)
+                } catch {
+                    return
+                }
+            }
+        }
         .alert(
             "Veetbot",
             isPresented: Binding(
@@ -61,15 +72,23 @@ public struct RootView: View {
 private struct SessionSidebar: View {
     @ObservedObject var model: ChatViewModel
     @Binding var showingSettings: Bool
-    @State private var removalCandidate: SessionHistoryEntry?
+    @State private var deletionCandidate: SessionHistoryEntry?
 
     var body: some View {
         List {
             Button {
                 model.newSession()
             } label: {
-                Label("New conversation", systemImage: "square.and.pencil")
+                HStack(spacing: 10) {
+                    Image(systemName: "square.and.pencil")
+                        .foregroundColor(AppTheme.orange)
+                    Text("New conversation")
+                        .appFont(.headline)
+                    Spacer()
+                }
+                .padding(.vertical, 4)
             }
+            .listRowBackground(AppTheme.brandGradient)
 
             Section("History") {
                 ForEach(model.history) { entry in
@@ -81,8 +100,8 @@ private struct SessionSidebar: View {
                                 Text(entry.title)
                                     .lineLimit(2)
                                     .foregroundColor(.primary)
-                                Text(entry.updatedAt, style: .relative)
-                                    .font(.caption)
+                                ConversationAgeText(updatedAt: entry.updatedAt)
+                                    .appFont(.caption)
                                     .foregroundColor(.secondary)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,17 +109,17 @@ private struct SessionSidebar: View {
                         .buttonStyle(.plain)
 
                         Button(role: .destructive) {
-                            removalCandidate = entry
+                            deletionCandidate = entry
                         } label: {
                             Image(systemName: "trash")
                                 .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Remove \(entry.title) from history")
+                        .accessibilityLabel("Delete \(entry.title) everywhere")
                     }
                     .listRowBackground(
                         entry.sessionID == model.selectedSessionID
-                            ? Color.accentColor.opacity(0.12)
+                            ? AppTheme.turquoise.opacity(0.15)
                             : Color.clear
                     )
                 }
@@ -109,23 +128,25 @@ private struct SessionSidebar: View {
         .listStyle(.sidebar)
         .navigationTitle("Veetbot")
         .confirmationDialog(
-            "Remove conversation from history?",
+            "Delete conversation everywhere?",
             isPresented: Binding(
-                get: { removalCandidate != nil },
-                set: { if !$0 { removalCandidate = nil } }
+                get: { deletionCandidate != nil },
+                set: { if !$0 { deletionCandidate = nil } }
             ),
             titleVisibility: .visible,
-            presenting: removalCandidate
+            presenting: deletionCandidate
         ) { entry in
-            Button("Remove from History", role: .destructive) {
-                removalCandidate = nil
-                Task { await model.removeSessionFromHistory(entry) }
+            Button("Delete Everywhere", role: .destructive) {
+                deletionCandidate = nil
+                Task { await model.deleteSessionEverywhere(entry) }
             }
             Button("Cancel", role: .cancel) {
-                removalCandidate = nil
+                deletionCandidate = nil
             }
         } message: { _ in
-            Text("This removes the conversation from this device. Server data is not deleted.")
+            Text(
+                "This permanently deletes the conversation and its associated data from the server and all synchronized devices. This cannot be undone."
+            )
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
@@ -133,9 +154,69 @@ private struct SessionSidebar: View {
                     showingSettings = true
                 } label: {
                     Image(systemName: "gearshape")
+                        .foregroundColor(AppTheme.orange)
                 }
-                .accessibilityLabel("Connection settings")
+                .accessibilityLabel("Settings")
             }
+        }
+    }
+}
+
+private struct ConversationAgeText: View {
+    let updatedAt: Date
+
+    var body: some View {
+        TimelineView(ConversationAgeSchedule(updatedAt: updatedAt)) { context in
+            Text(
+                ConversationAgeFormatter.string(
+                    since: updatedAt,
+                    relativeTo: context.date
+                )
+            )
+        }
+    }
+}
+
+enum ConversationAgeFormatter {
+    static func string(
+        since updatedAt: Date,
+        relativeTo now: Date,
+        locale: Locale = .current
+    ) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.dateTimeStyle = .numeric
+        formatter.unitsStyle = .abbreviated
+        formatter.locale = locale
+        return formatter.localizedString(for: min(updatedAt, now), relativeTo: now)
+    }
+}
+
+private struct ConversationAgeSchedule: TimelineSchedule {
+    let updatedAt: Date
+
+    func entries(from startDate: Date, mode: Mode) -> Entries {
+        Entries(nextDate: startDate, updatedAt: updatedAt)
+    }
+
+    struct Entries: Sequence, IteratorProtocol {
+        var nextDate: Date
+        let updatedAt: Date
+
+        mutating func next() -> Date? {
+            let result = nextDate
+            let elapsed = Swift.max(0, result.timeIntervalSince(updatedAt))
+            let refreshInterval: TimeInterval
+            if elapsed < 60 {
+                refreshInterval = 1
+            } else if elapsed < 3_600 {
+                refreshInterval = 60
+            } else if elapsed < 86_400 {
+                refreshInterval = 3_600
+            } else {
+                refreshInterval = 86_400
+            }
+            nextDate.addTimeInterval(refreshInterval)
+            return result
         }
     }
 }

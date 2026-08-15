@@ -249,7 +249,9 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
     missing = UUID(int=987654)
     error_requests: list[tuple[str, str, dict[str, object] | None]] = [
         ("POST", "/v1/sessions", {}),
+        ("GET", "/v1/sessions?cursor=malformed", None),
         ("GET", f"/v1/sessions/{missing}", None),
+        ("DELETE", f"/v1/sessions/{missing}", None),
         (
             "POST",
             f"/v1/sessions/{missing}/messages",
@@ -342,7 +344,7 @@ def test_api_handlers_never_bind_a_request_tenant() -> None:
         and any(
             isinstance(decorator, ast.Call)
             and isinstance(decorator.func, ast.Attribute)
-            and decorator.func.attr in {"get", "post"}
+            and decorator.func.attr in {"delete", "get", "post"}
             for decorator in node.decorator_list
         )
     ]
@@ -382,7 +384,7 @@ async def test_every_route_declares_exactly_one_scope_except_health(tmp_path: Pa
             composition.readiness_probe,
         )
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
-    assert len(routes) == 14
+    assert len(routes) == 16
     for route in routes:
         declared = (route.openapi_extra or {}).get("required_scope")
         if route.path in {"/health/live", "/health/ready"}:
@@ -425,6 +427,7 @@ async def test_cross_tenant_resource_routes_return_404(tmp_path: Path) -> None:
         async with _client(composition, principal=foreign) as client:
             requests = [
                 ("GET", f"/v1/sessions/{session_id}", None),
+                ("DELETE", f"/v1/sessions/{session_id}", None),
                 (
                     "POST",
                     f"/v1/sessions/{session_id}/messages",
@@ -452,6 +455,50 @@ async def test_cross_tenant_resource_routes_return_404(tmp_path: Path) -> None:
                 response = await client.request(method, path, json=body)
                 assert response.status_code == 404, (method, path, response.text)
                 assert response.json()["error"]["code"] == "not_found"
+
+
+async def test_session_index_and_delete_are_authoritative_and_idempotent(
+    tmp_path: Path,
+) -> None:
+    async with _composition(tmp_path) as composition, _client(composition) as client:
+        first = await _create_session(client)
+        second, run_id, approval_id, artifact_id = await _create_resources(composition, client)
+
+        first_page = await client.get("/v1/sessions?limit=1")
+        assert first_page.status_code == 200
+        assert len(first_page.json()["items"]) == 1
+        cursor = first_page.json()["next_cursor"]
+        assert cursor is not None
+        invalid_cursor = await client.get(
+            "/v1/sessions", params={"limit": 1, "cursor": f"{cursor}!"}
+        )
+        assert invalid_cursor.status_code == 400
+        second_page = await client.get("/v1/sessions", params={"limit": 1, "cursor": cursor})
+        assert second_page.status_code == 200
+        listed = {
+            UUID(first_page.json()["items"][0]["id"]),
+            UUID(second_page.json()["items"][0]["id"]),
+        }
+        assert listed == {first, second}
+        full_index = await client.get("/v1/sessions")
+        indexed = {UUID(row["id"]): row for row in full_index.json()["items"]}
+        assert indexed[second]["last_run_id"] == str(run_id)
+
+        deleted = await client.delete(f"/v1/sessions/{second}")
+        assert deleted.status_code == 204
+        assert (await client.delete(f"/v1/sessions/{second}")).status_code == 204
+
+        remaining = await client.get("/v1/sessions")
+        assert [UUID(row["id"]) for row in remaining.json()["items"]] == [first]
+        for path in (
+            f"/v1/sessions/{second}",
+            f"/v1/runs/{run_id}",
+            f"/v1/approvals/{approval_id}",
+            f"/v1/artifacts/{artifact_id}",
+        ):
+            response = await client.get(path)
+            assert response.status_code == 404, (path, response.text)
+        assert not list(composition.settings.artifact_root.rglob(f"*{artifact_id}*"))
 
 
 def test_transient_sse_frames_and_heartbeats_have_no_id() -> None:
@@ -594,6 +641,12 @@ async def test_ask_user_suspends_and_input_resumes_the_same_run(tmp_path: Path) 
         run_id = UUID(submitted.json()["run_id"])
         waiting = await client.get(f"/v1/runs/{run_id}")
         assert waiting.json()["status"] == "WAITING_FOR_USER"
+        blocked_delete = await client.delete(f"/v1/sessions/{session_id}")
+        assert blocked_delete.status_code == 409
+        assert blocked_delete.json()["error"]["details"] == {
+            "reason": "active_run_exists",
+            "run_id": str(run_id),
+        }
         events = await composition.runs.events(run_id)
         waiting_event = next(
             event for event in events if event.event_type == "run.waiting_for_user"

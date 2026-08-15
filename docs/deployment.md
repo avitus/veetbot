@@ -31,7 +31,7 @@ static + contract + integration + sandbox
       current symlink + systemd restart
                     |
                     v
- release.sh: local release header
+ release.sh: local release header + API contract probe
                     |
                     v
  CircleCI: public release header
@@ -48,8 +48,10 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 6. applies `alembic upgrade head` and runs the production preflight;
 7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
    restarts all three systemd units;
-8. requires every process to run from the promoted directory and the local
-   readiness probe to return `X-Veetbot-Release: <release-id>`; and
+8. requires the local readiness probe to return
+   `X-Veetbot-Release: <release-id>`, makes an authenticated request to the
+   authoritative session index, and requires every process to run from the
+   promoted directory; and
 9. retains the five newest valid releases.
 
 A successful server release returns control to CircleCI, which polls the public
@@ -199,9 +201,10 @@ The Nginx installer stores the prior Veetbot configuration under
 `/etc/nginx/veetbot-backups`, runs `nginx -t`, and reloads Nginx. Validation or
 reload failure restores the prior file. So does a failure while installing the
 candidate file or activating its symlink. `deploy/app/release.sh` requires the
-local readiness header to identify the staged release; after it returns,
-CircleCI polls the public readiness endpoint for that exact identity. A public
-probe failure is therefore a post-promotion CircleCI failure boundary.
+local readiness header to identify the staged release and the authenticated
+session-index route to respond successfully; after it returns, CircleCI polls
+the public readiness endpoint for that exact identity. A public probe failure
+is therefore a post-promotion CircleCI failure boundary.
 
 The manual and nightly `live-model` workflows remain tests; they do not deploy.
 

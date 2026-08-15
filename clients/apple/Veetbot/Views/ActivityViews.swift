@@ -25,15 +25,15 @@ struct ToolActivityCard: View {
                     Image(systemName: taxonomy.icon)
                         .foregroundColor(taxonomy.color)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(activity.name).font(.headline)
+                        Text(activity.name).appFont(.headline)
                         Text(activity.status.rawValue.capitalized)
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundColor(taxonomy.color)
                     }
                     Spacer()
                     if let risk = activity.risk {
                         Text(risk.rawValue.uppercased())
-                            .font(.caption2.bold())
+                            .appFont(.caption, weight: .semibold)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                             .background(taxonomy.color.opacity(0.14))
@@ -83,8 +83,8 @@ struct ApprovalCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("Approval checkpoint", systemImage: "hand.raised.fill")
-                .font(.headline)
-                .foregroundColor(.orange)
+                .appFont(.headline)
+                .foregroundColor(AppTheme.orange)
             Text(approval.actionSummary)
             if let toolName = approval.toolName {
                 KeyValueRow(key: "Tool", value: toolName)
@@ -109,15 +109,15 @@ struct ApprovalCard: View {
                 }
             } else {
                 Text("Resolved: \(approval.decision?.rawValue ?? approval.status.displayName)")
-                    .font(.caption)
+                    .appFont(.caption)
                     .foregroundColor(.secondary)
             }
         }
         .padding(12)
-        .background(Color.orange.opacity(0.08))
+        .background(AppTheme.orange.opacity(0.08))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.orange.opacity(0.45))
+                .stroke(AppTheme.orange.opacity(0.45))
         )
     }
 }
@@ -131,8 +131,8 @@ struct ClarifyingQuestionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Clarifying question", systemImage: "questionmark.bubble.fill")
-                .font(.headline)
-                .foregroundColor(.blue)
+                .appFont(.headline)
+                .foregroundColor(AppTheme.turquoise)
             Text(prompt.question)
             TextField("Your answer", text: $answer)
             Button("Answer") {
@@ -152,10 +152,10 @@ struct ClarifyingQuestionCard: View {
             )
         }
         .padding(12)
-        .background(Color.blue.opacity(0.08))
+        .background(AppTheme.turquoise.opacity(0.08))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.blue.opacity(0.4))
+                .stroke(AppTheme.turquoise.opacity(0.4))
         )
     }
 }
@@ -172,7 +172,9 @@ struct WorkingStatePanel: View {
                 }
                 if !state.tasks.isEmpty {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Tasks").font(.caption.bold()).foregroundColor(.secondary)
+                        Text("Tasks")
+                            .appFont(.caption, weight: .semibold)
+                            .foregroundColor(.secondary)
                         ForEach(state.tasks) { task in
                             Label(task.description, systemImage: icon(for: task.status))
                         }
@@ -180,7 +182,9 @@ struct WorkingStatePanel: View {
                 }
                 if !state.establishedFacts.isEmpty {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Facts").font(.caption.bold()).foregroundColor(.secondary)
+                        Text("Facts")
+                            .appFont(.caption, weight: .semibold)
+                            .foregroundColor(.secondary)
                         ForEach(state.establishedFacts) { fact in
                             Text("• \(fact.statement)")
                         }
@@ -193,7 +197,7 @@ struct WorkingStatePanel: View {
             .padding(.top, 8)
         } label: {
             Label("Working state", systemImage: "checklist")
-                .font(.headline)
+                .appFont(.headline)
         }
         .padding(12)
         .background(Color.secondary.opacity(0.06))
@@ -218,11 +222,13 @@ private struct ToolResultContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Result").font(.caption.bold()).foregroundColor(.secondary)
+                Text("Result")
+                    .appFont(.caption, weight: .semibold)
+                    .foregroundColor(.secondary)
                 Spacer()
                 if let trust = result.trust {
                     Text(trust.rawValue.replacingOccurrences(of: "_", with: " ").uppercased())
-                        .font(.caption2)
+                        .appFont(.caption)
                         .foregroundColor(trust == .externalUntrusted ? .orange : .secondary)
                 }
             }
@@ -275,7 +281,7 @@ private struct ToolResultContent: View {
                     .foregroundColor(.secondary)
             }
         }
-        .font(.system(.caption, design: .monospaced))
+        .appCodeFont()
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.black.opacity(0.88))
@@ -289,7 +295,7 @@ private struct ToolResultContent: View {
             result.structured?["content"]?.stringValue
             ?? result.content.compactMap(\.text).joined(separator: "\n")
         return Text(text)
-            .font(.system(.caption, design: .monospaced))
+            .appCodeFont()
             .padding(10)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.secondary.opacity(0.08))
@@ -304,9 +310,11 @@ struct DetailBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption.bold()).foregroundColor(.secondary)
+            Text(title)
+                .appFont(.caption, weight: .semibold)
+                .foregroundColor(.secondary)
             Text(text)
-                .font(.system(.caption, design: .monospaced))
+                .appCodeFont()
                 .textSelection(.enabled)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -319,9 +327,9 @@ private struct KeyValueRow: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(key).font(.caption).foregroundColor(.secondary)
+            Text(key).appFont(.caption).foregroundColor(.secondary)
             Spacer()
-            Text(value).font(.caption)
+            Text(value).appFont(.caption)
         }
     }
 }
@@ -348,7 +356,7 @@ private struct TaxonomyStyle {
         case .high: color = .orange
         case .medium: color = .yellow
         case .low: color = .green
-        case nil: color = .secondary
+        case nil: color = AppTheme.turquoise
         }
     }
 }
