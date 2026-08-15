@@ -33,6 +33,25 @@ import Testing
     }
 
     @Test
+    func testNormalizesCarriageReturnLineEndingsBeforeParsingTables() {
+        let expected: [MarkdownContentBlock] = [
+            .table(
+                MarkdownTable(
+                    headers: ["Name", "Value"],
+                    alignments: [.leading, .trailing],
+                    rows: [["Alpha", "12"]]
+                )
+            )
+        ]
+
+        let crlf = "| Name | Value |\r\n| --- | ---: |\r\n| Alpha | 12 |"
+        let carriageReturn = "| Name | Value |\r| --- | ---: |\r| Alpha | 12 |"
+
+        #expect(MarkdownContentParser.parse(crlf) == expected)
+        #expect(MarkdownContentParser.parse(carriageReturn) == expected)
+    }
+
+    @Test
     func testPipesInsideCodeAndEscapedPipesStayInsideCells() throws {
         let blocks = MarkdownContentParser.parse(
             """

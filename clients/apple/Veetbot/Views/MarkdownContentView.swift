@@ -52,7 +52,10 @@ indirect enum MarkdownContentBlock: Equatable, Sendable {
 
 enum MarkdownContentParser {
     static func parse(_ text: String) -> [MarkdownContentBlock] {
-        parseLines(text.components(separatedBy: "\n"))
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        return parseLines(normalized.components(separatedBy: "\n"))
     }
 
     private static func parseLines(_ lines: [String]) -> [MarkdownContentBlock] {
