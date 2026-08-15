@@ -74,9 +74,11 @@ repeated cursor as an invalid response, and reconciles that complete index after
 connecting, whenever it returns to the foreground, and every 30 seconds while
 it remains open. Server
 sessions are inserted or refreshed and local rows absent from the authoritative
-index are verified with a scoped point read before they are pruned. That point
-read prevents activity-driven movement between keyset pages from looking like a
-deletion. Confirmed pruning also clears the process-local artifact cache.
+index are verified with scoped point reads under a bounded concurrency limit
+before they are pruned. Those point reads prevent activity-driven movement
+between keyset pages from looking like a deletion without serializing a large
+history into one request per round trip. Confirmed pruning also clears the
+process-local artifact cache.
 Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.

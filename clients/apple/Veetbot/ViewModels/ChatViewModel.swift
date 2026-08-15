@@ -6,6 +6,51 @@ public struct LoadedArtifact: Sendable {
     public let data: Data
 }
 
+private enum MissingSessionResolution: Sendable {
+    case found(SessionView)
+    case deleted(UUID)
+}
+
+private func resolveMissingSession(
+    _ sessionID: UUID,
+    using api: VeetbotAPIClient
+) async throws -> MissingSessionResolution {
+    do {
+        return .found(try await api.getSession(sessionID))
+    } catch let error as HTTPTransportError {
+        if case .api(let apiError) = error, apiError.statusCode == 404 {
+            return .deleted(sessionID)
+        }
+        throw error
+    }
+}
+
+private func resolveMissingSessions(
+    _ sessionIDs: Set<UUID>,
+    using api: VeetbotAPIClient,
+    maximumConcurrency: Int = 8
+) async throws -> [MissingSessionResolution] {
+    let orderedIDs = sessionIDs.sorted { $0.uuidString < $1.uuidString }
+    let concurrency = min(max(1, maximumConcurrency), orderedIDs.count)
+    return try await withThrowingTaskGroup(of: MissingSessionResolution.self) { group in
+        for sessionID in orderedIDs.prefix(concurrency) {
+            group.addTask { try await resolveMissingSession(sessionID, using: api) }
+        }
+        var nextIndex = concurrency
+        var resolutions: [MissingSessionResolution] = []
+        resolutions.reserveCapacity(orderedIDs.count)
+        while let resolution = try await group.next() {
+            resolutions.append(resolution)
+            if nextIndex < orderedIDs.count {
+                let sessionID = orderedIDs[nextIndex]
+                nextIndex += 1
+                group.addTask { try await resolveMissingSession(sessionID, using: api) }
+            }
+        }
+        return resolutions
+    }
+}
+
 @MainActor
 public final class ChatViewModel: ObservableObject {
     @Published public private(set) var history: [SessionHistoryEntry] = []
@@ -86,6 +131,10 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func newSession() {
+        resetSelectedSession()
+    }
+
+    private func resetSelectedSession() {
         selectionRequestID = nil
         watchTasks.cancel()
         selectedSessionID = nil
@@ -183,42 +232,12 @@ public final class ChatViewModel: ObservableObject {
         let locallyKnownAtStart = Set(history.map(\.sessionID))
         var cursor: String?
         var seenCursors: Set<String> = []
-        var serverSessions: [SessionView] = []
+        var serverIDs: Set<UUID> = []
         repeat {
             let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
-            serverSessions.append(contentsOf: page.items)
-            cursor = try Self.nextHistoryCursor(page.nextCursor, seen: &seenCursors)
-        } while cursor != nil
-        guard historyReconciliationID == reconciliationID else { return }
-
-        let serverIDs = Set(serverSessions.map(\.id))
-        for session in serverSessions
-        where !removedHistorySessionIDs.contains(session.id)
-            && !deletingHistorySessionIDs.contains(session.id)
-        {
-            guard historyReconciliationID == reconciliationID else { return }
-            let existing = history.first { $0.sessionID == session.id }
-            let entry = Self.mergedHistoryEntry(
-                session: session,
-                existing: existing,
-                lastRunID: session.lastRunID,
-                suggestedTitle: nil,
-                touchedAt: session.updatedAt
-            )
-            guard historyReconciliationID == reconciliationID else { return }
-            try await historyStore.upsert(entry)
-            guard historyReconciliationID == reconciliationID else {
-                await discardSuccessfullyDeletedHistory()
-                return
-            }
-        }
-        var prunedHistory = false
-        for sessionID in locallyKnownAtStart.subtracting(serverIDs) {
-            guard historyReconciliationID == reconciliationID else { return }
-            do {
-                let session = try await api.getSession(sessionID)
-                guard historyReconciliationID == reconciliationID else { return }
+            for session in page.items {
+                serverIDs.insert(session.id)
                 guard !removedHistorySessionIDs.contains(session.id),
                     !deletingHistorySessionIDs.contains(session.id)
                 else { continue }
@@ -230,32 +249,54 @@ public final class ChatViewModel: ObservableObject {
                     suggestedTitle: nil,
                     touchedAt: session.updatedAt
                 )
-                guard historyReconciliationID == reconciliationID else { return }
                 try await historyStore.upsert(entry)
                 guard historyReconciliationID == reconciliationID else {
                     await discardSuccessfullyDeletedHistory()
                     return
                 }
-            } catch let error as HTTPTransportError {
+            }
+            cursor = try Self.nextHistoryCursor(page.nextCursor, seen: &seenCursors)
+        } while cursor != nil
+
+        let missingResolutions = try await resolveMissingSessions(
+            locallyKnownAtStart.subtracting(serverIDs),
+            using: api
+        )
+        guard historyReconciliationID == reconciliationID else { return }
+        var prunedHistory = false
+        for resolution in missingResolutions {
+            switch resolution {
+            case .found(let session):
+                guard !removedHistorySessionIDs.contains(session.id),
+                    !deletingHistorySessionIDs.contains(session.id)
+                else { continue }
+                let existing = history.first { $0.sessionID == session.id }
+                let entry = Self.mergedHistoryEntry(
+                    session: session,
+                    existing: existing,
+                    lastRunID: session.lastRunID,
+                    suggestedTitle: nil,
+                    touchedAt: session.updatedAt
+                )
+                try await historyStore.upsert(entry)
+                guard historyReconciliationID == reconciliationID else {
+                    await discardSuccessfullyDeletedHistory()
+                    return
+                }
+            case .deleted(let sessionID):
+                try await historyStore.delete(sessionID: sessionID)
                 guard historyReconciliationID == reconciliationID else { return }
-                if case .api(let apiError) = error, apiError.statusCode == 404 {
-                    guard historyReconciliationID == reconciliationID else { return }
-                    try await historyStore.delete(sessionID: sessionID)
-                    guard historyReconciliationID == reconciliationID else { return }
-                    prunedHistory = true
-                    if selectedSessionID == sessionID { newSession() }
-                } else {
-                    throw error
+                prunedHistory = true
+                if selectedSessionID == sessionID {
+                    resetSelectedSession()
                 }
             }
         }
-        guard historyReconciliationID == reconciliationID else { return }
         let reconciledHistory = try await historyStore.list()
         guard historyReconciliationID == reconciliationID else { return }
         history = reconciledHistory
         if prunedHistory {
             await artifactCache.removeAll()
-            guard historyReconciliationID == reconciliationID else { return }
         }
     }
 
@@ -507,14 +548,9 @@ public final class ChatViewModel: ObservableObject {
         baseURL = configuration.baseURL
         do {
             try await reconcileHistory()
-        } catch let error as VeetbotAPIClientError {
+        } catch {
             clearInstalledConnection()
             throw error
-        } catch let error as HTTPTransportError {
-            if case .reauthenticationRequired = error {
-                clearInstalledConnection()
-                throw error
-            }
         }
         isConfigured = true
     }

@@ -33,6 +33,9 @@ title: Changelog
   rejections their own stable tool reason code.
 - Required initial history compatibility and authentication checks to succeed
   before connection settings report success or dismiss their form.
+- Made initial reconciliation fail closed for every error, streamed server pages
+  into the local history cache, and bounded parallel verification of locally
+  missing sessions.
 - Proposed ADR-0050 for the two-route post-Milestone 9 extension and its
   deletion, synchronization, and artifact-lifecycle boundaries.
 

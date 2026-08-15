@@ -83,6 +83,28 @@ import Testing
         #expect(model.errorMessage == "expired")
     }
 
+    @Test
+    func testConfigureFailsOnAnyOtherInitialHistoryError() async throws {
+        let model = try configuredModel { request in
+            try response(
+                for: request,
+                statusCode: 500,
+                body: #"{"error":{"code":"internal_error","message":"temporarily unavailable","details":{},"request_id":"server-error"}}"#
+            )
+        }
+        defer { ChatViewModelURLProtocol.handler = nil }
+
+        let configured = await model.configure(
+            baseURLString: "https://veetbot.test",
+            token: "replacement-token"
+        )
+
+        #expect(configured == false)
+        #expect(model.isConfigured == false)
+        #expect(model.baseURL == nil)
+        #expect(model.errorMessage == "temporarily unavailable")
+    }
+
     private func configuredModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
