@@ -137,6 +137,14 @@ async def test_postgres_session_titles_persist_and_legacy_rows_derive_from_histo
 
         recovered = await client.get(f"/v1/sessions/{session_id}")
         assert recovered.json()["title"] == "Restore this conversation"
+        async with composition.uow_factory() as uow:
+            database_session = cast(PostgresUnitOfWork, uow)._session
+            assert database_session is not None
+            persisted_title = await database_session.scalar(
+                select(SessionRow.title).where(SessionRow.id == session_id)
+            )
+        assert persisted_title == "Restore this conversation"
+
         index = await client.get("/v1/sessions")
         listed = {UUID(row["id"]): row for row in index.json()["items"]}
         assert listed[session_id]["title"] == "Restore this conversation"

@@ -72,10 +72,12 @@ Application Support file behind the same store protocol. Both contain only
 client follows pagination until the server returns no next cursor, rejects a
 repeated cursor as an invalid response, and reconciles that complete index after
 connecting, whenever it returns to the foreground, and every 30 seconds while
-it remains open. The first submitted text provides an optimistic local title,
-but the server stores the authoritative normalized title and recovers titles for
-older sessions from their first user-message event. Moving to a new machine
-therefore does not turn established conversations into `New conversation` rows.
+it remains open. The first top-level user message provides an optimistic local
+title from its first non-empty text block; if that message has no non-empty text
+block, the title remains unset. The server stores the authoritative normalized
+title and recovers titles for older sessions from their first user-message
+event. Moving to a new machine therefore does not turn established
+conversations into `New conversation` rows.
 Server sessions are inserted or refreshed and local rows absent from the
 authoritative index are verified with scoped point reads under a bounded
 concurrency limit before they are pruned. Those point reads prevent

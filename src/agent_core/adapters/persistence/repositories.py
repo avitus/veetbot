@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import Text, delete, func, select, update
+from sqlalchemy import Text, case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -224,6 +224,27 @@ class PostgresSessionRepository:
             for session_id, payload in rows
             if (title := self._title_from_event_payload(payload)) is not None
         }
+        if titles:
+            await self._session.execute(
+                update(SessionRow)
+                .where(
+                    SessionRow.id.in_(titles),
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    SessionRow.title.is_(None),
+                )
+                .values(title=case(titles, value=SessionRow.id))
+            )
+            stored_rows = (
+                await self._session.execute(
+                    select(SessionRow.id, SessionRow.title).where(
+                        SessionRow.id.in_(titles),
+                        SessionRow.tenant_id == principal.tenant_id,
+                        SessionRow.principal_id == principal.principal_id,
+                    )
+                )
+            ).all()
+            titles = {session_id: title for session_id, title in stored_rows if title is not None}
         return [
             session.model_copy(update={"title": titles[session.id]})
             if session.id in titles
