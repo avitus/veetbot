@@ -3,17 +3,52 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Any, cast
 from uuid import UUID
 
 import httpx
+from sqlalchemy import func, select
 
+from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
+from agent_core.adapters.persistence.sqlalchemy_models import (
+    ConsolidationRunRow,
+    ConsolidationWatermarkRow,
+    EventRow,
+    KnowledgeChunkRow,
+    KnowledgeDocumentRow,
+    MemoryRow,
+    RunRow,
+    SessionDeletionArtifactRow,
+    SessionDeletionRow,
+    SessionRow,
+)
+from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.knowledge import (
+    DocumentAuthority,
+    KnowledgeChunk,
+    KnowledgeDocument,
+    KnowledgeIngestPrepared,
+    KnowledgeVisibility,
+)
+from agent_core.domain.memory import (
+    BeliefType,
+    ConsolidationRun,
+    MemoryAuthority,
+    MemoryRecord,
+    MemoryStatus,
+    Portability,
+    Sensitivity,
+)
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn, StopReason
+from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 from agent_core.domain.views import (
     ContentBlock,
     StreamFrame,
@@ -76,6 +111,195 @@ async def test_postgres_submit_idempotency_is_atomic_under_concurrency() -> None
             )
         assert changed.status_code == 409
         assert changed.json()["error"]["details"]["reason"] == "idempotency_key_reused"
+
+
+async def test_postgres_session_delete_cascades_and_clears_artifact_work() -> None:
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        _client(composition) as client,
+    ):
+        session_id = await _create_session(client)
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "delete this everywhere"}]},
+        )
+        run_id = UUID(submitted.json()["run_id"])
+        assert (await client.post(f"/v1/runs/{run_id}/cancel")).status_code == 200
+
+        content = b"session-scoped artifact"
+        artifact = ArtifactRef(
+            id=UUID(int=9100),
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            session_id=session_id,
+            run_id=run_id,
+            name="delete.txt",
+            media_type="text/plain",
+            storage_uri="pending",
+            sha256=hashlib.sha256(content).hexdigest(),
+            size_bytes=len(content),
+            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+            expires_at=composition.clock.now() + timedelta(days=1),
+            created_at=composition.clock.now(),
+        )
+        store = LocalTrajectoryArtifactStore(composition.settings.artifact_root)
+        artifact = await store.write(artifact, content)
+        async with composition.uow_factory() as uow:
+            await uow.trajectory_exports.create(
+                TrajectoryExport(
+                    export_id=UUID(int=9101),
+                    tenant_id=artifact.tenant_id,
+                    principal_id=artifact.principal_id,
+                    run_id=run_id,
+                    artifact=artifact,
+                    builder_version="delete-test",
+                    ruleset_version="delete-test",
+                    created_at=composition.clock.now(),
+                )
+            )
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+            now = composition.clock.now()
+            memory = MemoryRecord(
+                id=UUID(int=9102),
+                tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
+                scope="private",
+                subject="deletion-test",
+                statement="This session-scoped memory must be erased.",
+                source_session_id=session_id,
+                source_event_ids=[events[0].id],
+                confidence=1,
+                sensitivity=Sensitivity.PUBLIC,
+                valid_from=now,
+                status=MemoryStatus.ACTIVE,
+                belief_type=BeliefType.FACT,
+                portability=Portability.PORTABLE,
+                origin_scopes=["private"],
+                last_reinforced_at=now,
+                formation_run_id=run_id,
+                consolidation_policy_version="delete-test",
+                authority=MemoryAuthority.USER,
+                store_position=await uow.memories.next_position(),
+                created_at=now,
+                updated_at=now,
+            )
+            await uow.memories.upsert_belief(memory)
+            await uow.memories.record_consolidation(
+                ConsolidationRun(
+                    id=UUID(int=9103),
+                    tenant_id=composition.principal.tenant_id,
+                    principal_id=composition.principal.principal_id,
+                    trigger="delete-test",
+                    scope="private",
+                    session_id=session_id,
+                    watermark_before=0,
+                    watermark_after=events[-1].sequence,
+                    model="deterministic",
+                    policy_version="delete-test",
+                    candidates_proposed=1,
+                    committed=1,
+                    reinforced=0,
+                    superseded=0,
+                    rejected=0,
+                    started_at=now,
+                    finished_at=now,
+                )
+            )
+            await uow.memories.set_consolidation_watermark(
+                session_id, composition.principal, events[-1].sequence
+            )
+            document_id = UUID(int=9104)
+            document_row_id = UUID(int=9105)
+            chunk_text = "Session-scoped knowledge must also be erased."
+            chunk_digest = hashlib.sha256(chunk_text.encode()).hexdigest()
+            await uow.knowledge.ingest(
+                KnowledgeIngestPrepared(
+                    document=KnowledgeDocument(
+                        row_id=document_row_id,
+                        document_id=document_id,
+                        tenant_id=composition.principal.tenant_id,
+                        ingested_by_principal_id=composition.principal.principal_id,
+                        visibility=KnowledgeVisibility.PRINCIPAL,
+                        title="Deletion test",
+                        source_ref=artifact,
+                        media_type=artifact.media_type,
+                        authority=DocumentAuthority.PRINCIPAL_SUPPLIED,
+                        version=1,
+                        chunker_version="delete-test",
+                        valid_from=now,
+                        ingested_at=now,
+                        sensitivity=Sensitivity.PUBLIC,
+                    ),
+                    chunks=[
+                        KnowledgeChunk(
+                            chunk_id=f"kc_{chunk_digest[:16]}",
+                            document_row_id=document_row_id,
+                            document_id=document_id,
+                            version=1,
+                            ordinal=0,
+                            heading_path=[],
+                            text=chunk_text,
+                            tokens=8,
+                            contains_instruction_like_text=False,
+                            content_sha256=chunk_digest,
+                        )
+                    ],
+                )
+            )
+
+        assert (await client.delete(f"/v1/sessions/{session_id}")).status_code == 204
+        assert (await client.delete(f"/v1/sessions/{session_id}")).status_code == 204
+
+        async with composition.uow_factory() as uow:
+            database_session = cast(PostgresUnitOfWork, uow)._session
+            assert database_session is not None
+            assert await database_session.get(SessionRow, session_id) is None
+            assert (
+                await database_session.scalar(
+                    select(func.count()).select_from(RunRow).where(RunRow.session_id == session_id)
+                )
+                == 0
+            )
+            assert (
+                await database_session.scalar(
+                    select(func.count())
+                    .select_from(EventRow)
+                    .where(EventRow.session_id == session_id)
+                )
+                == 0
+            )
+            assert await database_session.get(SessionDeletionRow, session_id) is not None
+            for model, predicate in (
+                (MemoryRow, MemoryRow.source_session_id == session_id),
+                (ConsolidationRunRow, ConsolidationRunRow.session_id == session_id),
+                (
+                    ConsolidationWatermarkRow,
+                    ConsolidationWatermarkRow.session_id == session_id,
+                ),
+                (
+                    KnowledgeDocumentRow,
+                    KnowledgeDocumentRow.source_artifact_id == artifact.id,
+                ),
+                (
+                    KnowledgeChunkRow,
+                    KnowledgeChunkRow.document_row_id == document_row_id,
+                ),
+            ):
+                assert (
+                    await database_session.scalar(
+                        select(func.count()).select_from(model).where(predicate)
+                    )
+                    == 0
+                )
+            assert (
+                await database_session.scalar(
+                    select(func.count())
+                    .select_from(SessionDeletionArtifactRow)
+                    .where(SessionDeletionArtifactRow.session_id == session_id)
+                )
+                == 0
+            )
+        assert not list(composition.settings.artifact_root.rglob(f"*{artifact.id}*"))
 
 
 async def test_postgres_sse_reconnect_is_gapless_and_duplicate_free() -> None:

@@ -6,7 +6,7 @@ canonical: true
 
 # The HTTP API, the event stream, and what a client can rely on
 
-## Thirteen inherited routes and a response body for one of them
+## The fourteen-route Milestone 5 baseline
 
 Section 16 designs nine endpoints. Three more are named elsewhere —
 `GET /v1/approvals` and `GET /v1/approvals/{id}` in
@@ -42,6 +42,13 @@ adds exactly one route, `GET /v1/sessions/{session_id}`, argued for
 where it is specified. Every other route below is a route the corpus
 already names, and what this document adds to those is shapes, codes,
 orders, and rules.
+
+ADR-0050 later authorizes two post-Milestone 9 additions:
+`GET /v1/sessions` and `DELETE /v1/sessions/{session_id}`. They make the
+current public surface sixteen routes without rewriting the completed
+Milestone 5 baseline or its gate census. The sections labelled as that
+baseline remain historical requirements; the authoritative-history section
+below specifies the current extension.
 
 ## What this document does not change
 
@@ -354,7 +361,9 @@ is not an authorization input.
 | Route | Scope |
 | --- | --- |
 | `POST /v1/sessions` | `session.write` |
+| `GET /v1/sessions` | `session.read` |
 | `GET /v1/sessions/{id}` | `session.read` |
+| `DELETE /v1/sessions/{id}` | `session.write` |
 | `POST /v1/sessions/{id}/messages` | `run.write` |
 | `GET /v1/runs/{id}` | `run.read` |
 | `GET /v1/runs/{id}/events` | `run.read` |
@@ -374,12 +383,11 @@ the session itself. `run.cancel` is separate from `run.write` because a
 surface that may stop work is not necessarily a surface that may start
 it — an operator console is the obvious case.
 
-`session.read` gates reading a session and gates nothing else. It is the
-only row that requires it, and that is the whole reason the string is in
-the vocabulary: a scope that gates no route is a scope nothing checks.
-Hard gate 5 is what keeps the row honest — it walks the route table and
-fails the build on a route that declares no scope — so a route added
-here without a row does not ship open.
+`session.read` gates reading one session and listing the principal's sessions.
+`session.write` gates both creation and authoritative deletion. Hard gate 5 is
+what keeps the rows honest — it walks the route table and fails the build on a
+route that declares no scope — so a route added here without a row does not ship
+open.
 
 `skill.write` is in the vocabulary and in no row of the table, because it
 is checked by the policy engine on a tool call rather than by the API on a
@@ -439,7 +447,8 @@ a comment.
 
 Two values, not more. A session is open or it is finished. There is no
 `ARCHIVED` because nothing in the corpus archives one, and no `DELETED`
-because deletion is not designed.
+because deletion hard-removes the live session row. Its content-free tombstone
+is an idempotency record, not a third session state.
 
 ### `agent_version` is resolved at creation and frozen
 
@@ -491,12 +500,13 @@ readable by a client that kept its own records.
   "id": "uuid",
   "status": "ACTIVE",
   "agent_id": "general",
-  "agent_version": 1,
+  "agent_version": "1",
   "title": null,
   "metadata": {},
   "created_at": "2026-01-01T00:00:00Z",
   "updated_at": "2026-01-01T00:00:00Z",
-  "active_run_id": null
+  "active_run_id": null,
+  "last_run_id": null
 }
 ```
 
@@ -507,9 +517,69 @@ declares — `WHERE status NOT IN ('COMPLETED','FAILED','CANCELLED')` —
 and it is what a reconnecting client needs to decide whether to open a
 stream or submit a message.
 
+`last_run_id` is the most recently created run in the session, whether active
+or terminal, or null if the session has no runs. It lets a history client reopen
+the latest transcript without maintaining an authoritative device-local run
+index.
+
 `next_event_sequence` is not returned. It is an internal allocation
 counter, and a client that reads it will treat it as a stream position,
 which it is not.
+
+### Authoritative history index and deletion
+
+ADR-0050 adds two principal-scoped routes after the completed Milestone 5
+surface:
+
+```http
+GET /v1/sessions?limit=50&cursor=<opaque>
+DELETE /v1/sessions/{session_id}
+```
+
+The list response uses the standard page shape:
+
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "status": "ACTIVE",
+      "agent_id": "general",
+      "agent_version": "1",
+      "title": null,
+      "metadata": {},
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z",
+      "active_run_id": null,
+      "last_run_id": "uuid"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+It is ordered by `updated_at DESC, id DESC` and paginated by that keyset.
+Appending a persisted event advances the session's `updated_at`, so the order
+reflects server-observed conversation activity. The repository applies tenant
+and principal ownership before ordering and limiting; the client cannot supply
+either identifier.
+
+Delete returns `204 No Content` only after the durable session graph is removed.
+A non-terminal run makes deletion unsafe and returns `409 invalid_state` with
+`details.reason = "active_run_exists"` and `details.run_id`; the caller must
+cancel and observe termination first. A missing, cross-tenant, or differently
+owned live session returns `404`. A repeat by the principal who already deleted
+the session returns `204`, based on a content-free ownership tombstone.
+
+The database transaction removes runs, events, checkpoints, projections,
+approvals, invocations, artifact metadata, session recall traces, session-bound
+memory and consolidation records, and knowledge documents sourced from the
+session's artifacts. Published skill revisions survive as separately managed
+resources, with an authoring-run reference detached if necessary. Artifact
+references enter a durable deletion queue in the transaction; the request tries
+to delete external bytes immediately and maintenance retries failures until the
+queue is empty. The permanent tombstone retains only session, tenant, principal,
+and deletion-time identifiers and contains no conversation content.
 
 ## Submitting a message, and the two mechanisms that share the name
 
@@ -1213,10 +1283,11 @@ public.
 
 ## Pagination
 
-One route paginates in 0.1 — `GET /v1/approvals` — and the rule is
-written here rather than in
-[policy-and-approvals.md](policy-and-approvals.md) because the next
-list route will need the same one.
+The Milestone 5 baseline has one paginated route, `GET /v1/approvals`.
+ADR-0050 applies the same rule to the later `GET /v1/sessions` route.
+The rule is written here rather than in
+[policy-and-approvals.md](policy-and-approvals.md) because both list routes
+share it.
 
 ```json
 {
@@ -1244,11 +1315,11 @@ Four rules.
    is null, not when `items` is empty, because the final page can be
    both full and last.
 
-Sort order is `created_at DESC, id DESC` — newest first, with `id` as
-the tiebreaker that makes the key total. A cursor from a different sort
-or a different filter is not detected and produces a wrong-looking page,
-which is acceptable because the client that constructs one is the
-client that took the cursor apart.
+Approvals use `created_at DESC, id DESC`; sessions use
+`updated_at DESC, id DESC`. In both, `id` is the tiebreaker that makes the key
+total. A cursor from a different sort or a different filter is not detected and
+produces a wrong-looking page, which is acceptable because the client that
+constructs one is the client that took the cursor apart.
 
 ## Limits
 
@@ -1304,6 +1375,15 @@ class SessionService(Protocol):
     async def get(
         self, principal: Principal, session_id: UUID,
     ) -> SessionView: ...
+
+    async def list(
+        self, principal: Principal, limit: int,
+        cursor: str | None,
+    ) -> Page[SessionView]: ...
+
+    async def delete(
+        self, principal: Principal, session_id: UUID,
+    ) -> None: ...
 
     async def close(
         self, principal: Principal, session_id: UUID,
@@ -1397,9 +1477,11 @@ process.
 
 ## Milestones
 
-Every route in this document is Milestone 5 work, which is what Section
-21 already says. The table exists because three things this document
-specifies are not routes and land elsewhere.
+The fourteen-route baseline in this document is Milestone 5 work, which is what
+Section 21 already says. The two ADR-0050 routes are separately authorized
+post-Milestone 9 work and do not change a completed milestone's acceptance
+criteria or gate count. The table exists because several things this document
+specifies are not routes or do not land with the baseline.
 
 ```text
 # capability                                milestone
@@ -1408,6 +1490,7 @@ AUTH_MODE dev and token, startup refusal    M5
 error envelope, code table, status map      M5
 request identifiers and trace propagation   M5
 sessions create, read, close                M5
+sessions list and delete                    post-M9 explicit assignment
 submit, HTTP idempotency, routing table     M5
 run read, RunView                           M5
 cancel endpoint, cancel_requested_at        M5
@@ -1444,8 +1527,9 @@ an implementer does not move the DDL forward or the endpoint back.
 8  no route reads a session         GET /v1/sessions/{id} added
 9  five vs six observation points   already reconciled by the loop spec
 10 approval routes at M4 or M5      M5; the service and CLI are M4
-11 added route has no scope row     session.read; the surface is 14
+11 added M5 route has no scope row  session.read; M5 surface is 14
 12 two run column counts, neither   fifteen in §15, twenty-six live
+13 current history routes           session.read/write; current surface is 16
 ```
 
 Row 3 is the one worth expanding, because the readiness review stated
@@ -1607,17 +1691,25 @@ build failure.
 19. **`Principal` is the first argument of every application service
     method.** Authorization visible in the signature is authorization
     that cannot be forgotten.
-20. **`GET /v1/sessions/{id}` is added and nothing else is.** It is
-    the one route a reconnecting client cannot do without, and it
-    exposes no capability a client with its own records lacked.
-21. **The surface this document leaves is fourteen routes.**
-    Thirteen inherited and one added. A document that closes the API
-    at a number closes it at fourteen.
+20. **The Milestone 5 baseline adds only
+    `GET /v1/sessions/{id}`.** It is the one route a reconnecting client
+    could not do without at that milestone, and it exposes no capability a
+    client with its own records lacked.
+21. **The completed Milestone 5 surface is fourteen routes.** Thirteen
+    inherited and one added. ADR-0050 later adds two separately authorized
+    routes; it does not rewrite this historical route census.
 22. **`runs` is twenty-six columns and this returns thirteen.**
     Section 15 declares fifteen and four other documents add eleven.
     A body that withholds half a table should say which half, so that
     the next document to add a column knows it is adding a private
     one unless it says otherwise.
+23. **The current history index is server-authoritative.** Clients may cache
+    `GET /v1/sessions`, but they reconcile and prune from the complete server
+    page set rather than treating local history as a second source of truth.
+24. **Deletion is hard, idempotent, and asynchronous only at the external-byte
+    boundary.** The database graph is gone before `204`; a content-free
+    tombstone makes retries stable; queued artifact references let maintenance
+    finish byte deletion without retaining conversation content.
 
 ## Open questions for review
 
@@ -1636,8 +1728,9 @@ build failure.
    a user answering a question expects; rejecting makes every client
    implement the rule the server already has the state to apply.
 4. Should `GET /v1/runs` exist — a list of runs in a session? It is
-   the obvious next route and nothing in 0.1 needs it, since a client
-   holds its own run identifiers and `active_run_id` covers reconnect.
+   the obvious next route, but the current history client needs only
+   `active_run_id` and `last_run_id`; a complete multi-run transcript browser
+   would need a separately authorized list.
 5. Is fifteen seconds the right heartbeat interval? It is chosen to
    sit under common proxy idle timeouts and is otherwise arbitrary.
 6. Should the event stream be available per session as well as per

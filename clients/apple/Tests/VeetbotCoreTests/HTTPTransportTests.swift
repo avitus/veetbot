@@ -244,6 +244,77 @@ import Testing
         #expect(await client.transport.authorizationState() == .authenticated)
     }
 
+    @Test
+    func testDeleteSessionUsesTheAuthoritativeDeleteRoute() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var captured: URLRequest?
+        StubURLProtocol.handler = { request in
+            lock.withLock { captured = request }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 204, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (response, Data())
+        }
+        let client = try makeClient(token: "valid")
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")
+        )
+
+        try await client.deleteSession(sessionID)
+
+        let request = try #require(lock.withLock { captured })
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.path == "/v1/sessions/\(sessionID.uuidString)")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer valid")
+    }
+
+    @Test
+    func testHistoryRoutesExplainAnOutdatedServer() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 400, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old-server"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.listSessions()
+            Issue.record("expected the session index to require a server upgrade")
+        } catch let error as VeetbotAPIClientError {
+            guard case .serverUpgradeRequired = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+            #expect(error.errorDescription?.contains("Update the server") == true)
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+
+        do {
+            try await client.deleteSession(UUID())
+            Issue.record("expected deletion to require a server upgrade")
+        } catch let error as VeetbotAPIClientError {
+            guard case .serverUpgradeRequired = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
     private func makeClient(token: String) throws -> VeetbotAPIClient {
         let configuration = try ConnectionConfiguration(baseURLString: "https://veetbot.test")
         let sessionConfiguration = URLSessionConfiguration.ephemeral

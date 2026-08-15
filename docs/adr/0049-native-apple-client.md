@@ -11,6 +11,10 @@
   wire contract, secure networking, streaming reducer, local history, and
   agentic interaction surfaces
 
+ADR-0050 later supersedes this ADR's local-history constraint by adding an
+authoritative session index and deletion. The transport-only boundary and the
+local store's status as a nonauthoritative cache remain unchanged.
+
 ## Context
 
 ADR-0047 provided the first downloadable terminal surface and deliberately
@@ -46,7 +50,9 @@ pretending SwiftData is available there.
 7. **Treat local history as a cache.** SwiftData implements the store on iOS
    17+/macOS 14+. An atomic Application Support file implements the same
    nonauthoritative fields on iOS 15–16/macOS 12–13, where SwiftData cannot be
-   linked. Selecting history always refreshes the server session.
+   linked. Selecting history always refreshes the server session. ADR-0050 later
+   adds whole-index reconciliation and server-authoritative deletion without
+   changing this cache boundary.
 8. **Do not expand the server surface for richer tool cards.** The client renders
    content and trust from public events, consumes classification and structured
    result fields when present, and degrades to generic cards when the public
@@ -76,7 +82,8 @@ pretending SwiftData is available there.
   annotations do not make a missing operating-system framework exist.
 - **Store the bearer token in `UserDefaults`:** rejected because preferences are
   not a credential store.
-- **Add a server session-list or tool-invocation-detail route:** deferred because
-  this assignment authorizes a client, not a new public API or milestone.
+- **Add a server session-list or tool-invocation-detail route:** deferred by this
+  assignment. ADR-0050 later authorizes the session list and delete routes; the
+  tool-invocation-detail route remains deferred.
 - **Embed the Python downloadable client:** rejected because a native client can
   use the public protocol directly and should not inherit the server toolchain.

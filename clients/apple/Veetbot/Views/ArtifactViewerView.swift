@@ -78,7 +78,7 @@ public struct ArtifactViewerView: View {
                         countStyle: .file
                     ))
             }
-            .font(.caption)
+            .appFont(.caption)
             .foregroundColor(.secondary)
             .padding(.horizontal)
 
@@ -87,14 +87,14 @@ public struct ArtifactViewerView: View {
                 ScrollView([.horizontal, .vertical]) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text(preview.text)
-                            .font(.system(.body, design: .monospaced))
+                            .appCodeFont(.body)
                             .textSelection(.enabled)
                         if preview.isTruncated {
                             Label(
                                 "Preview truncated. Download the artifact for the full content.",
                                 systemImage: "scissors"
                             )
-                            .font(.caption)
+                            .appFont(.caption)
                             .foregroundColor(.secondary)
                         }
                     }

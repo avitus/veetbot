@@ -30,3 +30,18 @@ def database_settings() -> Settings:
         credentials=MappingProxyType({}),
         interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
     )
+
+
+def memory_settings() -> Settings:
+    """Return deterministic settings for tests that never open PostgreSQL."""
+
+    return Settings(
+        database_url="postgresql+asyncpg://127.0.0.1:1/unused",
+        deployment_mode=DeploymentMode.DEVELOPMENT,
+        auth_mode=AuthMode.DEV,
+        auth_token=None,
+        sandbox=SandboxMechanism.FAKE,
+        config_dir=None,
+        credentials=MappingProxyType({}),
+        interpolation=MappingProxyType({"OPENAI_MODEL": ""}),
+    )

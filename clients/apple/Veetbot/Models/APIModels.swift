@@ -145,6 +145,7 @@ public struct SessionView: Codable, Identifiable, Sendable {
     public let createdAt: Date
     public let updatedAt: Date
     public let activeRunID: UUID?
+    public let lastRunID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case id, status, title, metadata
@@ -153,6 +154,7 @@ public struct SessionView: Codable, Identifiable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case activeRunID = "active_run_id"
+        case lastRunID = "last_run_id"
     }
 }
 

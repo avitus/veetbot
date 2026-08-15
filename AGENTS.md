@@ -108,6 +108,30 @@ As implementation tooling is added in later milestones, this section and
 `make check` must also require formatting, linting, type checking, and tests.
 Do not claim a command works unless it exists in this repository.
 
+## Pull request review gate
+
+A pull request is not ready or mergeable under this project's operating
+contract merely because GitHub reports that it can be merged. Before describing
+a PR as ready or merging it:
+
+Use only the CodeRabbit GitHub PR integration. Never run local CodeRabbit CLI
+reviews; the local service is continually rate-limited and is not the
+authoritative review channel for this project. The required loop is:
+
+1. Wait for CodeRabbit to finish reviewing the current head commit.
+2. Address every CodeRabbit comment, regardless of severity or where CodeRabbit
+   presents it. This includes inline comments, review-summary findings,
+   outside-diff comments, nitpicks, suggestions, and trivial or low-priority
+   observations. Fix each valid finding; when a finding is not applicable,
+   respond with concrete evidence and resolve the conversation.
+3. Push the changes and wait for CodeRabbit to review the new head commit.
+4. Repeat the review, fix, and re-review loop until CodeRabbit reports no further
+   findings of any severity and every review conversation is resolved.
+5. Confirm all required CI checks pass on that same final head commit.
+
+Never call a PR ready, mergeable, approved, or complete while CodeRabbit is
+queued, running, has unresolved comments, or has not reviewed the latest push.
+
 ## Documentation update rules
 
 - Update the **smallest** relevant documentation surface when behavior changes.

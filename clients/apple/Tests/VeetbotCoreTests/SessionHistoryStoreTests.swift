@@ -184,7 +184,8 @@ import Testing
             metadata: [:],
             createdAt: existing.createdAt,
             updatedAt: Date(timeIntervalSince1970: 20),
-            activeRunID: refreshedRunID
+            activeRunID: refreshedRunID,
+            lastRunID: refreshedRunID
         )
 
         let refreshed = ChatViewModel.mergedHistoryEntry(

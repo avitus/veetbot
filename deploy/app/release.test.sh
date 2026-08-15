@@ -75,11 +75,26 @@ write_stub systemctl '
 '
 write_stub curl '
   headers=""
+  request_url=""
   while (($#)); do
-    if [[ "$1" == --dump-header ]]; then headers="$2"; shift 2; else shift; fi
+    if [[ "$1" == --dump-header ]]; then
+      headers="$2"
+      shift 2
+    else
+      request_url="$1"
+      shift
+    fi
   done
-  if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
-  printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" "$VEETBOT_TEST_RELEASE" >"$headers"
+  if [[ -n "$headers" ]]; then
+    printf "curl health\n" >>"$VEETBOT_TEST_LOG"
+    if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
+    printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" "$VEETBOT_TEST_RELEASE" >"$headers"
+  else
+    cat >"$VEETBOT_TEST_AUTH_HEADERS"
+    printf "curl session-index %s\n" "$request_url" >>"$VEETBOT_TEST_LOG"
+    if [[ "${VEETBOT_TEST_FAIL_SESSION_INDEX:-0}" == 1 ]]; then exit 1; fi
+    printf "%s" "${VEETBOT_TEST_SESSION_STATUS:-200}"
+  fi
 '
 
 make_stage() {
@@ -115,13 +130,15 @@ run_release() {
   PATH="$BIN_DIR:$PATH" \
   BASH_ENV=/dev/null \
   VEETBOT_ROOT="$DEPLOY_ROOT" \
-  VEETBOT_ENV_FILE="$ENV_FILE" \
+  VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
   VEETBOT_HEALTH_TIMEOUT_SECS=2 \
   VEETBOT_TEST_LOG="$LOG_FILE" \
+  VEETBOT_TEST_AUTH_HEADERS="$TEST_ROOT/session-index-headers" \
   VEETBOT_TEST_RELEASE="$release_id" \
+  VEETBOT_API_BASE_URL="${VEETBOT_TEST_API_BASE_URL:-http://127.0.0.1:8000/}" \
     "$RELEASE_SCRIPT" "$release_id"
 }
 
@@ -129,6 +146,15 @@ if run_release invalid-release >/dev/null 2>&1; then
   printf 'invalid release id unexpectedly succeeded\n' >&2
   exit 1
 fi
+
+invalid_base_id="20260810-152230-abcde00"
+if VEETBOT_TEST_API_BASE_URL='https://api.example.test/v1?tenant=test' \
+  run_release "$invalid_base_id" >"$TEST_ROOT/invalid-base.out" 2>&1; then
+  printf 'release with a query-bearing API base URL unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq 'VEETBOT_API_BASE_URL must be an HTTP(S) URL without a query or fragment' \
+  "$TEST_ROOT/invalid-base.out"
 
 for old_revision in 0000001 0000002 0000003; do
   mkdir -p "$DEPLOY_ROOT/releases/20260809-12000${old_revision: -1}-$old_revision"
@@ -146,6 +172,11 @@ grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
 grep -Fq 'systemctl restart veetbot-maintenance veetbot-worker veetbot-api' "$LOG_FILE"
+grep -Fq 'curl session-index' "$LOG_FILE"
+grep -Fq 'curl session-index http://127.0.0.1:8000/v1/sessions?limit=1' "$LOG_FILE"
+auth_scheme='Bearer'
+grep -Fxq "Authorization: $auth_scheme synthetic-test-token" \
+  "$TEST_ROOT/session-index-headers"
 [[ ! -d "$DEPLOY_ROOT/releases/20260809-120001-0000001" ]]
 
 if run_release "$release_id" >"$TEST_ROOT/active.out" 2>&1; then
@@ -165,6 +196,46 @@ fi
 grep -Fq 'refusing stale release' "$TEST_ROOT/stale.out"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 
+no_auth_env="$TEST_ROOT/no-auth.env"
+grep -v '^AUTH_TOKEN=' "$ENV_FILE" >"$no_auth_env"
+no_auth_id="20260810-152238-0000000"
+make_stage "$no_auth_id"
+if VEETBOT_TEST_ENV_FILE="$no_auth_env" run_release "$no_auth_id" \
+  >"$TEST_ROOT/no-auth.out" 2>&1; then
+  printf 'release without an API probe token unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ ! -e "$DEPLOY_ROOT/releases/$no_auth_id" ]]
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
+grep -Fq 'AUTH_TOKEN is required for the API contract probe' "$TEST_ROOT/no-auth.out"
+
+unsupported_id="20260810-152239-bcdef00"
+make_stage "$unsupported_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$unsupported_id" "$PROCESS_ROOT/4242/cwd"
+if VEETBOT_TEST_FAIL_SESSION_INDEX=1 run_release "$unsupported_id" \
+  >"$TEST_ROOT/unsupported.out" 2>&1; then
+  printf 'release without the session index unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ -d "$DEPLOY_ROOT/releases/$unsupported_id" ]]
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$unsupported_id" ]]
+grep -Fq 'promoted API does not expose the authoritative session index' \
+  "$TEST_ROOT/unsupported.out"
+
+redirect_id="20260810-152241-bcdef02"
+make_stage "$redirect_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$redirect_id" "$PROCESS_ROOT/4242/cwd"
+if VEETBOT_TEST_SESSION_STATUS=302 run_release "$redirect_id" \
+  >"$TEST_ROOT/redirect.out" 2>&1; then
+  printf 'release with a redirecting session index unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ -d "$DEPLOY_ROOT/releases/$redirect_id" ]]
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$redirect_id" ]]
+grep -Fq 'promoted API session index returned HTTP 302' "$TEST_ROOT/redirect.out"
+
 failed_id="20260810-152244-bcdef01"
 make_stage "$failed_id"
 if VEETBOT_TEST_FAIL_UV=1 run_release "$failed_id" >/dev/null 2>&1; then
@@ -172,7 +243,7 @@ if VEETBOT_TEST_FAIL_UV=1 run_release "$failed_id" >/dev/null 2>&1; then
   exit 1
 fi
 [[ ! -e "$DEPLOY_ROOT/releases/$failed_id" ]]
-[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
+[[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$redirect_id" ]]
 
 unhealthy_id="20260810-152255-cdef012"
 make_stage "$unhealthy_id"
@@ -185,7 +256,7 @@ if VEETBOT_TEST_FAIL_HEALTH=1 run_release "$unhealthy_id" \
 fi
 [[ -d "$DEPLOY_ROOT/releases/$unhealthy_id" ]]
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$unhealthy_id" ]]
-grep -Fq "manual rollback target: $DEPLOY_ROOT/releases/$release_id" \
+grep -Fq "manual rollback target: $DEPLOY_ROOT/releases/$redirect_id" \
   "$TEST_ROOT/unhealthy.out"
 
 equal_timestamp_id="20260810-152255-0000000"

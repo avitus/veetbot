@@ -889,7 +889,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:3332` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:3369` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
@@ -1218,9 +1218,9 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:391` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:723` cited `engineering-plan.md:2690` for the
+`readiness.md:725` cited `engineering-plan.md:2727` for the
 version-pinning acceptance criterion, which is at
-`engineering-plan.md:2696`; the line it named is an MCP
+`engineering-plan.md:2733`; the line it named is an MCP
 trust-labelling bullet. The ADR and the questions file are
 historical records and are not edited. The two live statements are.
 Both numbers moved by two after an `#### Acceptance criteria` heading
@@ -1491,8 +1491,9 @@ the authoring loop.
    only tenant-scoped resource with a sub-tenant owner.
 3. Should there be a catalog surface — `GET /v1/skills`, or an
    `agent skill` command? Neither exists here, deliberately: the
-   route table is fourteen routes and the CLI is twelve commands,
-   both closed for 0.1, and the substrate needs neither. But an
+   Milestone 5 route table was fourteen routes and the CLI is twelve commands,
+   both closed for 0.1, and the substrate needs neither. ADR-0050's later
+   session list and delete routes do not add a skill catalog. But an
    operator who has to read PostgreSQL to find out what an agent
    knows will not audit it, and the authoring milestone makes that
    worse rather than better. The likely answer is a CLI command at

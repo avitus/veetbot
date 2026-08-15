@@ -1792,7 +1792,7 @@ Do not store artifact bytes in PostgreSQL.
 
 ## 16. API contract
 
-The detailed design - the fourteen routes and a response body for each of them, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. The nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
+The detailed design - the fourteen-route Milestone 5 baseline and a response body for each route, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. ADR-0050 separately authorizes the post-Milestone 9 session-list and session-delete routes, bringing the current surface to sixteen without rewriting the completed Milestone 5 acceptance criteria. The original nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
 
 ### Authentication
 
@@ -1828,6 +1828,43 @@ Response:
   "agent_version": 1
 }
 ```
+
+#### List sessions
+
+```http
+GET /v1/sessions?limit=50&cursor=<opaque>
+```
+
+The server is authoritative for conversation history. Return a keyset-paginated
+page of the authenticated principal's sessions ordered by
+`updated_at DESC, id DESC`. Each session view includes `active_run_id` and
+`last_run_id`. Appending a persisted conversation event advances the session's
+`updated_at`; client selection does not. Tenant and principal identity come only
+from authentication, never from request parameters.
+
+#### Delete session everywhere
+
+```http
+DELETE /v1/sessions/{session_id}
+```
+
+Return `204 No Content` after removing the authoritative session graph. Reject
+a session with a non-terminal run as `409 invalid_state` with the run identifier;
+the caller must cancel and observe termination before deleting. Missing,
+cross-tenant, and differently owned sessions return `404`. Repeating a completed
+delete as the same principal returns `204` from a content-free ownership
+tombstone.
+
+Deletion removes conversation events, runs, checkpoints, projections,
+approvals, invocation and artifact metadata, session-bound memory and recall
+records, and knowledge derived from the session's artifacts. External artifact
+bytes are placed in a durable deletion queue within the transaction, attempted
+immediately, and retried by maintenance. Published skill revisions are separate
+managed resources and retain their content with any deleted authoring-run
+reference detached. A client deletes its local cache only after this route
+succeeds and reconciles history from the list route on connect, foreground
+entry, and periodically while open.
+
 #### Submit message
 
 ```http
@@ -2561,7 +2598,7 @@ The persistence design for this milestone - the observation-not-durability contr
 
 Version 0.1 may be considered minimally usable after this milestone, but sandbox execution and artifact support are still required for the full target.
 
-[http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028 expand every item in the implement list above and give each of the seven acceptance criteria something to test against: a request shape, a response shape, a status code, a required scope, and an error mapping for each of fourteen routes rather than nine; the code list the error envelope needed; request identifiers with a stated provenance and a stated relationship to the trace identifier; `Idempotency-Key` separated from the Milestone 1 tool-call port it shares a name with; authentication specified at what it produces rather than only at what it refuses; and the cross-process half of cancellation, which is that the endpoint writes `runs.cancel_requested_at` - the worker half was already specified. Ten hard gates land here, every gate that document declares, taking this milestone from one registered invariant to eleven. One route is added: `GET /v1/sessions/{session_id}`, so that a client reconnecting with only a session identifier can find its active run.
+[http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028 expand every item in the implement list above and give each of the seven acceptance criteria something to test against: a request shape, a response shape, a status code, a required scope, and an error mapping for each of the fourteen Milestone 5 baseline routes rather than nine; the code list the error envelope needed; request identifiers with a stated provenance and a stated relationship to the trace identifier; `Idempotency-Key` separated from the Milestone 1 tool-call port it shares a name with; authentication specified at what it produces rather than only at what it refuses; and the cross-process half of cancellation, which is that the endpoint writes `runs.cancel_requested_at` - the worker half was already specified. Ten hard gates land here, every gate that document declares, taking this milestone from one registered invariant to eleven. One route is added within that milestone: `GET /v1/sessions/{session_id}`, so that a client reconnecting with only a session identifier can find its active run. ADR-0050's two later routes are separately authorized post-Milestone 9 work and do not change this completed milestone's census or acceptance evidence.
 
 "Cancellation reaches the worker" is specified in [runtime-loop.md](runtime-loop.md) and ADR-0023 as one `CancellationToken` per run, observed at six points and shared by the loop, the tool executor, and the sandbox, with the rule that a cancellation observed after a call's `effect_sent_at` watermark is set completes the disposition rather than abandoning a half-sent side effect. That document proposes splitting cancellation across Milestones 1, 4, and 5 rather than introducing it whole here, and records the split as an open question, since collapsing it back into this milestone is cheap and introducing it late is not.
 

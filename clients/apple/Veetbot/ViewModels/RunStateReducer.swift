@@ -44,6 +44,18 @@ public struct ToolActivity: Identifiable, Sendable {
     public var id: String { callID }
 }
 
+public enum ConversationActivity: Identifiable, Sendable {
+    case message(TimelineItem)
+    case tool(ToolActivity)
+
+    public var id: String {
+        switch self {
+        case .message(let item): "message:\(item.id)"
+        case .tool(let activity): "tool:\(activity.id)"
+        }
+    }
+}
+
 public struct ClarifyingQuestionPrompt: Identifiable, Sendable {
     public let questionID: UUID
     public let runID: UUID
@@ -68,11 +80,25 @@ public final class RunStateReducer: ObservableObject {
     private var streamingMessageID: String?
     private var toolIndex: [String: Int] = [:]
     private var pendingApprovalIDs: Set<UUID> = []
+    private var activityOrder: [ConversationActivityReference] = []
 
     public init() {}
 
     public var isRunActive: Bool { runStatus?.isActive == true }
     public var needsApprovalIDs: [UUID] { Array(pendingApprovalIDs) }
+    public var activityTimeline: [ConversationActivity] {
+        activityOrder.compactMap { reference in
+            switch reference {
+            case .message(let id):
+                return timeline.first(where: { $0.id == id }).map(ConversationActivity.message)
+            case .tool(let callID):
+                guard let index = toolIndex[callID], tools.indices.contains(index) else {
+                    return nil
+                }
+                return .tool(tools[index])
+            }
+        }
+    }
 
     public func reset() {
         timeline = []
@@ -88,6 +114,7 @@ public final class RunStateReducer: ObservableObject {
         streamingMessageID = nil
         toolIndex = [:]
         pendingApprovalIDs = []
+        activityOrder = []
     }
 
     public func seed(run: RunView) {
@@ -208,8 +235,10 @@ public final class RunStateReducer: ObservableObject {
     private func appendUserMessage(_ frame: SSEFrame) {
         guard let content = frame.data["content"].flatMap({ decode([ContentBlock].self, from: $0) })
         else { return }
+        let id = frameID(frame)
+        activityOrder.append(.message(id))
         timeline.append(
-            TimelineItem(id: frameID(frame), role: .user, content: content)
+            TimelineItem(id: id, role: .user, content: content)
         )
     }
 
@@ -224,6 +253,7 @@ public final class RunStateReducer: ObservableObject {
         } else {
             let id = "transient-assistant-\(UUID().uuidString)"
             streamingMessageID = id
+            activityOrder.append(.message(id))
             timeline.append(
                 TimelineItem(id: id, role: .assistant, content: [.text(text)], isStreaming: true)
             )
@@ -242,6 +272,7 @@ public final class RunStateReducer: ObservableObject {
         }
         guard !timeline.contains(where: { $0.role == .assistant && $0.content == message.content })
         else { return }
+        activityOrder.append(.message(fallbackID))
         timeline.append(
             TimelineItem(id: fallbackID, role: .assistant, content: message.content)
         )
@@ -300,6 +331,7 @@ public final class RunStateReducer: ObservableObject {
     private func ensureTool(callID: String, name: String, status: ToolActivityStatus) {
         guard toolIndex[callID] == nil else { return }
         toolIndex[callID] = tools.count
+        activityOrder.append(.tool(callID))
         tools.append(
             ToolActivity(
                 callID: callID,
@@ -369,6 +401,11 @@ public final class RunStateReducer: ObservableObject {
         guard let data = try? JSONEncoder.server.encode(value) else { return nil }
         return try? JSONDecoder.server.decode(Value.self, from: data)
     }
+}
+
+private enum ConversationActivityReference {
+    case message(String)
+    case tool(String)
 }
 
 private struct AssistantMessagePayload: Decodable {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
@@ -123,6 +123,7 @@ class ToolExecutionContext:
     loaded_skills: tuple[dict[str, Any], ...] = ()
     available_tools: frozenset[str] = frozenset()
     origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
+    argument_trust: dict[str, TrustLevel] = field(default_factory=dict)
 
 
 class ToolOutcomeStatus(StrEnum):

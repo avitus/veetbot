@@ -56,6 +56,7 @@ class SessionView(BaseModel):
     created_at: datetime
     updated_at: datetime
     active_run_id: UUID | None
+    last_run_id: UUID | None
 
 
 class SubmitResult(BaseModel):

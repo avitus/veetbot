@@ -85,6 +85,7 @@ let package = Package(
             exclude: [
                 "Resources",
                 "VeetbotApp.swift",
+                "Veetbot.entitlements",
             ],
             swiftSettings: fullXcodeFlags
         ),

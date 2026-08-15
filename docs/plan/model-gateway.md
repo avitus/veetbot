@@ -718,7 +718,7 @@ call sites.
 ### Pinning, and the contradiction with availability routing
 
 Section 10 (`engineering-plan.md:1305`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:2810`) wants routing to move work
+provider. Milestone 10 (`engineering-plan.md:2847`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -746,7 +746,7 @@ done. Section 10 already made this call; this document only explains it so
 that a future reader does not undo it as an obvious improvement.
 
 A resumed run keeps its pin. `ProviderPin` is persisted on the run rather than
-held in memory, because `event-log-and-persistence.md:609` shows
+held in memory, because `event-log-and-persistence.md:618` shows
 `ProviderContinuation` being lost across a worker restart and a lost pin would
 compound that into a provider switch on resume.
 
@@ -1353,7 +1353,7 @@ deadline permit another attempt. Each caller-level retry is a new attempt with
 a new `attempt_id` and its own `model_calls` row.
 
 `max_attempts` is 3 and lives in application code, matching
-`event-log-and-persistence.md:717`, which already sets 3 for the worker.
+`event-log-and-persistence.md:726`, which already sets 3 for the worker.
 Section 13 states neither number, so this document states both and notes that
 they are the same number for the same reason rather than by coincidence: three
 attempts is where the marginal recovery rate stops justifying the marginal
@@ -1544,7 +1544,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2076-2085`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2113-2122`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1646,8 +1646,8 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:157-161` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2500`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2244`
+(`engineering-plan.md:2537`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2281`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the

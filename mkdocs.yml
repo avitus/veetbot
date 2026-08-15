@@ -141,4 +141,5 @@ nav:
       - ADR-0047 Downloadable thin client: adr/0047-downloadable-thin-client.md
       - ADR-0048 Atomic CircleCI production delivery: adr/0048-atomic-circleci-production-delivery.md
       - ADR-0049 Native Apple client: adr/0049-native-apple-client.md
+      - ADR-0050 Authoritative conversation history and deletion: adr/0050-authoritative-conversation-history-and-deletion.md
   - Changelog: changelog.md

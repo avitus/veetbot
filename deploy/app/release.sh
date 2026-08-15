@@ -10,6 +10,7 @@ PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
 KEEP_RELEASES="${VEETBOT_KEEP_RELEASES:-5}"
 LOCK_WAIT_SECS="${VEETBOT_DEPLOY_LOCK_WAIT_SECS:-900}"
 HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
+API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
 UNITS=(veetbot-maintenance veetbot-worker veetbot-api)
@@ -29,6 +30,11 @@ fail() {
   "VEETBOT_DEPLOY_LOCK_WAIT_SECS must be a positive integer"
 [[ "$HEALTH_TIMEOUT_SECS" =~ ^[1-9][0-9]*$ ]] || fail \
   "VEETBOT_HEALTH_TIMEOUT_SECS must be a positive integer"
+[[ "$API_BASE_URL" =~ ^https?://[^/?#[:space:]]+(/[^?#[:space:]]*)?$ ]] || fail \
+  "VEETBOT_API_BASE_URL must be an HTTP(S) URL without a query or fragment"
+while [[ "$API_BASE_URL" == */ ]]; do
+  API_BASE_URL="${API_BASE_URL%/}"
+done
 
 RELEASES_DIR="$DEPLOY_ROOT/releases"
 SHARED_DIR="$DEPLOY_ROOT/shared"
@@ -115,6 +121,7 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+[[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 docker compose --env-file "$ENV_FILE" \
   --project-name "$COMPOSE_PROJECT_NAME" \
@@ -164,6 +171,17 @@ done
 rm -f -- "$HEALTH_HEADERS"
 HEALTH_HEADERS=""
 (( healthy == 1 )) || fail "the local readiness probe did not report $RELEASE_ID"
+
+if ! session_index_status="$(
+  printf 'Authorization: %s %s\n' Bearer "$AUTH_TOKEN" \
+    | curl --silent --show-error \
+      --connect-timeout 2 --max-time 5 --header @- --output /dev/null \
+      --write-out '%{http_code}' "$API_BASE_URL/v1/sessions?limit=1"
+)"; then
+  fail "the promoted API does not expose the authoritative session index"
+fi
+[[ "$session_index_status" =~ ^2[0-9][0-9]$ ]] || fail \
+  "the promoted API session index returned HTTP $session_index_status"
 
 for unit in "${UNITS[@]}"; do
   sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"
