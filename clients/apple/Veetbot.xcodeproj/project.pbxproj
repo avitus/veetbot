@@ -32,6 +32,7 @@
 		100000000000000000000017 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* Assets.xcassets */; };
 		100000000000000000000019 /* ComposerTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* ComposerTextEditor.swift */; };
 		10000000000000000000001A /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* AppTheme.swift */; };
+		10000000000000000000001B /* MarkdownContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001B /* MarkdownContentView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -62,6 +63,7 @@
 		200000000000000000000019 /* ComposerTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextEditor.swift; sourceTree = "<group>"; };
 		20000000000000000000001A /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
+		20000000000000000000001B /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -159,6 +161,7 @@
 				200000000000000000000013 /* ChatView.swift */,
 				200000000000000000000019 /* ComposerTextEditor.swift */,
 				200000000000000000000014 /* ConnectionSettingsView.swift */,
+				20000000000000000000001B /* MarkdownContentView.swift */,
 				200000000000000000000015 /* RootView.swift */,
 			);
 			path = Views;
@@ -271,6 +274,7 @@
 				10000000000000000000001A /* AppTheme.swift in Sources */,
 				100000000000000000000019 /* ComposerTextEditor.swift in Sources */,
 				100000000000000000000014 /* ConnectionSettingsView.swift in Sources */,
+				10000000000000000000001B /* MarkdownContentView.swift in Sources */,
 				100000000000000000000015 /* RootView.swift in Sources */,
 				100000000000000000000016 /* VeetbotApp.swift in Sources */,
 			);

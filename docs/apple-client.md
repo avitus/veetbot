@@ -103,8 +103,11 @@ The timeline includes generic, collapsible tool activity, approval checkpoints,
 clarifying questions, working state, and artifact links. Tool presentation is
 driven by effect and risk taxonomy rather than a per-tool icon table. Structured
 sandbox and workspace results receive terminal and file-preview treatments when
-those fields are present. Messages and tool calls retain their first-seen event
-order as later status events update an existing tool card. Approval rule
+those fields are present. Conversation text renders Markdown headings, emphasis,
+links, lists and task lists, block quotes, thematic rules, code blocks, and
+tables. Wide code blocks and tables scroll horizontally rather than compressing
+their contents past readability. Messages and tool calls retain their first-seen
+event order as later status events update an existing tool card. Approval rule
 internals are intentionally not shown.
 
 Artifact metadata and bytes are fetched separately. The process-local content

@@ -17,7 +17,8 @@ from agent_core.adapters.persistence.memory import (
 )
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.application.public_services import PublicSessionService
-from agent_core.bootstrap import _memory_uow_repositories
+from agent_core.bootstrap import _memory_uow_repositories, build
+from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.context.rendering import build_prefix, prefix_bytes
 from agent_core.domain.errors import ConflictError, ToolTrustRejectedError
 from agent_core.domain.events import NewEvent
@@ -30,20 +31,43 @@ from agent_core.domain.memory import (
     RejectionKind,
     Sensitivity,
 )
-from agent_core.domain.messages import TextPart, ToolResultItem, UserMessage
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedTurn,
+    StopReason,
+    TextPart,
+    ToolCallItem,
+    ToolResultItem,
+    UserMessage,
+)
 from agent_core.domain.policies import TrustLevel
-from agent_core.domain.runs import RunCheckpoint, RunStatus
+from agent_core.domain.runs import RunCheckpoint, RunStatus, Step
 from agent_core.domain.sessions import SessionStatus
-from agent_core.domain.tools import ToolFailureKind
+from agent_core.domain.tools import ToolFailureKind, ToolInvocationStatus
 from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.retrieval import EventEpisodeSearch, HybridMemoryRetriever, render_memory
+from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.tools.executor import _turn_origin_trust
-from agent_core.tools.memory_remember import MemoryRememberTool
+from agent_core.tools.memory_remember import LegacyMemoryRememberTool, MemoryRememberTool
 from agent_core.tools.messages import message_for
 from tests.contract.memory_fixtures import memory, recall_query
 from tests.contract.support import NOW, SESSION_ID, agent, memory_stack, principal, tool_context
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _settings(tmp_path: Path) -> Settings:
+    return Settings(
+        database_url="postgresql+asyncpg://localhost/unused",
+        deployment_mode=DeploymentMode.DEVELOPMENT,
+        auth_mode=AuthMode.DEV,
+        auth_token=None,
+        sandbox=SandboxMechanism.FAKE,
+        config_dir=None,
+        credentials={},
+        interpolation={"OPENAI_MODEL": ""},
+        artifact_root=tmp_path / "artifacts",
+    )
 
 
 async def _stack() -> tuple[
@@ -150,6 +174,75 @@ async def test_remember_tool_explains_portability_ceiling() -> None:
     assert result.failure.reason_code == "tool.invalid_arguments.portability_ceiling"
     assert result.failure.retryable is True
     assert "user_model_attr" in message_for(result.failure.reason_code)
+
+
+async def test_remember_tool_survives_builtin_patch_upgrade(tmp_path: Path) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    async with build(settings=_settings(tmp_path), script=script, sequential_ids=True) as app:
+        run_id = await app.runs.submit("Remember that I prefer concise answers.")
+        active_run = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            current_checkpoint = await uow.checkpoints.latest(run_id)
+        assert current_checkpoint is not None
+        assert current_checkpoint.pinned_tool_versions["memory.remember"] == "1.0.1"
+
+        legacy_checkpoint = current_checkpoint.model_copy(
+            update={
+                "pinned_tool_versions": {
+                    **current_checkpoint.pinned_tool_versions,
+                    "memory.remember": "1.0.0",
+                },
+                "pinned_tool_specs": {
+                    **current_checkpoint.pinned_tool_specs,
+                    "memory.remember": LegacyMemoryRememberTool.spec,
+                },
+            },
+            deep=True,
+        )
+        result = await app.tool_pipeline.dispatch(
+            run=active_run,
+            checkpoint=legacy_checkpoint,
+            tool_calls=[
+                ToolCallItem(
+                    call_id="remember-after-upgrade",
+                    item_index=0,
+                    name="memory.remember",
+                    arguments={
+                        "statement": "User prefers concise answers",
+                        "subject": "answer style",
+                        "scope": "project-a",
+                        "belief_type": BeliefType.PREFERENCE.value,
+                    },
+                    raw_arguments=(
+                        '{"statement":"User prefers concise answers",'
+                        '"subject":"answer style","scope":"project-a",'
+                        '"belief_type":"preference"}'
+                    ),
+                )
+            ],
+            principal=app.principal,
+            step=Step(
+                run_id=run_id,
+                step_number=active_run.step_count + 1,
+                started_at=app.clock.now(),
+            ),
+            agent=active_agent,
+            token=RunCancellationToken(app.clock, active_run.deadline_at),
+        )
+        async with app.uow_factory() as uow:
+            invocation = (await uow.invocations.list_for_run(run_id, app.principal))[0]
+
+        assert result[0].is_error is False
+        assert invocation.status is ToolInvocationStatus.SUCCEEDED
+        assert invocation.tool_version == "1.0.0"
+        assert invocation.policy_decision is not None
+        assert invocation.policy_decision.reason_code == "policy.matrix.none"
+        assert [item.statement for item in await app.memory.list_memories()] == [
+            "User prefers concise answers"
+        ]
 
 
 async def test_form_injection() -> None:
