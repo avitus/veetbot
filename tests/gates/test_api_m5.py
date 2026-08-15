@@ -483,6 +483,7 @@ async def test_session_index_and_delete_are_authoritative_and_idempotent(
         full_index = await client.get("/v1/sessions")
         indexed = {UUID(row["id"]): row for row in full_index.json()["items"]}
         assert indexed[second]["last_run_id"] == str(run_id)
+        assert indexed[second]["title"] == "make resources"
 
         deleted = await client.delete(f"/v1/sessions/{second}")
         assert deleted.status_code == 204
@@ -499,6 +500,27 @@ async def test_session_index_and_delete_are_authoritative_and_idempotent(
             response = await client.get(path)
             assert response.status_code == 404, (path, response.text)
         assert not list(composition.settings.artifact_root.rglob(f"*{artifact_id}*"))
+
+
+async def test_only_the_first_top_level_message_can_supply_a_session_title(
+    tmp_path: Path,
+) -> None:
+    async with _composition(tmp_path) as composition, _client(composition) as client:
+        session_id = await _create_session(client)
+        first = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "   "}]},
+        )
+        assert first.status_code == 202, first.text
+
+        later = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "Do not use this later text"}]},
+        )
+        assert later.status_code == 202, later.text
+
+        session = await client.get(f"/v1/sessions/{session_id}")
+        assert session.json()["title"] is None
 
 
 def test_transient_sse_frames_and_heartbeats_have_no_id() -> None:

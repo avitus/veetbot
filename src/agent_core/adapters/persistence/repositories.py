@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import Text, delete, func, select, update
+from sqlalchemy import Text, case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -87,7 +87,7 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session, SessionCursor, SessionStatus
+from agent_core.domain.sessions import Session, SessionCursor, SessionStatus, conversation_title
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -182,6 +182,76 @@ class PostgresSessionRepository:
         if not _rowcount(await self._session.execute(statement)):
             raise ConflictError("session already exists")
 
+    @staticmethod
+    def _title_from_event_payload(payload: dict[str, Any]) -> str | None:
+        content = payload.get("content")
+        if isinstance(content, str):
+            return conversation_title(content)
+        if not isinstance(content, list):
+            return None
+        for part in content:
+            if not isinstance(part, dict) or part.get("kind") != "text":
+                continue
+            text = part.get("text")
+            if isinstance(text, str):
+                title = conversation_title(text)
+                if title is not None:
+                    return title
+        return None
+
+    async def _with_legacy_titles(
+        self, sessions: list[Session], principal: Principal
+    ) -> list[Session]:
+        missing_ids = [session.id for session in sessions if session.title is None]
+        if not missing_ids:
+            return sessions
+        rows = (
+            await self._session.execute(
+                select(EventRow.session_id, EventRow.payload)
+                .join(SessionRow, SessionRow.id == EventRow.session_id)
+                .where(
+                    EventRow.session_id.in_(missing_ids),
+                    EventRow.event_type == "user.message.created",
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .distinct(EventRow.session_id)
+                .order_by(EventRow.session_id, EventRow.sequence, EventRow.id)
+            )
+        ).all()
+        titles = {
+            session_id: title
+            for session_id, payload in rows
+            if (title := self._title_from_event_payload(payload)) is not None
+        }
+        if titles:
+            await self._session.execute(
+                update(SessionRow)
+                .where(
+                    SessionRow.id.in_(titles),
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    SessionRow.title.is_(None),
+                )
+                .values(title=case(titles, value=SessionRow.id))
+            )
+            stored_rows = (
+                await self._session.execute(
+                    select(SessionRow.id, SessionRow.title).where(
+                        SessionRow.id.in_(titles),
+                        SessionRow.tenant_id == principal.tenant_id,
+                        SessionRow.principal_id == principal.principal_id,
+                    )
+                )
+            ).all()
+            titles = {session_id: title for session_id, title in stored_rows if title is not None}
+        return [
+            session.model_copy(update={"title": titles[session.id]})
+            if session.id in titles
+            else session
+            for session in sessions
+        ]
+
     async def get(self, session_id: UUID, principal: Principal) -> Session:
         row = (
             await self._session.scalars(
@@ -194,7 +264,30 @@ class PostgresSessionRepository:
         ).one_or_none()
         if row is None:
             raise NotFoundError("session not found")
-        return session_to_domain(row)
+        return (await self._with_legacy_titles([session_to_domain(row)], principal))[0]
+
+    async def set_title_if_missing(
+        self, session_id: UUID, principal: Principal, title: str
+    ) -> Session:
+        normalized = conversation_title(title)
+        if normalized is None:
+            raise ValueError("session title must contain text")
+        row = (
+            await self._session.scalars(
+                update(SessionRow)
+                .where(
+                    SessionRow.id == session_id,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    SessionRow.title.is_(None),
+                )
+                .values(title=normalized)
+                .returning(SessionRow)
+            )
+        ).one_or_none()
+        if row is not None:
+            return session_to_domain(row)
+        return await self.get(session_id, principal)
 
     async def list(
         self,
@@ -220,7 +313,7 @@ class PostgresSessionRepository:
                 .limit(limit)
             )
         ).all()
-        return [session_to_domain(row) for row in rows]
+        return await self._with_legacy_titles([session_to_domain(row) for row in rows], principal)
 
     async def close(
         self, session_id: UUID, principal: Principal, closed_at: datetime
@@ -239,7 +332,7 @@ class PostgresSessionRepository:
             )
         ).one_or_none()
         if row is not None:
-            return session_to_domain(row), True
+            return (await self._with_legacy_titles([session_to_domain(row)], principal))[0], True
         return await self.get(session_id, principal), False
 
 

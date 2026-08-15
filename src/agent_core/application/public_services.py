@@ -41,7 +41,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.persistence import IdempotencyRecord
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
-from agent_core.domain.sessions import Session, SessionCursor, SessionStatus
+from agent_core.domain.sessions import Session, SessionCursor, SessionStatus, conversation_title
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.domain.views import (
@@ -576,6 +576,22 @@ class PublicRunService:
                             },
                         )
                 else:
+                    if session.title is None and (
+                        await uow.runs.latest_for_session(session.id, principal) is None
+                    ):
+                        title = next(
+                            (
+                                candidate
+                                for block in content
+                                if isinstance(block, TextContentBlock)
+                                if (candidate := conversation_title(block.text)) is not None
+                            ),
+                            None,
+                        )
+                        if title is not None:
+                            session = await uow.sessions.set_title_if_missing(
+                                session.id, principal, title
+                            )
                     agent = await uow.agents.get_version(session.agent_id, session.agent_version)
                     consent = await uow.export_consent.get(
                         principal.tenant_id, principal.principal_id

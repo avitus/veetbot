@@ -9,6 +9,17 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+SESSION_TITLE_MAX_LENGTH = 64
+
+
+def conversation_title(text: str) -> str | None:
+    """Derive the stable sidebar title used by every client."""
+
+    collapsed = " ".join(text.split())
+    if not collapsed:
+        return None
+    return collapsed[:SESSION_TITLE_MAX_LENGTH]
+
 
 class SessionStatus(StrEnum):
     ACTIVE = "ACTIVE"

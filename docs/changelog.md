@@ -4,6 +4,15 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-14 — Cross-device conversation titles
+
+- Moved generated conversation titles into the authoritative shared core so
+  they survive a client reinstall or move to another machine.
+- Derived titles for older null-title sessions from their immutable first user
+  message, avoiding an event rewrite or a one-off data migration.
+- Kept title assignment first-writer-wins, principal-scoped, whitespace-
+  normalized, and capped at 64 characters across the API and terminal paths.
+
 ## 2026-08-14 — Authoritative conversation history and deletion
 
 - Added a principal-scoped, paginated server session index with latest-run

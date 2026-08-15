@@ -11,7 +11,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.persistence.sqlalchemy_models import (
@@ -111,6 +111,43 @@ async def test_postgres_submit_idempotency_is_atomic_under_concurrency() -> None
             )
         assert changed.status_code == 409
         assert changed.json()["error"]["details"]["reason"] == "idempotency_key_reused"
+
+
+async def test_postgres_session_titles_persist_and_legacy_rows_derive_from_history() -> None:
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        _client(composition) as client,
+    ):
+        session_id = await _create_session(client)
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "  Restore   this\nconversation  "}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+
+        stored = await client.get(f"/v1/sessions/{session_id}")
+        assert stored.json()["title"] == "Restore this conversation"
+
+        async with composition.uow_factory() as uow:
+            database_session = cast(PostgresUnitOfWork, uow)._session
+            assert database_session is not None
+            await database_session.execute(
+                update(SessionRow).where(SessionRow.id == session_id).values(title=None)
+            )
+
+        recovered = await client.get(f"/v1/sessions/{session_id}")
+        assert recovered.json()["title"] == "Restore this conversation"
+        async with composition.uow_factory() as uow:
+            database_session = cast(PostgresUnitOfWork, uow)._session
+            assert database_session is not None
+            persisted_title = await database_session.scalar(
+                select(SessionRow.title).where(SessionRow.id == session_id)
+            )
+        assert persisted_title == "Restore this conversation"
+
+        index = await client.get("/v1/sessions")
+        listed = {UUID(row["id"]): row for row in index.json()["items"]}
+        assert listed[session_id]["title"] == "Restore this conversation"
 
 
 async def test_postgres_session_delete_cascades_and_clears_artifact_work() -> None:
