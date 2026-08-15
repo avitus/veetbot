@@ -36,6 +36,8 @@ title: Changelog
 - Made initial reconciliation fail closed for every error, streamed server pages
   into the local history cache, and bounded parallel verification of locally
   missing sessions.
+- Removed a server-confirmed deletion from the visible Apple history immediately
+  even when persistent device-cache cleanup subsequently reports an error.
 - Proposed ADR-0050 for the two-route post-Milestone 9 extension and its
   deletion, synchronization, and artifact-lifecycle boundaries.
 

@@ -197,6 +197,7 @@ public final class ChatViewModel: ObservableObject {
             removedHistorySessionIDs.insert(entry.sessionID)
             historyReconciliationID = nil
             if selectedSessionID == entry.sessionID { newSession() }
+            history.removeAll { $0.sessionID == entry.sessionID }
             try await historyStore.delete(sessionID: entry.sessionID)
             history = try await historyStore.list()
             await artifactCache.removeAll()

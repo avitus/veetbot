@@ -105,13 +105,52 @@ import Testing
         #expect(model.errorMessage == "temporarily unavailable")
     }
 
+    @Test
+    func testSuccessfulServerDeleteRemovesVisibleRowWhenCacheDeleteFails() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let store = DeleteFailingHistoryStore()
+        let session = urlSession { request in
+            if request.httpMethod == HTTPMethod.delete.rawValue {
+                return try response(for: request, statusCode: 204, body: "")
+            }
+            return try response(
+                for: request,
+                statusCode: 200,
+                body: """
+                    {"items":[{"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Delete me","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z","active_run_id":null,"last_run_id":null}],"next_cursor":null}
+                    """
+            )
+        }
+        defer { ChatViewModelURLProtocol.handler = nil }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(
+                defaults: try #require(UserDefaults(suiteName: "com.veetbot.tests.\(UUID())"))
+            ),
+            historyStore: store,
+            urlSession: session
+        )
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+        let entry = try #require(model.history.first)
+
+        await model.deleteSessionEverywhere(entry)
+
+        #expect(model.history.isEmpty)
+        #expect(model.errorMessage == DeleteFailingHistoryStore.message)
+        #expect(await store.list().map(\.sessionID) == [sessionID])
+    }
+
     private func configuredModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
-        ChatViewModelURLProtocol.handler = handler
-        let sessionConfiguration = URLSessionConfiguration.ephemeral
-        sessionConfiguration.protocolClasses = [ChatViewModelURLProtocol.self]
-        let session = URLSession(configuration: sessionConfiguration)
+        let session = urlSession(handler: handler)
         let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defaults.removePersistentDomain(forName: suiteName)
@@ -121,6 +160,15 @@ import Testing
             historyStore: VolatileSessionHistoryStore(),
             urlSession: session
         )
+    }
+
+    private func urlSession(
+        handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> URLSession {
+        ChatViewModelURLProtocol.handler = handler
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [ChatViewModelURLProtocol.self]
+        return URLSession(configuration: sessionConfiguration)
     }
 
     private func response(
@@ -137,6 +185,29 @@ import Testing
             )
         )
         return (response, Data(body.utf8))
+    }
+}
+
+private enum DeleteFailingHistoryStoreError: Error, LocalizedError {
+    case syntheticFailure
+
+    var errorDescription: String? { DeleteFailingHistoryStore.message }
+}
+
+private actor DeleteFailingHistoryStore: SessionHistoryStore {
+    static let message = "Synthetic history deletion failure."
+    private var entries: [UUID: SessionHistoryEntry] = [:]
+
+    func list() -> [SessionHistoryEntry] {
+        entries.values.sortedForHistoryList()
+    }
+
+    func upsert(_ entry: SessionHistoryEntry) {
+        entries[entry.sessionID] = entry
+    }
+
+    func delete(sessionID: UUID) throws {
+        throw DeleteFailingHistoryStoreError.syntheticFailure
     }
 }
 
