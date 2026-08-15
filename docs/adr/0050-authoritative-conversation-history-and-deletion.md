@@ -39,7 +39,11 @@ model.
    `SessionView` values ordered by activity (`updated_at DESC, id DESC`). The
    view includes both `active_run_id` and `last_run_id`, so a client can attach
    to active work or reopen the most recent completed run without owning a
-   second index.
+   second index. The title is authoritative too: the server stores a normalized,
+   64-character prefix of the first non-empty text block in the first top-level
+   user message and, for sessions that predate that write path, derives the same
+   value from the immutable first user-message event. A device-local title is
+   only an optimistic cache value.
 2. **Advance session activity from persisted events.** Appending an event also
    advances the owning session's `updated_at`. The history order is therefore a
    server projection of conversation activity, not a device's selection order.
@@ -85,6 +89,9 @@ model.
 - Conversation history converges across clients. An already open Apple client
   may display a deleted row until foreground reconciliation or the next
   30-second poll; reconnecting clients converge immediately.
+- Conversation titles survive a client reinstall or move to another machine.
+  Older conversations recover their titles from server history without an
+  event-payload migration.
 - The current public API contains sixteen routes: the fourteen-route Milestone 5
   baseline plus the post-Milestone 9 list and delete routes authorized here.
 - Deletion is irreversible. The confirmation copy must say that the server and
