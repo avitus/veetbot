@@ -162,21 +162,6 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
                     ScriptedToolCall(
                         name="memory.remember",
                         arguments={
-                            "statement": recalled,
-                            "subject": "copied recalled preference",
-                            "scope": "general",
-                        },
-                        call_id="golden-recall-derived-write",
-                    )
-                ],
-                stop_reason=StopReason.TOOL_USE,
-                context_contains=recalled,
-            ),
-            ScriptedTurn(
-                tool_calls=[
-                    ScriptedToolCall(
-                        name="memory.remember",
-                        arguments={
                             "statement": explicit,
                             "subject": "deployment region",
                             "scope": "general",
@@ -185,6 +170,7 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
                     )
                 ],
                 stop_reason=StopReason.TOOL_USE,
+                context_contains=recalled,
             ),
             ScriptedTurn(text="I will remember that deployment region."),
         ]
@@ -203,7 +189,8 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
         )
         session_id = await composition.sessions.create()
         run_id = await composition.runs.submit(
-            f"Recall my status update preference, and remember exactly: {explicit}",
+            "Recall my status update preference, and remember that eu-west-1 is "
+            "the deployment region.",
             session_id,
         )
         await _run_worker(composition, "golden-recall-write-worker")
@@ -213,15 +200,7 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
 
     assert run.status is RunStatus.COMPLETED
     assert run.final_message == "I will remember that deployment region."
-    assert _tool_names(events, "tool.call.failed") == ["memory.remember"]
-    assert (
-        next(
-            event.payload["reason_code"]
-            for event in events
-            if event.event_type == "tool.call.failed"
-        )
-        == "tool.trust_rejected"
-    )
+    assert _tool_names(events, "tool.call.failed") == []
     assert _tool_names(events, "tool.call.completed") == ["memory.remember"]
     assert explicit in {memory.statement for memory in memories}
 

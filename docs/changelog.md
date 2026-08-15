@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-15 — Explicit memory writes after recall
+
+- Preserved the runtime's `MEMORY` provenance through `memory.remember` instead
+  of replacing it with the default untrusted argument label. Explicit writes
+  can now succeed after a memory snapshot or recall even when the model
+  normalizes the user's wording; external and knowledge-derived turns remain
+  subject to the existing trust rejection.
+- Added focused and PostgreSQL-backed regression coverage for the complete
+  recall-then-remember path.
+
 ## 2026-08-14 — Authoritative conversation history and deletion
 
 - Added a principal-scoped, paginated server session index with latest-run
