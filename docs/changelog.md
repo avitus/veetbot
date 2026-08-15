@@ -31,6 +31,8 @@ title: Changelog
 - Removed the Apple history page cap and rejected cursor loops, tightened
   release-probe URL and status validation, and gave memory origin-trust
   rejections their own stable tool reason code.
+- Required initial history compatibility and authentication checks to succeed
+  before connection settings report success or dismiss their form.
 - Proposed ADR-0050 for the two-route post-Milestone 9 extension and its
   deletion, synchronization, and artifact-lifecycle boundaries.
 

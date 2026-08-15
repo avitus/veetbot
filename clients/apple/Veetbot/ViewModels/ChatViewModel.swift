@@ -23,6 +23,7 @@ public final class ChatViewModel: ObservableObject {
     private let configurationStore: ConnectionConfigurationStore
     private let historyStore: any SessionHistoryStore
     private let artifactCache: ArtifactCache
+    private let urlSession: URLSession?
     private var api: VeetbotAPIClient?
     private var eventStream: ReconnectingEventStream?
     private let watchTasks = WatchTaskBox()
@@ -38,13 +39,15 @@ public final class ChatViewModel: ObservableObject {
         configurationStore: ConnectionConfigurationStore = ConnectionConfigurationStore(),
         historyStore: (any SessionHistoryStore)? = nil,
         artifactCache: ArtifactCache = ArtifactCache(),
-        runState: RunStateReducer? = nil
+        runState: RunStateReducer? = nil,
+        urlSession: URLSession? = nil
     ) {
         self.tokenStore = tokenStore
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
         self.artifactCache = artifactCache
         self.runState = runState ?? RunStateReducer()
+        self.urlSession = urlSession
         Task { await bootstrap() }
     }
 
@@ -59,8 +62,8 @@ public final class ChatViewModel: ObservableObject {
             guard try await tokenStore.readToken() != nil else {
                 throw HTTPTransportError.missingToken
             }
+            try await install(configuration)
             await configurationStore.save(configuration)
-            await install(configuration)
             requiresReauthentication = false
             errorMessage = nil
             return true
@@ -154,6 +157,21 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func synchronizeHistory() async {
+        do {
+            try await reconcileHistory()
+        } catch let error as VeetbotAPIClientError {
+            present(error)
+        } catch let error as HTTPTransportError {
+            if case .reauthenticationRequired = error {
+                present(error)
+            }
+        } catch {
+            // Background reconciliation is best effort; direct user actions
+            // still surface their own failures.
+        }
+    }
+
+    private func reconcileHistory() async throws {
         guard let api else { return }
         let reconciliationID = UUID()
         historyReconciliationID = reconciliationID
@@ -163,24 +181,47 @@ public final class ChatViewModel: ObservableObject {
             }
         }
         let locallyKnownAtStart = Set(history.map(\.sessionID))
-        do {
-            var cursor: String?
-            var seenCursors: Set<String> = []
-            var serverSessions: [SessionView] = []
-            repeat {
-                let page = try await api.listSessions(cursor: cursor)
-                guard historyReconciliationID == reconciliationID else { return }
-                serverSessions.append(contentsOf: page.items)
-                cursor = try Self.nextHistoryCursor(page.nextCursor, seen: &seenCursors)
-            } while cursor != nil
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        var serverSessions: [SessionView] = []
+        repeat {
+            let page = try await api.listSessions(cursor: cursor)
             guard historyReconciliationID == reconciliationID else { return }
+            serverSessions.append(contentsOf: page.items)
+            cursor = try Self.nextHistoryCursor(page.nextCursor, seen: &seenCursors)
+        } while cursor != nil
+        guard historyReconciliationID == reconciliationID else { return }
 
-            let serverIDs = Set(serverSessions.map(\.id))
-            for session in serverSessions
-            where !removedHistorySessionIDs.contains(session.id)
-                && !deletingHistorySessionIDs.contains(session.id)
-            {
+        let serverIDs = Set(serverSessions.map(\.id))
+        for session in serverSessions
+        where !removedHistorySessionIDs.contains(session.id)
+            && !deletingHistorySessionIDs.contains(session.id)
+        {
+            guard historyReconciliationID == reconciliationID else { return }
+            let existing = history.first { $0.sessionID == session.id }
+            let entry = Self.mergedHistoryEntry(
+                session: session,
+                existing: existing,
+                lastRunID: session.lastRunID,
+                suggestedTitle: nil,
+                touchedAt: session.updatedAt
+            )
+            guard historyReconciliationID == reconciliationID else { return }
+            try await historyStore.upsert(entry)
+            guard historyReconciliationID == reconciliationID else {
+                await discardSuccessfullyDeletedHistory()
+                return
+            }
+        }
+        var prunedHistory = false
+        for sessionID in locallyKnownAtStart.subtracting(serverIDs) {
+            guard historyReconciliationID == reconciliationID else { return }
+            do {
+                let session = try await api.getSession(sessionID)
                 guard historyReconciliationID == reconciliationID else { return }
+                guard !removedHistorySessionIDs.contains(session.id),
+                    !deletingHistorySessionIDs.contains(session.id)
+                else { continue }
                 let existing = history.first { $0.sessionID == session.id }
                 let entry = Self.mergedHistoryEntry(
                     session: session,
@@ -195,62 +236,26 @@ public final class ChatViewModel: ObservableObject {
                     await discardSuccessfullyDeletedHistory()
                     return
                 }
-            }
-            var prunedHistory = false
-            for sessionID in locallyKnownAtStart.subtracting(serverIDs) {
+            } catch let error as HTTPTransportError {
                 guard historyReconciliationID == reconciliationID else { return }
-                do {
-                    let session = try await api.getSession(sessionID)
+                if case .api(let apiError) = error, apiError.statusCode == 404 {
                     guard historyReconciliationID == reconciliationID else { return }
-                    guard !removedHistorySessionIDs.contains(session.id),
-                        !deletingHistorySessionIDs.contains(session.id)
-                    else { continue }
-                    let existing = history.first { $0.sessionID == session.id }
-                    let entry = Self.mergedHistoryEntry(
-                        session: session,
-                        existing: existing,
-                        lastRunID: session.lastRunID,
-                        suggestedTitle: nil,
-                        touchedAt: session.updatedAt
-                    )
+                    try await historyStore.delete(sessionID: sessionID)
                     guard historyReconciliationID == reconciliationID else { return }
-                    try await historyStore.upsert(entry)
-                    guard historyReconciliationID == reconciliationID else {
-                        await discardSuccessfullyDeletedHistory()
-                        return
-                    }
-                } catch let error as HTTPTransportError {
-                    guard historyReconciliationID == reconciliationID else { return }
-                    if case .api(let apiError) = error, apiError.statusCode == 404 {
-                        guard historyReconciliationID == reconciliationID else { return }
-                        try await historyStore.delete(sessionID: sessionID)
-                        guard historyReconciliationID == reconciliationID else { return }
-                        prunedHistory = true
-                        if selectedSessionID == sessionID { newSession() }
-                    } else {
-                        throw error
-                    }
+                    prunedHistory = true
+                    if selectedSessionID == sessionID { newSession() }
+                } else {
+                    throw error
                 }
             }
+        }
+        guard historyReconciliationID == reconciliationID else { return }
+        let reconciledHistory = try await historyStore.list()
+        guard historyReconciliationID == reconciliationID else { return }
+        history = reconciledHistory
+        if prunedHistory {
+            await artifactCache.removeAll()
             guard historyReconciliationID == reconciliationID else { return }
-            let reconciledHistory = try await historyStore.list()
-            guard historyReconciliationID == reconciliationID else { return }
-            history = reconciledHistory
-            if prunedHistory {
-                await artifactCache.removeAll()
-                guard historyReconciliationID == reconciliationID else { return }
-            }
-        } catch let error as VeetbotAPIClientError {
-            if historyReconciliationID == reconciliationID { present(error) }
-        } catch let error as HTTPTransportError {
-            if historyReconciliationID == reconciliationID,
-                case .reauthenticationRequired = error
-            {
-                present(error)
-            }
-        } catch {
-            // Background reconciliation is best effort; direct user actions
-            // still surface their own failures.
         }
     }
 
@@ -482,22 +487,43 @@ public final class ChatViewModel: ObservableObject {
             if let configuration = await configurationStore.load(),
                 try await tokenStore.readToken() != nil
             {
-                await install(configuration)
+                try await install(configuration)
             }
         } catch {
             present(error)
         }
     }
 
-    private func install(_ configuration: ConnectionConfiguration) async {
+    private func install(_ configuration: ConnectionConfiguration) async throws {
         await artifactCache.removeAll()
         pendingSubmission = nil
-        let transport = HTTPTransport(configuration: configuration, tokenStore: tokenStore)
+        let transport = HTTPTransport(
+            configuration: configuration,
+            tokenStore: tokenStore,
+            session: urlSession
+        )
         api = VeetbotAPIClient(transport: transport)
         eventStream = ReconnectingEventStream(reader: SSEReader(transport: transport))
         baseURL = configuration.baseURL
+        do {
+            try await reconcileHistory()
+        } catch let error as VeetbotAPIClientError {
+            clearInstalledConnection()
+            throw error
+        } catch let error as HTTPTransportError {
+            if case .reauthenticationRequired = error {
+                clearInstalledConnection()
+                throw error
+            }
+        }
         isConfigured = true
-        await synchronizeHistory()
+    }
+
+    private func clearInstalledConnection() {
+        api = nil
+        eventStream = nil
+        baseURL = nil
+        isConfigured = false
     }
 
     private func watch(runID: UUID, touchHistoryOnCompletion: Bool = true) {

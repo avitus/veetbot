@@ -91,7 +91,9 @@ deleted identifier remains excluded from later stale responses. Other open
 clients remove the row on foreground reconciliation or their next active-phase
 poll. A server release that predates the history routes produces an explicit
 server-upgrade message during reconciliation or deletion rather than the generic
-unsupported-request response.
+unsupported-request response. Initial connection setup propagates that
+compatibility failure, or a reauthentication response, back to the settings
+form so it remains open instead of reporting a successful save.
 
 ## Agent activity and artifacts
 
