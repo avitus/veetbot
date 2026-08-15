@@ -57,6 +57,12 @@ pretending SwiftData is available there.
    content and trust from public events, consumes classification and structured
    result fields when present, and degrades to generic cards when the public
    stream does not provide stored invocation details.
+9. **Execute native tests under full Xcode in hosted CI.** Command Line Tools may
+   compile a Swift Testing bundle without running its tests. The repository's
+   `make test-apple` target therefore refuses that environment, selects full
+   Xcode when it is installed at the standard path, and CircleCI runs the target
+   on a pinned Xcode macOS executor. Server release packaging depends on that
+   job, so native-client regressions block delivery.
 
 ## Consequences
 
@@ -73,6 +79,9 @@ pretending SwiftData is available there.
   authorized contract and security review.
 - Project milestone status does not change; this is a separately authorized
   client surface over completed API capabilities.
+- Native-client tests are an explicit hosted verification partition because
+  they require Apple tooling and cannot be folded into the portable Python
+  `make check` contract.
 
 ## Alternatives considered
 

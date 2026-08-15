@@ -4,6 +4,25 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-15 — Documentation-derived regression coverage
+
+- Made red-green-refactor evidence part of the repository operating contract,
+  including a prohibition on weakening failing tests and boundary-level
+  coverage requirements for public behavior.
+- Added a required full-Xcode Apple test partition to local tooling and hosted
+  CI. Release packaging now waits for native tests instead of accepting a
+  Command Line Tools build that compiles Swift Testing bundles without running
+  them.
+- Added native client contract coverage for every typed HTTP operation,
+  security-sensitive connection validation, missing credentials, conditional
+  artifact reads, stable message retries, and unbounded loop-safe pagination.
+- Added a PostgreSQL-backed conversation journey covering activity ordering,
+  principal isolation, active-run deletion refusal, cancellation, deletion,
+  tombstone idempotency, and converged history.
+- Fixed future activity timestamps rendering as `in 0s`, normalized seeded
+  in-memory credentials, and removed the approval-list 20-page truncation while
+  rejecting repeated cursors.
+
 ## 2026-08-14 — Cross-device conversation titles
 
 - Moved generated conversation titles into the authoritative shared core so

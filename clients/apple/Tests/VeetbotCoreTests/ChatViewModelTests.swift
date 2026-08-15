@@ -30,13 +30,13 @@ import Testing
 
         for page in 1 ... 101 {
             let cursor = "cursor-\(page)"
-            #expect(try ChatViewModel.nextHistoryCursor(cursor, seen: &seen) == cursor)
+            #expect(try ChatViewModel.nextPageCursor(cursor, seen: &seen) == cursor)
         }
         #expect(seen.count == 101)
         #expect(throws: HTTPTransportError.self) {
-            try ChatViewModel.nextHistoryCursor("cursor-101", seen: &seen)
+            try ChatViewModel.nextPageCursor("cursor-101", seen: &seen)
         }
-        #expect(try ChatViewModel.nextHistoryCursor(nil, seen: &seen) == nil)
+        #expect(try ChatViewModel.nextPageCursor(nil, seen: &seen) == nil)
     }
 
     @Test
@@ -147,6 +147,162 @@ import Testing
         #expect(await store.list().map(\.sessionID) == [sessionID])
     }
 
+    @Test
+    func testPendingApprovalPaginationHasNoArbitraryPageCap() async throws {
+        let lock = NSLock()
+        var approvalRequests = 0
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            }
+            #expect(request.url?.path == "/v1/approvals")
+            let cursor = URLComponents(
+                url: try #require(request.url),
+                resolvingAgainstBaseURL: false
+            )?.queryItems?.first { $0.name == "cursor" }?.value
+            let page = cursor.flatMap { Int($0.replacingOccurrences(of: "page-", with: "")) } ?? 1
+            lock.withLock { approvalRequests += 1 }
+            let next = page < 21 ? "\"page-\(page + 1)\"" : "null"
+            return try response(
+                for: request,
+                statusCode: 200,
+                body: "{\"items\":[],\"next_cursor\":\(next)}"
+            )
+        }
+        defer { ChatViewModelURLProtocol.handler = nil }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        await model.refreshPendingApprovals()
+
+        #expect(lock.withLock { approvalRequests } == 21)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testPendingApprovalPaginationRejectsRepeatedCursor() async throws {
+        let lock = NSLock()
+        var approvalRequests = 0
+        let model = try configuredModel { request in
+            if request.url?.path == "/v1/sessions" {
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            }
+            #expect(request.url?.path == "/v1/approvals")
+            lock.withLock { approvalRequests += 1 }
+            return try response(
+                for: request,
+                statusCode: 200,
+                body: #"{"items":[],"next_cursor":"repeated"}"#
+            )
+        }
+        defer { ChatViewModelURLProtocol.handler = nil }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        await model.refreshPendingApprovals()
+
+        #expect(lock.withLock { approvalRequests } == 2)
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test
+    func testRetryingTheSameMessageReusesOneKeyAndDoesNotCreateAnotherSession() async throws {
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let sessionBody = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z","active_run_id":null,"last_run_id":null}
+            """
+        let model = try configuredModel { request in
+            let captured = lock.withLock { () -> [URLRequest] in
+                requests.append(request)
+                return requests
+            }
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/sessions"):
+                return try response(for: request, statusCode: 201, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                let attempts = captured.filter { $0.url?.path.hasSuffix("/messages") == true }.count
+                if attempts <= 3 {
+                    return try response(
+                        for: request,
+                        statusCode: 503,
+                        body: #"{"error":{"code":"internal_error","message":"retry","details":{},"request_id":"retry"}}"#,
+                        headers: ["Retry-After": "0"]
+                    )
+                }
+                return try response(
+                    for: request,
+                    statusCode: 202,
+                    body: "{\"run_id\":\"\(runID.uuidString)\",\"status\":\"QUEUED\"}"
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { ChatViewModelURLProtocol.handler = nil }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        #expect(await model.send("  retry me  ") == false)
+        model.clearError()
+        #expect(await model.send("retry me") == true)
+        model.newSession()
+
+        let captured = lock.withLock { requests }
+        #expect(
+            captured.filter {
+                $0.httpMethod == "POST" && $0.url?.path == "/v1/sessions"
+            }.count == 1
+        )
+        let submissions = captured.filter { $0.url?.path.hasSuffix("/messages") == true }
+        #expect(submissions.count == 4)
+        let keys = submissions.compactMap {
+            $0.value(forHTTPHeaderField: "Idempotency-Key")
+        }
+        #expect(keys.count == submissions.count)
+        #expect(Set(keys).count == 1)
+        #expect(model.selectedSessionID == nil)
+    }
+
     private func configuredModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {
@@ -174,14 +330,17 @@ import Testing
     private func response(
         for request: URLRequest,
         statusCode: Int,
-        body: String
+        body: String,
+        headers: [String: String] = [:]
     ) throws -> (HTTPURLResponse, Data) {
+        var responseHeaders = ["Content-Type": "application/json"]
+        responseHeaders.merge(headers) { _, new in new }
         let response = try #require(
             HTTPURLResponse(
                 url: request.url!,
                 statusCode: statusCode,
                 httpVersion: nil,
-                headerFields: ["Content-Type": "application/json"]
+                headerFields: responseHeaders
             )
         )
         return (response, Data(body.utf8))

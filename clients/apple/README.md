@@ -22,8 +22,11 @@ wire, transport, reducer, SSE, and local-history tests:
 
 ```bash
 swift build --package-path clients/apple
-swift test --package-path clients/apple
+make test-apple
 ```
+
+Run the test target from the repository root. It requires full Xcode so a
+Command Line Tools build cannot be mistaken for an executed Swift Testing run.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
