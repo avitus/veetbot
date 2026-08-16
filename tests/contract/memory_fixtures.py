@@ -4,6 +4,14 @@ import hashlib
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.persistence.memory import (
+    InMemoryAgentRepository,
+    InMemoryToolInvocationRepository,
+)
+from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.bootstrap import _memory_uow_repositories
+from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeDocument,
@@ -17,6 +25,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecalledBelief,
     RecallMoment,
     RecallProfile,
     RecallQuery,
@@ -26,7 +35,66 @@ from agent_core.domain.memory import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.chunking import DeterministicChunker
-from tests.contract.support import NOW, PRINCIPAL_ID, RUN_ID, SESSION_ID, TENANT
+from agent_core.memory.formation import GovernedMemoryService
+from agent_core.memory.retrieval import HybridMemoryRetriever
+from tests.contract.support import (
+    NOW,
+    PRINCIPAL_ID,
+    RUN_ID,
+    SESSION_ID,
+    TENANT,
+    memory_stack,
+    principal,
+)
+
+
+async def formation_stack() -> tuple[
+    FixedClock,
+    MemoryUnitOfWorkFactory,
+    GovernedMemoryService,
+    HybridMemoryRetriever,
+]:
+    """One deterministic in-memory composition for memory behavior suites."""
+
+    clock, sessions, runs, events = await memory_stack()
+    repositories = _memory_uow_repositories(
+        agents=InMemoryAgentRepository(),
+        sessions=sessions,
+        runs=runs,
+        events=events,
+        invocations=InMemoryToolInvocationRepository(runs),
+        clock=clock,
+    )
+    factory = MemoryUnitOfWorkFactory(repositories)
+    ids = SequenceIdFactory(UUID(int=value) for value in range(2_000, 3_000))
+    return (
+        clock,
+        factory,
+        GovernedMemoryService(factory, clock, ids, principal()),
+        HybridMemoryRetriever(factory, clock, ids, principal()),
+    )
+
+
+async def user_event(factory: MemoryUnitOfWorkFactory, text: str) -> int:
+    """Append one user episode and return its sequence for provenance."""
+
+    async with factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=PRINCIPAL_ID,
+                payload={"content": text},
+            )
+        )
+    return event.sequence
+
+
+async def session_events(factory: MemoryUnitOfWorkFactory) -> list[EventEnvelope]:
+    async with factory() as uow:
+        return await uow.events.list_after(SESSION_ID, 0, principal())
 
 
 def memory(
@@ -111,6 +179,46 @@ def trace() -> RecallTrace:
         retrieval_policy_version="retrieval@1",
         created_at=NOW,
         operator_fields_expire_at=NOW + timedelta(days=30),
+    )
+
+
+def recalled(
+    *,
+    belief_id: int = 601,
+    statement: str = "User prefers concise answers",
+    subject: str = "answer style",
+    score: float = 0.5,
+    sensitivity: Sensitivity = Sensitivity.INTERNAL,
+    carried: bool = False,
+    origin_scope: str = "project-a",
+    arms: list[str] | None = None,
+    blocked: bool = False,
+    conflict_with: list[UUID] | None = None,
+    confidence_band: str = "high",
+    portability: Portability = Portability.PORTABLE,
+    status: MemoryStatus = MemoryStatus.ACTIVE,
+    authority: MemoryAuthority = MemoryAuthority.USER,
+    source_event_ids: list[int] | None = None,
+) -> RecalledBelief:
+    return RecalledBelief(
+        belief_id=UUID(int=belief_id),
+        subject=subject,
+        statement=statement,
+        belief_type=BeliefType.PREFERENCE,
+        status=status,
+        confidence_band=confidence_band,
+        authority=authority,
+        origin_scope=origin_scope,
+        portability=portability,
+        sensitivity=sensitivity,
+        carried=carried,
+        valid_from=NOW,
+        valid_to=None,
+        score=score,
+        arms=["lexical"] if arms is None else arms,
+        conflict_with=[] if conflict_with is None else conflict_with,
+        blocked=blocked,
+        source_event_ids=[1] if source_event_ids is None else source_event_ids,
     )
 
 
