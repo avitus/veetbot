@@ -108,6 +108,25 @@ As implementation tooling is added in later milestones, this section and
 `make check` must also require formatting, linting, type checking, and tests.
 Do not claim a command works unless it exists in this repository.
 
+## Test-driven development
+
+Behavior changes in this repository use a strict red-green-refactor loop.
+
+- Derive behavior from governing documentation before reading or changing code.
+- Add the smallest test for that documented behavior. Run the new or changed test first and record the expected failure.
+  Environment, import, and fixture errors are not valid red tests.
+- Implement the smallest coherent change that passes without weakening a
+  requirement. Rerun the focused test, its partition, and every risk-relevant
+  repository check; refactor only while tests remain green.
+
+Do not weaken, delete, skip, or rewrite a failing test merely to make the suite
+pass. If the documented requirement is wrong or conflicts with another
+requirement, stop and propose the documentation or ADR change explicitly.
+Every production bug fix begins with a regression test that reproduces the
+failure. New adapters must begin with their shared contract suite, and new
+public surfaces require boundary-level happy-path, validation, authorization,
+failure, and retry coverage.
+
 ## Pull request review gate
 
 A pull request is not ready or mergeable under this project's operating
@@ -164,6 +183,7 @@ End every coding assignment with a report covering:
 - Files changed
 - Behavior implemented
 - Tests and checks run (with outcomes)
+- Red test command and expected failure
 - Documentation updated
 - Acceptance criteria completed (with evidence)
 - Known limitations

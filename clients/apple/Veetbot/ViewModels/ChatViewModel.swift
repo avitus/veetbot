@@ -256,7 +256,7 @@ public final class ChatViewModel: ObservableObject {
                     return
                 }
             }
-            cursor = try Self.nextHistoryCursor(page.nextCursor, seen: &seenCursors)
+            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
         } while cursor != nil
 
         let missingResolutions = try await resolveMissingSessions(
@@ -307,7 +307,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
-    static func nextHistoryCursor(
+    static func nextPageCursor(
         _ cursor: String?,
         seen: inout Set<String>
     ) throws -> String? {
@@ -470,7 +470,7 @@ public final class ChatViewModel: ObservableObject {
         guard let api else { return }
         do {
             var cursor: String?
-            var pageCount = 0
+            var seenCursors: Set<String> = []
             repeat {
                 let page = try await api.listPendingApprovals(
                     runID: runState.activeRunID,
@@ -481,9 +481,8 @@ public final class ChatViewModel: ObservableObject {
                     loadedApprovalIDs.insert(approval.id)
                     runState.mergeApproval(approval)
                 }
-                cursor = page.nextCursor
-                pageCount += 1
-            } while cursor != nil && pageCount < 20
+                cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+            } while cursor != nil
         } catch {
             present(error)
         }

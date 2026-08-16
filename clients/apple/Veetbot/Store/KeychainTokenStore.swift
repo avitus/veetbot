@@ -175,7 +175,10 @@ public actor KeychainTokenStore: TokenStore {
 public actor InMemoryTokenStore: TokenStore {
     private var token: String?
 
-    public init(token: String? = nil) { self.token = token }
+    public init(token: String? = nil) {
+        let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.token = trimmed?.isEmpty == false ? trimmed : nil
+    }
     public func readToken() -> String? { token }
     public func saveToken(_ token: String) {
         let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -91,6 +91,16 @@ jobs:
           name: Real-runtime sandbox security gates
           command: make test-sandbox
 
+  apple:
+    macos:
+      xcode: "26.6.0"
+    resource_class: m4pro.medium
+    steps:
+      - checkout
+      - run:
+          name: Native Apple client tests
+          command: make test-apple
+
   live:
     docker:
       - image: cimg/python:3.12
@@ -254,12 +264,14 @@ workflows:
       - contract
       - integration
       - sandbox
+      - apple
       - package-release:
           requires:
             - static
             - contract
             - integration
             - sandbox
+            - apple
           filters:
             branches:
               only: main

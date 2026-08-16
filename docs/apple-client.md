@@ -17,8 +17,13 @@ compilation and transport/reducer tests:
 
 ```bash
 swift build --package-path clients/apple
-swift test --package-path clients/apple
+make test-apple
 ```
+
+`make test-apple` requires full Xcode and guarantees that Swift Testing suites
+execute; it fails instead of accepting the Command Line Tools behavior that can
+compile the bundle without running it. The same target runs in the required
+CircleCI Apple job.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
 Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
