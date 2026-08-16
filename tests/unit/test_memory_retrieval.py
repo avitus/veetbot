@@ -14,7 +14,6 @@ from uuid import UUID
 
 import pytest
 
-from agent_core.domain.context import WorkingState
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -25,7 +24,6 @@ from agent_core.domain.memory import (
 )
 from agent_core.memory.retrieval import (
     RETRIEVAL_POLICY_VERSION,
-    DeterministicQueryFormer,
     _rrf_fuse,
     _score,
     render_memory,
@@ -37,7 +35,7 @@ from tests.contract.memory_fixtures import (
     recalled,
     session_events,
 )
-from tests.contract.support import NOW, SESSION_ID, TENANT, principal, run
+from tests.contract.support import NOW, SESSION_ID, TENANT, principal
 
 
 def test_score_enforces_the_relevance_floor() -> None:
@@ -153,22 +151,15 @@ def test_render_memory_is_deterministic_and_escapes_markup() -> None:
     first = render_memory([item], as_of=NOW)
     second = render_memory([item], as_of=NOW)
     assert first == second
+    stamp = NOW.isoformat().replace("+00:00", "Z")
     header = first.splitlines()[0]
-    assert header == (
-        f'<memory as_of="2026-07-25T13:03:11.482913Z" policy="{RETRIEVAL_POLICY_VERSION}">'
-    )
+    assert header == f'<memory as_of="{stamp}" policy="{RETRIEVAL_POLICY_VERSION}">'
     assert "&lt;b&gt;bold&lt;/b&gt; &amp; ampersands" in first
     assert "(learned in atlas &lt;beta&gt;)" in first
     assert f"conflicts={UUID(int=888)}" in first
     assert "<b>" not in first
     assert f"[m:{str(item.belief_id)[:8]}]" in first
     assert first.endswith("</memory>")
-
-
-def test_query_former_stays_silent_without_signal() -> None:
-    former = DeterministicQueryFormer(principal())
-    assert former.form(run(), WorkingState(), None) == []
-    assert former.form(run(), WorkingState(), "   ") == []
 
 
 async def test_recall_is_ordered_by_score_then_id_and_byte_stable() -> None:

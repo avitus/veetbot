@@ -6,7 +6,7 @@ from uuid import UUID
 
 from agent_core.memory.retrieval import HybridMemoryRetriever
 from tests.contract.memory_fixtures import formation_stack, memory, recall_query
-from tests.contract.support import SESSION_ID, TENANT, principal
+from tests.contract.support import PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
 
 def test_hybrid_retriever_exposes_async_recall_and_snapshot() -> None:
@@ -38,7 +38,7 @@ async def test_recall_records_a_trace_bound_to_the_rendered_bytes() -> None:
     assert trace.retrieval_policy_version == "retrieval@1"
 
 
-async def test_recall_for_another_identity_fails_closed_without_reaching_the_store() -> None:
+async def test_recall_for_another_identity_fails_closed_and_traces_the_caller() -> None:
     _clock, factory, _service, retriever = await formation_stack()
     async with factory() as uow:
         await uow.memories.upsert_belief(memory())
@@ -53,3 +53,4 @@ async def test_recall_for_another_identity_fails_closed_without_reaching_the_sto
             trace = await uow.traces.get(result.trace_id, principal())
         assert trace.candidates == 0
         assert trace.query.tenant_id == TENANT
+        assert trace.query.principal_id == PRINCIPAL_ID
