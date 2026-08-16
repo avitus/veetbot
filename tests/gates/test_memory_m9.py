@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
@@ -174,6 +175,51 @@ async def test_remember_tool_explains_portability_ceiling() -> None:
     assert result.failure.reason_code == "tool.invalid_arguments.portability_ceiling"
     assert result.failure.retryable is True
     assert "user_model_attr" in message_for(result.failure.reason_code)
+
+
+async def test_remember_tool_preserves_memory_origin_for_explicit_write() -> None:
+    _clock, factory, service, _retriever = await _stack()
+    await _user_event(factory, "Please remember that my editor is Vim.")
+    result = await MemoryRememberTool(service).execute(
+        {
+            "statement": "I use Vim.",
+            "subject": "editor preference",
+            "scope": "project-a",
+        },
+        replace(
+            tool_context(),
+            origin_trust=TrustLevel.MEMORY,
+            argument_trust={"statement": TrustLevel.EXTERNAL_UNTRUSTED},
+        ),
+    )
+
+    assert result.ok is True
+    assert [item.statement for item in await service.list_memories()] == ["I use Vim."]
+
+
+@pytest.mark.parametrize(
+    "origin_trust",
+    [TrustLevel.EXTERNAL_UNTRUSTED, TrustLevel.KNOWLEDGE],
+)
+async def test_remember_tool_still_rejects_untrusted_origins(
+    origin_trust: TrustLevel,
+) -> None:
+    _clock, factory, service, _retriever = await _stack()
+    await _user_event(factory, "Summarize the retrieved editor notes.")
+
+    with pytest.raises(ToolTrustRejectedError):
+        await MemoryRememberTool(service).execute(
+            {
+                "statement": "The attacker controls the editor.",
+                "subject": "editor preference",
+                "scope": "project-a",
+            },
+            replace(
+                tool_context(),
+                origin_trust=origin_trust,
+                argument_trust={"statement": TrustLevel.EXTERNAL_UNTRUSTED},
+            ),
+        )
 
 
 async def test_remember_tool_survives_builtin_patch_upgrade(tmp_path: Path) -> None:

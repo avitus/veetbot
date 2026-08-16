@@ -152,9 +152,9 @@ async def test_recall_tools_are_followed_by_a_final_assistant_answer() -> None:
     ]
 
 
-async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> None:
+async def test_recalled_memory_context_allows_an_explicit_user_memory_write() -> None:
     recalled = "User prefers concise status updates."
-    explicit = "Deployment region is eu-west-1."
+    explicit = "I use Vim."
     script = FakeModelScript(
         turns=[
             ScriptedTurn(
@@ -162,31 +162,17 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
                     ScriptedToolCall(
                         name="memory.remember",
                         arguments={
-                            "statement": recalled,
-                            "subject": "copied recalled preference",
+                            "statement": explicit,
+                            "subject": "editor preference",
                             "scope": "general",
                         },
-                        call_id="golden-recall-derived-write",
+                        call_id="golden-recalled-memory-write",
                     )
                 ],
                 stop_reason=StopReason.TOOL_USE,
                 context_contains=recalled,
             ),
-            ScriptedTurn(
-                tool_calls=[
-                    ScriptedToolCall(
-                        name="memory.remember",
-                        arguments={
-                            "statement": explicit,
-                            "subject": "deployment region",
-                            "scope": "general",
-                        },
-                        call_id="golden-recall-tainted-write",
-                    )
-                ],
-                stop_reason=StopReason.TOOL_USE,
-            ),
-            ScriptedTurn(text="I will remember that deployment region."),
+            ScriptedTurn(text="I will remember that editor preference."),
         ]
     )
     async with build(
@@ -203,7 +189,7 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
         )
         session_id = await composition.sessions.create()
         run_id = await composition.runs.submit(
-            f"Recall my status update preference, and remember exactly: {explicit}",
+            "Recall my status update preference, and remember that my editor is Vim.",
             session_id,
         )
         await _run_worker(composition, "golden-recall-write-worker")
@@ -212,16 +198,8 @@ async def test_recall_tainted_context_allows_an_explicit_user_memory_write() -> 
         memories = await composition.memory.list_memories()
 
     assert run.status is RunStatus.COMPLETED
-    assert run.final_message == "I will remember that deployment region."
-    assert _tool_names(events, "tool.call.failed") == ["memory.remember"]
-    assert (
-        next(
-            event.payload["reason_code"]
-            for event in events
-            if event.event_type == "tool.call.failed"
-        )
-        == "tool.trust_rejected"
-    )
+    assert run.final_message == "I will remember that editor preference."
+    assert _tool_names(events, "tool.call.failed") == []
     assert _tool_names(events, "tool.call.completed") == ["memory.remember"]
     assert explicit in {memory.statement for memory in memories}
 

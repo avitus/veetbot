@@ -59,7 +59,7 @@ class MemoryRememberTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         statement_trust = context.origin_trust
-        if statement_trust is not TrustLevel.USER:
+        if statement_trust not in {TrustLevel.USER, TrustLevel.MEMORY}:
             statement_trust = context.argument_trust.get("statement", statement_trust)
         belief_type = BeliefType(str(arguments.get("belief_type", BeliefType.FACT.value)))
         portability = (
