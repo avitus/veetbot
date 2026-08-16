@@ -183,11 +183,12 @@ enum ConversationAgeFormatter {
         relativeTo now: Date,
         locale: Locale = .current
     ) -> String {
+        guard updatedAt < now else { return "now" }
         let formatter = RelativeDateTimeFormatter()
         formatter.dateTimeStyle = .numeric
         formatter.unitsStyle = .abbreviated
         formatter.locale = locale
-        return formatter.localizedString(for: min(updatedAt, now), relativeTo: now)
+        return formatter.localizedString(for: updatedAt, relativeTo: now)
     }
 }
 

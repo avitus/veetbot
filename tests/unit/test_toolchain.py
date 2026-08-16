@@ -83,6 +83,7 @@ def test_required_make_targets_exist() -> None:
         "test-fast",
         "test-integration",
         "test-live",
+        "test-apple",
         "test-deploy",
         "production-check",
         "client-build",
@@ -237,6 +238,7 @@ def test_ci_has_the_required_partitions() -> None:
         "contract",
         "integration",
         "sandbox",
+        "apple",
         "live",
         "package-release",
         "deploy-app",
@@ -245,6 +247,10 @@ def test_ci_has_the_required_partitions() -> None:
     for name, job in jobs.items():
         if name == "sandbox":
             assert job["machine"] == {"image": "ubuntu-2404:current"}
+            continue
+        if name == "apple":
+            assert job["macos"] == {"xcode": "26.6.0"}
+            assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = (
             "cimg/base:stable"
@@ -275,6 +281,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-contract" in commands["contract"]
     assert "make migrate test-integration" in commands["integration"]
     assert "make test-sandbox" in commands["sandbox"]
+    assert "make test-apple" in commands["apple"]
     assert "make test-live" in commands["live"]
     assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
     package_workspace = next(
@@ -310,10 +317,10 @@ def test_ci_has_the_required_partitions() -> None:
     assert set(workflows) == {"verify", "live_manual", "live_nightly"}
     verify = workflows["verify"]
     assert verify["unless"] == "<< pipeline.parameters.run_live >>"
-    assert verify["jobs"][:4] == ["static", "contract", "integration", "sandbox"]
+    assert verify["jobs"][:5] == ["static", "contract", "integration", "sandbox", "apple"]
     delivery_jobs = {
         next(iter(job)): next(iter(job.values()))
-        for job in verify["jobs"][4:]
+        for job in verify["jobs"][5:]
         if isinstance(job, dict)
     }
     assert set(delivery_jobs) == {"package-release", "deploy-app", "deploy-nginx"}
@@ -322,6 +329,7 @@ def test_ci_has_the_required_partitions() -> None:
         "contract",
         "integration",
         "sandbox",
+        "apple",
     ]
     assert delivery_jobs["deploy-app"]["requires"] == ["package-release"]
     assert delivery_jobs["deploy-app"]["context"] == "veetbot-production"
@@ -348,6 +356,15 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_repository_contract_requires_red_green_tdd_evidence() -> None:
+    contract = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+
+    assert "## Test-driven development" in contract
+    assert "Run the new or changed test first and record the expected failure" in contract
+    assert "Do not weaken, delete, skip, or rewrite a failing test" in contract
+    assert "Red test command and expected failure" in contract
 
 
 def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:

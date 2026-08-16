@@ -38,7 +38,7 @@ from agent_core.domain.runs import (
     RunStatus,
     RunUsage,
 )
-from agent_core.domain.sessions import Session, SessionCursor, SessionStatus
+from agent_core.domain.sessions import Session, SessionCursor, SessionStatus, conversation_title
 from agent_core.domain.tools import (
     ALLOWED_TOOL_TRANSITIONS,
     ToolInvocation,
@@ -122,6 +122,27 @@ class InMemorySessionRepository:
                 or session.principal_id != principal.principal_id
             ):
                 raise NotFoundError("session not found")
+            return session.model_copy(deep=True)
+
+    async def set_title_if_missing(
+        self, session_id: UUID, principal: Principal, title: str
+    ) -> Session:
+        normalized = conversation_title(title)
+        if normalized is None:
+            raise ValueError("session title must contain text")
+        async with self._lock:
+            try:
+                session = self._sessions[session_id]
+            except KeyError as exc:
+                raise NotFoundError("session not found") from exc
+            if (
+                session.tenant_id != principal.tenant_id
+                or session.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("session not found")
+            if session.title is None:
+                session = session.model_copy(update={"title": normalized}, deep=True)
+                self._sessions[session_id] = session
             return session.model_copy(deep=True)
 
     async def list(

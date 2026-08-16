@@ -19,6 +19,26 @@ import Testing
     }
 
     @Test
+    func testConnectionRejectsEveryDocumentedUnsafeBaseURLShape() {
+        let cases: [(String, ConnectionConfigurationError)] = [
+            ("https://user:password@host.example", .credentialsNotAllowed),
+            ("https://host.example?token=secret", .baseURLMustNotContainQueryOrFragment),
+            ("https://host.example#credentials", .baseURLMustNotContainQueryOrFragment),
+        ]
+
+        for (value, expected) in cases {
+            do {
+                _ = try ConnectionConfiguration(baseURLString: value)
+                Issue.record("expected \(value) to be rejected")
+            } catch let error as ConnectionConfigurationError {
+                #expect(error == expected)
+            } catch {
+                Issue.record("unexpected error for \(value): \(error)")
+            }
+        }
+    }
+
+    @Test
     func testRoutePathCharactersArePercentEncoded() throws {
         let configuration = try ConnectionConfiguration(
             baseURLString: "https://host.example/base%20path"
@@ -144,6 +164,30 @@ import Testing
         } catch {
             Issue.record("unexpected error: \(error)")
         }
+        #expect(await client.transport.authorizationState() == .requiresReauthentication)
+    }
+
+    @Test
+    func testMissingBearerTokenFailsBeforeAnyNetworkRequest() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requestCount = 0
+        StubURLProtocol.handler = { request in
+            lock.withLock { requestCount += 1 }
+            throw URLError(.badServerResponse)
+        }
+        let client = try makeClient(token: " \n ")
+
+        do {
+            _ = try await client.getSession(UUID())
+            Issue.record("expected a missing-token failure")
+        } catch HTTPTransportError.missingToken {
+            // Expected: authentication fails closed before URLSession receives a request.
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+
+        #expect(lock.withLock { requestCount } == 0)
         #expect(await client.transport.authorizationState() == .requiresReauthentication)
     }
 
@@ -313,6 +357,264 @@ import Testing
         } catch {
             Issue.record("unexpected error: \(error)")
         }
+    }
+
+    @Test
+    func testTypedClientImplementsEveryDocumentedRequestContract() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000001")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000002")
+        )
+        let approvalID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000003")
+        )
+        let artifactID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000004")
+        )
+        let questionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000005")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let sessionBody = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"research","agent_version":"7","title":null,"metadata":{"source":"mobile"},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
+            """
+        let runBody = """
+            {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"RUNNING","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":10,"output_tokens":2,"cost_usd":"0.01"},"limits":{"max_steps":40,"deadline_at":null,"max_cost_usd":"1.00"},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:01:00Z"}
+            """
+        let approvalBody = """
+            {"id":"\(approvalID.uuidString)","run_id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","status":"PENDING","tool_name":"shell.exec","action_summary":"Run command","arguments":{"command":"pwd"},"risk":"HIGH","policy_reason":"Side effect","expires_at":null,"created_at":"2026-08-14T00:00:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+            """
+        let artifactBody = """
+            {"id":"\(artifactID.uuidString)","session_id":"\(sessionID.uuidString)","run_id":"\(runID.uuidString)","name":"report.txt","media_type":"text/plain","sha256":"abc123","size_bytes":7,"metadata":{},"created_at":"2026-08-14T00:00:00Z"}
+            """
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let path = try #require(request.url?.path)
+            let method = try #require(request.httpMethod)
+            let statusCode: Int
+            let body: String
+            let headers: [String: String]
+            switch (method, path) {
+            case ("POST", "/v1/sessions"):
+                statusCode = 201
+                body = sessionBody
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                statusCode = 200
+                body = sessionBody
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/sessions"):
+                statusCode = 200
+                body = "{\"items\":[\(sessionBody)],\"next_cursor\":\"next-session\"}"
+                headers = ["Content-Type": "application/json"]
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                statusCode = 202
+                body = "{\"run_id\":\"\(runID.uuidString)\",\"status\":\"QUEUED\"}"
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/runs/\(runID.uuidString)"),
+                ("POST", "/v1/runs/\(runID.uuidString)/cancel"):
+                statusCode = 200
+                body = runBody
+                headers = ["Content-Type": "application/json"]
+            case ("POST", "/v1/runs/\(runID.uuidString)/input"):
+                statusCode = 202
+                body = "{\"run_id\":\"\(runID.uuidString)\",\"status\":\"QUEUED\"}"
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/approvals"):
+                statusCode = 200
+                body = "{\"items\":[\(approvalBody)],\"next_cursor\":\"next-approval\"}"
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/approvals/\(approvalID.uuidString)"),
+                ("POST", "/v1/approvals/\(approvalID.uuidString)/resolve"):
+                statusCode = 200
+                body = approvalBody
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/artifacts/\(artifactID.uuidString)"):
+                statusCode = 200
+                body = artifactBody
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/artifacts/\(artifactID.uuidString)/content"):
+                statusCode = 200
+                body = "payload"
+                headers = ["Content-Type": "text/plain", "ETag": "abc123"]
+            default:
+                Issue.record("unexpected request: \(method) \(path)")
+                statusCode = 500
+                body = ""
+                headers = [:]
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: statusCode,
+                    httpVersion: nil,
+                    headerFields: headers
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+
+        let client = try makeClient(token: "valid")
+        #expect(
+            try await client.createSession(
+                agentID: "research", metadata: ["source": .string("mobile")]
+            ).id == sessionID
+        )
+        #expect(try await client.getSession(sessionID).activeRunID == runID)
+        #expect(try await client.listSessions(limit: 999, cursor: "session cursor").items.count == 1)
+        #expect(
+            try await client.submitMessage(
+                sessionID: sessionID,
+                content: [.text("hello")],
+                idempotencyKey: "stable-key"
+            ).runID == runID
+        )
+        #expect(try await client.getRun(runID).status == .running)
+        #expect(
+            try await client.deliverInput(
+                runID: runID,
+                content: [.text("EU")],
+                questionID: questionID
+            ).status == .queued
+        )
+        #expect(try await client.cancelRun(runID).id == runID)
+        #expect(
+            try await client.listPendingApprovals(
+                runID: runID,
+                sessionID: sessionID,
+                limit: 0,
+                cursor: "approval cursor"
+            ).items.first?.id == approvalID
+        )
+        #expect(try await client.getApproval(approvalID).toolName == "shell.exec")
+        #expect(
+            try await client.resolveApproval(
+                approvalID,
+                decision: .deny,
+                reason: "Not now"
+            ).id == approvalID
+        )
+        #expect(try await client.getArtifact(artifactID).name == "report.txt")
+        let content = try await client.getArtifactContent(artifactID, etag: "cached-tag")
+        guard case .content(let data, let etag) = content else {
+            Issue.record("expected artifact bytes")
+            return
+        }
+        #expect(String(decoding: data, as: UTF8.self) == "payload")
+        #expect(etag == "abc123")
+
+        let captured = lock.withLock { requests }
+        #expect(captured.count == 12)
+        let create = try #require(
+            captured.first {
+                $0.httpMethod == "POST" && $0.url?.path == "/v1/sessions"
+            }
+        )
+        let createJSON = try requestJSONObject(create)
+        #expect(createJSON["agent_id"] as? String == "research")
+        #expect((createJSON["metadata"] as? [String: String])?["source"] == "mobile")
+
+        let sessionList = try #require(
+            captured.first {
+                $0.httpMethod == "GET" && $0.url?.path == "/v1/sessions"
+            }
+        )
+        let sessionQuery = try #require(
+            URLComponents(url: sessionList.url!, resolvingAgainstBaseURL: false)?.queryItems
+        )
+        #expect(sessionQuery.contains(URLQueryItem(name: "limit", value: "200")))
+        #expect(sessionQuery.contains(URLQueryItem(name: "cursor", value: "session cursor")))
+        #expect(!sessionQuery.contains { $0.name == "tenant_id" || $0.name == "principal_id" })
+
+        let message = try #require(
+            captured.first { $0.url?.path.hasSuffix("/messages") == true }
+        )
+        #expect(message.value(forHTTPHeaderField: "Idempotency-Key") == "stable-key")
+        #expect(
+            ((try requestJSONObject(message)["content"] as? [[String: String]])?.first)?["text"]
+                == "hello"
+        )
+
+        let input = try #require(
+            captured.first { $0.url?.path.hasSuffix("/input") == true }
+        )
+        let inputJSON = try requestJSONObject(input)
+        #expect(inputJSON["question_id"] as? String == questionID.uuidString)
+        #expect(input.value(forHTTPHeaderField: "Idempotency-Key") == nil)
+
+        let approvals = try #require(
+            captured.first { $0.url?.path == "/v1/approvals" }
+        )
+        let approvalQuery = try #require(
+            URLComponents(url: approvals.url!, resolvingAgainstBaseURL: false)?.queryItems
+        )
+        #expect(approvalQuery.contains(URLQueryItem(name: "status", value: "pending")))
+        #expect(approvalQuery.contains(URLQueryItem(name: "limit", value: "1")))
+        #expect(approvalQuery.contains(URLQueryItem(name: "run_id", value: runID.uuidString)))
+        #expect(
+            approvalQuery.contains(URLQueryItem(name: "session_id", value: sessionID.uuidString))
+        )
+        #expect(approvalQuery.contains(URLQueryItem(name: "cursor", value: "approval cursor")))
+
+        let resolve = try #require(
+            captured.first { $0.url?.path.hasSuffix("/resolve") == true }
+        )
+        let resolveJSON = try requestJSONObject(resolve)
+        #expect(resolveJSON["decision"] as? String == "deny")
+        #expect(resolveJSON["reason"] as? String == "Not now")
+
+        let artifactContent = try #require(
+            captured.first { $0.url?.path.hasSuffix("/content") == true }
+        )
+        #expect(artifactContent.value(forHTTPHeaderField: "If-None-Match") == "cached-tag")
+    }
+
+    @Test
+    func testArtifactConditionalRequestAcceptsNotModifiedWithoutDecoding() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 304, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (response, Data())
+        }
+        let client = try makeClient(token: "valid")
+
+        let result = try await client.getArtifactContent(UUID(), etag: "known")
+
+        guard case .notModified = result else {
+            Issue.record("expected a typed not-modified result")
+            return
+        }
+    }
+
+    private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
+        let data: Data
+        if let body = request.httpBody {
+            data = body
+        } else {
+            let stream = try #require(request.httpBodyStream)
+            stream.open()
+            defer { stream.close() }
+            var bytes = Data()
+            var buffer = [UInt8](repeating: 0, count: 1_024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count >= 0 else {
+                    throw stream.streamError ?? HTTPTransportError.invalidResponse
+                }
+                if count == 0 { break }
+                bytes.append(buffer, count: count)
+            }
+            data = bytes
+        }
+        return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
 
     private func makeClient(token: String) throws -> VeetbotAPIClient {

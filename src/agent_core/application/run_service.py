@@ -13,6 +13,7 @@ from agent_core.domain.errors import ConflictError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.persistence import IdempotencyRecord
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
+from agent_core.domain.sessions import conversation_title
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import RunDispatcher
 from agent_core.ports.persistence import (
@@ -86,6 +87,15 @@ class RunService:
                     session_id = await self._sessions.create_in(uow)
                     created_session = True
                 session = await uow.sessions.get(session_id, self._principal)
+                if session.title is None and (
+                    created_session
+                    or await uow.runs.latest_for_session(session.id, self._principal) is None
+                ):
+                    title = conversation_title(prompt)
+                    if title is not None:
+                        session = await uow.sessions.set_title_if_missing(
+                            session.id, self._principal, title
+                        )
                 agent = await uow.agents.get_version(session.agent_id, session.agent_version)
                 consent = await uow.export_consent.get(
                     self._principal.tenant_id,

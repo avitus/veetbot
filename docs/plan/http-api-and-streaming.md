@@ -450,6 +450,22 @@ Two values, not more. A session is open or it is finished. There is no
 because deletion hard-removes the live session row. Its content-free tombstone
 is an idempotency record, not a third session state.
 
+### The title belongs to the shared core
+
+`SessionView.title` is server-owned conversation-history state, not a title a
+client may keep only in its local cache. On the first top-level user message,
+the application collapses whitespace in the first non-empty text block and
+stores its first 64 characters with the session. Later messages never replace
+that title. A message containing no non-empty text leaves the nullable field
+unset.
+
+Sessions created before this rule may still have a null stored title even
+though their event log contains conversation history. Reads of those rows
+derive the same title from the earliest `user.message.created` event without
+rewriting the immutable event. The list and point-read routes therefore return
+the same authoritative title on a newly installed client as on the client that
+started the conversation.
+
 ### `agent_version` is resolved at creation and frozen
 
 The request names an `agent_id` and never a version. The server resolves

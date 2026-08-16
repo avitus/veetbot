@@ -51,6 +51,10 @@ class SessionRepository(Protocol):
 
     async def get(self, session_id: UUID, principal: Principal) -> Session: ...
 
+    async def set_title_if_missing(
+        self, session_id: UUID, principal: Principal, title: str
+    ) -> Session: ...
+
     async def list(
         self,
         principal: Principal,

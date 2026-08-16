@@ -4,15 +4,43 @@ title: Changelog
 
 # Changelog
 
-## 2026-08-15 — Explicit memory writes after recall
+## 2026-08-16 — Explicit memory writes after recall
 
 - Preserved the runtime's `MEMORY` provenance through `memory.remember` instead
   of replacing it with the default untrusted argument label. Explicit writes
-  can now succeed after a memory snapshot or recall even when the model
-  normalizes the user's wording; external and knowledge-derived turns remain
-  subject to the existing trust rejection.
-- Added focused and PostgreSQL-backed regression coverage for the complete
-  recall-then-remember path.
+  now succeed after a memory snapshot or recall even when the model normalizes
+  the user's wording, while external and knowledge-derived turns remain
+  rejected.
+- Added focused and PostgreSQL-backed regressions for the complete
+  recall-then-remember path, including short normalized statements.
+
+## 2026-08-15 — Documentation-derived regression coverage
+
+- Made red-green-refactor evidence part of the repository operating contract,
+  including a prohibition on weakening failing tests and boundary-level
+  coverage requirements for public behavior.
+- Added a required full-Xcode Apple test partition to local tooling and hosted
+  CI. Release packaging now waits for native tests instead of accepting a
+  Command Line Tools build that compiles Swift Testing bundles without running
+  them.
+- Added native client contract coverage for every typed HTTP operation,
+  security-sensitive connection validation, missing credentials, conditional
+  artifact reads, stable message retries, and unbounded loop-safe pagination.
+- Added a PostgreSQL-backed conversation journey covering activity ordering,
+  principal isolation, active-run deletion refusal, cancellation, deletion,
+  tombstone idempotency, and converged history.
+- Fixed future activity timestamps rendering as `in 0s`, normalized seeded
+  in-memory credentials, and removed the approval-list 20-page truncation while
+  rejecting repeated cursors.
+
+## 2026-08-14 — Cross-device conversation titles
+
+- Moved generated conversation titles into the authoritative shared core so
+  they survive a client reinstall or move to another machine.
+- Derived titles for older null-title sessions from their immutable first user
+  message, avoiding an event rewrite or a one-off data migration.
+- Kept title assignment first-writer-wins, principal-scoped, whitespace-
+  normalized, and capped at 64 characters across the API and terminal paths.
 
 ## 2026-08-14 — Authoritative conversation history and deletion
 

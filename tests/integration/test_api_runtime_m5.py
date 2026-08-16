@@ -11,7 +11,7 @@ from typing import Any, cast
 from uuid import UUID
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.persistence.sqlalchemy_models import (
@@ -29,6 +29,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
+from agent_core.domain.agents import Principal
 from agent_core.domain.knowledge import (
     DocumentAuthority,
     KnowledgeChunk,
@@ -55,22 +56,28 @@ from agent_core.domain.views import (
     TextContentBlock,
     TransientStreamFrame,
 )
+from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.runtime.worker import DurableWorker
 from tests.integration.m2_support import database_settings
 
 
 @asynccontextmanager
-async def _client(composition: Composition) -> Any:
+async def _client(
+    composition: Composition,
+    *,
+    principal: Principal | None = None,
+    client_address: tuple[str, int] = ("127.0.0.1", 43105),
+) -> Any:
     app = create_app(
         composition.services,
         composition.settings,
-        composition.principal,
+        principal or composition.principal,
         composition.new_request_id,
         composition.readiness_probe,
     )
     transport = httpx.ASGITransport(
         app=app,
-        client=("127.0.0.1", 43105),
+        client=client_address,
         raise_app_exceptions=False,
     )
     async with httpx.AsyncClient(transport=transport, base_url="http://agent.test") as client:
@@ -111,6 +118,115 @@ async def test_postgres_submit_idempotency_is_atomic_under_concurrency() -> None
             )
         assert changed.status_code == 409
         assert changed.json()["error"]["details"]["reason"] == "idempotency_key_reused"
+
+
+async def test_postgres_session_titles_persist_and_legacy_rows_derive_from_history() -> None:
+    async with (
+        build(settings=database_settings(), storage="postgres") as composition,
+        _client(composition) as client,
+    ):
+        session_id = await _create_session(client)
+        submitted = await client.post(
+            f"/v1/sessions/{session_id}/messages",
+            json={"content": [{"type": "text", "text": "  Restore   this\nconversation  "}]},
+        )
+        assert submitted.status_code == 202, submitted.text
+
+        stored = await client.get(f"/v1/sessions/{session_id}")
+        assert stored.json()["title"] == "Restore this conversation"
+
+        async with composition.uow_factory() as uow:
+            database_session = cast(PostgresUnitOfWork, uow)._session
+            assert database_session is not None
+            await database_session.execute(
+                update(SessionRow).where(SessionRow.id == session_id).values(title=None)
+            )
+
+        recovered = await client.get(f"/v1/sessions/{session_id}")
+        assert recovered.json()["title"] == "Restore this conversation"
+        async with composition.uow_factory() as uow:
+            database_session = cast(PostgresUnitOfWork, uow)._session
+            assert database_session is not None
+            persisted_title = await database_session.scalar(
+                select(SessionRow.title).where(SessionRow.id == session_id)
+            )
+        assert persisted_title == "Restore this conversation"
+
+        index = await client.get("/v1/sessions")
+        listed = {UUID(row["id"]): row for row in index.json()["items"]}
+        assert listed[session_id]["title"] == "Restore this conversation"
+
+
+async def test_postgres_history_activity_ownership_and_delete_lifecycle() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        owner = composition.principal
+        other = Principal(
+            tenant_id=owner.tenant_id,
+            principal_id="another-history-owner",
+            roles={"user"},
+            scopes=set(PLATFORM_SCOPES),
+        )
+        async with (
+            _client(composition) as client,
+            _client(
+                composition,
+                principal=other,
+                client_address=("127.0.0.1", 43106),
+            ) as other_client,
+        ):
+            first = await _create_session(client)
+            second = await _create_session(client)
+            hidden = await _create_session(other_client)
+
+            submitted = await client.post(
+                f"/v1/sessions/{first}/messages",
+                json={"content": [{"type": "text", "text": "make this newest"}]},
+            )
+            assert submitted.status_code == 202, submitted.text
+            run_id = UUID(submitted.json()["run_id"])
+
+            first_page = await client.get("/v1/sessions", params={"limit": 1})
+            assert first_page.status_code == 200, first_page.text
+            assert [UUID(row["id"]) for row in first_page.json()["items"]] == [first]
+            assert first_page.json()["items"][0]["active_run_id"] == str(run_id)
+            assert first_page.json()["items"][0]["last_run_id"] == str(run_id)
+            cursor = first_page.json()["next_cursor"]
+            assert cursor is not None
+
+            second_page = await client.get("/v1/sessions", params={"limit": 1, "cursor": cursor})
+            assert second_page.status_code == 200, second_page.text
+            assert [UUID(row["id"]) for row in second_page.json()["items"]] == [second]
+            assert second_page.json()["next_cursor"] is None
+            assert hidden not in {
+                UUID(row["id"])
+                for row in [
+                    *first_page.json()["items"],
+                    *second_page.json()["items"],
+                ]
+            }
+
+            other_index = await other_client.get("/v1/sessions")
+            assert other_index.status_code == 200, other_index.text
+            assert [UUID(row["id"]) for row in other_index.json()["items"]] == [hidden]
+            assert (await other_client.get(f"/v1/sessions/{first}")).status_code == 404
+            assert (await other_client.delete(f"/v1/sessions/{first}")).status_code == 404
+
+            blocked = await client.delete(f"/v1/sessions/{first}")
+            assert blocked.status_code == 409, blocked.text
+            assert blocked.json()["error"]["code"] == "conflict"
+            assert blocked.json()["error"]["details"] == {
+                "reason": "active_run_exists",
+                "run_id": str(run_id),
+            }
+
+            cancelled = await client.post(f"/v1/runs/{run_id}/cancel")
+            assert cancelled.status_code == 200, cancelled.text
+            assert cancelled.json()["status"] == RunStatus.CANCELLED.value
+            assert (await client.delete(f"/v1/sessions/{first}")).status_code == 204
+            assert (await client.delete(f"/v1/sessions/{first}")).status_code == 204
+            assert (await client.get(f"/v1/sessions/{first}")).status_code == 404
+            remaining = await client.get("/v1/sessions")
+            assert [UUID(row["id"]) for row in remaining.json()["items"]] == [second]
 
 
 async def test_postgres_session_delete_cascades_and_clears_artifact_work() -> None:

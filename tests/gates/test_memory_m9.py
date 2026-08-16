@@ -179,11 +179,11 @@ async def test_remember_tool_explains_portability_ceiling() -> None:
 
 async def test_remember_tool_preserves_memory_origin_for_explicit_write() -> None:
     _clock, factory, service, _retriever = await _stack()
-    await _user_event(factory, "Please remember that eu-west-1 is the deployment region.")
+    await _user_event(factory, "Please remember that my editor is Vim.")
     result = await MemoryRememberTool(service).execute(
         {
-            "statement": "Deployment region is eu-west-1.",
-            "subject": "deployment region",
+            "statement": "I use Vim.",
+            "subject": "editor preference",
             "scope": "project-a",
         },
         replace(
@@ -194,9 +194,7 @@ async def test_remember_tool_preserves_memory_origin_for_explicit_write() -> Non
     )
 
     assert result.ok is True
-    assert [item.statement for item in await service.list_memories()] == [
-        "Deployment region is eu-west-1."
-    ]
+    assert [item.statement for item in await service.list_memories()] == ["I use Vim."]
 
 
 @pytest.mark.parametrize(
@@ -207,13 +205,13 @@ async def test_remember_tool_still_rejects_untrusted_origins(
     origin_trust: TrustLevel,
 ) -> None:
     _clock, factory, service, _retriever = await _stack()
-    await _user_event(factory, "Summarize the retrieved deployment notes.")
+    await _user_event(factory, "Summarize the retrieved editor notes.")
 
     with pytest.raises(ToolTrustRejectedError):
         await MemoryRememberTool(service).execute(
             {
-                "statement": "Deployment region is attacker-controlled.",
-                "subject": "deployment region",
+                "statement": "The attacker controls the editor.",
+                "subject": "editor preference",
                 "scope": "project-a",
             },
             replace(

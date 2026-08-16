@@ -278,9 +278,10 @@ now would be a service nobody starts and nobody maintains.
 One file, `.circleci/config.yml`, using CircleCI configuration version 2.1.
 The original four verification jobs match
 [evaluation-harness.md](evaluation-harness.md) exactly; the real-runtime
-sandbox lane and the post-gate production delivery jobs extend that file without
-changing the meaning of the original partitions or `make check`. ADR-0048 owns
-the delivery mechanics.
+sandbox lane, native Apple lane, and post-gate production delivery jobs extend
+that file without changing the meaning of the original partitions or `make
+check`. ADR-0048 owns the delivery mechanics and ADR-0049 owns native-client
+verification.
 
 ```text
 job           target invoked         needs     runs on
@@ -291,6 +292,7 @@ job           target invoked         needs     runs on
 3 integration make test-integration  postgres  every push, PR
 4 live        make test-live         secrets   schedule, manual
 5 sandbox     make test-sandbox      machine   every push, PR
+6 apple       make test-apple        Xcode     every push, PR
 ```
 
 Jobs 1 and 2 partition `make check`, split so the cheap one fails
@@ -301,6 +303,9 @@ in both the static lane and the local aggregate. No check appears in
 both jobs, and a developer who runs `make check` locally has run both
 jobs' contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
+Job 6 is an additional native-client gate outside `make check`; it runs under
+full Xcode because Command Line Tools can compile a Swift Testing bundle
+without executing it. Release packaging depends on both additional gates.
 
 Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
 than the compose file, because the compose file publishes a port on the
@@ -319,10 +324,11 @@ credentials without placing them in the configuration file.
 Three workflow-level facts complete the definition:
 
 1.  **Triggers.** The `verify` workflow runs jobs 1 through 3 plus the additional
-    sandbox job 5 for ordinary VCS pipelines, including pull-request branches.
+    sandbox and Apple jobs 5 and 6 for ordinary VCS pipelines, including
+    pull-request branches.
     A pipeline with `run_live: true` selects the manual live workflow instead.
     The fourth job also runs nightly on `main` at 07:17 UTC. Production delivery
-    begins only after all four `verify` jobs pass.
+    begins only after all five `verify` jobs pass.
 2.  **Python version.** A single version, 3.12, not a matrix. The
     project pins `requires-python >=3.12` and runs one deployment; a
     matrix here would test a configuration nothing runs.
@@ -578,10 +584,11 @@ done badly.
     placeholder service is one nobody starts and nobody maintains.
 10. **One CircleCI configuration file and one Python version.** The four
     original verification jobs retain their specified partitions. The later
-    sandbox and post-gate delivery jobs share the same file under ADR-0048. No
-    Python matrix is added: the project pins `>=3.12` and runs one deployment,
-    so a matrix would test a configuration nothing runs. The `uv` cache keys on
-    `uv.lock`, so a cache miss means a dependency changed.
+    sandbox, native Apple, and post-gate delivery jobs share the same file under
+    ADR-0048 and ADR-0049. No Python matrix is added: the project pins `>=3.12`
+    and runs one deployment, so a matrix would test a configuration nothing
+    runs. The `uv` cache keys on `uv.lock`, so a cache miss means a dependency
+    changed.
 11. **Job 4 does not run on pull requests.** Live tests need a
     credential a fork cannot have and cost money per run. Schedule and
     manual dispatch only, which is where `RUN_LIVE_MODEL_TESTS=1` is

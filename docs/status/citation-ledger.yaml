@@ -31,7 +31,7 @@ citations:
   - cite: "docs/plan/event-log-and-persistence.md#docs/plan/evaluation-harness.md:1319"
     excerpt: "**Redaction happens at export, not at conversion.** The expo"
     digest: "a597371d17f12940"
-  - cite: "docs/plan/event-log-and-persistence.md#docs/plan/http-api-and-streaming.md:607"
+  - cite: "docs/plan/event-log-and-persistence.md#docs/plan/http-api-and-streaming.md:623"
     excerpt: "8. In one transaction, insert the run, append the user messa"
     digest: "8252bb41d4b37c1b"
   - cite: "docs/plan/event-log-and-persistence.md#docs/plan/runtime-loop.md:276"
