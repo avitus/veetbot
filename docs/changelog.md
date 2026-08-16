@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-16 — Explicit memory writes after recall
+
+- Preserved the runtime's `MEMORY` provenance through `memory.remember` instead
+  of replacing it with the default untrusted argument label. Explicit writes
+  now succeed after a memory snapshot or recall even when the model normalizes
+  the user's wording, while external and knowledge-derived turns remain
+  rejected.
+- Added focused and PostgreSQL-backed regressions for the complete
+  recall-then-remember path, including short normalized statements.
+
 ## 2026-08-15 — Documentation-derived regression coverage
 
 - Made red-green-refactor evidence part of the repository operating contract,
