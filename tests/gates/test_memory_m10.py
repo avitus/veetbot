@@ -384,18 +384,24 @@ async def test_old_pending_in_memory_session_is_not_starved_by_newer_sessions() 
                     )
                 )
 
+    fairness_cutoff = NOW + timedelta(minutes=3)
     async with factory() as uow:
         assert (
             await uow.maintenance.pending_memory_sessions(
                 principal(),
-                idle_before=NOW + timedelta(minutes=1),
+                idle_before=fairness_cutoff,
                 limit=0,
             )
             == []
         )
+        assert await uow.maintenance.pending_memory_sessions(
+            principal(),
+            idle_before=fairness_cutoff,
+            limit=2,
+        ) == [SESSION_ID, UUID(int=7_000)]
         pending = await uow.maintenance.pending_memory_sessions(
             principal(),
-            idle_before=NOW + timedelta(minutes=1),
+            idle_before=fairness_cutoff,
             limit=1,
         )
 
