@@ -185,7 +185,10 @@ import Testing
                 return try response(for: request, statusCode: 500, body: "")
             }
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
+        defer {
+            model.newSession()
+            ChatViewModelURLProtocol.handler = nil
+        }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
