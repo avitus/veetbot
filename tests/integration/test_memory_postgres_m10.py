@@ -23,6 +23,8 @@ from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
 from tests.contract.support import NOW
 from tests.integration.m2_support import database_settings
 
+_BARRIER_TIMEOUT = 10.0
+
 
 class _BarrierExtractor:
     name = "barrier-deterministic-v2"
@@ -42,7 +44,7 @@ class _BarrierExtractor:
         self._arrivals += 1
         if self._arrivals == 2:
             self._ready.set()
-        await self._ready.wait()
+        await asyncio.wait_for(self._ready.wait(), _BARRIER_TIMEOUT)
         return await self._delegate.extract(events, principal=principal, scope=scope)
 
 
@@ -113,7 +115,7 @@ async def test_postgres_concurrent_consolidators_form_each_candidate_once(
             claim_arrivals += 1
             if claim_arrivals == 2:
                 claims_ready.set()
-            await claims_ready.wait()
+            await asyncio.wait_for(claims_ready.wait(), _BARRIER_TIMEOUT)
             return await original_acquire(repository, principal, session_id)
 
         monkeypatch.setattr(

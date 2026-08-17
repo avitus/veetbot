@@ -1,6 +1,8 @@
 """Memory candidate extractor contract: bounded, structured, trusted proposals."""
 
-from agent_core.memory.formation import DeterministicCandidateExtractor
+import pytest
+
+from agent_core.memory.formation import MAX_EXTRACTOR_PROPOSALS, DeterministicCandidateExtractor
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import principal
 
@@ -33,3 +35,6 @@ async def test_extractor_enforces_its_candidate_volume_cap() -> None:
     )
 
     assert len(candidates) == 1
+
+    with pytest.raises(ValueError, match="must not exceed"):
+        DeterministicCandidateExtractor(maximum_candidates=MAX_EXTRACTOR_PROPOSALS + 1)

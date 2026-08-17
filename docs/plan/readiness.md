@@ -853,7 +853,7 @@ whether it may).
 One of the five is sharper than this review recorded, and the
 sharpening belongs here. The human-editable surface is not merely
 uncontracted: the `MemoryStore` port declares `list`, `edit`, and
-`delete` at `memory-formation-and-consolidation.md:374`, and no tool,
+`delete` at `memory-formation-and-consolidation.md:377`, and no tool,
 route, or command in the corpus calls any of them. The agent-facing
 surface is three tools: `memory.search` and `memory.recall_episodes`
 read, and `memory.remember` creates. None of the three lists, edits,

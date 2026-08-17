@@ -55,6 +55,13 @@ _CLAUSE_BOUNDARY = re.compile(
     re.I,
 )
 _ITEM_BOUNDARY = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+)\s*", re.I)
+_OWNERSHIP_VERBS = {
+    "have": "has",
+    "own": "owns",
+    "use": "uses",
+    "wear": "wears",
+    "drive": "drives",
+}
 _POSSESSIVE_ENTITY = re.compile(
     r"\bmy\s+((?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)"
     r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
@@ -125,6 +132,8 @@ class DeterministicCandidateExtractor:
     def __init__(self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS) -> None:
         if maximum_candidates < 1:
             raise ValueError("maximum memory candidates must be positive")
+        if maximum_candidates > MAX_EXTRACTOR_PROPOSALS:
+            raise ValueError(f"maximum memory candidates must not exceed {MAX_EXTRACTOR_PROPOSALS}")
         self._maximum_candidates = maximum_candidates
 
     async def extract(
@@ -203,10 +212,9 @@ class DeterministicCandidateExtractor:
             preference = re.fullmatch(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", clause, re.I)
             if preference is not None:
                 value = preference.group(1).strip(" ,.:;!?")
-                legacy_we = clause.casefold().startswith("we ")
                 add(
                     subject=_preference_subject(value),
-                    statement=(f"Prefers {value}" if legacy_we else f"User prefers {value}."),
+                    statement=f"User prefers {value}.",
                     belief_type=BeliefType.PREFERENCE,
                     confidence=0.82,
                 )
@@ -218,14 +226,7 @@ class DeterministicCandidateExtractor:
                 re.I,
             )
             if retraction is not None:
-                verb = retraction.group(1).casefold()
-                rendered_verb = {
-                    "have": "has",
-                    "own": "owns",
-                    "use": "uses",
-                    "wear": "wears",
-                    "drive": "drives",
-                }[verb]
+                rendered_verb = _OWNERSHIP_VERBS[retraction.group(1).casefold()]
                 for raw_item in _ITEM_BOUNDARY.split(retraction.group(2)):
                     cleaned = _clean_object(raw_item)
                     if cleaned is None:
@@ -243,14 +244,7 @@ class DeterministicCandidateExtractor:
 
             ownership = re.fullmatch(r"i\s+(have|own|use|wear|drive)\s+(.+)", clause, re.I)
             if ownership is not None:
-                verb = ownership.group(1).casefold()
-                rendered_verb = {
-                    "have": "has",
-                    "own": "owns",
-                    "use": "uses",
-                    "wear": "wears",
-                    "drive": "drives",
-                }[verb]
+                rendered_verb = _OWNERSHIP_VERBS[ownership.group(1).casefold()]
                 for raw_item in _ITEM_BOUNDARY.split(ownership.group(2)):
                     cleaned = _clean_object(raw_item)
                     if cleaned is None:
@@ -754,6 +748,7 @@ class GovernedMemoryService:
                         rejected += 1
                     else:
                         if action == "unchanged":
+                            rejected += 1
                             continue
                         beliefs.append(belief)
                         if action == "reinforced":
@@ -1019,7 +1014,12 @@ def _candidate(event: EventEnvelope) -> tuple[EventEnvelope, str, str, BeliefTyp
         return event, "user", text[len("remember that ") :].strip(), BeliefType.FACT
     match = re.match(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", text, re.I)
     if match is not None:
-        return event, "user", f"Prefers {match.group(1).strip()}", BeliefType.PREFERENCE
+        return (
+            event,
+            "user",
+            f"User prefers {match.group(1).strip()}.",
+            BeliefType.PREFERENCE,
+        )
     return None
 
 

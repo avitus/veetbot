@@ -59,7 +59,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    supersedes only the related belief instead of every preference about the user.
    Other preferences derive a topic key rather than falling back to `user`, and
    a subject retracted in a source event is excluded from positive possessive
-   proposals from that same event.
+   proposals from that same event. First-person singular and plural preferences
+   also share the canonical statement shape `User prefers {value}.`, so changing
+   pronouns cannot turn an unchanged preference into a contradiction.
 6. **Bound formation before commit and preserve audit truth.** The deterministic
    extractor may scan up to 256 proposals, while the service consumes at most
    twelve automatic candidates even if an extractor overproduces. Existing
@@ -83,7 +85,10 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    Lock contention is a no-op, and a rollback leaves the prefix pending. The
    aggregate audit owns the formation id stored by every new belief and measures
    from before extraction through commit preparation. A non-positive maintenance
-   batch limit selects no sessions in either adapter.
+   batch limit selects no sessions in either adapter. Because the existing audit
+   schema has no `unchanged` field, an idempotent same-source replay counts as a
+   rejection; this preserves a reconciled terminal outcome for every proposal
+   without misreporting the no-op as a write or reinforcement.
 
 ## Consequences
 

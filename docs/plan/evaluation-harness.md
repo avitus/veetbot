@@ -206,7 +206,7 @@ restates a gate another spec owns.
 | **Total** | **99** | **23** | **9** | **46** | **177** |
 
 The counts are the useful output, not the individual assignments:
-**seventy-eight of the hundred and seventy-seven declared gates are not case
+**seventy-eight of the hundred and seventy-seven owned registry entries are not case
 gates**, and a harness that only runs cases would report a green build with
 those seventy-eight of the plan's stated invariants unchecked. Two of the
 four kinds — property and structural — need no runtime at all and can be

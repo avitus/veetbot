@@ -373,6 +373,16 @@ async def test_old_pending_in_memory_session_is_not_starved_by_newer_sessions() 
                     updated_at=NOW + timedelta(minutes=index + 2),
                 )
             )
+            if index == 0:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session_id,
+                        run_id=None,
+                        event_type="memory.formation.requested",
+                        actor_type="runtime",
+                        derivation_key="newer-pending-session",
+                    )
+                )
 
     async with factory() as uow:
         assert (
@@ -507,6 +517,56 @@ async def test_independent_clauses_and_text_parts_form_independent_candidates() 
         "Apple Watch",
         "home location",
     }
+
+
+async def test_equivalent_first_person_preferences_reinforce_instead_of_supersede() -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    await user_event(factory, "We prefer metric units.")
+    first = await service.run(
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+    assert first.beliefs[0].statement == "User prefers metric units."
+
+    await user_event(factory, "I prefer metric units.")
+    second = await service.run(
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert second.run.reinforced == 1
+    assert second.run.superseded == 0
+    assert [belief.statement for belief in await service.list_memories()] == [
+        "User prefers metric units."
+    ]
+
+
+async def test_same_source_replay_is_accounted_as_an_idempotent_rejection() -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    await user_event(factory, "I own an Apple Watch.")
+    first = await service.run(
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+    assert first.run.committed == 1
+
+    replay = await service.run(
+        trigger="replay",
+        scope="general",
+        session_id=SESSION_ID,
+        since_watermark=0,
+    )
+
+    assert replay.beliefs == []
+    assert (
+        replay.run.candidates_proposed,
+        replay.run.committed,
+        replay.run.reinforced,
+        replay.run.rejected,
+    ) == (1, 0, 0, 1)
 
 
 async def test_ordinary_retraction_supersedes_the_owned_entity_memory() -> None:

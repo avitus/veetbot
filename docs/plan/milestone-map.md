@@ -574,7 +574,7 @@ is Milestone 1 by the same decision.
 
 ### Memory formation, ten gates and four metrics
 
-The original list of eight bullets separates into five Milestone 9 gates and
+The original list of eight bullets separates into four Milestone 9 gates and
 four metrics by what the spec calls them. The trailing sentence *"Gate: memory
 improves target eval cases without increasing policy failures"* is a fifth
 gate, not a closing remark. Milestone 10 memory maturation later adds five

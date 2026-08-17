@@ -592,13 +592,15 @@ verification:
           counters, and the missing consolidation claim. A second hosted review
           drove four more red regressions for non-positive batch limits,
           independent clause and text-part boundaries, truthful overflow audits,
-          and inferred-confidence authority. After the corresponding
-          implementation steps, all 21 Milestone 10 memory gate tests pass.
+          and inferred-confidence authority. A third hosted review drove two
+          further red cases for canonical preference reinforcement and complete
+          audit reconciliation. After the corresponding implementation steps,
+          all 23 Milestone 10 memory gate tests pass.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 341 source and test
-          files, 419 static tests, 167 contracts, deployment-script checks,
+          files, 421 static tests, 167 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass. The gate
           registry contains 177 entries and retains 166 as the verified ceiling
           through Milestone 9.

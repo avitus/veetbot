@@ -113,7 +113,7 @@ def test_candidate_extracts_stated_preferences_from_text_parts() -> None:
     assert extracted is not None
     _, subject, statement, belief_type = extracted
     assert subject == "user"
-    assert statement == "Prefers tabs over spaces"
+    assert statement == "User prefers tabs over spaces."
     assert belief_type is BeliefType.PREFERENCE
 
 

@@ -161,7 +161,10 @@ tea and we decided to deploy Fridays” must not turn the decision into part of 
 preference. The deterministic extractor has a separate 256-proposal scan ceiling
 for resource safety. The governed service, not the extractor, applies the smaller
 twelve-candidate commit ceiling and records the number the extractor returned plus
-every proposal it rejected, including overflow.
+every proposal it rejected, including overflow. The `rejected` audit count also
+includes candidates that are idempotent same-source replays: they are safe no-op
+outcomes, but counting them makes every proposed candidate reconcile to a terminal
+outcome even though the schema has no separate `unchanged` field.
 
 **Portability has a deterministic ceiling.** Each `belief_type` carries a default
 portability — preferences, user-model attributes, and procedure pointers are

@@ -21,7 +21,7 @@ async def test_consolidation_extracts_candidates_and_advances_the_watermark() ->
     result = await service.run(trigger="session_close", scope="project-a", session_id=SESSION_ID)
 
     assert sorted(belief.statement for belief in result.beliefs) == [
-        "Prefers tabs over spaces",
+        "User prefers tabs over spaces.",
         "my launch code is ORBIT-9",
     ]
     assert {belief.status for belief in result.beliefs} == {MemoryStatus.PROVISIONAL}
