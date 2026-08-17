@@ -35,6 +35,7 @@ from agent_core.domain.runs import (
     Run,
     RunCheckpoint,
     RunFailure,
+    RunKind,
     RunStatus,
     RunUsage,
 )
@@ -210,6 +211,15 @@ class InMemoryRunRepository:
         async with self._lock:
             if run.id in self._runs:
                 raise ConflictError("run already exists")
+            if (
+                run.parent_run_id is not None
+                and run.kind is RunKind.SKILL_REVIEW
+                and any(
+                    candidate.parent_run_id == run.parent_run_id and candidate.kind is run.kind
+                    for candidate in self._runs.values()
+                )
+            ):
+                raise ConflictError("parent already has a child run of this kind")
             self._runs[run.id] = run.model_copy(deep=True)
 
     async def get(self, run_id: UUID, principal: Principal) -> Run:
@@ -265,6 +275,22 @@ class InMemoryRunRepository:
                 ):
                     latest[run.session_id] = run.model_copy(deep=True)
         return latest
+
+    async def child_for_parent(
+        self, parent_run_id: UUID, kind: RunKind, principal: Principal
+    ) -> Run | None:
+        async with self._lock:
+            matching = [
+                run.model_copy(deep=True)
+                for run in self._runs.values()
+                if run.parent_run_id == parent_run_id and run.kind is kind
+            ]
+        if not matching:
+            return None
+        if len(matching) > 1:
+            raise ConflictError("parent has multiple child runs of one kind")
+        await self._sessions.get(matching[0].session_id, principal)
+        return matching[0]
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         async with self._lock:

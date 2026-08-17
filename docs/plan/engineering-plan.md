@@ -2820,6 +2820,41 @@ These are separate optional extensions.
 
 A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill_manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, and the threshold is the one number that document leaves open.
 
+#### Self-authored skills (authorized tranche)
+
+This tranche is independently deliverable and does not authorize scheduling,
+new routing behavior, or the general-purpose `delegate.run` path.
+
+Implement:
+
+- The `skill.manage` capability tool with `create`, `edit`, `patch`, and
+  `archive` operations.
+- Exact `skill.write` scope enforcement, trusted-turn enforcement, provenance,
+  optimistic edit conflicts, and `SKILL_AUTHORING` approvals containing a diff.
+- An optional post-completion background review in a dedicated child session,
+  with a fixed tool allowlist, read-before-write, no archive permission, bounded
+  limits, and failure isolation from the completed parent.
+- Default-off foreground-authoring and background-review rollout controls.
+- Per-skill authoring, conflict, denial, approval, and outcome metrics.
+- The self-authored form of evaluation case 27 and the rollout evidence rule in
+  [skills.md](skills.md#rollout-evidence).
+
+Acceptance criteria:
+
+- Every authoring gate registered at Milestone 10 passes.
+- The agent can create and revise a skill through `skill.manage`; every revision
+  is immutable, version-pinned, provenance-linked, and recoverably idempotent.
+- Background review can write only agent-authored skills it has read, can use
+  only its allowlisted tools, cannot archive a skill, and can never change its
+  completed parent's outcome or event history.
+- A principal without `skill.write`, and every ordinary turn whose
+  `origin_trust` is below `USER`, is denied before the repository write.
+- A newly created skill remains disabled until an `AgentSpec` explicitly
+  enables it. A revision of an enabled floating reference appears only in a new
+  session. Rollback remains an `AgentSpec` pin or an operator archive.
+- Authoring remains disabled by default and is not enabled for a tenant until
+  the rollout evidence rule passes.
+
 #### Scheduling
 
 Implement a scheduler only after durable on-demand runs are reliable.

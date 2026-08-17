@@ -80,6 +80,8 @@ class AuthoringContext(BaseModel):
 
     run_id: UUID
     principal_id: str
+    invocation_id: UUID
+    idempotency_key: str = Field(min_length=1)
 
 
 class SkillRevision(BaseModel):
@@ -100,15 +102,28 @@ class SkillRevision(BaseModel):
     status: SkillStatus
     authored_by_run_id: UUID | None = None
     authored_by_principal_id: str | None = None
+    authored_by_invocation_id: UUID | None = None
+    authoring_idempotency_key: str | None = None
+    archived_by_invocation_id: UUID | None = None
+    archive_idempotency_key: str | None = None
     created_at: datetime
 
     @model_validator(mode="after")
     def provenance_matches_source(self) -> SkillRevision:
-        has_provenance = (
-            self.authored_by_run_id is not None and self.authored_by_principal_id is not None
+        durable_provenance = (
+            self.authored_by_principal_id,
+            self.authored_by_invocation_id,
+            self.authoring_idempotency_key,
         )
-        if (self.source is SkillSource.AGENT) != has_provenance:
+        has_durable_provenance = all(value is not None for value in durable_provenance)
+        if any(value is not None for value in durable_provenance) != has_durable_provenance:
+            raise ValueError("agent skill provenance must be complete")
+        if self.source is not SkillSource.AGENT and self.authored_by_run_id is not None:
+            raise ValueError("non-agent skills cannot carry authoring run provenance")
+        if (self.source is SkillSource.AGENT) != has_durable_provenance:
             raise ValueError("agent skill provenance must match its source")
+        if (self.archived_by_invocation_id is None) != (self.archive_idempotency_key is None):
+            raise ValueError("archive idempotency provenance must be complete")
         return self
 
 

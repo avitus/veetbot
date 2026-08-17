@@ -343,7 +343,7 @@ they fix four acceptance criteria and one exclusion list. Neither states a
 format, a redaction procedure, or what "consent-gated" means mechanically,
 and [evaluation-harness.md](evaluation-harness.md) has already built the
 consuming half against the assumption that this half is redacted before a
-converter ever sees it (`evaluation-harness.md:1319`). This is the
+converter ever sees it (`evaluation-harness.md:1320`). This is the
 producing half, and it is the third projection in the table above.
 
 ### The export is an artifact, not a query
@@ -421,7 +421,7 @@ same question in the same words.
 `recorded_on` is a date, not a timestamp, and there are no per-message
 timestamps at all. Per-message timing is the highest-entropy correlatable
 field an export could carry, no stated consumer needs it — the harness
-discards timestamps at conversion (`evaluation-harness.md:1296`) and a
+discards timestamps at conversion (`evaluation-harness.md:1297`) and a
 training corpus has no use for them — and a field that is dropped by every
 consumer and re-identifies a user is a field that should not have been
 written. `tools` records the name and schema hash of every tool the run

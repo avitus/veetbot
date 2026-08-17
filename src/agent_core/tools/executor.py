@@ -80,6 +80,7 @@ from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
 from agent_core.tools.messages import message_for
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME
+from agent_core.tools.skill_manage import SKILL_MANAGE_TOOL_NAME
 from agent_core.tools.validation import validate_and_normalize, validate_output
 
 logger = logging.getLogger(__name__)
@@ -239,10 +240,14 @@ def _writer_origin(tool: Tool) -> ArtifactOrigin:
 
 
 def _action_kind(tool: Tool) -> ActionKind:
-    return ActionKind.MEMORY_WRITE if tool.spec.name == "memory.remember" else ActionKind.TOOL_CALL
+    if tool.spec.name == "memory.remember":
+        return ActionKind.MEMORY_WRITE
+    if tool.spec.name == SKILL_MANAGE_TOOL_NAME:
+        return ActionKind.SKILL_AUTHORING
+    return ActionKind.TOOL_CALL
 
 
-def _turn_origin_trust(checkpoint: RunCheckpoint) -> TrustLevel:
+def _turn_origin_trust(checkpoint: RunCheckpoint, run_kind: str = "interactive") -> TrustLevel:
     """Conservatively taint writes when the active turn consumed external content."""
 
     origin_trust = checkpoint.context_origin_trust
@@ -253,11 +258,23 @@ def _turn_origin_trust(checkpoint: RunCheckpoint) -> TrustLevel:
             break
     else:
         return TrustLevel.EXTERNAL_UNTRUSTED
+    calls_by_id: dict[str, list[ToolCallItem]] = {}
+    if run_kind == "skill_review":
+        for candidate in active_turn:
+            if isinstance(candidate, ToolCallItem):
+                calls_by_id.setdefault(candidate.call_id, []).append(candidate)
+    review_skill_load_calls = {
+        call_id
+        for call_id, calls in calls_by_id.items()
+        if len(calls) == 1 and calls[0].name == SKILL_LOAD_TOOL_NAME
+    }
     for active_item in active_turn:
         if isinstance(active_item, ToolResultItem) and active_item.trust in {
             TrustLevel.EXTERNAL_UNTRUSTED,
             TrustLevel.KNOWLEDGE,
         }:
+            if run_kind == "skill_review" and active_item.call_id in review_skill_load_calls:
+                continue
             return TrustLevel.EXTERNAL_UNTRUSTED
         if (
             isinstance(active_item, ToolResultItem)
@@ -580,7 +597,7 @@ class ToolPipeline:
                 normalized_arguments_hash=arguments_hash,
                 effective_arguments_hash=arguments_hash,
                 idempotency_key=key,
-                origin_trust=_turn_origin_trust(checkpoint),
+                origin_trust=_turn_origin_trust(checkpoint, run.kind.value),
                 parallel_group=parallel_group,
                 created_at=now,
                 updated_at=now,
@@ -935,6 +952,7 @@ class ToolPipeline:
             available_tools=frozenset(checkpoint.pinned_tool_names or agent.enabled_tools),
             origin_trust=invocation.origin_trust,
             argument_trust=_argument_trust(arguments, checkpoint),
+            run_kind=run.kind.value,
             cancellation=token,
             mark_effect_sent=mark_effect_sent,
         )
@@ -1233,6 +1251,14 @@ class ToolPipeline:
         if invocation.normalized_arguments is None or invocation.normalized_arguments_hash is None:
             raise ConflictError("approval action has no normalized arguments")
         now = self._clock.now()
+        action_summary = f"Run {tool.spec.name} with validated arguments."
+        approval_arguments = dict(invocation.normalized_arguments)
+        approval_view = getattr(tool, "approval_view", None)
+        if approval_view is not None:
+            action_summary, approval_arguments = await approval_view(
+                approval_arguments,
+                tenant_id=run.tenant_id,
+            )
         approval = ApprovalRequest(
             id=self._ids.new_id(),
             tenant_id=run.tenant_id,
@@ -1243,9 +1269,9 @@ class ToolPipeline:
             action_id=invocation.id,
             tool_invocation_id=invocation.id,
             status=ApprovalStatus.PENDING,
-            action_summary=f"Run {tool.spec.name} with validated arguments.",
+            action_summary=action_summary,
             tool_name=tool.spec.name,
-            arguments=_approval_argument_view(dict(invocation.normalized_arguments)),
+            arguments=_approval_argument_view(approval_arguments),
             normalized_arguments_hash=invocation.normalized_arguments_hash,
             required_scopes=set(tool.spec.required_scopes),
             agent_version=agent.version,

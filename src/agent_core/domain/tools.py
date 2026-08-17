@@ -124,6 +124,7 @@ class ToolExecutionContext:
     available_tools: frozenset[str] = frozenset()
     origin_trust: TrustLevel = TrustLevel.EXTERNAL_UNTRUSTED
     argument_trust: dict[str, TrustLevel] = field(default_factory=dict)
+    run_kind: str = "interactive"
 
 
 class ToolOutcomeStatus(StrEnum):

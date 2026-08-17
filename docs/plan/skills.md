@@ -354,6 +354,10 @@ class SkillRevision:
     status: SkillStatus
     authored_by_run_id: RunId | None
     authored_by_principal_id: PrincipalId | None
+    authored_by_invocation_id: InvocationId | None
+    authoring_idempotency_key: str | None
+    archived_by_invocation_id: InvocationId | None
+    archive_idempotency_key: str | None
     created_at: datetime
 ```
 
@@ -444,18 +448,20 @@ class AuthoringContext:
 
     run_id: RunId
     principal_id: PrincipalId
+    invocation_id: InvocationId
+    idempotency_key: str
 ```
 
-It carries exactly the two fields `SkillRevision` persists and no more. It is
-non-null when and only when `source is SkillSource.AGENT`, which is the same
-condition under which `authored_by_run_id` and `authored_by_principal_id` are
-non-null, so the argument and the columns cannot disagree. That is Section
-30.3's provenance requirement expressed once.
-
-The link to the events that produced a revision is `run_id` and needs no field
-of its own: a run's events are already addressable by run, so the revision
-reaches its authoring trace through the log rather than through a duplicated
-sequence number that could drift from it.
+It carries the authoring run and principal plus the invocation identity and the
+pipeline's canonical-argument idempotency key. It is non-null when and only
+when `source is SkillSource.AGENT`. At creation, all four corresponding revision
+fields are non-null and the run foreign key resolves to the events that produced
+the revision. The governed session-erasure flow may later null only
+`authored_by_run_id`; principal, invocation, and idempotency-key provenance
+remain durable so erasure does not make the revision anonymous or unreplayable.
+Archive stores a separate invocation-and-key pair on the archived revision so a
+crash after that effect can replay safely without overwriting creation
+provenance.
 
 ### `SkillRepository` and `SkillPackageStore`
 
@@ -542,9 +548,15 @@ skill_revisions
   + trust                      TEXT NOT NULL
   + status                     TEXT NOT NULL
   + authored_by_run_id         UUID NULL
-  + authored_by_principal_id   UUID NULL
+  + authored_by_principal_id   TEXT NULL
+  + authored_by_invocation_id  UUID NULL
+  + authoring_idempotency_key  TEXT NULL
+  + archived_by_invocation_id  UUID NULL
+  + archive_idempotency_key    TEXT NULL
   + created_at                 TIMESTAMPTZ NOT NULL
   + UNIQUE (skill_id, revision)
+  + UNIQUE (authored_by_invocation_id) WHERE authored_by_invocation_id IS NOT NULL
+  + UNIQUE (archived_by_invocation_id) WHERE archived_by_invocation_id IS NOT NULL
 ```
 
 `source` sits on `skills` and not on `skill_revisions`, which is the
@@ -889,7 +901,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:3369` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:3404` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
@@ -932,14 +944,15 @@ is what a skill write is. Archiving is also `EXTERNAL_WRITE` and not
 `EXTERNAL_DELETE`, because archiving deletes nothing.
 
 `CONDITIONALLY_IDEMPOTENT` is the classification whose comment in
-`policy-and-approvals.md` reads *"key required"*, and
-`expected_revision` is the key. That is a better answer than
-`NON_IDEMPOTENT` for a reason that has nothing to do with the
-control-tool rule: a `NON_IDEMPOTENT` tool left `RUNNING` by a crash
-resolves to `UNCERTAIN` and can never be retried, which would leave a
-skill write in a state nobody can resolve. With the key, the recovery
-path can retry and the retry either finds the revision already
-written or finds the conflict.
+`policy-and-approvals.md` reads *"key required"*. The key is the tool
+invocation identity together with the canonical request-argument hash, as the
+ordinary tool pipeline already derives it. `expected_revision` is a separate
+compare-and-swap precondition: two distinct edits may both expect revision 7
+and must not deduplicate to one result. A repeated invocation with the same
+arguments replays safely; a different edit against the stale revision receives
+`SkillRevisionConflict`. This is better than `NON_IDEMPOTENT` because a crash
+after the durable write remains recoverable instead of becoming permanently
+`UNCERTAIN`.
 
 ### Four operations
 
@@ -1134,6 +1147,31 @@ Neither deletes anything, and a run that pinned revision 7 before it
 was archived keeps resolving revision 7 forever. That is the property
 that makes the audit story true, and it is the reason this store has
 no retention policy.
+
+Creating a skill does not edit `AgentSpec`. The new revision is a governed
+candidate and remains absent from every agent catalog until an operator writes a
+new `AgentSpec` version that enables its floating or pinned reference. Editing
+an already-enabled floating skill needs no additional configuration write, but
+the newer revision is visible only to sessions opened after publication. This
+is the activation boundary that prevents authoring from silently broadening its
+own future context.
+
+## Rollout evidence
+
+Runtime construction has two independent controls: foreground authoring and
+background review. Both default off, and background review is invalid unless
+foreground authoring is also enabled. Enabling construction makes the machinery
+available; tenant activation remains a release decision.
+
+The release gate uses paired evaluations over the declared self-authored-skill
+target corpus. At least thirty paired samples are required. The authored arm
+must improve task completion by at least five absolute percentage points, the
+95 percent Wilson lower bound on the paired improvement must be above zero, and
+the authored arm may introduce no additional policy failure. The deterministic
+self-authored form of case 27 must also pass. Any policy regression blocks
+rollout regardless of task improvement. Evidence is recorded per model-policy,
+policy-profile, and authoring implementation version; it does not transfer to a
+different combination.
 
 ## Milestones
 
@@ -1337,12 +1375,12 @@ thirteenth area, `skill`. Ten are Milestone 8 and six are Milestone
     logged failure. Repeated with the review enqueued and the worker
     killed before it starts.
     `gate.skill.review_never_fatal`, case. **M10.**
-15. **Every agent-authored revision has provenance.** A structural
+15. **Every agent-authored revision has durable provenance.** A structural
     check plus a query: every `skill_revisions` row whose skill has
-    `source = agent` carries a non-null `authored_by_run_id` and
-    `authored_by_principal_id`, and every one of those run ids
-    resolves to a run in the event log. The insert path has no branch
-    that can write the row without them.
+    `source = agent` carries non-null principal, invocation, and idempotency-key
+    provenance. `authored_by_run_id` is non-null and resolves to the event log
+    while its session is retained; only governed session erasure may null that
+    link. The insert path has no branch that can omit the durable fields.
     `gate.skill.provenance_complete`, structural. **M10.**
 16. **Concurrent edits do not lose one.** Two runs `patch` the same
     skill with the same `expected_revision`. Exactly one revision is
@@ -1441,10 +1479,11 @@ the authoring loop.
     state outside the run, which is the definition the control-tool
     section already gives, and the control-tool table never listed
     it.
-17. **`CONDITIONALLY_IDEMPOTENT` with `expected_revision` as the
-    key.** It resolves the registration contradiction, and it also
-    makes a crashed skill write recoverable instead of permanently
-    `UNCERTAIN`.
+17. **`CONDITIONALLY_IDEMPOTENT` with invocation identity and the canonical
+    argument hash as the key.** `expected_revision` remains the concurrency
+    precondition. The separation resolves the registration contradiction and
+    makes a crashed skill write recoverable without deduplicating distinct
+    concurrent edits.
 18. **The scope is `skill.write`, singular, dotted, enumerated, and
     alone.** No `skill.read`, because nothing reads skills over the
     API in 0.1 and an uncheckable scope is worse than a missing one.
@@ -1477,8 +1516,8 @@ the authoring loop.
    land in different areas despite being two halves of the same
    governance story. This also answers the map's own open question 3
    — whether Milestone 8 should acquire gates — with yes.
-2. Is "may edit only skills it created" satisfied by `source =
-   AGENT`? Read literally at the run level it is vacuous: every
+2. **Resolved for Milestone 10A:** "may edit only skills it created" is
+   satisfied by `source = AGENT`. Read literally at the run level it is vacuous: every
    background review is a fresh run and has created nothing, so a
    literal reading forbids all editing and leaves only `create`,
    which would produce a skill per review and no refinement at all.
@@ -1516,14 +1555,9 @@ the authoring loop.
    tenant. A read-only shared catalog is the obvious shape and it
    brings a trust question with it that this document has no answer
    for: a shared skill is `TRUSTED_CONFIGURATION` for whom?
-7. Should the background review be able to propose deletions? It can
-   `archive`, which is reversible, and that is deliberate. But a
-   catalog that only grows will hit the twenty-entry cap, and the
-   thing that notices a skill has stopped being useful is exactly
-   the review. Letting it archive on its own evidence is a small
-   change with a large failure mode.
-8. Does the eval delta in Section 30.5 have a threshold? "Improves
-   defined eval cases without increasing policy failures" is a
-   direction, not a number. Case 27 proves the mechanism works; it
-   does not answer whether a two percent improvement is enough to
-   turn the authoring path on for a tenant.
+7. **Resolved for Milestone 10A:** a background review cannot archive. Archive
+   remains a foreground/operator action because an autonomous false positive
+   has catalog-wide effect even though the bytes remain recoverable.
+8. **Resolved for Milestone 10A:** the threshold is defined under
+   [Rollout evidence](#rollout-evidence). Case 27 remains the deterministic
+   mechanism gate; the paired capability evidence decides tenant activation.

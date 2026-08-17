@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.policies import (
+    ActionKind,
     LoadedRuleset,
     PolicyCondition,
     PolicyDecision,
@@ -71,6 +72,13 @@ def evaluate_deterministic(
     """Evaluate without I/O, ambient clocks, mutation, or hidden state."""
 
     del principal, run
+    if action.kind is ActionKind.SKILL_AUTHORING and action.origin_trust is not TrustLevel.USER:
+        return PolicyDecision(
+            decision=PolicyDecisionType.DENY,
+            reason_code="policy.skill.origin_untrusted",
+            explanation="Skill authoring requires a user-trusted turn.",
+            policy_version=ruleset.policy_version,
+        )
     for hardline_rule in ruleset.hardline:
         if hardline_matches(hardline_rule, action):
             return PolicyDecision(
