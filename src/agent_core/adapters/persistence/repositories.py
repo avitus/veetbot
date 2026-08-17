@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Protocol
@@ -41,6 +42,8 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     CheckpointRow,
     DerivedEventKeyRow,
+    EvalCriterionScoreRow,
+    EvalScenarioRunRow,
     EventRow,
     ExportConsentRow,
     IdempotencyKeyRow,
@@ -69,6 +72,7 @@ from agent_core.domain.errors import (
     NotFoundError,
     WorkerFencedError,
 )
+from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
@@ -1902,3 +1906,175 @@ class PostgresMaintenanceRepository:
             )
         ).all()
         return [run_id for run_id in rows if run_id is not None]
+
+
+class PostgresCapabilityEvaluationRepository:
+    """PostgreSQL capability results with one row per build repeat."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _run(row: EvalScenarioRunRow) -> EvalScenarioRun:
+        return EvalScenarioRun(
+            id=row.id,
+            scenario_id=row.scenario_id,
+            suite=row.suite,
+            repeat_index=row.repeat_index,
+            run_id=row.run_id,
+            judge_version=row.judge_version,
+            build_ref=row.build_ref,
+            score=row.score,
+            ceiling_hit=row.ceiling_hit,
+            policy_failures=row.policy_failures,
+            cost_usd=row.cost_usd,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
+
+    @staticmethod
+    def _criterion(row: EvalCriterionScoreRow) -> EvalCriterionScore:
+        return EvalCriterionScore(
+            id=row.id,
+            scenario_run_id=row.scenario_run_id,
+            criterion=row.criterion,
+            observation=row.observation,
+            value=row.value,
+        )
+
+    async def _saved(
+        self,
+        row: EvalScenarioRunRow,
+        *,
+        scores: Sequence[EvalCriterionScoreRow] | None = None,
+        replaced: bool = False,
+    ) -> SavedEvalScenario:
+        if scores is None:
+            scores = list(
+                (
+                    await self._session.scalars(
+                        select(EvalCriterionScoreRow)
+                        .where(EvalCriterionScoreRow.scenario_run_id == row.id)
+                        .order_by(EvalCriterionScoreRow.criterion)
+                    )
+                ).all()
+            )
+        return SavedEvalScenario(
+            run=self._run(row),
+            criteria=[self._criterion(score) for score in scores],
+            replaced=replaced,
+        )
+
+    async def replace(
+        self,
+        run: EvalScenarioRun,
+        criteria: Sequence[EvalCriterionScore],
+    ) -> SavedEvalScenario:
+        if len({score.criterion for score in criteria}) != len(criteria):
+            raise ConflictError("criterion names must be unique within a scenario run")
+        values = run.model_dump()
+        existing_id = await self._session.scalar(
+            select(EvalScenarioRunRow.id).where(
+                EvalScenarioRunRow.scenario_id == run.scenario_id,
+                EvalScenarioRunRow.build_ref == run.build_ref,
+                EvalScenarioRunRow.judge_version == run.judge_version,
+                EvalScenarioRunRow.repeat_index == run.repeat_index,
+            )
+        )
+        update_values = {key: value for key, value in values.items() if key != "id"}
+        row = (
+            await self._session.scalars(
+                pg_insert(EvalScenarioRunRow)
+                .values(**values)
+                .on_conflict_do_update(
+                    constraint="uq_eval_scenario_run_build_repeat",
+                    set_=update_values,
+                )
+                .returning(EvalScenarioRunRow),
+                execution_options={"populate_existing": True},
+            )
+        ).one_or_none()
+        if row is None:
+            raise ConflictError("capability scenario result was not persisted")
+        stored_id = row.id
+        replaced = existing_id is not None
+        await self._session.execute(
+            delete(EvalCriterionScoreRow).where(EvalCriterionScoreRow.scenario_run_id == stored_id)
+        )
+        if criteria:
+            await self._session.execute(
+                pg_insert(EvalCriterionScoreRow),
+                [
+                    {
+                        **score.model_dump(exclude={"scenario_run_id"}),
+                        "scenario_run_id": stored_id,
+                    }
+                    for score in criteria
+                ],
+            )
+        return await self._saved(row, replaced=replaced)
+
+    async def get_by_key(
+        self,
+        scenario_id: str,
+        build_ref: str,
+        judge_version: str,
+        repeat_index: int,
+    ) -> SavedEvalScenario | None:
+        row = (
+            await self._session.scalars(
+                select(EvalScenarioRunRow).where(
+                    EvalScenarioRunRow.scenario_id == scenario_id,
+                    EvalScenarioRunRow.build_ref == build_ref,
+                    EvalScenarioRunRow.judge_version == judge_version,
+                    EvalScenarioRunRow.repeat_index == repeat_index,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else await self._saved(row)
+
+    async def list_for_build(
+        self,
+        suite: str,
+        build_ref: str,
+        judge_version: str,
+    ) -> list[SavedEvalScenario]:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(EvalScenarioRunRow)
+                    .where(
+                        EvalScenarioRunRow.suite == suite,
+                        EvalScenarioRunRow.build_ref == build_ref,
+                        EvalScenarioRunRow.judge_version == judge_version,
+                    )
+                    .order_by(EvalScenarioRunRow.scenario_id, EvalScenarioRunRow.repeat_index)
+                )
+            ).all()
+        )
+        if not rows:
+            return []
+        scores = list(
+            (
+                await self._session.scalars(
+                    select(EvalCriterionScoreRow)
+                    .where(EvalCriterionScoreRow.scenario_run_id.in_([row.id for row in rows]))
+                    .order_by(
+                        EvalCriterionScoreRow.scenario_run_id,
+                        EvalCriterionScoreRow.criterion,
+                    )
+                )
+            ).all()
+        )
+        scores_by_run: dict[UUID, list[EvalCriterionScoreRow]] = {row.id: [] for row in rows}
+        for score in scores:
+            scores_by_run[score.scenario_run_id].append(score)
+        return [await self._saved(row, scores=scores_by_run[row.id]) for row in rows]
+
+    async def cost_since(self, since: datetime) -> Decimal:
+        value = await self._session.scalar(
+            select(func.coalesce(func.sum(EvalScenarioRunRow.cost_usd), Decimal("0"))).where(
+                EvalScenarioRunRow.started_at >= since
+            )
+        )
+        return Decimal(value or 0)

@@ -108,11 +108,33 @@ uv run agent run "What is 17 multiplied by 23?"
 ```
 
 Progress is written to stderr and the final answer (`391`) to stdout. Run the
-twelve checked-in deterministic cases with:
+checked-in deterministic cases with:
 
 ```bash
 uv run agent eval run
 ```
+
+To see which named problems are actually isolated, execute the canonical gate
+registry. Active checks run; later-milestone checks remain visible as pending;
+and an active skip is reported as a failure rather than a pass:
+
+```bash
+uv run agent eval gates
+uv run agent eval gates --area policy
+```
+
+The live capability lane is credential- and cost-gated. It accepts only
+scenarios linked to a checked-in redacted failed trajectory, repeats each
+scenario, uses a version-pinned independent judge, enforces scenario/suite/day
+ceilings, and persists the score distribution in PostgreSQL:
+
+```bash
+RUN_LIVE_MODEL_TESTS=1 uv run agent eval capability --suite research
+```
+
+No publishable scenario is checked in yet because the repository has no actual
+failed redacted trajectory. The command refuses to invent one; admission and
+fixture details are in [`evals/capability/README.md`](evals/capability/README.md).
 
 Choose a declared model policy when creating a new session:
 
@@ -218,6 +240,8 @@ here so availability is not confused with implementation:
 | Resolve an approval through the CLI | Milestone 4 (implemented) |
 | Start the HTTP API | Milestone 5 (implemented) |
 | Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
+| Execute named gate status by milestone or area | Implemented |
+| Run repeated live capability scenarios | Harness implemented; awaiting the first real failed trajectory |
 
 `agent run`, `agent run export`, `agent session create`, `agent session
 export-consent`, `agent worker`, `agent api`, and `agent eval run` are available

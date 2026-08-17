@@ -1,0 +1,6 @@
+schema_version: 1
+daily_cost_usd: "10.00"
+suites:
+  research:
+    subject_model_policy: balanced
+    cost_usd: "5.00"
