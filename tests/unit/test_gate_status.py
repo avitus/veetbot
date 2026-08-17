@@ -1,7 +1,9 @@
 from collections.abc import Sequence
 from pathlib import Path
 
-from agent_core.evals.gates import _execute_pytest_checks, collect_status
+import pytest
+
+from agent_core.evals.gates import _execute_pytest_checks, collect_status, current_milestone
 
 
 def test_gate_status_executes_active_checks_and_keeps_later_gates_visible() -> None:
@@ -29,3 +31,21 @@ def test_gate_executor_treats_an_active_pytest_skip_as_failure(tmp_path: Path) -
     )
     result = _execute_pytest_checks(tmp_path, ["test_gate.py::test_gate"])
     assert result == {"test_gate.py::test_gate": (False, "active gate skipped")}
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        ("project: [", "cannot parse project-state.yaml"),
+        ("project:\n  current_milestone: true\n", "no integer current_milestone"),
+    ],
+)
+def test_current_milestone_rejects_invalid_yaml_values(
+    tmp_path: Path, document: str, message: str
+) -> None:
+    path = tmp_path / "docs" / "status" / "project-state.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        current_milestone(tmp_path)

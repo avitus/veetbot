@@ -1492,6 +1492,15 @@ Four new families, all on the harness rather than on the run:
 | `eval.scenario.scored` | A track repeat scores | Scenario, judge, score |
 | `eval.ceiling.hit` | A ceiling terminates a scenario | Dimension, value |
 
+Capability-event derivation keys distinguish a retry from a real replacement.
+A scenario event derives from the durable scenario-row id and the ordinary run
+id it records. A suite event derives from the suite, build, and the ordered set
+of those ordinary run ids. Replaying the same persisted runs is idempotent;
+running the same build again with new ordinary runs appends replacement evidence
+as required by the schema contract above. A non-ceiling subject or judge failure
+still emits a blocking `eval.suite.completed` outcome before the harness
+propagates the evaluation error.
+
 `eval.gate.failed` carries the gate identifier and nothing about the failure's
 content. A gate failure's detail is the test runner's output, which belongs in
 CI logs and not in an append-only event log that will outlive the build.

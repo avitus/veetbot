@@ -1942,16 +1942,23 @@ class PostgresCapabilityEvaluationRepository:
             value=row.value,
         )
 
-    async def _saved(self, row: EvalScenarioRunRow, *, replaced: bool = False) -> SavedEvalScenario:
-        scores = list(
-            (
-                await self._session.scalars(
-                    select(EvalCriterionScoreRow)
-                    .where(EvalCriterionScoreRow.scenario_run_id == row.id)
-                    .order_by(EvalCriterionScoreRow.criterion)
-                )
-            ).all()
-        )
+    async def _saved(
+        self,
+        row: EvalScenarioRunRow,
+        *,
+        scores: Sequence[EvalCriterionScoreRow] | None = None,
+        replaced: bool = False,
+    ) -> SavedEvalScenario:
+        if scores is None:
+            scores = list(
+                (
+                    await self._session.scalars(
+                        select(EvalCriterionScoreRow)
+                        .where(EvalCriterionScoreRow.scenario_run_id == row.id)
+                        .order_by(EvalCriterionScoreRow.criterion)
+                    )
+                ).all()
+            )
         return SavedEvalScenario(
             run=self._run(row),
             criteria=[self._criterion(score) for score in scores],
@@ -1975,17 +1982,21 @@ class PostgresCapabilityEvaluationRepository:
             )
         )
         update_values = {key: value for key, value in values.items() if key != "id"}
-        stored_id = await self._session.scalar(
-            pg_insert(EvalScenarioRunRow)
-            .values(**values)
-            .on_conflict_do_update(
-                constraint="uq_eval_scenario_run_build_repeat",
-                set_=update_values,
+        row = (
+            await self._session.scalars(
+                pg_insert(EvalScenarioRunRow)
+                .values(**values)
+                .on_conflict_do_update(
+                    constraint="uq_eval_scenario_run_build_repeat",
+                    set_=update_values,
+                )
+                .returning(EvalScenarioRunRow),
+                execution_options={"populate_existing": True},
             )
-            .returning(EvalScenarioRunRow.id)
-        )
-        if stored_id is None:
+        ).one_or_none()
+        if row is None:
             raise ConflictError("capability scenario result was not persisted")
+        stored_id = row.id
         replaced = existing_id is not None
         await self._session.execute(
             delete(EvalCriterionScoreRow).where(EvalCriterionScoreRow.scenario_run_id == stored_id)
@@ -2001,9 +2012,6 @@ class PostgresCapabilityEvaluationRepository:
                     for score in criteria
                 ],
             )
-        row = await self._session.get(EvalScenarioRunRow, stored_id)
-        if row is None:
-            raise ConflictError("capability scenario result was not persisted")
         return await self._saved(row, replaced=replaced)
 
     async def get_by_key(
@@ -2044,7 +2052,24 @@ class PostgresCapabilityEvaluationRepository:
                 )
             ).all()
         )
-        return [await self._saved(row) for row in rows]
+        if not rows:
+            return []
+        scores = list(
+            (
+                await self._session.scalars(
+                    select(EvalCriterionScoreRow)
+                    .where(EvalCriterionScoreRow.scenario_run_id.in_([row.id for row in rows]))
+                    .order_by(
+                        EvalCriterionScoreRow.scenario_run_id,
+                        EvalCriterionScoreRow.criterion,
+                    )
+                )
+            ).all()
+        )
+        scores_by_run: dict[UUID, list[EvalCriterionScoreRow]] = {row.id: [] for row in rows}
+        for score in scores:
+            scores_by_run[score.scenario_run_id].append(score)
+        return [await self._saved(row, scores=scores_by_run[row.id]) for row in rows]
 
     async def cost_since(self, since: datetime) -> Decimal:
         value = await self._session.scalar(

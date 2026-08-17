@@ -31,11 +31,14 @@ class GateStatus:
 
 def current_milestone(repository_root: Path) -> int:
     path = repository_root / "docs" / "status" / "project-state.yaml"
-    loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ValueError(f"cannot parse project-state.yaml: {exc}") from exc
     if not isinstance(loaded, dict) or not isinstance(loaded.get("project"), dict):
         raise ValueError("project-state.yaml has no project mapping")
     value = loaded["project"].get("current_milestone")
-    if not isinstance(value, int):
+    if type(value) is not int:
         raise ValueError("project-state.yaml has no integer current_milestone")
     return value
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -12,8 +13,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
-from uuid import UUID
+from typing import Any, Never
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -347,14 +348,13 @@ async def _persist(
     criteria: Sequence[EvalCriterionScore],
     *,
     clock: Clock,
-    ids: IdFactory,
 ) -> SavedEvalScenario:
     async with uow_factory() as uow:
         stored = await uow.evaluations.replace(run, criteria)
-        event_id = ids.new_id()
+        derivation_key = f"eval.scenario:{stored.run.id}:{stored.run.run_id}"
         await uow.process_events.append(
             ProcessEvent(
-                id=event_id,
+                id=uuid5(NAMESPACE_URL, derivation_key),
                 event_type=(
                     "eval.ceiling.hit"
                     if stored.run.ceiling_hit is not None
@@ -363,6 +363,8 @@ async def _persist(
                 actor_type="eval_harness",
                 actor_id=stored.run.suite,
                 payload={
+                    "scenario_run_id": str(stored.run.id),
+                    "run_id": str(stored.run.run_id),
                     "scenario_id": stored.run.scenario_id,
                     "judge_version": stored.run.judge_version,
                     "build_ref": stored.run.build_ref,
@@ -370,9 +372,8 @@ async def _persist(
                     "score": None if stored.run.score is None else str(stored.run.score),
                     "ceiling_hit": stored.run.ceiling_hit,
                     "cost_usd": str(stored.run.cost_usd),
-                    "replaced": stored.replaced,
                 },
-                derivation_key=f"eval.scenario:{run.id}",
+                derivation_key=derivation_key,
                 created_at=clock.now(),
             )
         )
@@ -381,18 +382,67 @@ async def _persist(
 
 async def _daily_spend(uow_factory: UnitOfWorkFactory, day_start: datetime) -> Decimal:
     async with uow_factory() as uow:
-        events = [
-            *await uow.process_events.list("eval.scenario.scored"),
-            *await uow.process_events.list("eval.ceiling.hit"),
-        ]
-    return sum(
-        (
-            Decimal(str(event.payload.get("cost_usd", "0")))
-            for event in events
-            if event.created_at >= day_start
-        ),
-        Decimal("0"),
+        return await uow.evaluations.cost_since(day_start)
+
+
+async def _append_suite_completed(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    suite: str,
+    build_ref: str,
+    runs: Sequence[SavedEvalScenario],
+    ceiling_hits: int,
+    policy_failures: int,
+    release_blocked: bool,
+    stopped_by: str | None,
+    clock: Clock,
+) -> None:
+    invocation_identity = ",".join(str(row.run.run_id) for row in runs)
+    invocation_digest = hashlib.sha256(invocation_identity.encode("utf-8")).hexdigest()
+    derivation_key = f"eval.suite:{suite}:{build_ref}:{invocation_digest}"
+    async with uow_factory() as uow:
+        await uow.process_events.append(
+            ProcessEvent(
+                id=uuid5(NAMESPACE_URL, derivation_key),
+                event_type="eval.suite.completed",
+                actor_type="eval_harness",
+                actor_id=suite,
+                payload={
+                    "suite": suite,
+                    "build_ref": build_ref,
+                    "repeat_count": len(runs),
+                    "ceiling_hits": ceiling_hits,
+                    "policy_failures": policy_failures,
+                    "release_blocked": release_blocked,
+                    "stopped_by": stopped_by,
+                },
+                derivation_key=derivation_key,
+                created_at=clock.now(),
+            )
+        )
+
+
+async def _abort_suite(
+    uow_factory: UnitOfWorkFactory,
+    *,
+    suite: str,
+    build_ref: str,
+    saved: Sequence[SavedEvalScenario],
+    clock: Clock,
+    message: str,
+) -> Never:
+    await _append_suite_completed(
+        uow_factory,
+        suite=suite,
+        build_ref=build_ref,
+        runs=saved,
+        ceiling_hits=sum(row.run.ceiling_hit is not None for row in saved),
+        policy_failures=sum(row.run.policy_failures for row in saved),
+        release_blocked=True,
+        stopped_by="evaluation_error",
+        clock=clock,
     )
+    raise ValueError(message)
 
 
 async def run_suite(
@@ -452,15 +502,37 @@ async def run_suite(
             total_policy_failures = subject.policy_failures
             if ceiling is None:
                 if subject.status is not RunStatus.COMPLETED or subject.output is None:
-                    raise ValueError(
-                        f"capability subject did not complete: {scenario.id} repeat {repeat_index}"
+                    await _abort_suite(
+                        uow_factory,
+                        suite=suite,
+                        build_ref=build_ref,
+                        saved=saved,
+                        clock=clock,
+                        message=(
+                            f"capability subject did not complete: {scenario.id} "
+                            f"repeat {repeat_index}"
+                        ),
                     )
                 if subject.provider is None or subject.model is None:
-                    raise ValueError(f"capability subject has no provider pin: {scenario.id}")
+                    await _abort_suite(
+                        uow_factory,
+                        suite=suite,
+                        build_ref=build_ref,
+                        saved=saved,
+                        clock=clock,
+                        message=f"capability subject has no provider pin: {scenario.id}",
+                    )
                 if subject.provider == loaded.judge.provider and not scenario.judge_family_shared:
-                    raise ValueError(
-                        f"{scenario.id} uses the subject provider as judge without "
-                        "judge_family_shared: true"
+                    await _abort_suite(
+                        uow_factory,
+                        suite=suite,
+                        build_ref=build_ref,
+                        saved=saved,
+                        clock=clock,
+                        message=(
+                            f"{scenario.id} uses the subject provider as judge without "
+                            "judge_family_shared: true"
+                        ),
                     )
                 remaining_calls = budget.model_calls - subject.model_calls
                 remaining_cost = budget.cost_usd - subject.cost_usd
@@ -499,16 +571,41 @@ async def run_suite(
                     ceiling = _ceiling_hit(judged, judge_budget)
                     if ceiling is None:
                         if judged.status is not RunStatus.COMPLETED or judged.output is None:
-                            raise ValueError(f"judge {loaded.judge.id} did not complete")
+                            await _abort_suite(
+                                uow_factory,
+                                suite=suite,
+                                build_ref=build_ref,
+                                saved=saved,
+                                clock=clock,
+                                message=f"judge {loaded.judge.id} did not complete",
+                            )
                         if (
                             judged.provider != loaded.judge.provider
                             or judged.model != loaded.judge.model
                         ):
-                            raise ValueError(
-                                f"judge pin mismatch: expected {loaded.judge.provider}/"
-                                f"{loaded.judge.model}, observed {judged.provider}/{judged.model}"
+                            await _abort_suite(
+                                uow_factory,
+                                suite=suite,
+                                build_ref=build_ref,
+                                saved=saved,
+                                clock=clock,
+                                message=(
+                                    f"judge pin mismatch: expected {loaded.judge.provider}/"
+                                    f"{loaded.judge.model}, observed "
+                                    f"{judged.provider}/{judged.model}"
+                                ),
                             )
-                        score, observations = score_judge_output(loaded.rubric, judged.output)
+                        try:
+                            score, observations = score_judge_output(loaded.rubric, judged.output)
+                        except ValueError as exc:
+                            await _abort_suite(
+                                uow_factory,
+                                suite=suite,
+                                build_ref=build_ref,
+                                saved=saved,
+                                clock=clock,
+                                message=str(exc),
+                            )
             if ceiling == "cost_usd":
                 ceiling = cost_ceiling_scope
             scenario_run_id = ids.new_id()
@@ -542,7 +639,6 @@ async def run_suite(
                 run,
                 criteria,
                 clock=clock,
-                ids=ids,
             )
             saved.append(stored)
             suite_spend += total_cost
@@ -584,27 +680,17 @@ async def run_suite(
         ),
         stopped_by=stopped_by,
     )
-    async with uow_factory() as uow:
-        event_id = ids.new_id()
-        await uow.process_events.append(
-            ProcessEvent(
-                id=event_id,
-                event_type="eval.suite.completed",
-                actor_type="eval_harness",
-                actor_id=suite,
-                payload={
-                    "suite": suite,
-                    "build_ref": build_ref,
-                    "repeat_count": len(saved),
-                    "ceiling_hits": ceiling_hits,
-                    "policy_failures": policy_failures,
-                    "release_blocked": result.release_blocked,
-                    "stopped_by": result.stopped_by,
-                },
-                derivation_key=f"eval.suite:{event_id}",
-                created_at=clock.now(),
-            )
-        )
+    await _append_suite_completed(
+        uow_factory,
+        suite=suite,
+        build_ref=build_ref,
+        runs=saved,
+        ceiling_hits=ceiling_hits,
+        policy_failures=policy_failures,
+        release_blocked=result.release_blocked,
+        stopped_by=result.stopped_by,
+        clock=clock,
+    )
     return result
 
 
@@ -663,12 +749,30 @@ async def _live_execution(
         run_id = await composition.runs.submit(prompt)
         worker = composition.worker_factory(f"eval-capability:{ids.new_id()}")
         run = await composition.runs.get(run_id)
+        loop = asyncio.get_running_loop()
+        poll_deadline = loop.time() + budget.wall_seconds
+        maximum_polls = max(1, budget.wall_seconds)
+        polls = 0
         while run.status not in TERMINAL_RUN_STATUSES | {
             RunStatus.WAITING_FOR_APPROVAL,
             RunStatus.WAITING_FOR_USER,
         }:
-            if not await worker.run_once():
+            remaining = poll_deadline - loop.time()
+            if remaining <= 0 or polls >= maximum_polls:
+                raise RuntimeError(
+                    "capability run did not reach a terminal state within "
+                    f"{budget.wall_seconds} seconds"
+                )
+            try:
+                claimed = await asyncio.wait_for(worker.run_once(), timeout=remaining)
+            except TimeoutError as exc:
+                raise RuntimeError(
+                    "capability run did not reach a terminal state within "
+                    f"{budget.wall_seconds} seconds"
+                ) from exc
+            if not claimed:
                 raise RuntimeError("capability worker could not claim its submitted run")
+            polls += 1
             run = await composition.runs.get(run_id)
         events = await composition.runs.events(run_id)
         return CapabilityExecution(
