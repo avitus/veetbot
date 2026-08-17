@@ -34,7 +34,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    an immediate boundary. The interactive request performs no extraction. The
    selector requires both the session-idle cutoff and the flag's persisted
    `not_before`; a legacy flag without `not_before` falls back to its event time.
-   It streams all in-memory session pages through a batch-sized oldest-candidate
+   A malformed or timezone-naive value is ineligible in both adapters instead of
+   aborting a sweep or depending on the PostgreSQL session timezone. The selector
+   streams all in-memory session pages through a batch-sized oldest-candidate
    buffer and orders PostgreSQL candidates oldest first, so newer unflagged
    sessions cannot starve older work. PostgreSQL adds a composite
    event-type/session/sequence index for this scan.

@@ -1892,9 +1892,15 @@ class PostgresMaintenanceRepository:
         if not await self._acquire("maintenance.memory_formation"):
             return []
         watermark = func.coalesce(ConsolidationWatermarkRow.sequence, 0)
-        formation_not_before = func.coalesce(
-            sql_cast(EventRow.payload["not_before"].astext, DateTime(timezone=True)),
-            EventRow.created_at,
+        raw_not_before = EventRow.payload["not_before"].astext
+        formation_not_before = case(
+            (raw_not_before.is_(None), EventRow.created_at),
+            (
+                raw_not_before.op("~")(r"(Z|[+-][0-9]{2}:[0-9]{2})$")
+                & func.pg_input_is_valid(raw_not_before, "timestamp with time zone"),
+                sql_cast(raw_not_before, DateTime(timezone=True)),
+            ),
+            else_=None,
         )
         rows = (
             await self._session.scalars(

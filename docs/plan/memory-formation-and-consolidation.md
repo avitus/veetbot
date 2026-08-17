@@ -427,11 +427,13 @@ the deterministic fallback while preserving the model-assisted design above:
    silently change the policy represented by that version. Both the session-idle
    cutoff and the flag's persisted `not_before` must be satisfied; `not_before` is
    authoritative even when the session is otherwise idle, while legacy flags
-   without it fall back to their event time. Selection is oldest first without an
-   arbitrary look-ahead window. The in-memory selector streams the newest-first
-   session pages through a batch-sized oldest-candidate buffer, and PostgreSQL
-   uses an event-type/session/sequence index for the same scan. After extraction,
-   the writer takes a per-principal, per-session claim; PostgreSQL holds a
+   without it fall back to their event time. A malformed or timezone-naive value
+   is ineligible and cannot poison the rest of a maintenance sweep. Selection is
+   oldest first without an arbitrary look-ahead window. The in-memory selector
+   streams the newest-first session pages through a batch-sized oldest-candidate
+   buffer, and PostgreSQL uses an event-type/session/sequence index for the same
+   scan. After extraction, the writer takes a per-principal, per-session claim;
+   PostgreSQL holds a
    transaction-scoped advisory lock through belief writes, the audit, and
    watermark advancement, so concurrent workers cannot form the same prefix
    twice.

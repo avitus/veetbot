@@ -105,6 +105,47 @@ async def test_postgres_terminal_flag_drives_idle_memory_consolidation(tmp_path:
     assert all(memory.source_session_id == run.session_id for memory in memories)
 
 
+async def test_postgres_formation_deadlines_reject_invalid_values_without_poisoning_scan(
+    tmp_path: Path,
+) -> None:
+    clock = FixedClock(NOW)
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    deadline = NOW + timedelta(seconds=60)
+    payloads = {
+        "malformed": {"not_before": "not-a-timestamp"},
+        "naive": {"not_before": deadline.replace(tzinfo=None).isoformat()},
+        "aware": {"not_before": deadline.isoformat()},
+        "legacy": {},
+    }
+
+    async with build(settings=settings, storage="postgres", clock=clock) as app:
+        sessions: dict[str, UUID] = {}
+        for name, payload in payloads.items():
+            session_id = await app.sessions.create()
+            sessions[name] = session_id
+            async with app.uow_factory() as uow:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session_id,
+                        run_id=None,
+                        event_type="memory.formation.requested",
+                        actor_type="runtime",
+                        payload=payload,
+                        derivation_key=f"formation-deadline:{name}",
+                    )
+                )
+
+        async with app.uow_factory() as uow:
+            pending = await uow.maintenance.pending_memory_sessions(
+                app.principal,
+                idle_before=deadline,
+                ready_at=deadline,
+                limit=10,
+            )
+
+    assert set(pending) == {sessions["aware"], sessions["legacy"]}
+
+
 async def test_postgres_concurrent_consolidators_form_each_candidate_once(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -578,7 +578,7 @@ verification:
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-17T19:37:34Z
+    recorded_at: 2026-08-17T19:54:41Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -599,7 +599,10 @@ verification:
           persisted formation deadline, and the formation-scan index. After the
           corresponding implementation steps, the next full review exposed a
           duplicate possessive proposal; its red audit-reconciliation regression
-          now passes. All 27 Milestone 10 memory gate tests pass.
+          now passes. A later PostgreSQL red regression proved that one malformed
+          deadline could poison a sweep; malformed and timezone-naive deadlines
+          are now rejected consistently. All 27 Milestone 10 memory gate tests
+          pass.
       - check: make check
         outcome: passed
         detail: >-
@@ -611,11 +614,12 @@ verification:
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
-          All 100 tests passed against the Compose PostgreSQL 16 service on an
+          All 101 tests passed against the Compose PostgreSQL 16 service on an
           isolated host port, including terminal formation flags, the idle
-          and persisted-ready boundaries, concurrent consolidation claims,
-          savepoint rollback of stale replacement attempts, migrations,
-          consolidation watermarks, persistence, and re-composition.
+          and persisted-ready boundaries, malformed and timezone-naive deadline
+          isolation, concurrent consolidation claims, savepoint rollback of
+          stale replacement attempts, migrations, consolidation watermarks,
+          persistence, and re-composition.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
@@ -927,5 +931,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-17T19:37:34Z
+last_updated: 2026-08-17T19:54:41Z
 last_reviewed_commit: c7fd4a2
