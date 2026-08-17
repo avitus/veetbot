@@ -175,7 +175,11 @@ ports/memory.py          -- ADDED
   Ranker                 memory-retrieval-and-ranking.md
   EpisodeSearch          memory-retrieval-and-ranking.md
   TraceStore             memory-retrieval-and-ranking.md
-  the formation ports of memory-formation-and-consolidation.md
+  MemoryStore            memory-formation-and-consolidation.md
+  MemoryConsolidator     memory-formation-and-consolidation.md
+  MemoryCandidateExtractor memory-formation-and-consolidation.md
+  Salience               memory-formation-and-consolidation.md
+  ConflictResolver       memory-formation-and-consolidation.md
 
 ports/knowledge.py       -- ADDED
   Extractor              knowledge-documents.md

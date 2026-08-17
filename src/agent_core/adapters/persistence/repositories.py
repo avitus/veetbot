@@ -40,6 +40,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ApprovalRow,
     ArtifactRow,
     CheckpointRow,
+    ConsolidationWatermarkRow,
     DerivedEventKeyRow,
     EventRow,
     ExportConsentRow,
@@ -1877,3 +1878,37 @@ class PostgresMaintenanceRepository:
             )
         ).all()
         return [run_id for run_id in rows if run_id is not None]
+
+    async def pending_memory_sessions(
+        self,
+        principal: Principal,
+        *,
+        idle_before: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        if not await self._acquire("maintenance.memory_formation"):
+            return []
+        watermark = func.coalesce(ConsolidationWatermarkRow.sequence, 0)
+        rows = (
+            await self._session.scalars(
+                select(SessionRow.id)
+                .join(EventRow, EventRow.session_id == SessionRow.id)
+                .outerjoin(
+                    ConsolidationWatermarkRow,
+                    (ConsolidationWatermarkRow.session_id == SessionRow.id)
+                    & (ConsolidationWatermarkRow.tenant_id == principal.tenant_id)
+                    & (ConsolidationWatermarkRow.principal_id == principal.principal_id),
+                )
+                .where(
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    SessionRow.updated_at <= idle_before,
+                    EventRow.event_type == "memory.formation.requested",
+                )
+                .group_by(SessionRow.id, ConsolidationWatermarkRow.sequence)
+                .having(func.max(EventRow.sequence) > watermark)
+                .order_by(SessionRow.updated_at, SessionRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return list(rows)

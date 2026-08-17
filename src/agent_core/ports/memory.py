@@ -14,6 +14,7 @@ from agent_core.domain.memory import (
     ConsolidationResult,
     ConsolidationRun,
     EpisodeQuery,
+    MemoryCandidate,
     MemoryEdit,
     MemoryRecord,
     RecalledBelief,
@@ -86,6 +87,18 @@ class MemoryConsolidator(Protocol):
         session_id: UUID | None,
         since_watermark: int | None = None,
     ) -> ConsolidationResult: ...
+
+
+class MemoryCandidateExtractor(Protocol):
+    name: str
+
+    async def extract(
+        self,
+        events: list[EventEnvelope],
+        *,
+        principal: Principal,
+        scope: str,
+    ) -> list[MemoryCandidate]: ...
 
 
 class Salience(Protocol):

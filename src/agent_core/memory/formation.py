@@ -20,6 +20,7 @@ from agent_core.domain.memory import (
     ConsolidationResult,
     ConsolidationRun,
     MemoryAuthority,
+    MemoryCandidate,
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
@@ -31,9 +32,12 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
 from agent_core.ports.determinism import Clock, IdFactory
+from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@1"
+FORMATION_POLICY_VERSION = "formation@2"
+MAX_AUTOMATIC_CANDIDATES = 12
+SESSION_IDLE_SECONDS = 30
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
     re.I,
@@ -44,6 +48,288 @@ _INJECTION = re.compile(
     re.I,
 )
 _TRANSIENT = re.compile(r"\b(?:right now|this turn|temporary|today only)\b", re.I)
+_CLAUSE_BOUNDARY = re.compile(
+    r"[.!?;]+|,\s+(?:and\s+)?(?=(?:i|we|my)\b)|\s+and\s+(?=i\b)",
+    re.I,
+)
+_ITEM_BOUNDARY = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+)\s*", re.I)
+_POSSESSIVE_ENTITY = re.compile(
+    r"\bmy\s+((?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)"
+    r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
+)
+
+
+def _event_text(event: EventEnvelope) -> str:
+    content = event.payload.get("content")
+    texts: list[str] = []
+    if isinstance(content, str):
+        texts = [content]
+    elif isinstance(content, list):
+        for raw in content:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                part = TextPart.model_validate(raw)
+            except ValueError:
+                continue
+            texts.append(part.text)
+    return " ".join(texts).strip()
+
+
+def _clean_object(value: str) -> tuple[str, str] | None:
+    clean = value.strip(" \t\n\r,.:;!?")
+    if not clean or re.match(r"^(?:it|this|that|something|anything)$", clean, re.I):
+        return None
+    article = ""
+    match = re.match(r"^(a|an|the|my)\s+(.+)$", clean, re.I)
+    if match is not None:
+        article = match.group(1).casefold()
+        clean = match.group(2).strip()
+    if not clean or clean.casefold().startswith(("question", "problem")):
+        return None
+    if article in {"a", "an"}:
+        rendered = f"{article} {clean}"
+    elif clean[0].casefold() in {"a", "e", "i", "o", "u"}:
+        rendered = f"an {clean}"
+    else:
+        rendered = f"a {clean}"
+    return clean, rendered
+
+
+def _preference_subject(value: str) -> str:
+    lowered = value.casefold()
+    if "metric" in lowered or "imperial" in lowered:
+        return "measurement units"
+    if "concise" in lowered or "detailed" in lowered or "answer" in lowered:
+        return "answer style"
+    if "dark mode" in lowered or "light mode" in lowered or "theme" in lowered:
+        return "interface theme"
+    if "tabs" in lowered or "spaces" in lowered or "indent" in lowered:
+        return "indentation style"
+    return "user"
+
+
+class DeterministicCandidateExtractor:
+    """Bounded first-person extractor used before model-assisted extraction is enabled."""
+
+    name = "deterministic-formation-v2"
+
+    def __init__(self, maximum_candidates: int = MAX_AUTOMATIC_CANDIDATES) -> None:
+        if maximum_candidates < 1:
+            raise ValueError("maximum memory candidates must be positive")
+        self._maximum_candidates = maximum_candidates
+
+    async def extract(
+        self,
+        events: list[EventEnvelope],
+        *,
+        principal: Principal,
+        scope: str,
+    ) -> list[MemoryCandidate]:
+        candidates: list[MemoryCandidate] = []
+        seen: set[tuple[str, str, int]] = set()
+        for event in events:
+            if (
+                event.event_type != "user.message.created"
+                or event.actor_type != "principal"
+                or event.actor_id != principal.principal_id
+            ):
+                continue
+            text = _event_text(event)
+            for candidate in self._from_text(event.sequence, text, scope):
+                key = (
+                    candidate.subject.casefold(),
+                    candidate.statement.casefold(),
+                    event.sequence,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(candidate)
+                if len(candidates) >= self._maximum_candidates:
+                    return candidates
+        return candidates
+
+    def _from_text(self, sequence: int, text: str, scope: str) -> list[MemoryCandidate]:
+        proposed: list[MemoryCandidate] = []
+
+        def add(
+            *,
+            subject: str,
+            statement: str,
+            belief_type: BeliefType,
+            portability: Portability | None = None,
+            sensitivity: Sensitivity = Sensitivity.INTERNAL,
+            confidence: float = 0.72,
+            polarity: Polarity = Polarity.ASSERT,
+        ) -> None:
+            proposed.append(
+                MemoryCandidate(
+                    belief_type=belief_type,
+                    subject=subject,
+                    statement=statement,
+                    polarity=polarity,
+                    source_event_ids=[sequence],
+                    model_confidence=confidence,
+                    proposed_scope=scope,
+                    proposed_portability=portability or portability_ceiling(belief_type),
+                    sensitivity_guess=sensitivity,
+                )
+            )
+
+        stripped = text.strip()
+        if stripped.casefold().startswith("remember that "):
+            add(
+                subject="user",
+                statement=stripped[len("remember that ") :].strip(),
+                belief_type=BeliefType.FACT,
+                confidence=0.9,
+            )
+
+        for raw_clause in _CLAUSE_BOUNDARY.split(stripped):
+            clause = re.sub(r"^and\s+", "", raw_clause.strip(), flags=re.I)
+            if not clause:
+                continue
+
+            preference = re.fullmatch(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", clause, re.I)
+            if preference is not None:
+                value = preference.group(1).strip(" ,.:;!?")
+                legacy_we = clause.casefold().startswith("we ")
+                add(
+                    subject=_preference_subject(value),
+                    statement=(f"Prefers {value}" if legacy_we else f"User prefers {value}."),
+                    belief_type=BeliefType.PREFERENCE,
+                    confidence=0.82,
+                )
+                continue
+
+            retraction = re.fullmatch(
+                r"i\s+(?:no\s+longer|do\s+not|don't)\s+(have|own|use|wear|drive)\s+(.+)",
+                clause,
+                re.I,
+            )
+            if retraction is not None:
+                verb = retraction.group(1).casefold()
+                rendered_verb = {
+                    "have": "has",
+                    "own": "owns",
+                    "use": "uses",
+                    "wear": "wears",
+                    "drive": "drives",
+                }[verb]
+                for raw_item in _ITEM_BOUNDARY.split(retraction.group(2)):
+                    cleaned = _clean_object(raw_item)
+                    if cleaned is None:
+                        continue
+                    subject, rendered = cleaned
+                    add(
+                        subject=subject,
+                        statement=f"User no longer {rendered_verb} {rendered}.",
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                        confidence=0.85,
+                        polarity=Polarity.RETRACT,
+                    )
+                continue
+
+            ownership = re.fullmatch(r"i\s+(have|own|use|wear|drive)\s+(.+)", clause, re.I)
+            if ownership is not None:
+                verb = ownership.group(1).casefold()
+                rendered_verb = {
+                    "have": "has",
+                    "own": "owns",
+                    "use": "uses",
+                    "wear": "wears",
+                    "drive": "drives",
+                }[verb]
+                for raw_item in _ITEM_BOUNDARY.split(ownership.group(2)):
+                    cleaned = _clean_object(raw_item)
+                    if cleaned is None:
+                        continue
+                    subject, rendered = cleaned
+                    add(
+                        subject=subject,
+                        statement=f"User {rendered_verb} {rendered}.",
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                    )
+                continue
+
+            location = re.fullmatch(r"i\s+live\s+in\s+(.+)", clause, re.I)
+            if location is not None:
+                value = location.group(1).strip(" ,.:;!?")
+                add(
+                    subject="home location",
+                    statement=f"User lives in {value}.",
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.8,
+                )
+                continue
+
+            employment = re.fullmatch(r"i\s+work\s+(?:at|for)\s+(.+)", clause, re.I)
+            if employment is not None:
+                value = employment.group(1).strip(" ,.:;!?")
+                add(
+                    subject="employment",
+                    statement=f"User works at {value}.",
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.8,
+                )
+                continue
+
+            relationship = re.fullmatch(
+                r"my\s+(spouse|wife|husband|partner|mother|father|son|daughter)\s+is\s+(.+)",
+                clause,
+                re.I,
+            )
+            if relationship is not None:
+                relation = relationship.group(1).casefold()
+                value = relationship.group(2).strip(" ,.:;!?")
+                add(
+                    subject=relation,
+                    statement=f"User's {relation} is {value}.",
+                    belief_type=BeliefType.RELATIONSHIP,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.8,
+                )
+                continue
+
+            decision = re.fullmatch(r"we\s+(?:decided|agreed|chose)\s+(.+)", clause, re.I)
+            if decision is not None:
+                value = decision.group(1).strip(" ,.:;!?")
+                add(
+                    subject="project decision",
+                    statement=f"The team decided {value}.",
+                    belief_type=BeliefType.FACT,
+                    portability=Portability.LOCAL,
+                )
+                continue
+
+            outcome = re.fullmatch(
+                r"we\s+(shipped|launched|completed|finished)\s+(.+)", clause, re.I
+            )
+            if outcome is not None:
+                verb = outcome.group(1).casefold()
+                value = outcome.group(2).strip(" ,.:;!?")
+                add(
+                    subject="task outcome",
+                    statement=f"The team {verb} {value}.",
+                    belief_type=BeliefType.FACT,
+                    portability=Portability.LOCAL,
+                )
+
+        for match in _POSSESSIVE_ENTITY.finditer(stripped):
+            cleaned = _clean_object(match.group(1))
+            if cleaned is None:
+                continue
+            subject, rendered = cleaned
+            add(
+                subject=subject,
+                statement=f"User has {rendered}.",
+                belief_type=BeliefType.USER_MODEL_ATTR,
+                confidence=0.68,
+            )
+        return proposed
 
 
 class DeterministicSalience:
@@ -98,6 +384,7 @@ class GovernedMemoryService:
         *,
         salience: DeterministicSalience | None = None,
         resolver: DeterministicConflictResolver | None = None,
+        extractor: MemoryCandidateExtractor | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -105,6 +392,7 @@ class GovernedMemoryService:
         self._principal = principal
         self._salience = salience or DeterministicSalience()
         self._resolver = resolver or DeterministicConflictResolver()
+        self._extractor = extractor or DeterministicCandidateExtractor()
 
     async def remember(
         self,
@@ -121,6 +409,8 @@ class GovernedMemoryService:
         origin_trust: TrustLevel = TrustLevel.USER,
         explicit: bool = True,
         authority: MemoryAuthority = MemoryAuthority.USER,
+        polarity: Polarity = Polarity.ASSERT,
+        confidence: float | None = None,
         trigger: str = "explicit",
     ) -> MemoryRecord:
         if origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY} or (
@@ -152,7 +442,7 @@ class GovernedMemoryService:
                 session_id=session_id,
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
-                model="deterministic-formation-v1",
+                model=self._extractor.name,
                 policy_version=FORMATION_POLICY_VERSION,
                 candidates_proposed=1,
                 committed=0,
@@ -224,6 +514,8 @@ class GovernedMemoryService:
                         sources,
                         explicit,
                         authority,
+                        polarity,
+                        confidence,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -261,6 +553,8 @@ class GovernedMemoryService:
                 sources,
                 explicit,
                 authority,
+                polarity,
+                confidence,
             )
             stored = await uow.memories.upsert_belief(record)
             await self._append_event(uow, session_id, run_id, "memory.formed", stored)
@@ -286,7 +580,7 @@ class GovernedMemoryService:
                 scope=scope,
                 watermark_before=0,
                 watermark_after=0,
-                model="deterministic-formation-v1",
+                model=self._extractor.name,
                 policy_version=FORMATION_POLICY_VERSION,
                 candidates_proposed=0,
                 committed=0,
@@ -306,22 +600,46 @@ class GovernedMemoryService:
                 else since_watermark
             )
             events = await uow.events.list_after(session_id, watermark, self._principal)
-        candidates = [candidate for event in events if (candidate := _candidate(event))]
+        extracted = await self._extractor.extract(
+            events,
+            principal=self._principal,
+            scope=scope,
+        )
+        candidates = extracted[:MAX_AUTOMATIC_CANDIDATES]
+        trusted_user_sources = {
+            event.sequence
+            for event in events
+            if event.event_type == "user.message.created"
+            and event.actor_type == "principal"
+            and event.actor_id == self._principal.principal_id
+        }
+        by_sequence = {event.sequence: event for event in events}
         beliefs: list[MemoryRecord] = []
-        rejected = 0
-        for event, subject, statement, belief_type in candidates:
+        rejected = len(extracted) - len(candidates)
+        for candidate in candidates:
+            if (
+                candidate.proposed_scope != scope
+                or not set(candidate.source_event_ids) <= trusted_user_sources
+            ):
+                rejected += 1
+                continue
+            source_event = by_sequence[candidate.source_event_ids[0]]
             try:
                 belief = await self.remember(
                     session_id=session_id,
-                    run_id=event.run_id,
-                    statement=statement,
-                    subject=subject,
-                    scope=scope,
-                    belief_type=belief_type,
-                    source_event_ids=[event.sequence],
+                    run_id=source_event.run_id,
+                    statement=candidate.statement,
+                    subject=candidate.subject,
+                    scope=candidate.proposed_scope,
+                    belief_type=candidate.belief_type,
+                    portability=candidate.proposed_portability,
+                    sensitivity=candidate.sensitivity_guess,
+                    source_event_ids=candidate.source_event_ids,
                     origin_trust=TrustLevel.USER,
                     explicit=False,
-                    authority=MemoryAuthority.USER,
+                    authority=MemoryAuthority.INFERRED,
+                    polarity=candidate.polarity,
+                    confidence=candidate.model_confidence,
                     trigger=trigger,
                 )
             except (ConflictError, ToolValidationError):
@@ -340,9 +658,9 @@ class GovernedMemoryService:
                 session_id=session_id,
                 watermark_before=watermark,
                 watermark_after=after,
-                model="deterministic-formation-v1",
+                model=self._extractor.name,
                 policy_version=FORMATION_POLICY_VERSION,
-                candidates_proposed=len(candidates),
+                candidates_proposed=len(extracted),
                 committed=len(beliefs),
                 reinforced=0,
                 superseded=0,
@@ -490,6 +808,8 @@ class GovernedMemoryService:
         source_event_ids: list[int],
         explicit: bool,
         authority: MemoryAuthority,
+        polarity: Polarity,
+        confidence: float | None,
     ) -> MemoryRecord:
         now = self._clock.now()
         return MemoryRecord(
@@ -501,15 +821,18 @@ class GovernedMemoryService:
             statement=statement,
             source_session_id=source_session_id,
             source_event_ids=sorted(set(source_event_ids)),
-            confidence=0.9 if explicit else 0.55,
+            confidence=confidence if confidence is not None else (0.9 if explicit else 0.55),
             sensitivity=sensitivity,
             valid_from=now,
             status=MemoryStatus.ACTIVE if explicit else MemoryStatus.PROVISIONAL,
             belief_type=belief_type,
-            polarity=Polarity.ASSERT,
+            polarity=polarity,
             portability=portability,
             origin_scopes=[scope],
             last_reinforced_at=now,
+            flagged_for_review=(
+                not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+            ),
             formation_run_id=formation_run_id,
             consolidation_policy_version=FORMATION_POLICY_VERSION,
             authority=authority,

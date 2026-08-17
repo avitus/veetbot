@@ -3,9 +3,10 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_9_complete
+  status: milestone_10_in_progress
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 9
+  active_milestone: 10
   authorized_milestones:
     - 0
     - 1
@@ -17,6 +18,7 @@ project:
     - 7
     - 8
     - 9
+    - 10
 
 milestones:
   "0":
@@ -51,7 +53,7 @@ milestones:
     status: complete
   "10":
     title: Scheduling, model routing, and subagents
-    status: not_started
+    status: in_progress
 
 verification:
   milestone_0:
@@ -575,6 +577,52 @@ verification:
           PostgreSQL FTS, evaluation carry, tool classification, retained
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
+  milestone_10:
+    recorded_at: 2026-08-17T17:00:00Z
+    status: in_progress
+    evidence:
+      - check: test-driven memory maturation gates
+        outcome: passed_locally
+        detail: >-
+          The initial red run failed all six ordinary-conversation and lifecycle
+          tests, the correction/topic expansion failed its two new cases, and an
+          adversarial extractor failed both service-boundary cases. After the
+          smallest implementation steps, all 15 Milestone 10 memory gate tests
+          pass.
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 341 source and test
+          files, the static and contract partitions, deployment-script checks,
+          123 citation checks, and strict documentation builds pass. The gate
+          registry contains 177 entries and retains 166 as the verified ceiling
+          through Milestone 9.
+      - check: PostgreSQL integration and resilience partition
+        outcome: passed
+        detail: >-
+          All 98 tests passed against the Compose PostgreSQL 16 service on an
+          isolated host port, including terminal formation flags, the idle
+          boundary, consolidation watermarks, persistence, and re-composition.
+      - check: Apple client and signing regression suite
+        outcome: passed
+        detail: >-
+          All 71 Swift Testing cases passed, including the missing-keychain-
+          entitlement regression that verifies the previously merged signing
+          change remains in this branch's ancestry.
+      - check: real-Docker sandbox security partition
+        outcome: passed
+        detail: All 10 sandbox security tests passed against a freshly built image.
+      - check: proposed ADR-0051
+        outcome: owner_review_requested
+        detail: >-
+          The durable post-run flag, 30-second idle boundary, structured
+          extractor port, source and scope rechecks, semantic conflict subjects,
+          service-level cap, and formation@2 policy boundary are recorded for
+          owner review.
+    remaining:
+      - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
+      - Complete the six skill-authoring gates already assigned to Milestone 10.
+      - Implement separately gated scheduling, routing, and subagent extensions.
 
 documentation:
   canonical_format: markdown
@@ -593,11 +641,10 @@ readiness:
   review: docs/plan/readiness.md
   summary: >-
     Milestones 0 through 9 are implementable from the corpus alone.
-    Milestone 10 has a design for its skill-authoring half and no
-    acceptance criteria of its own; it remains a direction rather
-    than a milestone, which readiness.md now records as a choice and
-    not an omission, because two of its four parts gate on
-    evaluation evidence rather than on a date. Milestones 5, 6, and
+    The owner authorized Milestone 10 on 2026-08-17; its first
+    workstream now has memory-maturation acceptance criteria, while
+    skill authoring retains six pending gates and scheduling, routing,
+    and subagents retain their documented entry conditions. Milestones 5, 6, and
     8 moved into the covered set when
     docs/plan/http-api-and-streaming.md,
     docs/plan/sandbox-isolation.md, and docs/plan/skills.md were
@@ -635,9 +682,10 @@ readiness:
     the shape and five that do not, and places the four Section
     29.6 items under the existing port rule. It declares no gates,
     so the gate census is unchanged. The last unanswered readiness
-    question, whether Milestone 10 needs acceptance criteria, is
-    answered by re-measuring all twenty two of its requirements: it
-    is correctly an open direction. The re-measure corrected the
+    question, whether Milestone 10 needed acceptance criteria, was
+    originally answered by treating it as an open direction; the
+    later owner authorization and memory criteria supersede that
+    operational conclusion without weakening the other entry conditions. The re-measure corrected the
     review's own subagent count, which named five requirements as
     undesigned when five of the nine are supplied now, and it
     surfaced one conflict, that the single active run per session
@@ -864,5 +912,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-04T01:00:00Z
+last_updated: 2026-08-17T17:00:00Z
 last_reviewed_commit: c7fd4a2

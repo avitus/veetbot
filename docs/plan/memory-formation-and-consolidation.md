@@ -363,6 +363,10 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - **`MemoryConsolidator` port**: `run(trigger, scope, since_watermark) ->
   ConsolidationResult`. The builtin implementation is LLM extraction as above; an
   external memory provider can be delegated to behind this port.
+- **`MemoryCandidateExtractor` port**: `extract(events, principal, scope) ->
+  list[MemoryCandidate]`. Extractors propose only; the service owns the candidate
+  cap and every provenance, scope, portability, salience, rejection, and conflict
+  check.
 - **`Salience` and `ConflictResolver`** are replaceable strategies.
 - **Runtime placement.** Consolidation runs as a **restricted child run**
   (subagent, Section 27.6 / Milestone 10) or a dedicated background worker job:
@@ -382,6 +386,52 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - **Formation is fully autonomous**: no belief requires synchronous human confirmation. Safety rests on the deterministic eligibility gates, the untrusted-content write ban, and after-the-fact transparency and reversibility; sensitive or ambiguous beliefs are committed but flagged for review.
 - Every write is tenant- and principal-scoped.
 
+## Milestone 10 ordinary-conversation maturation
+
+Milestone 9 shipped the governed store, explicit write path, narrow deterministic
+extractor, conflict lifecycle, and session-close callback. It did not connect the
+runtime's documented post-run formation flag to maintenance, and its extractor
+returned at most one candidate from only two phrasings. Consequently a normal
+client that never called the internal session-close service could finish many
+runs without forming memory, and a single utterance mentioning an Apple Watch
+and a BMW X3 formed neither belief.
+
+The first authorized Milestone 10 memory slice closes that lifecycle and widens
+the deterministic fallback while preserving the model-assisted design above:
+
+1. Every terminal run appends one `memory.formation.requested` event after the
+   terminal transaction commits. Its derivation key is the terminal run id, so a
+   callback retry cannot enqueue the same work twice. A waiting run is not
+   terminal and does not enqueue the flag.
+2. Full extraction remains off the interactive path. The maintenance role selects
+   flagged sessions after 30 seconds without committed activity and invokes
+   consolidation; an explicit session close remains an immediate boundary. The
+   fixed delay is part of `formation@2`, not a deployment override that can
+   silently change the policy represented by that version.
+3. `MemoryCandidate` becomes a domain value and `MemoryCandidateExtractor` a
+   formation port. The deterministic v2 implementation emits multiple candidates
+   for independently addressable ownership, preference, user-attribute,
+   relationship, project-decision, and task-outcome spans. It also recognizes
+   ordinary entity retractions. The formation service, rather than any extractor,
+   applies the fixed ceiling of twelve proposals per consolidation.
+4. The service independently verifies every candidate source against the selected
+   log prefix. Every source must be a `user.message.created` event authored by the
+   owning principal; this rule applies even when a later model-assisted extractor
+   proposes the candidate. The service also rejects a proposed scope that differs
+   from the consolidation job's authorized scope. Automatic beliefs are
+   `inferred` and `provisional`, while sensitive proposals are also flagged for
+   review.
+5. Candidate subjects are conflict keys, not a generic `user` bucket. Device
+   entities remain separate; answer style, interface theme, indentation style,
+   and measurement units are separate preference subjects. A retraction therefore
+   supersedes the matching entity while unrelated memories survive.
+
+The schema-constrained consolidation model remains the normative rich extractor.
+ADR-0045 still requires evaluation evidence before it is activated, and the model
+call must run as the restricted, budgeted, audited background job specified above.
+The deterministic v2 extractor is the production fallback and the safety oracle
+for those model proposals; it does not claim open-ended natural-language recall.
+
 ## Hard gates
 
 Formation cannot be tuned without measurement; build the harness alongside the
@@ -398,6 +448,22 @@ first formation layer (Section 20).
 5. **No policy regression** — adapt LOCOMO-style long-horizon scenarios to
    exercise the write path. Gate: memory improves target eval cases **without**
    increasing policy failures. **M9.**
+6. **Multiple ordinary memories** — one ordinary user utterance naming two
+   durable entities forms two separate, provenance-linked beliefs, and an
+   independent preference in the same utterance remains a third belief.
+   **M10.**
+7. **Automatic-source integrity** — automatic candidates name only source events
+   authored by the owning principal; model, tool, and foreign-principal content
+   cannot become a direct source. **M10.**
+8. **Idle lifecycle** — a terminal run enqueues one idempotent formation flag,
+   returns without extracting, and maintenance consolidates the session only once
+   the idle boundary has elapsed. **M10.**
+9. **Bounded automatic formation** — a pathological utterance cannot commit more
+   than twelve candidates in one consolidation and a secret-shaped candidate is
+   still rejected. **M10.**
+10. **Ordinary correction isolation** — a natural-language retraction supersedes
+    the matching entity while unrelated entities and preference topics continue
+    to coexist. **M10.**
 
 ## Tracked metrics
 

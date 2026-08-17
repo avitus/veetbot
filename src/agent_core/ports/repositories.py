@@ -304,6 +304,14 @@ class MaintenanceRepository(Protocol):
 
     async def checkpoint_runs(self, limit: int) -> list[tuple[UUID, bool]]: ...
 
+    async def pending_memory_sessions(
+        self,
+        principal: Principal,
+        *,
+        idle_before: datetime,
+        limit: int,
+    ) -> list[UUID]: ...
+
 
 class SessionDeletionRepository(Protocol):
     async def delete(

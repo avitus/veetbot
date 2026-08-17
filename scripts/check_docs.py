@@ -272,7 +272,7 @@ def check_gate_registry() -> None:
         entries, _ = load_registry(ROOT)
         active = sum(entry.milestone <= current_milestone for entry in entries)
         note(
-            f"gate registry: 172 entries reconciled; {active} gates active through "
+            f"gate registry: {len(entries)} entries reconciled; {active} gates active through "
             f"Milestone {current_milestone}"
         )
 

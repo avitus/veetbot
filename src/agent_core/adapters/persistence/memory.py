@@ -46,6 +46,8 @@ from agent_core.domain.tools import (
 )
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 from agent_core.ports.determinism import Clock
+from agent_core.ports.events import EventRepository
+from agent_core.ports.memory import MemoryStore
 from agent_core.ports.repositories import RunRepository, SessionRepository
 from agent_core.runtime.state_machine import require_transition
 
@@ -1201,6 +1203,16 @@ class InMemoryArtifactRepository:
 
 
 class InMemoryMaintenanceRepository:
+    def __init__(
+        self,
+        sessions: SessionRepository | None = None,
+        events: EventRepository | None = None,
+        memories: MemoryStore | None = None,
+    ) -> None:
+        self._sessions = sessions
+        self._events = events
+        self._memories = memories
+
     async def live_run_leases(self) -> frozenset[tuple[UUID, int]]:
         return frozenset()
 
@@ -1219,3 +1231,25 @@ class InMemoryMaintenanceRepository:
     async def trajectory_runs(self, limit: int) -> list[UUID]:
         del limit
         return []
+
+    async def pending_memory_sessions(
+        self,
+        principal: Principal,
+        *,
+        idle_before: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        if self._sessions is None or self._events is None or self._memories is None:
+            return []
+        sessions = await self._sessions.list(principal, limit=max(limit * 10, limit))
+        pending: list[UUID] = []
+        for session in reversed(sessions):
+            if session.updated_at > idle_before:
+                continue
+            watermark = await self._memories.consolidation_watermark(session.id, principal)
+            events = await self._events.list_after(session.id, watermark, principal)
+            if any(event.event_type == "memory.formation.requested" for event in events):
+                pending.append(session.id)
+                if len(pending) >= limit:
+                    break
+        return pending

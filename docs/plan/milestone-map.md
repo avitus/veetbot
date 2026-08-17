@@ -43,8 +43,8 @@ gained two more on a later pass, all four at Milestone 3.
 [knowledge-documents.md](knowledge-documents.md) was written last
 and declares twelve more, in a new fourteenth area, all of them at
 Milestone 9. The counts throughout this document are the corpus as
-it now stands: one hundred and sixty-six declared across fourteen
-specs, one hundred and seventy-two registry entries.
+it now stands: one hundred and seventy-one declared across fourteen
+specs, one hundred and seventy-seven registry entries.
 
 ## What this document is responsible for
 
@@ -257,10 +257,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and sixty-six gates declared across fourteen specs, two
+One hundred and seventy-one gates declared across fourteen specs, two
 more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and seventy-five declarations, one hundred
-and seventy-two registry entries once the three aliases are
+over the corpus: one hundred and eighty declarations, one hundred
+and seventy-seven registry entries once the three aliases are
 subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
@@ -572,12 +572,14 @@ about a chosen one.
 The build sequence's seven steps are Milestone 7 except step 1, which
 is Milestone 1 by the same decision.
 
-### Memory formation, five gates and four metrics
+### Memory formation, ten gates and four metrics
 
-The list of eight bullets separates into five gates and four metrics by
-what the spec calls them. The trailing sentence *"Gate: memory improves
-target eval cases without increasing policy failures"* is a fifth gate,
-not a closing remark.
+The original list of eight bullets separates into five Milestone 9 gates and
+four metrics by what the spec calls them. The trailing sentence *"Gate: memory
+improves target eval cases without increasing policy failures"* is a fifth
+gate, not a closing remark. Milestone 10 memory maturation later adds five
+explicit gates for multiple candidates, source integrity, idle lifecycle,
+bounded formation, and correction isolation.
 
 ```text
 #   id                              kind         M
@@ -587,6 +589,11 @@ not a closing remark.
 3   gate.memory.form_injection      corpus       9
 4   gate.memory.correction_durable  case         9
 5   gate.memory.no_policy_regress   case         9
+6   gate.memory.multi_candidate     case        10
+7   gate.memory.source_integrity    property    10
+8   gate.memory.idle_lifecycle      case        10
+9   gate.memory.formation_bounded   case        10
+10  gate.memory.correction_isolated case        10
 ```
 
 Moved to `## Tracked metrics`: formation precision, recall of
@@ -856,8 +863,8 @@ milestone  new gates  cumulative  the earliest of them
                                   boundary, package validation
 9                 26         166  formation, retrieval, ingestion,
                                   and the corpus
-10                 6         172  the authoring loop and the
-                                  background review
+10                11         177  the authoring loop, background
+                                  review, and memory maturation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -877,19 +884,19 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and seventy-two gates are green before
+2.  **Forty-one of one hundred and seventy-seven gates are green before
     Milestone 2.** Nearly a third of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and seventy-two, which is
+The cumulative column reaches one hundred and seventy-seven, which is
 every registry entry, at Milestone 10, and the plan defines no
-milestone after it. All six of Milestone 10's gates are
-`gate.skill.*`: its routing and subagent half adds none, because
-routing and subagents are covered by gates registered against the
-runtime loop and the policy engine, and the question this document
+milestone after it. Six of Milestone 10's gates are `gate.skill.*` and
+five are `gate.memory.*`. Its routing and subagent half adds none,
+because routing and subagents are covered by gates registered against
+the runtime loop and the policy engine, and the question this document
 used to raise about Milestone 8 now applies only to that half.
 
 ## Build-sequence milestones
@@ -1188,8 +1195,9 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     that nothing cancels before Milestone 5, drop the handler and the
     deadline check and points 1 through 3 become unreachable until
     then. Reversal cost: low, one handler and one predicate.
-2.  **Whether memory formation has five gates or seven.** The harness
-    table said seven and this document says five, on the strength of
+2.  **Whether the original Milestone 9 memory formation set had five
+    gates or seven.** The harness table said seven and this document
+    says five, on the strength of
     the spec calling four of its eight bullets metrics. If the intent
     was that formation precision and rejection rate block the
     milestone, they are gates and need thresholds, which no document
@@ -1197,7 +1205,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     against one reading.
 3.  **Whether Milestone 8 should acquire gates of its own** —
     answered yes, by [skills.md](skills.md), which gave it ten and
-    gave Milestone 10 six. The sentence about a skill doing something
+    gave Milestone 10 its first six. The sentence about a skill doing something
     no gate was watching turned out to describe a real hole, as the
     same sentence about the sandbox had. The MCP half was answered
     the same way on two later passes: three gates when this census

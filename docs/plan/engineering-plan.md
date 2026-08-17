@@ -2174,7 +2174,7 @@ budget_exceeded_total
 
 Build evaluations before advanced features.
 
-The detailed design - what a hard gate is, and the registry that makes the one hundred and seventy-two gates fifteen specs and this plan declare reconcilable against a test run; the four gate kinds, and why seventy-seven of those gates cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
+The detailed design - what a hard gate is, and the registry that makes the one hundred and seventy-seven gates fifteen specs and this plan declare reconcilable against a test run; the four gate kinds, and why seventy-eight of those gates cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
 
 ### 20.1 Evaluation case format
 
@@ -2331,7 +2331,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - all one hundred and sixty-six gates the fourteen detailed-design specifications declare, the import-boundary walk and the secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself, which is one hundred and seventy-five declarations and one hundred and seventy-two registry entries once three aliases are subtracted; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 10; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the one hundred and seventy-two registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - all one hundred and seventy-one gates the fourteen detailed-design specifications declare, the import-boundary walk and the secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself, which is one hundred and eighty declarations and one hundred and seventy-seven registry entries once three aliases are subtracted; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 10; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the one hundred and seventy-seven registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -2816,9 +2816,42 @@ Never automatically store:
 
 ### Milestone 10: Scheduling, model routing, and subagents
 
-These are separate optional extensions.
+These are separately gated extensions. The repository owner authorized Milestone
+10 on 2026-08-17 and selected memory maturation as its first workstream; that
+authorization does not waive the entry conditions or acceptance gates of the
+other extensions.
 
 A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill_manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, and the threshold is the one number that document leaves open.
+
+#### Memory maturation
+
+Complete the ordinary-conversation path already designed by
+[memory-formation-and-consolidation.md](memory-formation-and-consolidation.md).
+A terminal run enqueues an idempotent, non-fatal formation flag after its
+terminal transaction commits. A session close consolidates immediately; an
+active session consolidates only after an idle boundary, in maintenance rather
+than on the interactive response path.
+
+The extractor may propose multiple structured candidates from one user event.
+Every proposal remains exactly linked to its user-authored source event, enters
+as inferred and provisional unless the explicit-memory path applies, and passes
+the existing eligibility, portability, conflict, correction, and sensitivity
+gates. Candidate volume is bounded before commit.
+
+Acceptance criteria for this workstream:
+
+- One ordinary utterance naming two durable entities produces two separately
+  inspectable beliefs rather than one compound belief or none.
+- Automatic formation accepts source ids only from the owning principal's user
+  events; assistant, tool, foreign-principal, and untrusted content cannot become
+  direct sources.
+- Formation is never inline with the user-visible run: terminal runs enqueue one
+  idempotent flag and maintenance performs full extraction only after the idle
+  boundary. Session close remains an immediate boundary.
+- Secrets and injection-shaped candidates remain rejected, and one consolidation
+  commits no more than its fixed candidate-volume ceiling.
+- An ordinary correction supersedes only the matching subject and belief type;
+  unrelated preferences and entities continue to coexist.
 
 #### Scheduling
 

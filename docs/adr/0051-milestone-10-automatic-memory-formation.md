@@ -1,0 +1,98 @@
+# ADR-0051: Milestone 10 automatic memory formation
+
+- Status: Proposed
+- Date: 2026-08-17
+- Related: Milestone 10, ADR-0003, ADR-0018, ADR-0023, ADR-0045
+- User authorization: authorize Milestone 10 and continue building a rich,
+  comprehensive memory system
+
+## Context
+
+Milestone 9 implemented durable beliefs, explicit `memory.remember`, correction
+and deletion, recall, and a session-close consolidation callback. The ordinary
+conversation path was still broken in two basic ways. The runtime never emitted
+the post-run formation flag its design required, so clients that did not call
+the internal close operation never reached consolidation. The deterministic
+extractor recognized only “remember that” and one preference grammar and
+returned at most one candidate per event. An ordinary message mentioning an
+Apple Watch and a BMW X3 therefore formed neither memory.
+
+The detailed design calls for schema-constrained model extraction as a
+restricted background job. ADR-0045 deliberately withheld activation until an
+evaluation demonstrated formation lift without fabrication or policy regressions.
+Calling a provider inline from the interactive run would evade that evidence
+gate, add unbudgeted model usage, and contradict the session-idle cadence.
+
+## Proposed decision
+
+1. **Make the post-run hook durable and idempotent.** After the terminal
+   transaction commits, append `memory.formation.requested` with a derivation key
+   containing the run id. Hook failure is logged and never changes the terminal
+   run. Waiting runs do not enqueue it.
+2. **Consolidate at the idle boundary.** The maintenance role selects flagged
+   sessions after 30 seconds without committed activity. Session close remains
+   an immediate boundary. The interactive request performs no extraction.
+3. **Add structured candidate and extractor boundaries.** `MemoryCandidate` is a
+   frozen proposal value carrying type, subject, statement, polarity, source ids,
+   confidence, scope, portability, sensitivity, and temporal hints.
+   `MemoryCandidateExtractor` is the replaceable port. The deterministic v2
+   implementation can emit multiple independently addressable candidates for
+   ownership, preferences, user attributes, relationships, decisions, outcomes,
+   and ordinary ownership retractions.
+4. **Recheck provenance after extraction.** The formation service accepts an
+   automatic candidate only when every named source is a selected
+   `user.message.created` event authored by the owning principal. This check is
+   independent of the extractor so a future model cannot grant itself trust.
+   The service likewise rejects a candidate whose proposed scope differs from
+   the scope authorized for that consolidation job.
+   Automatic beliefs enter as `INFERRED` and `PROVISIONAL`; sensitive ones are
+   also flagged for review.
+5. **Use semantic subjects as conflict keys.** Device entities are separate
+   subjects. Common preference domains use stable subjects such as answer style,
+   interface theme, indentation style, and measurement units. A correction then
+   supersedes only the related belief instead of every preference about the user.
+6. **Bound formation before commit.** The service consumes at most twelve
+   automatic candidates even if an extractor overproduces. Existing secret,
+   injection, transient-detail, portability, rejection, and conflict gates still
+   run for each consumed proposal, and any excess is counted as rejected in the
+   consolidation audit.
+7. **Keep model-assisted extraction evaluation-gated.** This change does not
+   activate an unaudited provider call. The next extractor may use a model only
+   as a restricted maintenance or child run with a principal, agent version,
+   policy, scopes, budget, deadline, usage record, and the same deterministic
+   source and safety gates.
+8. **Version the richer policy separately.** New consolidations record
+   `formation@2`. Existing `formation@1` records remain valid history, and the
+   explicit version boundary keeps replay and later re-derivation comparable.
+
+## Consequences
+
+- Ordinary Apple Watch and BMW X3 mentions now form two separate memories after
+  the session goes idle, even when the client never explicitly closes it.
+- Runs complete at the same point they did before; memory enrichment is
+  eventually consistent and may appear about 30 seconds later.
+- PostgreSQL and in-memory maintenance use the same selection contract. No new
+  table or migration is required because the flag is an event and the existing
+  consolidation watermark is the completion cursor.
+- The deterministic extractor is substantially broader and fully offline, but
+  it is not open-ended natural-language understanding. Model-assisted extraction,
+  semantic conflict resolution, graph memory, and re-derivation hints remain
+  future Milestone 10 memory work.
+- Milestone 10 is authorized and in progress. The verified gate ceiling remains
+  Milestone 9 until its six skill-authoring gates and five memory-maturation
+  gates all pass.
+
+## Alternatives considered
+
+- **Run full extraction after every turn:** rejected because it adds latency and
+  cost to the user-visible run and contradicts the documented cheap-flag/idle
+  split.
+- **Rely on clients to close sessions:** rejected because normal clients keep
+  conversations open and lifecycle correctness belongs to the shared core.
+- **Ask the primary model to call `memory.remember` for every durable fact:**
+  retained as the explicit path, but rejected as the sole automatic mechanism
+  because it depends on prompt compliance and cannot be replayed from the event
+  log under a newer formation policy.
+- **Activate a provider-backed extractor immediately:** deferred until it has a
+  budgeted audited run representation and passes the no-fabrication and
+  no-policy-regression evaluations required by ADR-0045.
