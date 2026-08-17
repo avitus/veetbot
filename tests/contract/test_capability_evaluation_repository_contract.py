@@ -70,7 +70,10 @@ async def assert_capability_result_replacement(
     assert len(distribution) == 1
     assert distribution[0].run.score == Decimal("0.90")
     assert distribution[0].criteria[0].value == Decimal("4")
-    assert await repository.cost_since(NOW - timedelta(seconds=1)) == Decimal("0.12")
+    assert await repository.cost_since(NOW - timedelta(seconds=1)) == Decimal("0.24")
+
+    await repository.replace(rerun, [criterion(rerun, value="4")])
+    assert await repository.cost_since(NOW - timedelta(seconds=1)) == Decimal("0.24")
 
 
 async def assert_capability_ceiling_hit(repository: CapabilityEvaluationRepository) -> None:

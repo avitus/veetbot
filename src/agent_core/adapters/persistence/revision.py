@@ -1,3 +1,3 @@
 """Schema revision shipped with this application build."""
 
-EXPECTED_REVISION = "e1f4a8c9b2d3"
+EXPECTED_REVISION = "f7a2c9e4d1b6"

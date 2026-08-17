@@ -43,6 +43,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     CheckpointRow,
     DerivedEventKeyRow,
     EvalCriterionScoreRow,
+    EvalScenarioAttemptCostRow,
     EvalScenarioRunRow,
     EventRow,
     ExportConsentRow,
@@ -2037,6 +2038,16 @@ class PostgresCapabilityEvaluationRepository:
         stored_id = row.id
         replaced = existing_id is not None
         await self._session.execute(
+            pg_insert(EvalScenarioAttemptCostRow)
+            .values(
+                id=run.id,
+                scenario_run_id=stored_id,
+                cost_usd=run.cost_usd,
+                started_at=run.started_at,
+            )
+            .on_conflict_do_nothing(index_elements=[EvalScenarioAttemptCostRow.id])
+        )
+        await self._session.execute(
             delete(EvalCriterionScoreRow).where(EvalCriterionScoreRow.scenario_run_id == stored_id)
         )
         if criteria:
@@ -2111,8 +2122,8 @@ class PostgresCapabilityEvaluationRepository:
 
     async def cost_since(self, since: datetime) -> Decimal:
         value = await self._session.scalar(
-            select(func.coalesce(func.sum(EvalScenarioRunRow.cost_usd), Decimal("0"))).where(
-                EvalScenarioRunRow.started_at >= since
-            )
+            select(
+                func.coalesce(func.sum(EvalScenarioAttemptCostRow.cost_usd), Decimal("0"))
+            ).where(EvalScenarioAttemptCostRow.started_at >= since)
         )
         return Decimal(value or 0)

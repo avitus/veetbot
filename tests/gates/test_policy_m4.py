@@ -210,10 +210,15 @@ class _SchedulingTool:
 
 
 class _FailingApprovalViewTool(_SchedulingTool):
+    def __init__(self, *, name: str, side_effect: SideEffectClass, parallel: bool) -> None:
+        super().__init__(name=name, side_effect=side_effect, parallel=parallel)
+        self.approval_view_called = False
+
     async def approval_view(
         self, arguments: dict[str, object], *, tenant_id: str
     ) -> tuple[str, dict[str, object]]:
         del arguments, tenant_id
+        self.approval_view_called = True
         raise RuntimeError("approval presentation failed")
 
 
@@ -712,6 +717,7 @@ async def test_approval_presentation_failure_falls_back_and_still_waits(
     assert created.action_summary == "Run demo.approval_fallback with validated arguments."
     assert created.arguments == {}
     assert waiting.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
+    assert tool.approval_view_called
 
 
 async def test_operator_policy_overlay_is_hashed_audited_and_evaluated(

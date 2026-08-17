@@ -29,6 +29,17 @@ class GateStatus:
     detail: str = ""
 
 
+def _registry_module(repository_root: Path) -> Any:
+    registry_path = repository_root / "scripts" / "gate_registry.py"
+    spec = importlib.util.spec_from_file_location("_agent_gate_registry", registry_path)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"cannot load gate registry implementation: {registry_path}")
+    registry = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = registry
+    spec.loader.exec_module(registry)
+    return registry
+
+
 def current_milestone(repository_root: Path) -> int:
     path = repository_root / "docs" / "status" / "project-state.yaml"
     try:
@@ -41,6 +52,16 @@ def current_milestone(repository_root: Path) -> int:
     if type(value) is not int:
         raise ValueError("project-state.yaml has no integer current_milestone")
     return value
+
+
+def maximum_milestone(repository_root: Path) -> int:
+    """Return the highest milestone declared by the canonical registry."""
+
+    registry = _registry_module(repository_root)
+    entries, errors = registry.load_registry(repository_root)
+    if errors:
+        raise ValueError("invalid gate registry: " + "; ".join(dict.fromkeys(errors)))
+    return int(max(entry.milestone for entry in entries))
 
 
 def _execute_pytest_checks(
@@ -104,13 +125,7 @@ def collect_status(
     area: str | None = None,
     execute: CheckExecutor = _execute_pytest_checks,
 ) -> list[GateStatus]:
-    registry_path = repository_root / "scripts" / "gate_registry.py"
-    spec = importlib.util.spec_from_file_location("_agent_gate_registry", registry_path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load gate registry implementation: {registry_path}")
-    registry = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = registry
-    spec.loader.exec_module(registry)
+    registry = _registry_module(repository_root)
     entries, load_errors = registry.load_registry(repository_root)
     errors = [*load_errors, *registry.registry_errors(repository_root, milestone)]
     if errors:

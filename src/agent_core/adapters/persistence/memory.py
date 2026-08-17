@@ -1278,6 +1278,7 @@ class InMemoryCapabilityEvaluationRepository:
     def __init__(self) -> None:
         self._runs: dict[tuple[str, str, str, int], EvalScenarioRun] = {}
         self._scores: dict[UUID, list[EvalCriterionScore]] = {}
+        self._attempt_costs: dict[UUID, tuple[datetime, Decimal]] = {}
         self._lock = asyncio.Lock()
 
     async def replace(
@@ -1286,6 +1287,8 @@ class InMemoryCapabilityEvaluationRepository:
         criteria: Sequence[EvalCriterionScore],
     ) -> SavedEvalScenario:
         key = (run.scenario_id, run.build_ref, run.judge_version, run.repeat_index)
+        if len({score.criterion for score in criteria}) != len(criteria):
+            raise ConflictError("criterion names must be unique within a scenario run")
         async with self._lock:
             previous = self._runs.get(key)
             stored_run = run.model_copy(
@@ -1295,10 +1298,9 @@ class InMemoryCapabilityEvaluationRepository:
                 score.model_copy(update={"scenario_run_id": stored_run.id}, deep=True)
                 for score in criteria
             ]
-            if len({score.criterion for score in stored_scores}) != len(stored_scores):
-                raise ConflictError("criterion names must be unique within a scenario run")
             self._runs[key] = stored_run
             self._scores[stored_run.id] = stored_scores
+            self._attempt_costs.setdefault(run.id, (run.started_at, run.cost_usd))
             return SavedEvalScenario(
                 run=stored_run.model_copy(deep=True),
                 criteria=[score.model_copy(deep=True) for score in stored_scores],
@@ -1352,6 +1354,6 @@ class InMemoryCapabilityEvaluationRepository:
     async def cost_since(self, since: datetime) -> Decimal:
         async with self._lock:
             return sum(
-                (run.cost_usd for run in self._runs.values() if run.started_at >= since),
+                (cost for started_at, cost in self._attempt_costs.values() if started_at >= since),
                 start=Decimal("0"),
             )

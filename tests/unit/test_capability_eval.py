@@ -241,3 +241,62 @@ async def test_capability_ceiling_hit_is_excluded_from_distribution(tmp_path: Pa
     assert result.release_blocked
     assert all(row.run.score is None for row in result.runs)
     assert all(row.run.ceiling_hit == "model_calls" for row in result.runs)
+
+
+async def test_capability_variance_preserves_decimal_precision(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    factory = EvalUnitOfWorkFactory()
+    judge_values = iter((Decimal("0.4"), Decimal("0.8")))
+    next_run = 600
+
+    async def execute(
+        model_policy: str, _tools: Any, _budget: Any, _prompt: str
+    ) -> CapabilityExecution:
+        nonlocal next_run
+        next_run += 1
+        output = "Subject output."
+        provider, model = "openai", "gpt-5.6-sol"
+        if model_policy != "balanced":
+            value = next(judge_values)
+            output = json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "criterion": "correctness",
+                            "observation": "Measured.",
+                            "value": str(value),
+                        },
+                        {
+                            "criterion": "clarity",
+                            "observation": "Measured.",
+                            "value": str(value),
+                        },
+                    ]
+                }
+            )
+            provider, model = "anthropic", "claude-opus-5"
+        return CapabilityExecution(
+            run_id=UUID(int=next_run),
+            status=RunStatus.COMPLETED,
+            output=output,
+            provider=provider,
+            model=model,
+            model_calls=1,
+            tool_calls=0,
+            cost_usd=Decimal("0.05"),
+            policy_failures=0,
+            started_at=NOW,
+            finished_at=NOW + timedelta(seconds=1),
+        )
+
+    result = await run_suite(
+        tmp_path,
+        suite="research",
+        build_ref="abc123",
+        uow_factory=cast(UnitOfWorkFactory, factory),
+        execute=execute,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory(UUID(int=value) for value in range(2100, 2110)),
+    )
+
+    assert result.variance == Decimal("0.0025")
