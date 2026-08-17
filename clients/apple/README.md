@@ -11,10 +11,12 @@ no third-party dependencies. On first launch, enter an HTTPS API base URL and a
 static bearer token. The base URL is stored as a preference; the token is stored
 only in Keychain.
 
-The resizable settings surface keeps connection actions pinned below its
-scrolling content and includes device-local text-size and font-style controls.
-Appearance changes apply immediately throughout the client; system text sizing
-remains the default.
+The settings surface groups Connection, Appearance, and Data & Privacy in a
+scrolling layout with connection actions pinned below it. On macOS, configured
+clients use a separate settings window that resizes in both dimensions and
+remembers its frame. The main and settings windows persist their sizes and
+positions independently. Device-local text-size and font-style controls apply
+immediately throughout the client; system text sizing remains the default.
 
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its

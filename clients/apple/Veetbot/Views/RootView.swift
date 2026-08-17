@@ -1,9 +1,19 @@
 import SwiftUI
 
+#if os(macOS)
+import AppKit
+#endif
+
 public struct RootView: View {
     @ObservedObject var model: ChatViewModel
+    #if !os(macOS)
     @State private var showingSettings = false
+    #endif
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var appearance: AppearancePreferences
+    #if os(macOS)
+    @StateObject private var settingsWindowPresenter = SettingsWindowPresenter()
+    #endif
 
     public init(model: ChatViewModel) {
         self.model = model
@@ -17,11 +27,13 @@ public struct RootView: View {
                 ConnectionSettingsView(model: model, embedded: true)
             }
         }
+        #if !os(macOS)
         .sheet(isPresented: $showingSettings) {
             ConnectionSettingsView(model: model, embedded: false)
         }
+        #endif
         .onChange(of: model.requiresReauthentication) { required in
-            if required { showingSettings = true }
+            if required { presentSettings() }
         }
         .onChange(of: scenePhase) { phase in
             if phase != .active {
@@ -50,28 +62,39 @@ public struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+        #if os(macOS)
+        .background(MainWindowFrameAutosaveView())
+        #endif
     }
 
     @ViewBuilder
     private var configuredContent: some View {
         if #available(iOS 16.0, macOS 13.0, *) {
             NavigationSplitView {
-                SessionSidebar(model: model, showingSettings: $showingSettings)
+                SessionSidebar(model: model, openSettings: presentSettings)
             } detail: {
                 ChatView(model: model)
             }
         } else {
             NavigationView {
-                SessionSidebar(model: model, showingSettings: $showingSettings)
+                SessionSidebar(model: model, openSettings: presentSettings)
                 ChatView(model: model)
             }
         }
+    }
+
+    private func presentSettings() {
+        #if os(macOS)
+        settingsWindowPresenter.show(model: model, appearance: appearance)
+        #else
+        showingSettings = true
+        #endif
     }
 }
 
 private struct SessionSidebar: View {
     @ObservedObject var model: ChatViewModel
-    @Binding var showingSettings: Bool
+    let openSettings: () -> Void
     @State private var deletionCandidate: SessionHistoryEntry?
 
     var body: some View {
@@ -150,9 +173,7 @@ private struct SessionSidebar: View {
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Button {
-                    showingSettings = true
-                } label: {
+                Button(action: openSettings) {
                     Image(systemName: "gearshape")
                         .foregroundColor(AppTheme.orange)
                 }
@@ -161,6 +182,102 @@ private struct SessionSidebar: View {
         }
     }
 }
+
+#if os(macOS)
+enum MainWindowConfiguration {
+    static let frameName: NSWindow.FrameAutosaveName = "VeetbotMainWindow"
+
+    @MainActor
+    static func apply(to window: NSWindow) {
+        guard window.frameAutosaveName != frameName else { return }
+        window.setFrameUsingName(frameName)
+        window.setFrameAutosaveName(frameName)
+    }
+}
+
+enum SettingsWindowConfiguration {
+    static let frameName: NSWindow.FrameAutosaveName = "VeetbotSettingsWindow"
+    static let minimumSize = NSSize(width: 520, height: 440)
+    static let initialSize = NSSize(width: 720, height: 680)
+    static let maximumSize = NSSize(width: 10_000, height: 10_000)
+
+    @MainActor
+    static func apply(to window: NSWindow) {
+        window.styleMask.insert(.resizable)
+        window.contentMinSize = minimumSize
+        window.contentMaxSize = maximumSize
+    }
+}
+
+@MainActor
+private final class SettingsWindowPresenter: NSObject, ObservableObject, NSWindowDelegate {
+    private var controller: NSWindowController?
+
+    func show(model: ChatViewModel, appearance: AppearancePreferences) {
+        if let window = controller?.window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: SettingsWindowConfiguration.initialSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        SettingsWindowConfiguration.apply(to: window)
+        window.title = "Veetbot Settings"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        let restoredFrame = window.setFrameUsingName(SettingsWindowConfiguration.frameName)
+        window.setFrameAutosaveName(SettingsWindowConfiguration.frameName)
+
+        let settings = ConnectionSettingsView(
+            model: model,
+            embedded: false,
+            onClose: { [weak window] in window?.close() }
+        )
+        .environmentObject(appearance)
+        .appTypography(appearance)
+        .tint(AppTheme.turquoise)
+        window.contentViewController = NSHostingController(rootView: settings)
+
+        let controller = NSWindowController(window: window)
+        self.controller = controller
+        if !restoredFrame { window.center() }
+        controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard notification.object as? NSWindow === controller?.window else { return }
+        controller = nil
+    }
+}
+
+private struct MainWindowFrameAutosaveView: NSViewRepresentable {
+    func makeNSView(context: Context) -> MainWindowFrameAutosaveNSView {
+        MainWindowFrameAutosaveNSView()
+    }
+
+    func updateNSView(_ view: MainWindowFrameAutosaveNSView, context: Context) {
+        view.applyConfigurationIfPossible()
+    }
+}
+
+private final class MainWindowFrameAutosaveNSView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyConfigurationIfPossible()
+    }
+
+    func applyConfigurationIfPossible() {
+        guard let window else { return }
+        MainWindowConfiguration.apply(to: window)
+    }
+}
+#endif
 
 private struct ConversationAgeText: View {
     let updatedAt: Date

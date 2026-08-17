@@ -18,7 +18,7 @@ struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     @Environment(\.appFontStyle) private var appFontStyle
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appTextSize) private var appTextSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -66,7 +66,9 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 
     private func applyFont(to textView: NSTextView) {
-        let pointSize = NSFont.systemFontSize * dynamicTypeSize.appScaleFactor
+        let pointSize =
+            appPointSize(for: .body, textSize: appTextSize)
+            ?? NSFont.systemFontSize
         let base = NSFont.systemFont(ofSize: pointSize)
         let descriptor = base.fontDescriptor.withDesign(appFontStyle.nsDesign)
         textView.font = descriptor.flatMap { NSFont(descriptor: $0, size: pointSize) } ?? base
@@ -115,7 +117,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     @Environment(\.appFontStyle) private var appFontStyle
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appTextSize) private var appTextSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -145,13 +147,15 @@ struct ComposerTextEditor: UIViewRepresentable {
     }
 
     private func applyFont(to textView: UITextView) {
-        let traits = UITraitCollection(
-            preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
-        )
-        let preferred = UIFontDescriptor.preferredFontDescriptor(
-            withTextStyle: .body,
-            compatibleWith: traits
-        )
+        let preferred: UIFontDescriptor
+        if let pointSize = appPointSize(for: .body, textSize: appTextSize) {
+            preferred = UIFont.systemFont(ofSize: pointSize).fontDescriptor
+        } else {
+            preferred = UIFontDescriptor.preferredFontDescriptor(
+                withTextStyle: .body,
+                compatibleWith: nil
+            )
+        }
         let descriptor = preferred.withDesign(appFontStyle.uiDesign) ?? preferred
         textView.font = UIFont(descriptor: descriptor, size: 0)
     }

@@ -52,7 +52,8 @@ indirect enum MarkdownContentBlock: Equatable, Sendable {
 
 enum MarkdownContentParser {
     static func parse(_ text: String) -> [MarkdownContentBlock] {
-        let normalized = text
+        let normalized =
+            text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
         return parseLines(normalized.components(separatedBy: "\n"))
@@ -270,7 +271,9 @@ enum MarkdownContentParser {
         let characters = Array(line)
         var position = 0
         var indent = 0
-        while position < characters.count, characters[position] == " " || characters[position] == "\t" {
+        while position < characters.count,
+            characters[position] == " " || characters[position] == "\t"
+        {
             indent += characters[position] == "\t" ? 4 : 1
             position += 1
         }
@@ -538,7 +541,7 @@ private struct MarkdownBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .heading(let level, let text):
             inlineMarkdownText(text)
-                .font(headingFont(level))
+                .appFont(headingTextStyle(level), weight: headingWeight(level))
                 .padding(.top, level <= 2 ? 6 : 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
@@ -569,14 +572,22 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    private func headingFont(_ level: Int) -> Font {
+    private func headingTextStyle(_ level: Int) -> Font.TextStyle {
         switch level {
-        case 1: return .largeTitle.bold()
-        case 2: return .title2.bold()
-        case 3: return .title3.weight(.semibold)
+        case 1: return .largeTitle
+        case 2: return .title2
+        case 3: return .title3
         case 4: return .headline
-        case 5: return .subheadline.weight(.semibold)
-        default: return .caption.weight(.semibold)
+        case 5: return .subheadline
+        default: return .caption
+        }
+    }
+
+    private func headingWeight(_ level: Int) -> Font.Weight? {
+        switch level {
+        case 1, 2: return .bold
+        case 3, 5...: return .semibold
+        default: return nil
         }
     }
 }
@@ -625,7 +636,7 @@ private struct MarkdownCodeBlockView: View {
         VStack(alignment: .leading, spacing: 0) {
             if let language {
                 Text(language)
-                    .font(.caption.weight(.semibold))
+                    .appFont(.caption, weight: .semibold)
                     .foregroundColor(.secondary)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 7)
@@ -633,7 +644,7 @@ private struct MarkdownCodeBlockView: View {
             }
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(code.isEmpty ? " " : code)
-                    .font(.system(.body, design: .monospaced))
+                    .appCodeFont(.body)
                     .fixedSize(horizontal: true, vertical: true)
                     .padding(12)
             }
@@ -679,7 +690,7 @@ private struct MarkdownTableView: View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(Array(cells.enumerated()), id: \.offset) { index, cell in
                 inlineMarkdownText(cell)
-                    .font(isHeader ? .subheadline.weight(.semibold) : .body)
+                    .appFont(isHeader ? .subheadline : .body, weight: isHeader ? .semibold : nil)
                     .multilineTextAlignment(table.alignments[index].textAlignment)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(

@@ -44,12 +44,12 @@ enum AppTextSize: String, CaseIterable, Identifiable {
         }
     }
 
-    var dynamicTypeSize: DynamicTypeSize? {
+    var fontScale: CGFloat? {
         switch self {
         case .system: return nil
-        case .compact: return .medium
-        case .comfortable: return .xLarge
-        case .large: return .xxLarge
+        case .compact: return 0.9
+        case .comfortable: return 1.12
+        case .large: return 1.3
         }
     }
 }
@@ -109,50 +109,120 @@ private struct AppFontStyleKey: EnvironmentKey {
     static let defaultValue = AppFontStyle.rounded
 }
 
+private struct AppTextSizeKey: EnvironmentKey {
+    static let defaultValue = AppTextSize.system
+}
+
 extension EnvironmentValues {
     var appFontStyle: AppFontStyle {
         get { self[AppFontStyleKey.self] }
         set { self[AppFontStyleKey.self] = newValue }
+    }
+
+    var appTextSize: AppTextSize {
+        get { self[AppTextSizeKey.self] }
+        set { self[AppTextSizeKey.self] = newValue }
+    }
+}
+
+func appPointSize(for textStyle: Font.TextStyle, textSize: AppTextSize) -> CGFloat? {
+    guard let scale = textSize.fontScale else { return nil }
+    return textStyle.appBasePointSize * scale
+}
+
+private func resolvedAppFont(
+    _ textStyle: Font.TextStyle,
+    textSize: AppTextSize,
+    design: Font.Design,
+    weight: Font.Weight? = nil
+) -> Font {
+    var font: Font
+    if let pointSize = appPointSize(for: textStyle, textSize: textSize) {
+        font = .system(size: pointSize, design: design)
+    } else {
+        font = .system(textStyle, design: design)
+    }
+    if let weight {
+        font = font.weight(weight)
+    }
+    return font
+}
+
+extension Font.TextStyle {
+    fileprivate var appBasePointSize: CGFloat {
+        #if os(macOS)
+        switch self {
+        case .largeTitle: return 26
+        case .title: return 22
+        case .title2: return 17
+        case .title3: return 15
+        case .headline, .body: return 13
+        case .callout: return 12
+        case .subheadline: return 11
+        case .footnote, .caption, .caption2: return 10
+        @unknown default: return 13
+        }
+        #else
+        switch self {
+        case .largeTitle: return 34
+        case .title: return 28
+        case .title2: return 22
+        case .title3: return 20
+        case .headline, .body: return 17
+        case .callout: return 16
+        case .subheadline: return 15
+        case .footnote: return 13
+        case .caption: return 12
+        case .caption2: return 11
+        @unknown default: return 17
+        }
+        #endif
     }
 }
 
 private struct AppTypographyModifier: ViewModifier {
     @ObservedObject var preferences: AppearancePreferences
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        let styled = content
+        content
             .environment(\.appFontStyle, preferences.fontStyle)
-            .font(.system(.body, design: preferences.fontStyle.design))
-
-        if let size = preferences.textSize.dynamicTypeSize {
-            styled.dynamicTypeSize(size)
-        } else {
-            styled
-        }
+            .environment(\.appTextSize, preferences.textSize)
+            .font(
+                resolvedAppFont(
+                    .body,
+                    textSize: preferences.textSize,
+                    design: preferences.fontStyle.design
+                )
+            )
     }
 }
 
 private struct AppFontModifier: ViewModifier {
     @Environment(\.appFontStyle) private var fontStyle
+    @Environment(\.appTextSize) private var textSize
     let textStyle: Font.TextStyle
     let weight: Font.Weight?
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if let weight {
-            content.font(.system(textStyle, design: fontStyle.design).weight(weight))
-        } else {
-            content.font(.system(textStyle, design: fontStyle.design))
-        }
+        content.font(
+            resolvedAppFont(
+                textStyle,
+                textSize: textSize,
+                design: fontStyle.design,
+                weight: weight
+            )
+        )
     }
 }
 
 private struct AppCodeFontModifier: ViewModifier {
+    @Environment(\.appTextSize) private var textSize
     let textStyle: Font.TextStyle
 
     func body(content: Content) -> some View {
-        content.font(.system(textStyle, design: .monospaced))
+        content.font(
+            resolvedAppFont(textStyle, textSize: textSize, design: .monospaced)
+        )
     }
 }
 
@@ -204,25 +274,6 @@ extension AppFontStyle {
     }
 }
 
-extension DynamicTypeSize {
-    var uiContentSizeCategory: UIContentSizeCategory {
-        switch self {
-        case .xSmall: return .extraSmall
-        case .small: return .small
-        case .medium: return .medium
-        case .large: return .large
-        case .xLarge: return .extraLarge
-        case .xxLarge: return .extraExtraLarge
-        case .xxxLarge: return .extraExtraExtraLarge
-        case .accessibility1: return .accessibilityMedium
-        case .accessibility2: return .accessibilityLarge
-        case .accessibility3: return .accessibilityExtraLarge
-        case .accessibility4: return .accessibilityExtraExtraLarge
-        case .accessibility5: return .accessibilityExtraExtraExtraLarge
-        @unknown default: return .large
-        }
-    }
-}
 #elseif os(macOS)
 extension AppFontStyle {
     var nsDesign: NSFontDescriptor.SystemDesign {
@@ -235,23 +286,4 @@ extension AppFontStyle {
     }
 }
 
-extension DynamicTypeSize {
-    var appScaleFactor: CGFloat {
-        switch self {
-        case .xSmall: return 0.82
-        case .small: return 0.88
-        case .medium: return 0.94
-        case .large: return 1
-        case .xLarge: return 1.12
-        case .xxLarge: return 1.24
-        case .xxxLarge: return 1.36
-        case .accessibility1: return 1.6
-        case .accessibility2: return 1.84
-        case .accessibility3: return 2.08
-        case .accessibility4: return 2.32
-        case .accessibility5: return 2.56
-        @unknown default: return 1
-        }
-    }
-}
 #endif
