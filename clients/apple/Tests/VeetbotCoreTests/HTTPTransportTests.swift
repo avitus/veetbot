@@ -357,6 +357,18 @@ import Testing
         } catch {
             Issue.record("unexpected error: \(error)")
         }
+
+        do {
+            _ = try await client.listSessionMessages(sessionID: UUID())
+            Issue.record("expected transcript history to require a server upgrade")
+        } catch let error as VeetbotAPIClientError {
+            guard case .serverUpgradeRequired = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
     }
 
     @Test
@@ -410,6 +422,10 @@ import Testing
             case ("GET", "/v1/sessions"):
                 statusCode = 200
                 body = "{\"items\":[\(sessionBody)],\"next_cursor\":\"next-session\"}"
+                headers = ["Content-Type": "application/json"]
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                statusCode = 200
+                body = "{\"items\":[{\"sequence\":2,\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}]}],\"next_cursor\":\"next-message\"}"
                 headers = ["Content-Type": "application/json"]
             case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
                 statusCode = 202
@@ -467,6 +483,13 @@ import Testing
         #expect(try await client.getSession(sessionID).activeRunID == runID)
         #expect(try await client.listSessions(limit: 999, cursor: "session cursor").items.count == 1)
         #expect(
+            try await client.listSessionMessages(
+                sessionID: sessionID,
+                limit: 999,
+                cursor: "message cursor"
+            ).items.first?.content == [.text("hello")]
+        )
+        #expect(
             try await client.submitMessage(
                 sessionID: sessionID,
                 content: [.text("hello")],
@@ -508,7 +531,7 @@ import Testing
         #expect(etag == "abc123")
 
         let captured = lock.withLock { requests }
-        #expect(captured.count == 12)
+        #expect(captured.count == 13)
         let create = try #require(
             captured.first {
                 $0.httpMethod == "POST" && $0.url?.path == "/v1/sessions"
@@ -530,8 +553,21 @@ import Testing
         #expect(sessionQuery.contains(URLQueryItem(name: "cursor", value: "session cursor")))
         #expect(!sessionQuery.contains { $0.name == "tenant_id" || $0.name == "principal_id" })
 
+        let transcript = try #require(
+            captured.first {
+                $0.httpMethod == "GET" && $0.url?.path.hasSuffix("/messages") == true
+            }
+        )
+        let transcriptQuery = try #require(
+            URLComponents(url: transcript.url!, resolvingAgainstBaseURL: false)?.queryItems
+        )
+        #expect(transcriptQuery.contains(URLQueryItem(name: "limit", value: "200")))
+        #expect(transcriptQuery.contains(URLQueryItem(name: "cursor", value: "message cursor")))
+
         let message = try #require(
-            captured.first { $0.url?.path.hasSuffix("/messages") == true }
+            captured.first {
+                $0.httpMethod == "POST" && $0.url?.path.hasSuffix("/messages") == true
+            }
         )
         #expect(message.value(forHTTPHeaderField: "Idempotency-Key") == "stable-key")
         #expect(

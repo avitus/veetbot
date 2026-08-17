@@ -45,10 +45,12 @@ orders, and rules.
 
 ADR-0050 later authorizes two post-Milestone 9 additions:
 `GET /v1/sessions` and `DELETE /v1/sessions/{session_id}`. They make the
-current public surface sixteen routes without rewriting the completed
-Milestone 5 baseline or its gate census. The sections labelled as that
-baseline remain historical requirements; the authoritative-history section
-below specifies the current extension.
+public surface sixteen routes without rewriting the completed Milestone 5
+baseline or its gate census. ADR-0051 adds the principal-scoped session-message
+read needed to restore a complete historical transcript, bringing the current
+surface to seventeen. The sections labelled as the Milestone 5 baseline remain
+historical requirements; the authoritative-history section below specifies the
+current extensions.
 
 ## What this document does not change
 
@@ -363,6 +365,7 @@ is not an authorization input.
 | `POST /v1/sessions` | `session.write` |
 | `GET /v1/sessions` | `session.read` |
 | `GET /v1/sessions/{id}` | `session.read` |
+| `GET /v1/sessions/{id}/messages` | `session.read` |
 | `DELETE /v1/sessions/{id}` | `session.write` |
 | `POST /v1/sessions/{id}/messages` | `run.write` |
 | `GET /v1/runs/{id}` | `run.read` |
@@ -596,6 +599,49 @@ references enter a durable deletion queue in the transaction; the request tries
 to delete external bytes immediately and maintenance retries failures until the
 queue is empty. The permanent tombstone retains only session, tenant, principal,
 and deletion-time identifiers and contains no conversation content.
+
+### Durable session transcript
+
+ADR-0051 adds the read counterpart to the existing message-submission path:
+
+```http
+GET /v1/sessions/{session_id}/messages?limit=100&cursor=<opaque>
+```
+
+It requires `session.read` and returns the standard page shape:
+
+```json
+{
+  "items": [
+    {
+      "sequence": 12,
+      "role": "user",
+      "content": [{"type": "text", "text": "What changed?"}]
+    },
+    {
+      "sequence": 18,
+      "role": "assistant",
+      "content": [{"type": "text", "text": "The durable answer."}]
+    }
+  ],
+  "next_cursor": null
+}
+```
+
+Items are ordered by ascending immutable session sequence. The default page size
+is 100 and the server clamps it to 200. The cursor is opaque and identifies the
+last returned message sequence; an invalid cursor is `malformed_request`. As on
+the point read, a missing, cross-tenant, or differently owned session is 404.
+
+The route is a transcript projection rather than an event-log export. Only
+`user.message.created` and `assistant.message.completed` produce items, and the
+response converts their content to the public content-block vocabulary. Tool
+lifecycle events, system events, provider continuation data, private reasoning,
+and transient stream deltas are excluded. A client restores every page before
+attaching to `active_run_id` or `last_run_id` and records the returned sequences
+in the same persisted-event deduplication set used by SSE replay. Replaying the
+latest run therefore fills current run state without duplicating its durable
+messages.
 
 ## Submitting a message, and the two mechanisms that share the name
 
@@ -1397,6 +1443,11 @@ class SessionService(Protocol):
         cursor: str | None,
     ) -> Page[SessionView]: ...
 
+    async def messages(
+        self, principal: Principal, session_id: UUID,
+        limit: int, cursor: str | None,
+    ) -> Page[SessionMessageView]: ...
+
     async def delete(
         self, principal: Principal, session_id: UUID,
     ) -> None: ...
@@ -1494,10 +1545,10 @@ process.
 ## Milestones
 
 The fourteen-route baseline in this document is Milestone 5 work, which is what
-Section 21 already says. The two ADR-0050 routes are separately authorized
-post-Milestone 9 work and do not change a completed milestone's acceptance
-criteria or gate count. The table exists because several things this document
-specifies are not routes or do not land with the baseline.
+Section 21 already says. The two ADR-0050 routes and ADR-0051 transcript route
+are separately authorized post-Milestone 9 work and do not change a completed
+milestone's acceptance criteria or gate count. The table exists because several
+things this document specifies are not routes or do not land with the baseline.
 
 ```text
 # capability                                milestone
@@ -1507,6 +1558,7 @@ error envelope, code table, status map      M5
 request identifiers and trace propagation   M5
 sessions create, read, close                M5
 sessions list and delete                    post-M9 explicit assignment
+session durable message transcript          post-M9 explicit assignment
 submit, HTTP idempotency, routing table     M5
 run read, RunView                           M5
 cancel endpoint, cancel_requested_at        M5
@@ -1545,7 +1597,7 @@ an implementer does not move the DDL forward or the endpoint back.
 10 approval routes at M4 or M5      M5; the service and CLI are M4
 11 added M5 route has no scope row  session.read; M5 surface is 14
 12 two run column counts, neither   fifteen in §15, twenty-six live
-13 current history routes           session.read/write; current surface is 16
+13 current history routes           session.read/write; ADR-0051 makes surface 17
 ```
 
 Row 3 is the one worth expanding, because the readiness review stated
@@ -1726,6 +1778,9 @@ build failure.
     boundary.** The database graph is gone before `204`; a content-free
     tombstone makes retries stable; queued artifact references let maintenance
     finish byte deletion without retaining conversation content.
+25. **The durable transcript is a closed message projection.** Historical
+    clients read only durable user and completed-assistant messages, never the
+    open internal event vocabulary, and reconcile their sequences with replay.
 
 ## Open questions for review
 
@@ -1743,10 +1798,11 @@ build failure.
    Section 27.3 permits either and requires one. Routing matches what
    a user answering a question expects; rejecting makes every client
    implement the rule the server already has the state to apply.
-4. Should `GET /v1/runs` exist — a list of runs in a session? It is
-   the obvious next route, but the current history client needs only
-   `active_run_id` and `last_run_id`; a complete multi-run transcript browser
-   would need a separately authorized list.
+4. Should `GET /v1/runs` exist — a list of runs in a session? ADR-0051 shows
+   that a complete conversation transcript does not need one: the session
+   message projection restores conversational history while `active_run_id` and
+   `last_run_id` remain sufficient for current execution state. A run browser
+   would therefore need a separate use case.
 5. Is fifteen seconds the right heartbeat interval? It is chosen to
    sit under common proxy idle timeouts and is otherwise arbitrary.
 6. Should the event stream be available per session as well as per

@@ -1792,7 +1792,7 @@ Do not store artifact bytes in PostgreSQL.
 
 ## 16. API contract
 
-The detailed design - the fourteen-route Milestone 5 baseline and a response body for each route, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. ADR-0050 separately authorizes the post-Milestone 9 session-list and session-delete routes, bringing the current surface to sixteen without rewriting the completed Milestone 5 acceptance criteria. The original nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
+The detailed design - the fourteen-route Milestone 5 baseline and a response body for each route, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. ADR-0050 separately authorizes the post-Milestone 9 session-list and session-delete routes, and ADR-0051 authorizes the durable session-message read used to restore a complete historical transcript, bringing the current surface to seventeen without rewriting the completed Milestone 5 acceptance criteria. The original nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
 
 ### Authentication
 
@@ -1864,6 +1864,20 @@ managed resources and retain their content with any deleted authoring-run
 reference detached. A client deletes its local cache only after this route
 succeeds and reconciles history from the list route on connect, foreground
 entry, and periodically while open.
+
+#### Read durable session messages
+
+```http
+GET /v1/sessions/{session_id}/messages?limit=100&cursor=<opaque>
+```
+
+Return an oldest-first, keyset-paginated page of the authenticated principal's
+durable user and completed-assistant messages. Each item carries its immutable
+session sequence, role, and public content blocks. Exclude tool lifecycle and
+system events, provider continuation state, private reasoning, and transient
+deltas. Missing, cross-tenant, and differently owned sessions return `404`.
+Clients restore all pages before attaching to the active or last run and use the
+message sequences to deduplicate that run's persisted replay.
 
 #### Submit message
 

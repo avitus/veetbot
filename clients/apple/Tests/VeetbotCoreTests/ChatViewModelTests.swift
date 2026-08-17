@@ -106,6 +106,106 @@ import Testing
     }
 
     @Test
+    func testSelectingHistoricalSessionAfterRelaunchRestoresEveryCompletedTurn() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let sessionBody = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"First question","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
+            """
+        let lock = NSLock()
+        var messageRequests = 0
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                let attempt = lock.withLock { () -> Int in
+                    messageRequests += 1
+                    return messageRequests
+                }
+                if attempt == 1 {
+                    return try response(
+                        for: request,
+                        statusCode: 503,
+                        body: #"{"error":{"code":"internal_error","message":"retry","details":{},"request_id":"retry-history"}}"#,
+                        headers: ["Retry-After": "0"]
+                    )
+                }
+                let cursor = URLComponents(
+                    url: try #require(request.url),
+                    resolvingAgainstBaseURL: false
+                )?.queryItems?.first { $0.name == "cursor" }?.value
+                if cursor == nil {
+                    return try response(
+                        for: request,
+                        statusCode: 200,
+                        body: """
+                            {"items":[
+                              {"sequence":2,"role":"user","content":[{"type":"text","text":"First question"}]},
+                              {"sequence":6,"role":"assistant","content":[{"type":"text","text":"First answer"}]}
+                            ],"next_cursor":"messages-2"}
+                            """
+                    )
+                }
+                #expect(cursor == "messages-2")
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[
+                          {"sequence":7,"role":"user","content":[{"type":"text","text":"Second question"}]},
+                          {"sequence":11,"role":"assistant","content":[{"type":"text","text":"Second answer"}]}
+                        ],"next_cursor":null}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { ChatViewModelURLProtocol.handler = nil }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        let entry = try #require(model.history.first)
+        await model.selectSession(entry)
+
+        #expect(model.runState.timeline.map(\.text) == [
+            "First question",
+            "First answer",
+            "Second question",
+            "Second answer",
+        ])
+        #expect(lock.withLock { messageRequests } == 3)
+    }
+
+    @Test
     func testSuccessfulServerDeleteRemovesVisibleRowWhenCacheDeleteFails() async throws {
         let sessionID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-000000000123")

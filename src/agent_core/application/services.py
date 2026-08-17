@@ -17,6 +17,7 @@ from agent_core.domain.views import (
     ContentBlock,
     Page,
     RunView,
+    SessionMessageView,
     SessionView,
     StreamFrame,
     SubmitResult,
@@ -33,6 +34,14 @@ class SessionService(Protocol):
     async def list(
         self, principal: Principal, limit: int, cursor: str | None
     ) -> Page[SessionView]: ...
+
+    async def messages(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[SessionMessageView]: ...
 
     async def delete(self, principal: Principal, session_id: UUID) -> None: ...
 
