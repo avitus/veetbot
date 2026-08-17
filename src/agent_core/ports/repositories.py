@@ -35,7 +35,15 @@ from agent_core.domain.persistence import (
     WorkerLease,
 )
 from agent_core.domain.policies import PolicyProfileRecord
-from agent_core.domain.runs import BudgetScope, Run, RunCheckpoint, RunStatus, RunUsage, Step
+from agent_core.domain.runs import (
+    BudgetScope,
+    Run,
+    RunCheckpoint,
+    RunKind,
+    RunStatus,
+    RunUsage,
+    Step,
+)
 from agent_core.domain.sessions import Session, SessionCursor
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
@@ -83,6 +91,10 @@ class RunRepository(Protocol):
     async def latest_for_sessions(
         self, session_ids: list[UUID], principal: Principal
     ) -> dict[UUID, Run]: ...
+
+    async def child_for_parent(
+        self, parent_run_id: UUID, kind: RunKind, principal: Principal
+    ) -> Run | None: ...
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run: ...
 

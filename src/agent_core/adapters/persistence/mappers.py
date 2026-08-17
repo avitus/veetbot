@@ -36,7 +36,7 @@ from agent_core.domain.policies import (
     SideEffectClass,
     TrustLevel,
 )
-from agent_core.domain.runs import Run, RunFailure, RunLimits, RunStatus, RunUsage
+from agent_core.domain.runs import Run, RunFailure, RunKind, RunLimits, RunStatus, RunUsage
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolOutcome, ToolSource
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
@@ -108,6 +108,7 @@ def run_to_domain(row: RunRow) -> Run:
         id=row.id,
         session_id=row.session_id,
         parent_run_id=row.parent_run_id,
+        kind=RunKind(row.run_kind),
         tenant_id=row.tenant_id,
         principal_scopes=set(row.principal_scopes),
         agent_id=row.agent_id,
@@ -143,6 +144,7 @@ def run_values(run: Run) -> dict[str, Any]:
         "id": run.id,
         "session_id": run.session_id,
         "parent_run_id": run.parent_run_id,
+        "run_kind": run.kind.value,
         "tenant_id": run.tenant_id,
         "principal_scopes": sorted(run.principal_scopes),
         "agent_id": run.agent_id,

@@ -54,6 +54,24 @@ class PostgresSkillRepository:
         if (source is SkillSource.AGENT) != (authored_by is not None):
             raise ValueError("authoring provenance must be present only for agent skills")
         validated = self._validator.validate(package)
+        if authored_by is not None:
+            prior = (
+                await self._session.execute(
+                    select(SkillRow, SkillRevisionRow)
+                    .join(SkillRevisionRow, SkillRevisionRow.skill_id == SkillRow.id)
+                    .where(
+                        SkillRow.tenant_id == tenant_id,
+                        SkillRevisionRow.authored_by_invocation_id == authored_by.invocation_id,
+                    )
+                )
+            ).one_or_none()
+            if prior is not None:
+                if prior[1].authoring_idempotency_key != authored_by.idempotency_key:
+                    raise ConflictError(
+                        "skill authoring invocation was reused with different arguments",
+                        reason="skill_authoring_idempotency_conflict",
+                    )
+                return self._to_domain(prior[0], prior[1])
         await self._session.execute(
             pg_insert(SkillRow)
             .values(
@@ -77,6 +95,24 @@ class PostgresSkillRepository:
         ).one()
         if identity.source != source.value:
             raise ConflictError("skill source cannot change across revisions")
+        if authored_by is not None:
+            locked_prior = (
+                await self._session.scalars(
+                    select(SkillRevisionRow).where(
+                        SkillRevisionRow.authored_by_invocation_id == authored_by.invocation_id
+                    )
+                )
+            ).one_or_none()
+            if locked_prior is not None:
+                if (
+                    locked_prior.skill_id != identity.id
+                    or locked_prior.authoring_idempotency_key != authored_by.idempotency_key
+                ):
+                    raise ConflictError(
+                        "skill authoring invocation was reused with different arguments",
+                        reason="skill_authoring_idempotency_conflict",
+                    )
+                return self._to_domain(identity, locked_prior)
         latest = (
             await self._session.scalars(
                 select(SkillRevisionRow)
@@ -117,6 +153,12 @@ class PostgresSkillRepository:
                 authored_by_run_id=None if authored_by is None else authored_by.run_id,
                 authored_by_principal_id=(
                     None if authored_by is None else authored_by.principal_id
+                ),
+                authored_by_invocation_id=(
+                    None if authored_by is None else authored_by.invocation_id
+                ),
+                authoring_idempotency_key=(
+                    None if authored_by is None else authored_by.idempotency_key
                 ),
                 created_at=self._clock.now(),
             )
@@ -163,22 +205,95 @@ class PostgresSkillRepository:
         ).all()
         return [self._to_domain(identity, revision) for identity, revision in rows]
 
-    async def archive(self, tenant_id: str, name: str, revision: int) -> None:
-        identity_id = await self._session.scalar(
-            select(SkillRow.id).where(SkillRow.tenant_id == tenant_id, SkillRow.name == name)
+    async def archive(
+        self,
+        tenant_id: str,
+        name: str,
+        revision: int,
+        authored_by: AuthoringContext | None = None,
+    ) -> SkillRevision:
+        if authored_by is not None:
+            prior = (
+                await self._session.execute(
+                    select(SkillRow, SkillRevisionRow)
+                    .join(SkillRevisionRow, SkillRevisionRow.skill_id == SkillRow.id)
+                    .where(
+                        SkillRow.tenant_id == tenant_id,
+                        SkillRevisionRow.archived_by_invocation_id == authored_by.invocation_id,
+                    )
+                )
+            ).one_or_none()
+            if prior is not None:
+                if (
+                    prior[0].name != name
+                    or prior[1].revision != revision
+                    or prior[1].archive_idempotency_key != authored_by.idempotency_key
+                ):
+                    raise ConflictError(
+                        "skill archive invocation was reused with different arguments",
+                        reason="skill_authoring_idempotency_conflict",
+                    )
+                return self._to_domain(prior[0], prior[1])
+        identity = await self._session.scalar(
+            select(SkillRow)
+            .where(SkillRow.tenant_id == tenant_id, SkillRow.name == name)
+            .with_for_update()
         )
-        if identity_id is None:
+        if identity is None:
             raise NotFoundError("skill revision not found")
+        if authored_by is not None:
+            locked_prior = (
+                await self._session.scalars(
+                    select(SkillRevisionRow).where(
+                        SkillRevisionRow.archived_by_invocation_id == authored_by.invocation_id
+                    )
+                )
+            ).one_or_none()
+            if locked_prior is not None:
+                if (
+                    locked_prior.skill_id != identity.id
+                    or locked_prior.revision != revision
+                    or locked_prior.archive_idempotency_key != authored_by.idempotency_key
+                ):
+                    raise ConflictError(
+                        "skill archive invocation was reused with different arguments",
+                        reason="skill_authoring_idempotency_conflict",
+                    )
+                return self._to_domain(identity, locked_prior)
+        current_revision = await self._session.scalar(
+            select(SkillRevisionRow.revision)
+            .where(
+                SkillRevisionRow.skill_id == identity.id,
+                SkillRevisionRow.status == SkillStatus.ACTIVE.value,
+            )
+            .order_by(SkillRevisionRow.revision.desc())
+            .limit(1)
+        )
+        if current_revision is None:
+            raise NotFoundError("skill revision not found")
+        if current_revision != revision:
+            raise SkillRevisionConflict(current_revision)
         result = await self._session.execute(
             update(SkillRevisionRow)
             .where(
-                SkillRevisionRow.skill_id == identity_id,
+                SkillRevisionRow.skill_id == identity.id,
                 SkillRevisionRow.revision == revision,
             )
-            .values(status=SkillStatus.ARCHIVED.value)
+            .values(
+                status=SkillStatus.ARCHIVED.value,
+                archived_by_invocation_id=(
+                    None if authored_by is None else authored_by.invocation_id
+                ),
+                archive_idempotency_key=(
+                    None if authored_by is None else authored_by.idempotency_key
+                ),
+            )
+            .returning(SkillRevisionRow)
         )
-        if not int(getattr(result, "rowcount", 0) or 0):
+        archived = result.scalar_one_or_none()
+        if archived is None:
             raise NotFoundError("skill revision not found")
+        return self._to_domain(identity, archived)
 
     @staticmethod
     def _to_domain(identity: SkillRow, row: SkillRevisionRow) -> SkillRevision:
@@ -203,5 +318,9 @@ class PostgresSkillRepository:
             status=SkillStatus(row.status),
             authored_by_run_id=row.authored_by_run_id,
             authored_by_principal_id=row.authored_by_principal_id,
+            authored_by_invocation_id=row.authored_by_invocation_id,
+            authoring_idempotency_key=row.authoring_idempotency_key,
+            archived_by_invocation_id=row.archived_by_invocation_id,
+            archive_idempotency_key=row.archive_idempotency_key,
             created_at=row.created_at,
         )

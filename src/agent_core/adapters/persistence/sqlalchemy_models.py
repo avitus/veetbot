@@ -140,6 +140,12 @@ class RunRow(Base):
                 "('RUNNING','WAITING_FOR_APPROVAL','WAITING_FOR_USER')"
             ),
         ),
+        Index(
+            "uq_runs_parent_skill_review",
+            "parent_run_id",
+            unique=True,
+            postgresql_where=text("parent_run_id IS NOT NULL AND run_kind = 'skill_review'"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -149,6 +155,7 @@ class RunRow(Base):
     parent_run_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="SET NULL")
     )
+    run_kind: Mapped[str] = mapped_column(Text, server_default=text("'interactive'"))
     tenant_id: Mapped[str] = mapped_column(Text)
     principal_scopes: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     agent_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
@@ -588,6 +595,18 @@ class SkillRevisionRow(Base):
     __table_args__ = (
         UniqueConstraint("skill_id", "revision", name="uq_skill_revisions_skill_revision"),
         Index(
+            "uq_skill_revisions_authoring_invocation",
+            "authored_by_invocation_id",
+            unique=True,
+            postgresql_where=text("authored_by_invocation_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_skill_revisions_archive_invocation",
+            "archived_by_invocation_id",
+            unique=True,
+            postgresql_where=text("archived_by_invocation_id IS NOT NULL"),
+        ),
+        Index(
             "ix_skill_revisions_skill_status_revision_desc",
             "skill_id",
             "status",
@@ -615,6 +634,10 @@ class SkillRevisionRow(Base):
         PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="RESTRICT")
     )
     authored_by_principal_id: Mapped[str | None] = mapped_column(Text)
+    authored_by_invocation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    authoring_idempotency_key: Mapped[str | None] = mapped_column(Text)
+    archived_by_invocation_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    archive_idempotency_key: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

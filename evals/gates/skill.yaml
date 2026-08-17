@@ -64,34 +64,36 @@
   kind: corpus
   spec: docs/plan/skills.md#hard-gates
   statement: "**An untrusted turn cannot write a skill.** A corpus of runs, each of which reads untrusted content — a web page, an MCP tool result, another skill's body, a file the user uploaded — and then proposes a `skill_manage` write. Every proposal is denied with `origin_trust` as the reason, every denial is an event, and no revision exists afterwards. `gate.skill.authoring_trust`, corpus."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m10a.py::test_authoring_trust
+  corpus: evals/corpora/skill_authoring_trust/
+  minimum_members: 4
 - id: gate.skill.authoring_scope
   milestone: 10
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**Authoring without the scope is denied.** A principal lacking `skill.write` is denied at the policy stage rather than at the store, the denial names the scope, and the same call with the scope succeeds. The scope string is matched by exact equality: `skill.writex` and `skill` are both denied. `gate.skill.authoring_scope`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m10a.py::test_authoring_scope
 - id: gate.skill.review_confined
   milestone: 10
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**The background review is confined.** A review run is denied every tool outside `{memory.*, skill.load, skill_manage}`; is denied `edit` and `patch` on a skill it has not loaded; and is denied `edit`, `patch`, and `archive` on any skill whose source is not `AGENT`. Each denial is asserted separately. `gate.skill.review_confined`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m10a.py::test_review_confined
 - id: gate.skill.review_never_fatal
   milestone: 10
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**A failed review never touches its parent.** A review run that raises, times out, or is killed leaves its parent `COMPLETED`, leaves the parent's events unchanged, and produces exactly one logged failure. Repeated with the review enqueued and the worker killed before it starts. `gate.skill.review_never_fatal`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m10a.py::test_review_never_fatal
 - id: gate.skill.provenance_complete
   milestone: 10
   kind: structural
   spec: docs/plan/skills.md#hard-gates
-  statement: "**Every agent-authored revision has provenance.** A structural check plus a query: every `skill_revisions` row whose skill has `source = agent` carries a non-null `authored_by_run_id` and `authored_by_principal_id`, and every one of those run ids resolves to a run in the event log. The insert path has no branch that can write the row without them. `gate.skill.provenance_complete`, structural."
-  check: tests/gates/pending.py::pending_gate
+  statement: "**Every agent-authored revision has durable provenance.** A structural check plus a query: every `skill_revisions` row whose skill has `source = agent` carries non-null principal, invocation, and idempotency-key provenance. `authored_by_run_id` is non-null and resolves to the event log while its session is retained; only governed session erasure may null that link. The insert path has no branch that can omit the durable fields. `gate.skill.provenance_complete`, structural."
+  check: tests/gates/test_skill_m10a.py::test_provenance_complete
 - id: gate.skill.edit_conflict
   milestone: 10
   kind: case
   spec: docs/plan/skills.md#hard-gates
   statement: "**Concurrent edits do not lose one.** Two runs `patch` the same skill with the same `expected_revision`. Exactly one revision is written, the loser receives `SkillRevisionConflict` carrying the winner's revision, no revision number is skipped, and the loser's content appears nowhere. `gate.skill.edit_conflict`, case."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_skill_m10a.py::test_edit_conflict

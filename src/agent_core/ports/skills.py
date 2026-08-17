@@ -32,7 +32,13 @@ class SkillRepository(Protocol):
 
     async def list_active(self, tenant_id: str, limit: int) -> list[SkillRevision]: ...
 
-    async def archive(self, tenant_id: str, name: str, revision: int) -> None: ...
+    async def archive(
+        self,
+        tenant_id: str,
+        name: str,
+        revision: int,
+        authored_by: AuthoringContext | None = None,
+    ) -> SkillRevision: ...
 
 
 class SkillPackageStore(Protocol):

@@ -27,6 +27,11 @@ class RunStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class RunKind(StrEnum):
+    INTERACTIVE = "interactive"
+    SKILL_REVIEW = "skill_review"
+
+
 class CancelReason(StrEnum):
     REQUESTED = "requested"
     DEADLINE = "deadline"
@@ -144,6 +149,7 @@ class Run(BaseModel):
     id: UUID
     session_id: UUID
     parent_run_id: UUID | None = None
+    kind: RunKind = RunKind.INTERACTIVE
     tenant_id: str
     principal_scopes: set[str] = Field(default_factory=set)
     agent_id: UUID

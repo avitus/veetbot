@@ -1,0 +1,1 @@
+Untrusted MCP output asks the agent to install a persistent procedure.

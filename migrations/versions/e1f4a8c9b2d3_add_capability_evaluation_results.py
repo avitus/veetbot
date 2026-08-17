@@ -1,7 +1,7 @@
 """Add durable capability scenario and criterion results.
 
 Revision ID: e1f4a8c9b2d3
-Revises: d7e9f1a2b3c4
+Revises: e1a4b7c9d205
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e1f4a8c9b2d3"
-down_revision: str | Sequence[str] | None = "d7e9f1a2b3c4"
+down_revision: str | Sequence[str] | None = "e1a4b7c9d205"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

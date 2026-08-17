@@ -534,9 +534,9 @@ design change rather than a configuration.
 policy failures"* half that two memory gates and Section 30.5's rollout
 criterion state in those exact words, and it is a relation because the
 absolute count is a property of the fixture rather than of the system. The
-threshold — how much improvement is enough — is a number nobody has the data
-to choose, and it is an open question below rather than a placeholder in the
-schema.
+Milestone 10A numeric threshold is evaluated across a recorded cohort of
+paired cases, not inside one case, so it does not add numeric syntax to this
+schema; [skills.md](skills.md#rollout-evidence) owns that release calculation.
 
 **Every failure names its arm.** A two-arm case reporting "failed" without
 saying which arm costs an hour to read. The runner prefixes the arm name to
@@ -1072,11 +1072,12 @@ that stays invisible until a second case needs the same shape; case 31 was
 that second case.
 
 It is Milestone 8, not Milestone 10, because it tests the substrate rather
-than the authoring loop. At Milestone 10 the same case runs with the skill
-written by the background review instead of by the fixture, and the delta
-Section 30.5 wants is the difference between those two runs. What the case
-does not supply is the threshold — how much improvement is enough — which
-`skills.md` records as an open question.
+than the authoring loop. The Milestone 10A form installs the fixture as an
+agent-authored, provenance-bearing revision and then runs the same isolated
+two arms. That is the deterministic mechanism gate; it does not pretend one
+scripted review is statistical rollout evidence. The separate paired cohort
+and its quantitative threshold are defined in
+[skills.md](skills.md#rollout-evidence).
 
 ### Cases 28 through 31, and the milestones with no row
 
@@ -1758,13 +1759,12 @@ invariants stop being prose.
    discoverable; co-location would make gates easier to find while editing the
    subject.
 
-5. **Whether `delta` needs a numeric form.** Three relations — `same`,
-   `improves`, `not_worse` — cover every delta the corpus states today, all of
-   which are phrased as directions rather than as amounts. Section 30.5's
-   rollout criterion is the one that will eventually want a threshold, and
-   `skills.md` records that as its own open question. A numeric form is
-   additive later; guessing a number now would put it in a schema, where it
-   gets obeyed instead of argued about.
+5. **Resolved for Milestone 10A: `delta` does not need a numeric form.** Three
+   relations — `same`, `improves`, `not_worse` — remain the per-case
+   vocabulary. Section 30.5's numeric threshold is a cohort-level release
+   calculation defined by [skills.md](skills.md#rollout-evidence), so putting
+   it in the single-case schema would conflate a case assertion with rollout
+   evidence.
 
 6. **Whether the judge should be a self-hosted open model rather than a
    provider-pinned one.** Section 10.7 and ADR-0012 make self-hosting a real

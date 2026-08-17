@@ -4,19 +4,21 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 9 — long-term memory and knowledge retrieval
-  (complete)
-- **Next milestone:** None authorized. Milestone 10 remains an open direction.
-- **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 9 are complete. Milestone 10 remains
-  unauthorized and has no acceptance criteria of its own.
+- **Current milestone:** Milestone 10A — self-authored skills
+- **Authorized milestones:** Milestones 0 through 9 are complete; only the
+  self-authored-skills tranche of Milestone 10 is authorized.
+- **Deferred:** Scheduling, routing, general-purpose subagents, and every other
+  Milestone 10 extension.
+- **Project status:** Milestone 10A is in progress behind default-off rollout
+  controls.
 
-Milestone 9 adds governed, provenance-linked belief formation; deterministic
-hybrid retrieval with frozen session snapshots and faithful recall traces; a
-human memory-management surface; and separately governed knowledge-document
-ingestion, passage retrieval, citations, versions, and deletion. The
-machine-readable [project state](../status/project-state.yaml) records progress
-and evidence.
+Milestone 10A adds governed foreground skill authoring and an optional,
+non-joining background-review child run. Authoring stays disabled by default;
+tenant rollout remains blocked until the evaluation threshold in the
+[skills design](skills.md#rollout-evidence) passes. The machine-readable
+[project state](../status/project-state.yaml) records progress and evidence.
+The construction gates and local repository checks pass; paired rollout
+evidence, hosted CI, and the required GitHub CodeRabbit review remain open.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -34,15 +36,17 @@ substitute.
 - [Milestone 7 — context budgeting and structured working state](engineering-plan.md#milestone-7-context-budgeting-and-structured-working-state)
 - [Milestone 8 — skills and MCP integration](engineering-plan.md#milestone-8-skills-and-mcp-integration)
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
+- [Milestone 10A — self-authored skills](engineering-plan.md#self-authored-skills-authorized-tranche)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Milestone 9 began after the reviewed Milestone 8 pull request passed hosted CI
-and merged into `dev`. Milestone 10 is not authorized because the readiness
-review records that it has no complete acceptance criteria.
+Milestone 10A is authorized independently because the optional extensions under
+Milestone 10 do not share a delivery dependency. Its contract is Section 30.6,
+the six Milestone 10 `gate.skill.*` entries, and the definition of done. This
+authorization does not extend to `delegate.run` or any other optional extension.
 
 ## Completion rule
 
-Milestone 9 is complete. All 26 new gates and all 166 cumulative gates, 526
-non-live tests, all hosted CircleCI lanes, and the final finding-free CodeRabbit
-review passed. Every review thread is resolved. Its reviewed pull request must
-merge into `dev` before any later milestone may begin.
+Milestone 10A is complete only when all six new gates and all 172 cumulative
+gates pass, the self-authored form of case 27 clears its rollout threshold
+without increasing policy failures, all required CI lanes pass on the final
+head, and the final CodeRabbit review has no finding or unresolved conversation.
