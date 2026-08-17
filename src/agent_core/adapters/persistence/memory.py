@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -46,6 +46,8 @@ from agent_core.domain.tools import (
 )
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
 from agent_core.ports.determinism import Clock
+from agent_core.ports.events import EventRepository
+from agent_core.ports.memory import MemoryStore
 from agent_core.ports.repositories import RunRepository, SessionRepository
 from agent_core.runtime.state_machine import require_transition
 
@@ -67,6 +69,21 @@ MEMORY_ADAPTER_GAPS = frozenset(
         "concurrent_idempotency_deduplication",
     }
 )
+
+
+def _memory_formation_ready(event: EventEnvelope, ready_at: datetime) -> bool:
+    raw_not_before = event.payload.get("not_before")
+    if raw_not_before is None:
+        return event.created_at <= ready_at
+    if not isinstance(raw_not_before, str):
+        return False
+    try:
+        not_before = datetime.fromisoformat(raw_not_before)
+    except ValueError:
+        return False
+    if not_before.utcoffset() is None:
+        return False
+    return not_before <= ready_at
 
 
 class InMemoryAgentRepository:
@@ -1201,6 +1218,18 @@ class InMemoryArtifactRepository:
 
 
 class InMemoryMaintenanceRepository:
+    def __init__(
+        self,
+        sessions: SessionRepository | None = None,
+        events: EventRepository | None = None,
+        memories: MemoryStore | None = None,
+    ) -> None:
+        self._sessions = sessions
+        self._events = events
+        self._memories = memories
+        self._memory_claims: set[tuple[str, str, UUID]] = set()
+        self._memory_claim_lock = asyncio.Lock()
+
     async def live_run_leases(self) -> frozenset[tuple[UUID, int]]:
         return frozenset()
 
@@ -1219,3 +1248,49 @@ class InMemoryMaintenanceRepository:
     async def trajectory_runs(self, limit: int) -> list[UUID]:
         del limit
         return []
+
+    async def pending_memory_sessions(
+        self,
+        principal: Principal,
+        *,
+        idle_before: datetime,
+        ready_at: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        if limit <= 0:
+            return []
+        if self._sessions is None or self._events is None or self._memories is None:
+            return []
+        pending: deque[UUID] = deque(maxlen=limit)
+        cursor: SessionCursor | None = None
+        while True:
+            page = await self._sessions.list(principal, limit=256, cursor=cursor)
+            for session in page:
+                if session.updated_at > idle_before:
+                    continue
+                watermark = await self._memories.consolidation_watermark(session.id, principal)
+                events = await self._events.list_after(session.id, watermark, principal)
+                if any(
+                    event.event_type == "memory.formation.requested"
+                    and _memory_formation_ready(event, ready_at)
+                    for event in events
+                ):
+                    pending.append(session.id)
+            if len(page) < 256:
+                break
+            last = page[-1]
+            cursor = SessionCursor(updated_at=last.updated_at, id=last.id)
+        return list(reversed(pending))
+
+    async def acquire_memory_session(self, principal: Principal, session_id: UUID) -> bool:
+        key = (principal.tenant_id, principal.principal_id, session_id)
+        async with self._memory_claim_lock:
+            if key in self._memory_claims:
+                return False
+            self._memory_claims.add(key)
+            return True
+
+    async def release_memory_session(self, principal: Principal, session_id: UUID) -> None:
+        key = (principal.tenant_id, principal.principal_id, session_id)
+        async with self._memory_claim_lock:
+            self._memory_claims.discard(key)

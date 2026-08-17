@@ -4,12 +4,13 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 9 — long-term memory and knowledge retrieval
-  (complete)
-- **Next milestone:** None authorized. Milestone 10 remains an open direction.
-- **Authorized milestones:** Milestones 0 through 9
-- **Project status:** Milestones 0 through 9 are complete. Milestone 10 remains
-  unauthorized and has no acceptance criteria of its own.
+- **Active milestone:** Milestone 10 — scheduling, model routing, subagents, and
+  memory maturation (in progress)
+- **Verified gate ceiling:** Milestone 9
+- **Authorized milestones:** Milestones 0 through 10
+- **Project status:** Milestones 0 through 9 are complete. The repository owner
+  authorized Milestone 10 on 2026-08-17 and selected memory maturation as its
+  first workstream. Milestone 10 is incomplete.
 
 Milestone 9 adds governed, provenance-linked belief formation; deterministic
 hybrid retrieval with frozen session snapshots and faithful recall traces; a
@@ -34,15 +35,20 @@ substitute.
 - [Milestone 7 — context budgeting and structured working state](engineering-plan.md#milestone-7-context-budgeting-and-structured-working-state)
 - [Milestone 8 — skills and MCP integration](engineering-plan.md#milestone-8-skills-and-mcp-integration)
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
+- [Milestone 10 — scheduling, model routing, and subagents](engineering-plan.md#milestone-10-scheduling-model-routing-and-subagents)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Milestone 9 began after the reviewed Milestone 8 pull request passed hosted CI
-and merged into `dev`. Milestone 10 is not authorized because the readiness
-review records that it has no complete acceptance criteria.
+The machine-readable `current_milestone` remains 9 while Milestone 10 is in
+progress because it is the hard-gate enforcement ceiling: all six pre-existing
+skill-authoring gates and the memory-maturation gates must be implemented before
+that ceiling can advance. `active_milestone: 10` and the authorization list
+record the work now permitted. The memory-formation specification supplies the
+acceptance gates for this workstream; the other Milestone 10 extensions retain
+their own entry conditions and incomplete gates.
 
 ## Completion rule
 
-Milestone 9 is complete. All 26 new gates and all 166 cumulative gates, 526
-non-live tests, all hosted CircleCI lanes, and the final finding-free CodeRabbit
-review passed. Every review thread is resolved. Its reviewed pull request must
-merge into `dev` before any later milestone may begin.
+Milestone 10 remains in progress until every Milestone 10 gate is implemented,
+all cumulative checks pass on one head commit, the finding-free CodeRabbit loop
+completes, and the reviewed pull request merges. Partial work does not advance
+the verified gate ceiling or mark the milestone complete.

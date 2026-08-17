@@ -273,16 +273,18 @@ class PostgresMemoryStore:
         self, current: MemoryRecord, replacement: MemoryRecord
     ) -> tuple[MemoryRecord, MemoryRecord]:
         # The replacement row must exist before the retired row can point at it
-        # through fk_memories_superseded_by_memories; a conflict below rolls the
-        # insert back with the rest of the unit of work.
-        await self._session.execute(pg_insert(MemoryRow).values(**_memory_values(replacement)))
-        result = await self._session.execute(
-            update(MemoryRow)
-            .where(MemoryRow.id == current.id, MemoryRow.status.in_(_LIVE))
-            .values(**_memory_values(current))
-        )
-        if not _rowcount(result):
-            raise ConflictError("memory was already inactive")
+        # through fk_memories_superseded_by_memories. A savepoint ensures a
+        # stale-current conflict cannot leave that replacement behind when the
+        # caller handles the conflict and continues the outer transaction.
+        async with self._session.begin_nested():
+            await self._session.execute(pg_insert(MemoryRow).values(**_memory_values(replacement)))
+            result = await self._session.execute(
+                update(MemoryRow)
+                .where(MemoryRow.id == current.id, MemoryRow.status.in_(_LIVE))
+                .values(**_memory_values(current))
+            )
+            if not _rowcount(result):
+                raise ConflictError("memory was already inactive")
         return current, replacement
 
     async def list_memories(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -20,6 +21,7 @@ from agent_core.domain.memory import (
     ConsolidationResult,
     ConsolidationRun,
     MemoryAuthority,
+    MemoryCandidate,
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
@@ -31,9 +33,14 @@ from agent_core.domain.memory import (
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
 from agent_core.ports.determinism import Clock, IdFactory
+from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@1"
+FORMATION_POLICY_VERSION = "formation@2"
+MAX_AUTOMATIC_CANDIDATES = 12
+MAX_EXTRACTOR_PROPOSALS = 256
+MAX_INFERRED_CONFIDENCE = 0.55
+SESSION_IDLE_SECONDS = 30
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
     re.I,
@@ -44,6 +51,295 @@ _INJECTION = re.compile(
     re.I,
 )
 _TRANSIENT = re.compile(r"\b(?:right now|this turn|temporary|today only)\b", re.I)
+_CLAUSE_BOUNDARY = re.compile(
+    r"[.!?;\r\n]+|,\s+(?:and\s+)?(?=(?:i|we)\b)|\s+and\s+(?=(?:i|we)\b)",
+    re.I,
+)
+_ITEM_BOUNDARY = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+)\s*", re.I)
+_OWNERSHIP_VERBS = {
+    "have": "has",
+    "own": "owns",
+    "use": "uses",
+    "wear": "wears",
+    "drive": "drives",
+}
+_POSSESSIVE_ENTITY = re.compile(
+    r"\bmy\s+((?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)"
+    r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
+)
+
+
+def _event_text(event: EventEnvelope) -> str:
+    content = event.payload.get("content")
+    texts: list[str] = []
+    if isinstance(content, str):
+        texts = [content]
+    elif isinstance(content, list):
+        for raw in content:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                part = TextPart.model_validate(raw)
+            except ValueError:
+                continue
+            texts.append(part.text)
+    return "\n".join(texts).strip()
+
+
+def _clean_object(value: str) -> tuple[str, str] | None:
+    clean = value.strip(" \t\n\r,.:;!?")
+    if not clean or re.match(r"^(?:it|this|that|something|anything)$", clean, re.I):
+        return None
+    article = ""
+    match = re.match(r"^(a|an|the|my)\s+(.+)$", clean, re.I)
+    if match is not None:
+        article = match.group(1).casefold()
+        clean = match.group(2).strip()
+    if not clean or clean.casefold().startswith(("question", "problem")):
+        return None
+    if article in {"a", "an"}:
+        rendered = f"{article} {clean}"
+    elif clean[0].casefold() in {"a", "e", "i", "o", "u"}:
+        rendered = f"an {clean}"
+    else:
+        rendered = f"a {clean}"
+    return clean, rendered
+
+
+def _preference_subject(value: str) -> str:
+    lowered = value.casefold()
+    if "metric" in lowered or "imperial" in lowered:
+        return "measurement units"
+    if "concise" in lowered or "detailed" in lowered or "answer" in lowered:
+        return "answer style"
+    if "dark mode" in lowered or "light mode" in lowered or "theme" in lowered:
+        return "interface theme"
+    if "tabs" in lowered or "spaces" in lowered or "indent" in lowered:
+        return "indentation style"
+    words = re.findall(r"[a-z0-9'-]+", lowered)
+    topic = words[-1] if words else "general"
+    if topic.endswith("ies") and len(topic) > 3:
+        topic = f"{topic[:-3]}y"
+    elif topic.endswith("s") and not topic.endswith("ss") and len(topic) > 3:
+        topic = topic[:-1]
+    return f"{topic} preference"
+
+
+class DeterministicCandidateExtractor:
+    """Bounded first-person extractor used before model-assisted extraction is enabled."""
+
+    name = "deterministic-formation-v2"
+
+    def __init__(self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS) -> None:
+        if maximum_candidates < 1:
+            raise ValueError("maximum memory candidates must be positive")
+        if maximum_candidates > MAX_EXTRACTOR_PROPOSALS:
+            raise ValueError(f"maximum memory candidates must not exceed {MAX_EXTRACTOR_PROPOSALS}")
+        self._maximum_candidates = maximum_candidates
+
+    async def extract(
+        self,
+        events: list[EventEnvelope],
+        *,
+        principal: Principal,
+        scope: str,
+    ) -> list[MemoryCandidate]:
+        candidates: list[MemoryCandidate] = []
+        seen: set[tuple[str, str, int]] = set()
+        for event in events:
+            if (
+                event.event_type != "user.message.created"
+                or event.actor_type != "principal"
+                or event.actor_id != principal.principal_id
+            ):
+                continue
+            text = _event_text(event)
+            for candidate in self._from_text(event.sequence, text, scope):
+                key = (
+                    candidate.subject.casefold(),
+                    candidate.statement.casefold(),
+                    event.sequence,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(candidate)
+                if len(candidates) >= self._maximum_candidates:
+                    return candidates
+        return candidates
+
+    def _from_text(self, sequence: int, text: str, scope: str) -> list[MemoryCandidate]:
+        proposed: list[MemoryCandidate] = []
+        retracted_subjects: set[str] = set()
+        proposed_subjects: set[str] = set()
+
+        def add(
+            *,
+            subject: str,
+            statement: str,
+            belief_type: BeliefType,
+            portability: Portability | None = None,
+            sensitivity: Sensitivity = Sensitivity.INTERNAL,
+            confidence: float = 0.72,
+            polarity: Polarity = Polarity.ASSERT,
+        ) -> None:
+            proposed_subjects.add(subject.casefold())
+            proposed.append(
+                MemoryCandidate(
+                    belief_type=belief_type,
+                    subject=subject,
+                    statement=statement,
+                    polarity=polarity,
+                    source_event_ids=[sequence],
+                    model_confidence=confidence,
+                    proposed_scope=scope,
+                    proposed_portability=portability or portability_ceiling(belief_type),
+                    sensitivity_guess=sensitivity,
+                )
+            )
+
+        stripped = text.strip()
+        if stripped.casefold().startswith("remember that "):
+            add(
+                subject="user",
+                statement=stripped[len("remember that ") :].strip(),
+                belief_type=BeliefType.FACT,
+                confidence=0.9,
+            )
+
+        for raw_clause in _CLAUSE_BOUNDARY.split(stripped):
+            clause = re.sub(r"^and\s+", "", raw_clause.strip(), flags=re.I)
+            if not clause:
+                continue
+
+            preference = re.fullmatch(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", clause, re.I)
+            if preference is not None:
+                value = preference.group(1).strip(" ,.:;!?")
+                add(
+                    subject=_preference_subject(value),
+                    statement=f"User prefers {value}.",
+                    belief_type=BeliefType.PREFERENCE,
+                    confidence=0.82,
+                )
+                continue
+
+            retraction = re.fullmatch(
+                r"i\s+(?:no\s+longer|do\s+not|don't)\s+(have|own|use|wear|drive)\s+(.+)",
+                clause,
+                re.I,
+            )
+            if retraction is not None:
+                rendered_verb = _OWNERSHIP_VERBS[retraction.group(1).casefold()]
+                for raw_item in _ITEM_BOUNDARY.split(retraction.group(2)):
+                    cleaned = _clean_object(raw_item)
+                    if cleaned is None:
+                        continue
+                    subject, rendered = cleaned
+                    retracted_subjects.add(subject.casefold())
+                    add(
+                        subject=subject,
+                        statement=f"User no longer {rendered_verb} {rendered}.",
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                        confidence=0.85,
+                        polarity=Polarity.RETRACT,
+                    )
+                continue
+
+            ownership = re.fullmatch(r"i\s+(have|own|use|wear|drive)\s+(.+)", clause, re.I)
+            if ownership is not None:
+                rendered_verb = _OWNERSHIP_VERBS[ownership.group(1).casefold()]
+                for raw_item in _ITEM_BOUNDARY.split(ownership.group(2)):
+                    cleaned = _clean_object(raw_item)
+                    if cleaned is None:
+                        continue
+                    subject, rendered = cleaned
+                    add(
+                        subject=subject,
+                        statement=f"User {rendered_verb} {rendered}.",
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                    )
+                continue
+
+            location = re.fullmatch(r"i\s+live\s+in\s+(.+)", clause, re.I)
+            if location is not None:
+                value = location.group(1).strip(" ,.:;!?")
+                add(
+                    subject="home location",
+                    statement=f"User lives in {value}.",
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.8,
+                )
+                continue
+
+            employment = re.fullmatch(r"i\s+work\s+(?:at|for)\s+(.+)", clause, re.I)
+            if employment is not None:
+                value = employment.group(1).strip(" ,.:;!?")
+                add(
+                    subject="employment",
+                    statement=f"User works at {value}.",
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.8,
+                )
+                continue
+
+            relationship = re.fullmatch(
+                r"my\s+(spouse|wife|husband|partner|mother|father|son|daughter)\s+is\s+(.+)",
+                clause,
+                re.I,
+            )
+            if relationship is not None:
+                relation = relationship.group(1).casefold()
+                value = relationship.group(2).strip(" ,.:;!?")
+                add(
+                    subject=relation,
+                    statement=f"User's {relation} is {value}.",
+                    belief_type=BeliefType.RELATIONSHIP,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.8,
+                )
+                continue
+
+            decision = re.fullmatch(r"we\s+(?:decided|agreed|chose)\s+(.+)", clause, re.I)
+            if decision is not None:
+                value = decision.group(1).strip(" ,.:;!?")
+                add(
+                    subject="project decision",
+                    statement=f"The team decided {value}.",
+                    belief_type=BeliefType.FACT,
+                    portability=Portability.LOCAL,
+                )
+                continue
+
+            outcome = re.fullmatch(
+                r"we\s+(shipped|launched|completed|finished)\s+(.+)", clause, re.I
+            )
+            if outcome is not None:
+                verb = outcome.group(1).casefold()
+                value = outcome.group(2).strip(" ,.:;!?")
+                add(
+                    subject="task outcome",
+                    statement=f"The team {verb} {value}.",
+                    belief_type=BeliefType.FACT,
+                    portability=Portability.LOCAL,
+                )
+
+        for match in _POSSESSIVE_ENTITY.finditer(stripped):
+            cleaned = _clean_object(match.group(1))
+            if cleaned is None:
+                continue
+            subject, rendered = cleaned
+            normalized_subject = subject.casefold()
+            if normalized_subject in retracted_subjects or normalized_subject in proposed_subjects:
+                continue
+            add(
+                subject=subject,
+                statement=f"User has {rendered}.",
+                belief_type=BeliefType.USER_MODEL_ATTR,
+                confidence=0.68,
+            )
+        return proposed
 
 
 class DeterministicSalience:
@@ -98,6 +394,7 @@ class GovernedMemoryService:
         *,
         salience: DeterministicSalience | None = None,
         resolver: DeterministicConflictResolver | None = None,
+        extractor: MemoryCandidateExtractor | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -105,6 +402,7 @@ class GovernedMemoryService:
         self._principal = principal
         self._salience = salience or DeterministicSalience()
         self._resolver = resolver or DeterministicConflictResolver()
+        self._extractor = extractor or DeterministicCandidateExtractor()
 
     async def remember(
         self,
@@ -121,8 +419,56 @@ class GovernedMemoryService:
         origin_trust: TrustLevel = TrustLevel.USER,
         explicit: bool = True,
         authority: MemoryAuthority = MemoryAuthority.USER,
+        polarity: Polarity = Polarity.ASSERT,
+        confidence: float | None = None,
         trigger: str = "explicit",
     ) -> MemoryRecord:
+        record, _action = await self._remember(
+            session_id=session_id,
+            run_id=run_id,
+            statement=statement,
+            subject=subject,
+            scope=scope,
+            belief_type=belief_type,
+            portability=portability,
+            sensitivity=sensitivity,
+            source_event_ids=source_event_ids,
+            origin_trust=origin_trust,
+            explicit=explicit,
+            authority=authority,
+            polarity=polarity,
+            confidence=confidence,
+            valid_from=None,
+            expires_at=None,
+            trigger=trigger,
+            record_audit=True,
+        )
+        return record
+
+    async def _remember(
+        self,
+        *,
+        session_id: UUID,
+        run_id: UUID | None,
+        statement: str,
+        subject: str,
+        scope: str,
+        belief_type: BeliefType,
+        portability: Portability | None,
+        sensitivity: Sensitivity,
+        source_event_ids: list[int] | None,
+        origin_trust: TrustLevel,
+        explicit: bool,
+        authority: MemoryAuthority,
+        polarity: Polarity,
+        confidence: float | None,
+        valid_from: datetime | None,
+        expires_at: datetime | None,
+        trigger: str,
+        record_audit: bool,
+        existing_uow: RepositoryUnitOfWork | None = None,
+        audit_id: UUID | None = None,
+    ) -> tuple[MemoryRecord, str]:
         if origin_trust not in {TrustLevel.USER, TrustLevel.MEMORY} or (
             origin_trust is TrustLevel.MEMORY and not explicit
         ):
@@ -134,7 +480,8 @@ class GovernedMemoryService:
         effective_portability = portability or portability_ceiling(belief_type)
         if not _portability_allowed(effective_portability, portability_ceiling(belief_type)):
             raise ToolValidationError("memory portability exceeds the belief type ceiling")
-        async with self._uow_factory() as uow:
+
+        async def apply(uow: RepositoryUnitOfWork) -> tuple[MemoryRecord, str]:
             sources = source_event_ids or await self._latest_user_source(uow, session_id)
             await self._validate_sources(uow, session_id, sources)
             rejections = await uow.memories.outstanding_rejections(
@@ -144,7 +491,7 @@ class GovernedMemoryService:
             if any(rejection.statement_sha256 == statement_hash for rejection in rejections):
                 raise ConflictError("a user deletion or correction blocks this memory")
             formation_run = ConsolidationRun(
-                id=self._ids.new_id(),
+                id=audit_id or self._ids.new_id(),
                 tenant_id=self._principal.tenant_id,
                 principal_id=self._principal.principal_id,
                 trigger=trigger,
@@ -152,7 +499,7 @@ class GovernedMemoryService:
                 session_id=session_id,
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
-                model="deterministic-formation-v1",
+                model=self._extractor.name,
                 policy_version=FORMATION_POLICY_VERSION,
                 candidates_proposed=1,
                 committed=0,
@@ -170,7 +517,7 @@ class GovernedMemoryService:
             for current in sorted(related, key=lambda item: item.store_position, reverse=True):
                 relation = self._resolver.relationship(current, clean_statement, sources)
                 if relation == "same_source":
-                    return current
+                    return current, "unchanged"
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
@@ -201,15 +548,16 @@ class GovernedMemoryService:
                         "memory.promoted" if promoted else "memory.reinforced",
                         stored,
                     )
-                    await uow.memories.record_consolidation(
-                        formation_run.model_copy(
-                            update={
-                                "reinforced": 1,
-                                "finished_at": self._clock.now(),
-                            }
+                    if record_audit:
+                        await uow.memories.record_consolidation(
+                            formation_run.model_copy(
+                                update={
+                                    "reinforced": 1,
+                                    "finished_at": self._clock.now(),
+                                }
+                            )
                         )
-                    )
-                    return stored
+                    return stored, "reinforced"
                 if relation == "contradiction":
                     replacement = await self._new_record(
                         uow,
@@ -224,6 +572,10 @@ class GovernedMemoryService:
                         sources,
                         explicit,
                         authority,
+                        polarity,
+                        confidence,
+                        valid_from,
+                        expires_at,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -238,16 +590,17 @@ class GovernedMemoryService:
                     )
                     _old, stored = await uow.memories.supersede(superseded, replacement)
                     await self._append_event(uow, session_id, run_id, "memory.superseded", stored)
-                    await uow.memories.record_consolidation(
-                        formation_run.model_copy(
-                            update={
-                                "committed": 1,
-                                "superseded": 1,
-                                "finished_at": self._clock.now(),
-                            }
+                    if record_audit:
+                        await uow.memories.record_consolidation(
+                            formation_run.model_copy(
+                                update={
+                                    "committed": 1,
+                                    "superseded": 1,
+                                    "finished_at": self._clock.now(),
+                                }
+                            )
                         )
-                    )
-                    return stored
+                    return stored, "superseded"
             record = await self._new_record(
                 uow,
                 formation_run.id,
@@ -261,13 +614,25 @@ class GovernedMemoryService:
                 sources,
                 explicit,
                 authority,
+                polarity,
+                confidence,
+                valid_from,
+                expires_at,
             )
             stored = await uow.memories.upsert_belief(record)
             await self._append_event(uow, session_id, run_id, "memory.formed", stored)
-            await uow.memories.record_consolidation(
-                formation_run.model_copy(update={"committed": 1, "finished_at": self._clock.now()})
-            )
-            return stored
+            if record_audit:
+                await uow.memories.record_consolidation(
+                    formation_run.model_copy(
+                        update={"committed": 1, "finished_at": self._clock.now()}
+                    )
+                )
+            return stored, "committed"
+
+        if existing_uow is not None:
+            return await apply(existing_uow)
+        async with self._uow_factory() as uow:
+            return await apply(uow)
 
     async def run(
         self,
@@ -277,6 +642,7 @@ class GovernedMemoryService:
         session_id: UUID | None,
         since_watermark: int | None = None,
     ) -> ConsolidationResult:
+        started_at = self._clock.now()
         if session_id is None:
             run = ConsolidationRun(
                 id=self._ids.new_id(),
@@ -286,14 +652,14 @@ class GovernedMemoryService:
                 scope=scope,
                 watermark_before=0,
                 watermark_after=0,
-                model="deterministic-formation-v1",
+                model=self._extractor.name,
                 policy_version=FORMATION_POLICY_VERSION,
                 candidates_proposed=0,
                 committed=0,
                 reinforced=0,
                 superseded=0,
                 rejected=0,
-                started_at=self._clock.now(),
+                started_at=started_at,
                 finished_at=self._clock.now(),
             )
             async with self._uow_factory() as uow:
@@ -306,51 +672,128 @@ class GovernedMemoryService:
                 else since_watermark
             )
             events = await uow.events.list_after(session_id, watermark, self._principal)
-        candidates = [candidate for event in events if (candidate := _candidate(event))]
-        beliefs: list[MemoryRecord] = []
-        rejected = 0
-        for event, subject, statement, belief_type in candidates:
-            try:
-                belief = await self.remember(
-                    session_id=session_id,
-                    run_id=event.run_id,
-                    statement=statement,
-                    subject=subject,
-                    scope=scope,
-                    belief_type=belief_type,
-                    source_event_ids=[event.sequence],
-                    origin_trust=TrustLevel.USER,
-                    explicit=False,
-                    authority=MemoryAuthority.USER,
-                    trigger=trigger,
-                )
-            except (ConflictError, ToolValidationError):
-                rejected += 1
-            else:
-                beliefs.append(belief)
+        extracted = await self._extractor.extract(
+            events,
+            principal=self._principal,
+            scope=scope,
+        )
+        candidates = extracted[:MAX_AUTOMATIC_CANDIDATES]
+        trusted_user_sources = {
+            event.sequence
+            for event in events
+            if event.event_type == "user.message.created"
+            and event.actor_type == "principal"
+            and event.actor_id == self._principal.principal_id
+        }
+        by_sequence = {event.sequence: event for event in events}
         after = max((event.sequence for event in events), default=watermark)
-        async with self._uow_factory() as uow:
-            await uow.memories.set_consolidation_watermark(session_id, self._principal, after)
-            audit = ConsolidationRun(
-                id=self._ids.new_id(),
-                tenant_id=self._principal.tenant_id,
-                principal_id=self._principal.principal_id,
-                trigger=trigger,
-                scope=scope,
-                session_id=session_id,
-                watermark_before=watermark,
-                watermark_after=after,
-                model="deterministic-formation-v1",
-                policy_version=FORMATION_POLICY_VERSION,
-                candidates_proposed=len(candidates),
-                committed=len(beliefs),
-                reinforced=0,
-                superseded=0,
-                rejected=rejected,
-                started_at=self._clock.now(),
-                finished_at=self._clock.now(),
+
+        def no_work(at_watermark: int) -> ConsolidationResult:
+            return ConsolidationResult(
+                run=ConsolidationRun(
+                    id=self._ids.new_id(),
+                    tenant_id=self._principal.tenant_id,
+                    principal_id=self._principal.principal_id,
+                    trigger=trigger,
+                    scope=scope,
+                    session_id=session_id,
+                    watermark_before=at_watermark,
+                    watermark_after=at_watermark,
+                    model=self._extractor.name,
+                    policy_version=FORMATION_POLICY_VERSION,
+                    candidates_proposed=0,
+                    committed=0,
+                    reinforced=0,
+                    superseded=0,
+                    rejected=0,
+                    started_at=started_at,
+                    finished_at=self._clock.now(),
+                )
             )
-            await uow.memories.record_consolidation(audit)
+
+        async with self._uow_factory() as uow:
+            acquired = await uow.maintenance.acquire_memory_session(self._principal, session_id)
+            if not acquired:
+                return no_work(watermark)
+            try:
+                current_watermark = await uow.memories.consolidation_watermark(
+                    session_id, self._principal
+                )
+                if since_watermark is None and current_watermark != watermark:
+                    return no_work(current_watermark)
+                consolidation_id = self._ids.new_id()
+                beliefs: list[MemoryRecord] = []
+                rejected = len(extracted) - len(candidates)
+                committed = 0
+                reinforced = 0
+                superseded = 0
+                for candidate in candidates:
+                    if (
+                        candidate.proposed_scope != scope
+                        or not set(candidate.source_event_ids) <= trusted_user_sources
+                    ):
+                        rejected += 1
+                        continue
+                    source_event = by_sequence[candidate.source_event_ids[0]]
+                    try:
+                        belief, action = await self._remember(
+                            session_id=session_id,
+                            run_id=source_event.run_id,
+                            statement=candidate.statement,
+                            subject=candidate.subject,
+                            scope=candidate.proposed_scope,
+                            belief_type=candidate.belief_type,
+                            portability=candidate.proposed_portability,
+                            sensitivity=candidate.sensitivity_guess,
+                            source_event_ids=candidate.source_event_ids,
+                            origin_trust=TrustLevel.USER,
+                            explicit=False,
+                            authority=MemoryAuthority.INFERRED,
+                            polarity=candidate.polarity,
+                            confidence=candidate.model_confidence,
+                            valid_from=candidate.valid_from,
+                            expires_at=candidate.expires_hint,
+                            trigger=trigger,
+                            record_audit=False,
+                            existing_uow=uow,
+                            audit_id=consolidation_id,
+                        )
+                    except (ConflictError, ToolValidationError):
+                        rejected += 1
+                    else:
+                        if action == "unchanged":
+                            rejected += 1
+                            continue
+                        beliefs.append(belief)
+                        if action == "reinforced":
+                            reinforced += 1
+                        else:
+                            committed += 1
+                            if action == "superseded":
+                                superseded += 1
+                await uow.memories.set_consolidation_watermark(session_id, self._principal, after)
+                audit = ConsolidationRun(
+                    id=consolidation_id,
+                    tenant_id=self._principal.tenant_id,
+                    principal_id=self._principal.principal_id,
+                    trigger=trigger,
+                    scope=scope,
+                    session_id=session_id,
+                    watermark_before=watermark,
+                    watermark_after=after,
+                    model=self._extractor.name,
+                    policy_version=FORMATION_POLICY_VERSION,
+                    candidates_proposed=len(extracted),
+                    committed=committed,
+                    reinforced=reinforced,
+                    superseded=superseded,
+                    rejected=rejected,
+                    started_at=started_at,
+                    finished_at=self._clock.now(),
+                )
+                await uow.memories.record_consolidation(audit)
+            finally:
+                await uow.maintenance.release_memory_session(self._principal, session_id)
         return ConsolidationResult(run=audit, beliefs=beliefs)
 
     async def list_memories(
@@ -490,8 +933,15 @@ class GovernedMemoryService:
         source_event_ids: list[int],
         explicit: bool,
         authority: MemoryAuthority,
+        polarity: Polarity,
+        confidence: float | None,
+        valid_from: datetime | None,
+        expires_at: datetime | None,
     ) -> MemoryRecord:
         now = self._clock.now()
+        effective_confidence = confidence if confidence is not None else 0.9
+        if not explicit:
+            effective_confidence = min(effective_confidence, MAX_INFERRED_CONFIDENCE)
         return MemoryRecord(
             id=self._ids.new_id(),
             tenant_id=self._principal.tenant_id,
@@ -501,15 +951,19 @@ class GovernedMemoryService:
             statement=statement,
             source_session_id=source_session_id,
             source_event_ids=sorted(set(source_event_ids)),
-            confidence=0.9 if explicit else 0.55,
+            confidence=effective_confidence,
             sensitivity=sensitivity,
-            valid_from=now,
+            valid_from=valid_from or now,
+            expires_at=expires_at,
             status=MemoryStatus.ACTIVE if explicit else MemoryStatus.PROVISIONAL,
             belief_type=belief_type,
-            polarity=Polarity.ASSERT,
+            polarity=polarity,
             portability=portability,
             origin_scopes=[scope],
             last_reinforced_at=now,
+            flagged_for_review=(
+                not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
+            ),
             formation_run_id=formation_run_id,
             consolidation_policy_version=FORMATION_POLICY_VERSION,
             authority=authority,
@@ -554,31 +1008,6 @@ class GovernedMemoryService:
                 payload={"belief": belief.model_dump(mode="json")},
             )
         )
-
-
-def _candidate(event: EventEnvelope) -> tuple[EventEnvelope, str, str, BeliefType] | None:
-    if event.event_type != "user.message.created":
-        return None
-    content = event.payload.get("content")
-    texts: list[str] = []
-    if isinstance(content, str):
-        texts = [content]
-    elif isinstance(content, list):
-        for raw in content:
-            if isinstance(raw, dict):
-                try:
-                    part = TextPart.model_validate(raw)
-                except ValueError:
-                    continue
-                texts.append(part.text)
-    text = " ".join(texts).strip()
-    lowered = text.casefold()
-    if lowered.startswith("remember that "):
-        return event, "user", text[len("remember that ") :].strip(), BeliefType.FACT
-    match = re.match(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", text, re.I)
-    if match is not None:
-        return event, "user", f"Prefers {match.group(1).strip()}", BeliefType.PREFERENCE
-    return None
 
 
 def _source_session(record: MemoryRecord) -> UUID:

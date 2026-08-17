@@ -163,7 +163,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and seventy-two gates are green before
+**Forty-one of one hundred and seventy-seven gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -351,7 +351,7 @@ only at `engineering-plan.md:459`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:556` named `ApprovalService` as one of
+`bootstrap-and-composition.md:561` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -542,14 +542,14 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3189-3266`
+Section 28 of the plan is not empty — `engineering-plan.md:3222-3299`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
 existed. `tool-system.md:1002` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
-`bootstrap-and-composition.md:201` and `:183` assign ownership of
+`bootstrap-and-composition.md:205` and `:183` assign ownership of
 `ArtifactStore` and `ExecutionEnvironment` to the engineering plan
 itself, which is the corpus recording that nothing below the plan owns
 them.
@@ -561,7 +561,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1366`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3264` requires a container-escape attempt as
+    `engineering-plan.md:3297` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -853,7 +853,7 @@ whether it may).
 One of the five is sharper than this review recorded, and the
 sharpening belongs here. The human-editable surface is not merely
 uncontracted: the `MemoryStore` port declares `list`, `edit`, and
-`delete` at `memory-formation-and-consolidation.md:360`, and no tool,
+`delete` at `memory-formation-and-consolidation.md:377`, and no tool,
 route, or command in the corpus calls any of them. The agent-facing
 surface is three tools: `memory.search` and `memory.recall_episodes`
 read, and `memory.remember` creates. None of the three lists, edits,
@@ -927,19 +927,24 @@ fourteen registry entries to twenty-six, and the corpus from one
 hundred and sixty to one hundred and seventy-two. The named gap is
 closed, so the verdict changes with it.
 
-## Milestone 10: not a milestone yet
+## Milestone 10: authorized and in progress
 
-Zero registry entries, and this milestone is structurally unlike every
-other one in the plan.
+The readiness review originally found this milestone structurally unlike every
+other one in the plan. The repository owner explicitly authorized it on
+2026-08-17 and selected memory maturation as the first workstream. Eleven
+registry entries now belong to Milestone 10: six for skill authoring and five
+for automatic memory formation. Authorization permits implementation; it does
+not make the remaining work ready or complete.
 
-It has no `#### Implement` heading and no `#### Acceptance criteria`
-heading. It opens with *"These are separate optional extensions."* and
-divides into scheduling, a second model provider with routing,
+When this review was written, it had no `#### Implement` heading and no
+`#### Acceptance criteria` heading. It opened with *"These are separate optional
+extensions"* and divided into scheduling, a second model provider with routing,
 subagents, and a `#### Gate for multi-agent work` — which is an entry
 condition stating when subagents may be built, not a statement of what
 is true once they are. Milestone 9 also lacks an `#### Implement`
-heading but does have acceptance criteria; Milestone 10 is the only
-one with neither.
+heading but does have acceptance criteria. The 2026-08-17 authorization adds a
+memory-maturation implement subsection and five criteria; the other extensions
+retain the structure assessed here.
 
 All seven scheduling requirements are undesigned. Of six routing
 considerations, data residency and evaluation performance have no
@@ -971,7 +976,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:553` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3173` and `engineering-plan.md:2867` and picked
+`engineering-plan.md:3206` and `engineering-plan.md:2900` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -988,13 +993,11 @@ written to choose between them. It is recorded here rather than
 resolved: resolving it is Milestone 10 work, and this review
 authorizes none.
 
-The honest verdict is that this is a direction rather than a
-milestone, and the plan says as much. It is listed here for
-completeness and because its gate column is no longer zero:
-[skills.md](skills.md) registers six gates here for the skill-authoring
-loop. Those gates come from a section of the plan rather than from
-this milestone's own criteria, which it still does not have, so the
-verdict is unchanged by them.
+The historical verdict was that this was a direction rather than a milestone.
+The authorization and new memory-maturation acceptance criteria change that
+operational verdict: Milestone 10 is now active, but its verified gate ceiling
+remains Milestone 9 until all eleven Milestone 10 gates pass. The scheduling,
+routing, subagent, and skill-authoring work described below remains incomplete.
 
 Open question 4 below closes the remaining half of this, which was
 whether the missing criteria are an omission or a choice. They are a
@@ -1011,7 +1014,7 @@ about work that must not start until evidence arrives. What Milestone
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3268-3421` for links to other documents returned
+`engineering-plan.md:3301-3454` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1232,7 +1235,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1462` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2487` against
-    `model-gateway.md:1786` and `milestone-map.md:910`. The map
+    `model-gateway.md:1786` and `milestone-map.md:917`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1241,7 +1244,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3264` requires a test the harness's case set
+    `engineering-plan.md:3297` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1313,17 +1316,11 @@ under the conflict it settles.
     the same reason: there is something designed there now to assert
     about.
 4.  **Does Milestone 10 need acceptance criteria, or is it correctly
-    an open direction?** It is the only milestone with neither an
-    implement list nor acceptance criteria, and the plan calls its
-    contents *"separate optional extensions"*. Leaving it as a
-    direction is defensible; leaving it in a numbered milestone
-    sequence while every other entry has criteria is what makes it
-    look like an omission rather than a choice. Answered by measuring
-    what sits behind it: correctly an open direction. Two of its four
-    parts gate on evidence rather than on a date, and criteria for
-    work that must not start until evidence arrives would be a
-    promise this plan cannot keep, where every other milestone's
-    criteria are promises it can. The re-measure that produced the
+    an open direction?** The original review answered “open direction” because
+    it was the only milestone with neither an implement list nor acceptance
+    criteria. The owner authorization on 2026-08-17 supersedes that operational
+    answer for memory maturation and adds five criteria without converting the
+    evidence gates for the other extensions into calendar promises. The re-measure that produced the
     answer also corrected this review: five of the nine subagent
     requirements are designed now, by documents that landed after the
     verdict above was written.

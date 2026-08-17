@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import Text, case, delete, func, select, update
+from sqlalchemy import DateTime, Text, case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     ApprovalRow,
     ArtifactRow,
     CheckpointRow,
+    ConsolidationWatermarkRow,
     DerivedEventKeyRow,
     EventRow,
     ExportConsentRow,
@@ -1877,3 +1878,61 @@ class PostgresMaintenanceRepository:
             )
         ).all()
         return [run_id for run_id in rows if run_id is not None]
+
+    async def pending_memory_sessions(
+        self,
+        principal: Principal,
+        *,
+        idle_before: datetime,
+        ready_at: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        if limit <= 0:
+            return []
+        if not await self._acquire("maintenance.memory_formation"):
+            return []
+        watermark = func.coalesce(ConsolidationWatermarkRow.sequence, 0)
+        raw_not_before = EventRow.payload["not_before"].astext
+        formation_not_before = case(
+            (raw_not_before.is_(None), EventRow.created_at),
+            (
+                raw_not_before.op("~")(r"(Z|[+-][0-9]{2}:[0-9]{2})$")
+                & func.pg_input_is_valid(raw_not_before, "timestamp with time zone"),
+                sql_cast(raw_not_before, DateTime(timezone=True)),
+            ),
+            else_=None,
+        )
+        rows = (
+            await self._session.scalars(
+                select(SessionRow.id)
+                .join(EventRow, EventRow.session_id == SessionRow.id)
+                .outerjoin(
+                    ConsolidationWatermarkRow,
+                    (ConsolidationWatermarkRow.session_id == SessionRow.id)
+                    & (ConsolidationWatermarkRow.tenant_id == principal.tenant_id)
+                    & (ConsolidationWatermarkRow.principal_id == principal.principal_id),
+                )
+                .where(
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                    SessionRow.updated_at <= idle_before,
+                    EventRow.event_type == "memory.formation.requested",
+                    formation_not_before <= ready_at,
+                )
+                .group_by(SessionRow.id, ConsolidationWatermarkRow.sequence)
+                .having(func.max(EventRow.sequence) > watermark)
+                .order_by(SessionRow.updated_at, SessionRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return list(rows)
+
+    async def acquire_memory_session(self, principal: Principal, session_id: UUID) -> bool:
+        return await self._acquire(
+            "maintenance.memory_formation:"
+            f"{principal.tenant_id}:{principal.principal_id}:{session_id}"
+        )
+
+    async def release_memory_session(self, principal: Principal, session_id: UUID) -> None:
+        # pg_try_advisory_xact_lock is released by the surrounding transaction.
+        del principal, session_id

@@ -28,12 +28,12 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.memory.formation import (
+    DeterministicCandidateExtractor,
     GovernedMemoryService,
-    _candidate,
     portability_ceiling,
 )
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
-from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT
+from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
 
 def _envelope(event_type: str, payload: dict[str, object], sequence: int = 1) -> EventEnvelope:
@@ -95,33 +95,42 @@ def test_portability_ceiling_travels_with_belief_type() -> None:
     assert portability_ceiling(BeliefType.RELATIONSHIP) is Portability.CONTEXTUAL
 
 
-def test_candidate_extracts_explicit_remember_requests() -> None:
+async def test_candidate_extracts_explicit_remember_requests() -> None:
     event = _envelope(
         "user.message.created", {"content": "Remember that my launch code is ORBIT-9"}
     )
-    extracted = _candidate(event)
-    assert extracted is not None
-    _, subject, statement, belief_type = extracted
-    assert subject == "user"
-    assert statement == "my launch code is ORBIT-9"
-    assert belief_type is BeliefType.FACT
+    candidates = await DeterministicCandidateExtractor().extract(
+        [event], principal=principal(), scope="project-a"
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].subject == "user"
+    assert candidates[0].statement == "my launch code is ORBIT-9"
+    assert candidates[0].belief_type is BeliefType.FACT
 
 
-def test_candidate_extracts_stated_preferences_from_text_parts() -> None:
+async def test_candidate_extracts_stated_preferences_from_text_parts() -> None:
     part = TextPart(text="We really prefer tabs over spaces").model_dump(mode="json")
-    extracted = _candidate(_envelope("user.message.created", {"content": [part]}))
-    assert extracted is not None
-    _, subject, statement, belief_type = extracted
-    assert subject == "user"
-    assert statement == "Prefers tabs over spaces"
-    assert belief_type is BeliefType.PREFERENCE
+    candidates = await DeterministicCandidateExtractor().extract(
+        [_envelope("user.message.created", {"content": [part]})],
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].subject == "indentation style"
+    assert candidates[0].statement == "User prefers tabs over spaces."
+    assert candidates[0].belief_type is BeliefType.PREFERENCE
 
 
-def test_candidate_ignores_non_user_events_and_plain_chatter() -> None:
+async def test_candidate_ignores_non_user_events_and_plain_chatter() -> None:
     tool_event = _envelope("tool.call.completed", {"content": "Remember that x is y"})
     chatter = _envelope("user.message.created", {"content": "What time is it?"})
-    assert _candidate(tool_event) is None
-    assert _candidate(chatter) is None
+    candidates = await DeterministicCandidateExtractor().extract(
+        [tool_event, chatter], principal=principal(), scope="project-a"
+    )
+
+    assert candidates == []
 
 
 async def test_remember_rejects_portability_above_type_ceiling() -> None:

@@ -78,6 +78,24 @@ class RecallMoment(StrEnum):
     CHILD_RUN = "child_run"
 
 
+class MemoryCandidate(BaseModel):
+    """A provenance-bound proposal emitted before policy and conflict gates."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    belief_type: BeliefType
+    subject: str = Field(min_length=1, max_length=512)
+    statement: str = Field(min_length=1, max_length=8192)
+    polarity: Polarity = Polarity.ASSERT
+    source_event_ids: list[PositiveInt] = Field(min_length=1)
+    model_confidence: float = Field(ge=0, le=1)
+    proposed_scope: str = Field(min_length=1, max_length=256)
+    proposed_portability: Portability
+    sensitivity_guess: Sensitivity
+    valid_from: datetime | None = None
+    expires_hint: datetime | None = None
+
+
 class MemoryRecord(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 

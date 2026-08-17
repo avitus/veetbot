@@ -146,9 +146,10 @@ async def test_recall_tools_are_followed_by_a_final_assistant_answer() -> None:
         "memory.search",
         "memory.recall_episodes",
     }
-    assert [event.event_type for event in events][-2:] == [
+    assert [event.event_type for event in events][-3:] == [
         "assistant.message.completed",
         "run.completed",
+        "memory.formation.requested",
     ]
 
 
