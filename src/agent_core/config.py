@@ -53,6 +53,8 @@ class Settings:
     credentials: Mapping[str, SecretStr]
     interpolation: Mapping[str, str]
     trajectory_export_enabled: bool = False
+    skill_authoring_enabled: bool = False
+    skill_background_review_enabled: bool = False
     artifact_root: Path = Path(".agent/artifacts")
     auth_tenant_id: str = ""
     auth_principal_id: str = ""
@@ -435,6 +437,8 @@ def validate_settings(settings: Settings) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
     _validate_release_id(settings.release_id)
+    if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
+        raise ConfigurationError("skill background review requires skill authoring to be enabled")
     if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE} and (
@@ -516,6 +520,14 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     if raw_export_enabled not in {"0", "1"}:
         raise ConfigurationError("AGENT_TRAJECTORY_EXPORT_ENABLED must be 0 or 1")
     trajectory_export_enabled = raw_export_enabled == "1"
+    raw_skill_authoring = values.get("AGENT_SKILL_AUTHORING_ENABLED", "0").strip()
+    if raw_skill_authoring not in {"0", "1"}:
+        raise ConfigurationError("AGENT_SKILL_AUTHORING_ENABLED must be 0 or 1")
+    skill_authoring_enabled = raw_skill_authoring == "1"
+    raw_skill_review = values.get("AGENT_SKILL_BACKGROUND_REVIEW_ENABLED", "0").strip()
+    if raw_skill_review not in {"0", "1"}:
+        raise ConfigurationError("AGENT_SKILL_BACKGROUND_REVIEW_ENABLED must be 0 or 1")
+    skill_background_review_enabled = raw_skill_review == "1"
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
@@ -555,6 +567,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         credentials=MappingProxyType(credentials),
         interpolation=MappingProxyType(interpolation),
         trajectory_export_enabled=trajectory_export_enabled,
+        skill_authoring_enabled=skill_authoring_enabled,
+        skill_background_review_enabled=skill_background_review_enabled,
         artifact_root=artifact_root,
         auth_tenant_id=auth_tenant_id,
         auth_principal_id=auth_principal_id,

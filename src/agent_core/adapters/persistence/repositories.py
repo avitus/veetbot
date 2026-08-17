@@ -84,6 +84,7 @@ from agent_core.domain.runs import (
     Run,
     RunCheckpoint,
     RunFailure,
+    RunKind,
     RunStatus,
     RunUsage,
 )
@@ -98,6 +99,7 @@ from agent_core.ports.determinism import Clock
 from agent_core.runtime.state_machine import require_transition
 
 ACTIVE_RUN_CONSTRAINT = "uq_runs_one_active_per_session"
+PARENT_SKILL_REVIEW_CONSTRAINT = "uq_runs_parent_skill_review"
 SESSION_HISTORY_PROJECTION = "session_history"
 TRAJECTORY_PROJECTION = "trajectory_export"
 
@@ -130,8 +132,11 @@ async def execute_run_insert(session: AsyncSession, statement: Any) -> int:
         async with session.begin_nested():
             return _rowcount(await session.execute(statement))
     except IntegrityError as exc:
-        if _constraint_name(exc) == ACTIVE_RUN_CONSTRAINT:
+        constraint = _constraint_name(exc)
+        if constraint == ACTIVE_RUN_CONSTRAINT:
             raise ConflictError("session already has a non-terminal run") from exc
+        if constraint == PARENT_SKILL_REVIEW_CONSTRAINT:
+            raise ConflictError("parent run already has a skill review") from exc
         raise
 
 
@@ -424,6 +429,26 @@ class PostgresRunRepository:
             )
         ).all()
         return {row.session_id: run_to_domain(row) for row in rows}
+
+    async def child_for_parent(
+        self, parent_run_id: UUID, kind: RunKind, principal: Principal
+    ) -> Run | None:
+        rows = (
+            await self._session.scalars(
+                select(RunRow)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    RunRow.parent_run_id == parent_run_id,
+                    RunRow.run_kind == kind.value,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .limit(2)
+            )
+        ).all()
+        if len(rows) > 1:
+            raise ConflictError("parent has multiple child runs of one kind")
+        return None if not rows else run_to_domain(rows[0])
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         statement = (

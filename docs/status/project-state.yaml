@@ -3,9 +3,9 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_9_complete
+  status: milestone_10a_in_progress
   canonical_plan: docs/plan/engineering-plan.md
-  current_milestone: 9
+  current_milestone: 10
   authorized_milestones:
     - 0
     - 1
@@ -17,6 +17,7 @@ project:
     - 7
     - 8
     - 9
+    - 10
 
 milestones:
   "0":
@@ -50,8 +51,16 @@ milestones:
     title: Long-term memory and knowledge retrieval
     status: complete
   "10":
-    title: Scheduling, model routing, and subagents
-    status: not_started
+    title: Self-authored skills tranche
+    status: in_progress
+    authorized_scope:
+      - skill.manage foreground authoring
+      - governed background-review child runs
+      - authoring metrics and evaluation evidence
+    deferred_scope:
+      - scheduling
+      - model routing changes
+      - general-purpose subagents and delegate.run
 
 verification:
   milestone_0:
@@ -575,6 +584,52 @@ verification:
           PostgreSQL FTS, evaluation carry, tool classification, retained
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
+  milestone_10a:
+    recorded_at: 2026-08-17T00:00:00Z
+    status: in_progress
+    evidence:
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting, strict mypy, 409 static tests, 164 port
+          contracts, deployment-script tests, strict documentation builds, 123
+          citation checks, and all 172 gates active through Milestone 10 passed.
+      - check: Milestone 10A skill-authoring gates
+        outcome: passed_locally
+        detail: >-
+          All six registered gates passed through eleven focused tests covering
+          trust and exact scope denials, canonical bounded approvals, default-off
+          construction, confined child reviews, non-fatal review failure,
+          durable provenance and replay, optimistic conflicts, and the
+          self-authored case 27 outcome change.
+      - check: clean PostgreSQL 16 migration and integration partition
+        outcome: passed_locally
+        detail: >-
+          A disposable PostgreSQL 16 database upgraded from empty through
+          revision e1a4b7c9d205. All 98 integration and resilience tests passed,
+          including concurrent authoring replay, edit conflict, provenance,
+          archive replay, and revision fallback.
+      - check: default-off rollout boundary
+        outcome: passed_locally
+        detail: >-
+          Foreground authoring and background review both default off;
+          configuration refuses background review without foreground authoring,
+          and skill.manage is absent from the registry until explicitly enabled.
+      - check: proposed ADR-0051
+        outcome: owner_review_requested
+        detail: >-
+          The independently authorized tranche, invocation idempotency, durable
+          provenance across session erasure, dedicated child-session placement,
+          disabled-candidate activation, no-review-archive rule, and quantitative
+          rollout threshold are recorded for owner review.
+    remaining:
+      - Record at least 30 paired rollout samples for each model-policy,
+        policy-profile, and authoring-version combination; require at least five
+        absolute percentage points of completion lift, a positive 95 percent
+        Wilson lower bound, and zero additional policy failures.
+      - Run every hosted CI lane on the final head commit.
+      - Complete the required GitHub CodeRabbit review on that same head and
+        resolve every finding and conversation.
 
 documentation:
   canonical_format: markdown
@@ -592,12 +647,11 @@ documentation:
 readiness:
   review: docs/plan/readiness.md
   summary: >-
-    Milestones 0 through 9 are implementable from the corpus alone.
-    Milestone 10 has a design for its skill-authoring half and no
-    acceptance criteria of its own; it remains a direction rather
-    than a milestone, which readiness.md now records as a choice and
-    not an omission, because two of its four parts gate on
-    evaluation evidence rather than on a date. Milestones 5, 6, and
+    Milestones 0 through 9 are complete. The self-authored-skills tranche of
+    Milestone 10 is authorized with the Section 30 acceptance criteria and the
+    six registered skill-authoring gates as its delivery contract. Scheduling,
+    routing, and general-purpose subagents remain optional directions and are
+    not authorized. Milestones 5, 6, and
     8 moved into the covered set when
     docs/plan/http-api-and-streaming.md,
     docs/plan/sandbox-isolation.md, and docs/plan/skills.md were
@@ -861,8 +915,8 @@ readiness:
     open hand-off question should produce the declaration. A numeric
     constants cross-check over retry counts, approval expiries, lease
     and heartbeat intervals, and token budgets found no conflict.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-04T01:00:00Z
+last_updated: 2026-08-17T00:00:00Z
 last_reviewed_commit: c7fd4a2

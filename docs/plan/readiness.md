@@ -83,7 +83,7 @@ rather than smoothed.
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready | 17 | Nothing |
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
-| 10 | Scheduling, routing, and subagents | Not a milestone yet | 6 | Its own entry gates, by design |
+| 10 | Self-authored skills tranche | Authorized | 6 | Nothing; other optional extensions remain deferred |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -443,7 +443,7 @@ the fewest of any milestone that adds work — and that number was the
 finding.
 
 Section 16 of the engineering plan, at
-`engineering-plan.md:1793-1997`, designs the API more thoroughly than
+`engineering-plan.md:1793-1998`, designs the API more thoroughly than
 a summary of this milestone's coverage would suggest. At the time of the
 Milestone 5 review it specified nine endpoints with methods, paths, and where
 relevant headers; ADR-0050 later added the authoritative session list and
@@ -542,7 +542,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3203-3280`
+Section 28 of the plan is not empty — `engineering-plan.md:3238-3315`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -561,7 +561,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1366`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3278` requires a container-escape attempt as
+    `engineering-plan.md:3313` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -927,7 +927,17 @@ fourteen registry entries to twenty-six, and the corpus from one
 hundred and sixty to one hundred and seventy-two. The named gap is
 closed, so the verdict changes with it.
 
-## Milestone 10: not a milestone yet
+## Milestone 10: self-authored skills authorized
+
+The project authorizes only the self-authored-skills tranche. Section 30.6 and
+the six registered `gate.skill.*` entries form its delivery contract. The
+tranche resolves the write-path idempotency key, fixes background review to a
+dedicated non-joining child session, keeps autonomous archive disabled, and
+defines a quantitative rollout threshold. Scheduling, routing, and
+general-purpose subagents remain optional directions and are not part of this
+authorization.
+
+### Historical readiness finding
 
 Zero registry entries, and this milestone is structurally unlike every
 other one in the plan.
@@ -971,7 +981,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:553` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3187` and `engineering-plan.md:2881` and picked
+`engineering-plan.md:3222` and `engineering-plan.md:2916` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1011,7 +1021,7 @@ about work that must not start until evidence arrives. What Milestone
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3282-3435` for links to other documents returned
+`engineering-plan.md:3317-3470` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1241,7 +1251,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3278` requires a test the harness's case set
+    `engineering-plan.md:3313` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

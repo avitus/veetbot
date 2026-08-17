@@ -1792,7 +1792,7 @@ Do not store artifact bytes in PostgreSQL.
 
 ## 16. API contract
 
-The detailed design - the fourteen-route Milestone 5 baseline and a response body for each route, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. ADR-0050 separately authorizes the post-Milestone 9 session-list and session-delete routes, and ADR-0051 authorizes the durable session-message read used to restore a complete historical transcript, bringing the current surface to seventeen without rewriting the completed Milestone 5 acceptance criteria. The original nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
+The detailed design - the fourteen-route Milestone 5 baseline and a response body for each route, thirteen of which the corpus had never written down; the wire error vocabulary as the existing error taxonomy snake-cased under one rule, with four API-specific codes and the four classes that deliberately never cross the boundary; the four request-identifier rules, of which the load-bearing one is that an identifier a client supplies is never trusted with anything; what a successful authentication produces, which is the Section 5 `Principal` and nothing else; the closed dotted scope vocabulary, matched exactly with no hierarchy, and the scope each route requires; tenancy as a repository argument rather than a filter applied afterwards, and a resource in another tenant as 404 rather than 403; `SessionStatus`, referenced in Section 5 and declared nowhere; the ten-step handler order for message submission and the deterministic rule that routes text to a `WAITING_FOR_USER` run instead of rejecting it; the two unrelated mechanisms the phrase "idempotency key" names; the consumer side of the event stream, including the rule that transient frames carry no `id` and the subscribe-before-read handoff that makes replay gapless and duplicate-free; the cancel endpoint's two status codes and the column it writes; and the four application service signatures Section 17 makes the CLI a second caller of - is specified in [http-api-and-streaming.md](http-api-and-streaming.md) and ADR-0028. That document expands this section and Sections 5, 13, 17, 19, 22, and 27 and Milestone 5; it does not replace the requirements below. ADR-0050 separately authorizes the post-Milestone 9 session-list and session-delete routes, and ADR-0052 authorizes the durable session-message read used to restore a complete historical transcript, bringing the current surface to seventeen without rewriting the completed Milestone 5 acceptance criteria. The original nine endpoints stay with their methods and paths, and the `202` on submission, the SSE frame format, the `Last-Event-ID` replay rule, the readiness constraint that a probe must not call a provider, and the rule that tracebacks are never exposed are unchanged.
 
 ### Authentication
 
@@ -2833,6 +2833,41 @@ Never automatically store:
 These are separate optional extensions.
 
 A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill_manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, and the threshold is the one number that document leaves open.
+
+#### Self-authored skills (authorized tranche)
+
+This tranche is independently deliverable and does not authorize scheduling,
+new routing behavior, or the general-purpose `delegate.run` path.
+
+Implement:
+
+- The `skill.manage` capability tool with `create`, `edit`, `patch`, and
+  `archive` operations.
+- Exact `skill.write` scope enforcement, trusted-turn enforcement, provenance,
+  optimistic edit conflicts, and `SKILL_AUTHORING` approvals containing a diff.
+- An optional post-completion background review in a dedicated child session,
+  with a fixed tool allowlist, read-before-write, no archive permission, bounded
+  limits, and failure isolation from the completed parent.
+- Default-off foreground-authoring and background-review rollout controls.
+- Per-skill authoring, conflict, denial, approval, and outcome metrics.
+- The self-authored form of evaluation case 27 and the rollout evidence rule in
+  [skills.md](skills.md#rollout-evidence).
+
+Acceptance criteria:
+
+- Every authoring gate registered at Milestone 10 passes.
+- The agent can create and revise a skill through `skill.manage`; every revision
+  is immutable, version-pinned, provenance-linked, and recoverably idempotent.
+- Background review can write only agent-authored skills it has read, can use
+  only its allowlisted tools, cannot archive a skill, and can never change its
+  completed parent's outcome or event history.
+- A principal without `skill.write`, and every ordinary turn whose
+  `origin_trust` is below `USER`, is denied before the repository write.
+- A newly created skill remains disabled until an `AgentSpec` explicitly
+  enables it. A revision of an enabled floating reference appears only in a new
+  session. Rollback remains an `AgentSpec` pin or an operator archive.
+- Authoring remains disabled by default and is not enabled for a tenant until
+  the rollout evidence rule passes.
 
 #### Scheduling
 

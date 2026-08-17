@@ -90,6 +90,7 @@ class EvalExpected(StrictModel):
 class EvalArm(StrictModel):
     name: str
     skills: list[str] = Field(default_factory=list)
+    skill_source: Literal["operator", "agent"] = "operator"
     carry: list[Literal["memory"]] = Field(default_factory=list)
     expected: EvalExpected
 

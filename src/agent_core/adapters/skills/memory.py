@@ -58,6 +58,24 @@ class InMemorySkillRepository:
         validated = self._validator.validate(package)
         key = (tenant_id, validated.manifest.name)
         async with self._lock:
+            if authored_by is not None:
+                prior = next(
+                    (
+                        item
+                        for items in self._revisions.values()
+                        for item in items
+                        if item.tenant_id == tenant_id
+                        and item.authored_by_invocation_id == authored_by.invocation_id
+                    ),
+                    None,
+                )
+                if prior is not None:
+                    if prior.authoring_idempotency_key != authored_by.idempotency_key:
+                        raise ConflictError(
+                            "skill authoring invocation was reused with different arguments",
+                            reason="skill_authoring_idempotency_conflict",
+                        )
+                    return prior.model_copy(deep=True)
             identity = self._identities.get(key)
             revisions = self._revisions.get(key, [])
             current_revision = 0 if not revisions else revisions[-1].revision
@@ -96,6 +114,12 @@ class InMemorySkillRepository:
                 authored_by_principal_id=(
                     None if authored_by is None else authored_by.principal_id
                 ),
+                authored_by_invocation_id=(
+                    None if authored_by is None else authored_by.invocation_id
+                ),
+                authoring_idempotency_key=(
+                    None if authored_by is None else authored_by.idempotency_key
+                ),
                 created_at=self._clock.now(),
             )
             self._identities[key] = identity
@@ -126,16 +150,58 @@ class InMemorySkillRepository:
                 latest.append(active[-1].model_copy(deep=True))
         return latest[:limit]
 
-    async def archive(self, tenant_id: str, name: str, revision: int) -> None:
+    async def archive(
+        self,
+        tenant_id: str,
+        name: str,
+        revision: int,
+        authored_by: AuthoringContext | None = None,
+    ) -> SkillRevision:
         key = (tenant_id, name)
         async with self._lock:
+            if authored_by is not None:
+                prior = next(
+                    (
+                        item
+                        for (candidate_tenant, candidate_name), items in self._revisions.items()
+                        for item in items
+                        if item.archived_by_invocation_id == authored_by.invocation_id
+                        and candidate_tenant == tenant_id
+                        and candidate_name == name
+                    ),
+                    None,
+                )
+                if prior is not None:
+                    if (
+                        prior.revision != revision
+                        or prior.archive_idempotency_key != authored_by.idempotency_key
+                    ):
+                        raise ConflictError(
+                            "skill archive invocation was reused with different arguments",
+                            reason="skill_authoring_idempotency_conflict",
+                        )
+                    return prior.model_copy(deep=True)
             revisions = self._revisions.get(key, [])
+            active = [item for item in revisions if item.status is SkillStatus.ACTIVE]
+            if not active:
+                raise NotFoundError("skill revision not found")
+            if active[-1].revision != revision:
+                raise SkillRevisionConflict(active[-1].revision)
             for index, candidate in enumerate(revisions):
                 if candidate.revision == revision:
                     revisions[index] = candidate.model_copy(
-                        update={"status": SkillStatus.ARCHIVED}, deep=True
+                        update={
+                            "status": SkillStatus.ARCHIVED,
+                            "archived_by_invocation_id": (
+                                None if authored_by is None else authored_by.invocation_id
+                            ),
+                            "archive_idempotency_key": (
+                                None if authored_by is None else authored_by.idempotency_key
+                            ),
+                        },
+                        deep=True,
                     )
-                    return
+                    return revisions[index].model_copy(deep=True)
         raise NotFoundError("skill revision not found")
 
     def revision_count(self) -> int:

@@ -46,7 +46,7 @@ orders, and rules.
 ADR-0050 later authorizes two post-Milestone 9 additions:
 `GET /v1/sessions` and `DELETE /v1/sessions/{session_id}`. They make the
 public surface sixteen routes without rewriting the completed Milestone 5
-baseline or its gate census. ADR-0051 adds the principal-scoped session-message
+baseline or its gate census. ADR-0052 adds the principal-scoped session-message
 read needed to restore a complete historical transcript, bringing the current
 surface to seventeen. The sections labelled as the Milestone 5 baseline remain
 historical requirements; the authoritative-history section below specifies the
@@ -602,7 +602,7 @@ and deletion-time identifiers and contains no conversation content.
 
 ### Durable session transcript
 
-ADR-0051 adds the read counterpart to the existing message-submission path:
+ADR-0052 adds the read counterpart to the existing message-submission path:
 
 ```http
 GET /v1/sessions/{session_id}/messages?limit=100&cursor=<opaque>
@@ -1545,7 +1545,7 @@ process.
 ## Milestones
 
 The fourteen-route baseline in this document is Milestone 5 work, which is what
-Section 21 already says. The two ADR-0050 routes and ADR-0051 transcript route
+Section 21 already says. The two ADR-0050 routes and ADR-0052 transcript route
 are separately authorized post-Milestone 9 work and do not change a completed
 milestone's acceptance criteria or gate count. The table exists because several
 things this document specifies are not routes or do not land with the baseline.
@@ -1597,7 +1597,7 @@ an implementer does not move the DDL forward or the endpoint back.
 10 approval routes at M4 or M5      M5; the service and CLI are M4
 11 added M5 route has no scope row  session.read; M5 surface is 14
 12 two run column counts, neither   fifteen in §15, twenty-six live
-13 current history routes           session.read/write; ADR-0051 makes surface 17
+13 current history routes           session.read/write; ADR-0052 makes surface 17
 ```
 
 Row 3 is the one worth expanding, because the readiness review stated
@@ -1798,7 +1798,7 @@ build failure.
    Section 27.3 permits either and requires one. Routing matches what
    a user answering a question expects; rejecting makes every client
    implement the rule the server already has the state to apply.
-4. Should `GET /v1/runs` exist — a list of runs in a session? ADR-0051 shows
+4. Should `GET /v1/runs` exist — a list of runs in a session? ADR-0052 shows
    that a complete conversation transcript does not need one: the session
    message projection restores conversational history while `active_run_id` and
    `last_run_id` remain sufficient for current execution state. A run browser
