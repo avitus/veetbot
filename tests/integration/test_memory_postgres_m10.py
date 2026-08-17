@@ -63,6 +63,14 @@ async def test_postgres_terminal_flag_drives_idle_memory_consolidation(tmp_path:
         run = await app.runs.get(run_id)
         async with app.uow_factory() as uow:
             events = await uow.events.list_after(run.session_id, 0, app.principal)
+            assert (
+                await uow.maintenance.pending_memory_sessions(
+                    app.principal,
+                    idle_before=NOW,
+                    limit=0,
+                )
+                == []
+            )
         assert sum(event.event_type == "memory.formation.requested" for event in events) == 1
 
         clock.advance(timedelta(seconds=30))

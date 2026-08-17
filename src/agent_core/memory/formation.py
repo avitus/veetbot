@@ -37,6 +37,8 @@ from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 FORMATION_POLICY_VERSION = "formation@2"
 MAX_AUTOMATIC_CANDIDATES = 12
+MAX_EXTRACTOR_PROPOSALS = 256
+MAX_INFERRED_CONFIDENCE = 0.55
 SESSION_IDLE_SECONDS = 30
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
@@ -49,7 +51,7 @@ _INJECTION = re.compile(
 )
 _TRANSIENT = re.compile(r"\b(?:right now|this turn|temporary|today only)\b", re.I)
 _CLAUSE_BOUNDARY = re.compile(
-    r"[.!?;]+|,\s+(?:and\s+)?(?=(?:i|we|my)\b)|\s+and\s+(?=i\b)",
+    r"[.!?;\r\n]+|,\s+(?:and\s+)?(?=(?:i|we|my)\b)|\s+and\s+(?=(?:i|we|my)\b)",
     re.I,
 )
 _ITEM_BOUNDARY = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+)\s*", re.I)
@@ -73,7 +75,7 @@ def _event_text(event: EventEnvelope) -> str:
             except ValueError:
                 continue
             texts.append(part.text)
-    return " ".join(texts).strip()
+    return "\n".join(texts).strip()
 
 
 def _clean_object(value: str) -> tuple[str, str] | None:
@@ -120,7 +122,7 @@ class DeterministicCandidateExtractor:
 
     name = "deterministic-formation-v2"
 
-    def __init__(self, maximum_candidates: int = MAX_AUTOMATIC_CANDIDATES) -> None:
+    def __init__(self, maximum_candidates: int = MAX_EXTRACTOR_PROPOSALS) -> None:
         if maximum_candidates < 1:
             raise ValueError("maximum memory candidates must be positive")
         self._maximum_candidates = maximum_candidates
@@ -926,6 +928,9 @@ class GovernedMemoryService:
         confidence: float | None,
     ) -> MemoryRecord:
         now = self._clock.now()
+        effective_confidence = confidence if confidence is not None else 0.9
+        if not explicit:
+            effective_confidence = min(effective_confidence, MAX_INFERRED_CONFIDENCE)
         return MemoryRecord(
             id=self._ids.new_id(),
             tenant_id=self._principal.tenant_id,
@@ -935,7 +940,7 @@ class GovernedMemoryService:
             statement=statement,
             source_session_id=source_session_id,
             source_event_ids=sorted(set(source_event_ids)),
-            confidence=confidence if confidence is not None else (0.9 if explicit else 0.55),
+            confidence=effective_confidence,
             sensitivity=sensitivity,
             valid_from=now,
             status=MemoryStatus.ACTIVE if explicit else MemoryStatus.PROVISIONAL,

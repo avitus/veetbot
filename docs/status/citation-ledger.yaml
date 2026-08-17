@@ -229,7 +229,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/event-log-and-persistence.md:782"
     excerpt: "+ UNIQUE INDEX (session_id) WHERE status NOT IN"
     digest: "75db92428b2a6778"
-  - cite: "docs/plan/readiness.md#docs/plan/memory-formation-and-consolidation.md:360"
+  - cite: "docs/plan/readiness.md#docs/plan/memory-formation-and-consolidation.md:374"
     excerpt: "`list`, `edit`, `delete`, `reject`, `outstanding_rejections`"
     digest: "34aed7aadd7300c0"
   - cite: "docs/plan/readiness.md#docs/plan/memory-retrieval-and-ranking.md:87"

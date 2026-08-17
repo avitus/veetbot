@@ -40,7 +40,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    `MemoryCandidateExtractor` is the replaceable port. The deterministic v2
    implementation can emit multiple independently addressable candidates for
    ownership, preferences, user attributes, relationships, decisions, outcomes,
-   and ordinary ownership retractions.
+   and ordinary ownership retractions. New sentence boundaries, first-person
+   conjunctions, and structured text parts are separate candidate boundaries, so
+   unrelated durable statements cannot be combined into one conflict subject.
 4. **Recheck provenance after extraction.** The formation service accepts an
    automatic candidate only when every named source is a selected
    `user.message.created` event authored by the owning principal. This check is
@@ -48,7 +50,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    The service likewise rejects a candidate whose proposed scope differs from
    the scope authorized for that consolidation job.
    Automatic beliefs enter as `INFERRED` and `PROVISIONAL`; sensitive ones are
-   also flagged for review.
+   also flagged for review. Extractor confidence is untrusted proposal metadata;
+   inferred records are capped at `0.55` until independent reinforcement, while
+   explicit user-authored writes retain their higher-authority confidence path.
 5. **Use semantic subjects as conflict keys.** Device entities are separate
    subjects. Common preference domains use stable subjects such as answer style,
    interface theme, indentation style, and measurement units. A correction then
@@ -56,11 +60,13 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    Other preferences derive a topic key rather than falling back to `user`, and
    a subject retracted in a source event is excluded from positive possessive
    proposals from that same event.
-6. **Bound formation before commit.** The service consumes at most twelve
-   automatic candidates even if an extractor overproduces. Existing secret,
-   injection, transient-detail, portability, rejection, and conflict gates still
-   run for each consumed proposal, and any excess is counted as rejected in the
-   consolidation audit.
+6. **Bound formation before commit and preserve audit truth.** The deterministic
+   extractor may scan up to 256 proposals, while the service consumes at most
+   twelve automatic candidates even if an extractor overproduces. Existing
+   secret, injection, transient-detail, portability, rejection, and conflict gates
+   still run for each consumed proposal. The audit records the full returned
+   proposal count and counts every excess proposal as rejected, rather than
+   allowing the extractor's resource ceiling to masquerade as the policy ceiling.
 7. **Keep model-assisted extraction evaluation-gated.** This change does not
    activate an unaudited provider call. The next extractor may use a model only
    as a restricted maintenance or child run with a principal, agent version,
@@ -76,7 +82,8 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    atomically; the in-memory adapter provides the equivalent process-local claim.
    Lock contention is a no-op, and a rollback leaves the prefix pending. The
    aggregate audit owns the formation id stored by every new belief and measures
-   from before extraction through commit preparation.
+   from before extraction through commit preparation. A non-positive maintenance
+   batch limit selects no sessions in either adapter.
 
 ## Consequences
 

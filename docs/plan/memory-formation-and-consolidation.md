@@ -155,6 +155,14 @@ class MemoryCandidate(BaseModel):
 
 Candidates are **proposals, not writes.**
 
+Candidate boundaries are semantic boundaries. Separate first-person clauses and
+separate text parts are extracted independently; a conjunction such as “I prefer
+tea and we decided to deploy Fridays” must not turn the decision into part of the
+preference. The deterministic extractor has a separate 256-proposal scan ceiling
+for resource safety. The governed service, not the extractor, applies the smaller
+twelve-candidate commit ceiling and records the number the extractor returned plus
+every proposal it rejected, including overflow.
+
 **Portability has a deterministic ceiling.** Each `belief_type` carries a default
 portability — preferences, user-model attributes, and procedure pointers are
 `portable`; facts and relationships default to `contextual`. The extractor may
@@ -174,7 +182,13 @@ the project it was learned in, and is defined in
   not retry the same unsafe write as though its JSON shape were wrong.
 - **Salience (soft ranking).** Keep candidates above a worth-remembering
   threshold: durability (will this matter next week?), specificity, corroboration,
-  and user-signaled importance. Sub-threshold candidates are dropped or held in the **provisional** state (see "Memory states and tiers") that promotes to `active` only on later reinforcement.
+  and user-signaled importance. Sub-threshold candidates are dropped or held in the
+  **provisional** state (see "Memory states and tiers") that promotes to `active`
+  only on later reinforcement. A model's confidence is proposal metadata rather
+  than user authority: an automatically inferred belief enters with confidence no
+  greater than `0.55`, regardless of the extractor's self-reported score, and must
+  earn promotion by later reinforcement. Explicit user-authored memory writes
+  retain their separate authority and confidence path.
 
 ### 5. Resolve against existing memory
 
@@ -470,8 +484,9 @@ first formation layer (Section 20).
    returns without extracting, and maintenance consolidates the session only once
    the idle boundary has elapsed. **M10.**
 9. **Bounded automatic formation** — a pathological utterance cannot commit more
-   than twelve candidates in one consolidation and a secret-shaped candidate is
-   still rejected. **M10.**
+   than twelve candidates in one consolidation, a secret-shaped candidate is
+   still rejected, and the consolidation audit accounts for extractor
+   overproduction rather than silently truncating it. **M10.**
 10. **Ordinary correction isolation** — a natural-language retraction supersedes
     the matching entity while unrelated entities and preference topics continue
     to coexist. **M10.**

@@ -1886,6 +1886,8 @@ class PostgresMaintenanceRepository:
         idle_before: datetime,
         limit: int,
     ) -> list[UUID]:
+        if limit <= 0:
+            return []
         if not await self._acquire("maintenance.memory_formation"):
             return []
         watermark = func.coalesce(ConsolidationWatermarkRow.sequence, 0)

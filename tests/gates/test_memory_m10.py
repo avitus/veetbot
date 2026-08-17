@@ -172,8 +172,8 @@ async def test_automatic_formation_caps_candidates_and_rejects_secrets() -> None
 
     assert len(result.beliefs) == 11
     assert all("do-not-store" not in belief.statement for belief in result.beliefs)
-    assert result.run.candidates_proposed == 12
-    assert result.run.rejected == 1
+    assert result.run.candidates_proposed == 30
+    assert result.run.rejected == 19
 
 
 async def test_service_enforces_candidate_cap_against_an_overproducing_extractor() -> None:
@@ -265,6 +265,38 @@ async def test_service_rejects_extractor_scope_escalation() -> None:
     assert result.run.rejected == 2
 
 
+async def test_inferred_candidates_cannot_claim_explicit_user_confidence() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "I own an Apple Watch.")
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        subject="Apple Watch",
+        statement="User owns an Apple Watch.",
+        source_event_ids=[source],
+        model_confidence=1.0,
+        proposed_scope="project-a",
+        proposed_portability=Portability.PORTABLE,
+        sensitivity_guess=Sensitivity.INTERNAL,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(5_500, 6_000)),
+        principal(),
+        extractor=_ScriptedCandidateExtractor([candidate]),
+    )
+
+    result = await service.run(
+        trigger="session_idle",
+        scope="project-a",
+        session_id=SESSION_ID,
+    )
+
+    assert result.beliefs[0].confidence == pytest.approx(0.55)
+    assert result.beliefs[0].authority is MemoryAuthority.INFERRED
+    assert result.beliefs[0].status is MemoryStatus.PROVISIONAL
+
+
 async def test_consolidation_audit_measures_extraction_and_commit_duration() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     await user_event(factory, "I own an Apple Watch.")
@@ -343,6 +375,14 @@ async def test_old_pending_in_memory_session_is_not_starved_by_newer_sessions() 
             )
 
     async with factory() as uow:
+        assert (
+            await uow.maintenance.pending_memory_sessions(
+                principal(),
+                idle_before=NOW + timedelta(minutes=1),
+                limit=0,
+            )
+            == []
+        )
         pending = await uow.maintenance.pending_memory_sessions(
             principal(),
             idle_before=NOW + timedelta(minutes=1),
@@ -433,6 +473,40 @@ async def test_automatic_formation_covers_documented_salient_span_types(
     assert {
         (belief.subject, belief.statement, belief.belief_type) for belief in result.beliefs
     } == expected
+
+
+async def test_independent_clauses_and_text_parts_form_independent_candidates() -> None:
+    _clock, factory, _service, _retriever = await formation_stack()
+    await user_event(factory, "I prefer jasmine tea and we decided to deploy on Fridays.")
+    async with factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=principal().principal_id,
+                payload={
+                    "content": [
+                        {"kind": "text", "text": "I own an Apple Watch."},
+                        {"kind": "text", "text": "I live in Seattle."},
+                    ]
+                },
+            )
+        )
+
+    candidates = await DeterministicCandidateExtractor().extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert {candidate.subject for candidate in candidates} == {
+        "tea preference",
+        "project decision",
+        "Apple Watch",
+        "home location",
+    }
 
 
 async def test_ordinary_retraction_supersedes_the_owned_entity_memory() -> None:

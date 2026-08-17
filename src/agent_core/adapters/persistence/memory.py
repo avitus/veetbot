@@ -1241,6 +1241,8 @@ class InMemoryMaintenanceRepository:
         idle_before: datetime,
         limit: int,
     ) -> list[UUID]:
+        if limit <= 0:
+            return []
         if self._sessions is None or self._events is None or self._memories is None:
             return []
         sessions: list[Session] = []

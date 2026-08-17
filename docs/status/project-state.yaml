@@ -589,13 +589,16 @@ verification:
           adversarial extractor failed both service-boundary cases. Review-driven
           red tests then exposed negated possessive duplication, generic
           preference collisions, pending-session starvation, inaccurate action
-          counters, and the missing consolidation claim. After the corresponding
-          implementation steps, all 19 Milestone 10 memory gate tests pass.
+          counters, and the missing consolidation claim. A second hosted review
+          drove four more red regressions for non-positive batch limits,
+          independent clause and text-part boundaries, truthful overflow audits,
+          and inferred-confidence authority. After the corresponding
+          implementation steps, all 21 Milestone 10 memory gate tests pass.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 341 source and test
-          files, 417 static tests, 167 contracts, deployment-script checks,
+          files, 419 static tests, 167 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass. The gate
           registry contains 177 entries and retains 166 as the verified ceiling
           through Milestone 9.
@@ -620,8 +623,8 @@ verification:
         detail: >-
           The durable post-run flag, 30-second idle boundary, structured
           extractor port, source and scope rechecks, semantic conflict subjects,
-          service-level cap, and formation@2 policy boundary are recorded for
-          owner review.
+          independently audited extractor and service caps, inferred-confidence
+          ceiling, and formation@2 policy boundary are recorded for owner review.
     remaining:
       - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
       - Complete the six skill-authoring gates already assigned to Milestone 10.
