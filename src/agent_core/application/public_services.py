@@ -439,42 +439,28 @@ class PublicSessionService:
         after_sequence = _decode_message_cursor(cursor)
         messages: list[SessionMessageView] = []
         async with self._uow_factory() as uow:
-            scan_watermark = after_sequence
-            while len(messages) <= effective_limit:
-                events = await uow.events.list_after(
-                    session_id,
-                    scan_watermark,
-                    principal,
-                    limit=200,
-                )
-                if not events:
-                    break
-                for event in events:
-                    scan_watermark = event.sequence
-                    if event.event_type not in {
-                        "user.message.created",
-                        "assistant.message.completed",
-                    }:
+            events = await uow.events.list_conversation_after(
+                session_id,
+                after_sequence,
+                principal,
+                limit=effective_limit + 1,
+            )
+            for event in events:
+                for item in conversation_items(event):
+                    role: Literal["user", "assistant"]
+                    if isinstance(item, UserMessage):
+                        role = "user"
+                    elif isinstance(item, AssistantMessage):
+                        role = "assistant"
+                    else:
                         continue
-                    for item in conversation_items(event):
-                        role: Literal["user", "assistant"]
-                        if isinstance(item, UserMessage):
-                            role = "user"
-                        elif isinstance(item, AssistantMessage):
-                            role = "assistant"
-                        else:
-                            continue
-                        messages.append(
-                            SessionMessageView(
-                                sequence=event.sequence,
-                                role=role,
-                                content=_content_view(item.content),
-                            )
+                    messages.append(
+                        SessionMessageView(
+                            sequence=event.sequence,
+                            role=role,
+                            content=_content_view(item.content),
                         )
-                    if len(messages) > effective_limit:
-                        break
-                if len(events) < 200 or len(messages) > effective_limit:
-                    break
+                    )
         has_more = len(messages) > effective_limit
         page_messages = messages[:effective_limit]
         return Page[SessionMessageView](

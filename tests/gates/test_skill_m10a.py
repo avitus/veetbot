@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
+import importlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -694,6 +696,14 @@ async def test_review_never_fatal() -> None:
                     contained_parent.id, RunKind.SKILL_REVIEW, composition.principal
                 )
                 dispatch_failures = await uow.process_events.list("skill.background_review.failed")
+                assert child is not None
+                await uow.runs.transition(child.id, RunStatus.QUEUED, RunStatus.RUNNING)
+                terminal_child = await uow.runs.transition(
+                    child.id, RunStatus.RUNNING, RunStatus.FAILED
+                )
+            assert await review_service.after_run(terminal_child.id) == terminal_child.id
+            async with composition.uow_factory() as uow:
+                all_failures = await uow.process_events.list("skill.background_review.failed")
         assert unchanged_parent.status is RunStatus.COMPLETED
         assert unchanged_parent.final_message == "Contained parent answer."
         assert after == before
@@ -701,9 +711,67 @@ async def test_review_never_fatal() -> None:
         assert child.status is RunStatus.QUEUED
         assert len(dispatch_failures) == 1
         assert dispatch_failures[0].payload["review_run_id"] == str(child.id)
+        assert len(all_failures) == 2
+        assert {event.payload.get("status") for event in all_failures} == {None, "FAILED"}
 
 
-async def test_provenance_complete() -> None:
+async def test_review_dispatch_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    class HangingDispatch:
+        async def dispatch(self, run_id: UUID) -> None:
+            del run_id
+            await asyncio.Event().wait()
+
+        async def resume(self, run_id: UUID) -> None:
+            del run_id
+            await asyncio.Event().wait()
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="math.calculate",
+                        arguments={"expression": "3 + 3"},
+                        call_id="bounded-parent-work",
+                    )
+                ]
+            ),
+            ScriptedTurn(text="Bounded parent answer."),
+        ]
+    )
+    settings = load_settings({**_environment(), "AGENT_SKILL_AUTHORING_ENABLED": "1"})
+    async with build(
+        settings=settings,
+        script=script,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        enabled_tools=["math.calculate"],
+    ) as composition:
+        parent_id = await composition.runs.submit("Complete bounded work.")
+        parent = await composition.runs.wait_terminal(parent_id)
+        review_service = SkillBackgroundReview(
+            uow_factory=composition.uow_factory,
+            dispatcher=HangingDispatch(),
+            catalogs=composition.skill_catalogs,
+            principal=composition.principal,
+            clock=composition.clock,
+            seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+            activate_session=composition.mcp.activate_session,
+            enabled=True,
+        )
+        monkeypatch.setattr(
+            "agent_core.application.skill_review.REVIEW_DISPATCH_TIMEOUT_SECONDS", 0.01
+        )
+
+        assert await asyncio.wait_for(review_service.after_run(parent.id), timeout=0.2) is None
+        async with composition.uow_factory() as uow:
+            failures = await uow.process_events.list("skill.background_review.failed")
+
+    assert len(failures) == 1
+    assert failures[0].payload["error_class"] == "TimeoutError"
+
+
+async def test_provenance_complete(monkeypatch: pytest.MonkeyPatch) -> None:
     tool, repository, _store, _factory = await _authoring_stack()
     result = await tool.execute(
         {
@@ -746,6 +814,20 @@ async def test_provenance_complete() -> None:
     assert conflict.failure is not None
     assert conflict.failure.reason_code == "skill_authoring_idempotency_conflict"
     assert repository.revision_count() == 1
+    tenant_revisions = [
+        revision
+        for (tenant_id, _name), revisions in repository._revisions.items()
+        if tenant_id == "tenant-a"
+        for revision in revisions
+    ]
+    assert tenant_revisions
+    assert all(
+        revision.authored_by_principal_id is not None
+        and revision.authored_by_invocation_id is not None
+        and revision.authoring_idempotency_key is not None
+        for revision in tenant_revisions
+        if revision.source is SkillSource.AGENT
+    )
 
     settings = load_settings({**_environment(), "AGENT_SKILL_AUTHORING_ENABLED": "1"})
     script = FakeModelScript(
@@ -790,6 +872,65 @@ async def test_provenance_complete() -> None:
     assert linked.authored_by_principal_id == composition.principal.principal_id
     assert linked.authored_by_invocation_id is not None
     assert linked.authoring_idempotency_key is not None
+    _assert_agent_provenance_insert_paths_are_complete()
+    test_agent_provenance_migration_backfills_by_skill_source(monkeypatch)
+
+
+def _assert_agent_provenance_insert_paths_are_complete() -> None:
+    required = {
+        "authored_by_run_id",
+        "authored_by_principal_id",
+        "authored_by_invocation_id",
+        "authoring_idempotency_key",
+    }
+    memory_source = (ROOT / "src/agent_core/adapters/skills/memory.py").read_text()
+    memory_tree = ast.parse(memory_source)
+    constructors = [
+        node
+        for node in ast.walk(memory_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "SkillRevision"
+    ]
+    assert len(constructors) == 1
+    assert required <= {keyword.arg for keyword in constructors[0].keywords}
+
+    postgres_source = (ROOT / "src/agent_core/adapters/persistence/skills.py").read_text()
+    postgres_tree = ast.parse(postgres_source)
+    inserts = [
+        node
+        for node in ast.walk(postgres_tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "values"
+        and "pg_insert(SkillRevisionRow)"
+        in (ast.get_source_segment(postgres_source, node.func.value) or "")
+    ]
+    assert len(inserts) == 1
+    assert required <= {keyword.arg for keyword in inserts[0].keywords}
+
+
+def test_agent_provenance_migration_backfills_by_skill_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = importlib.import_module(
+        "migrations.versions.e1a4b7c9d205_add_skill_authoring_provenance"
+    )
+    statements: list[str] = []
+    monkeypatch.setattr(migration.op, "add_column", lambda *args, **kwargs: None)
+    monkeypatch.setattr(migration.op, "create_index", lambda *args, **kwargs: None)
+    monkeypatch.setattr(migration.op, "execute", lambda statement: statements.append(statement))
+
+    migration.upgrade()
+
+    sql = "\n".join(statements)
+    assert "FROM skills AS skills" in sql
+    assert "skills.source = 'agent'" in sql
+    assert "authored_by_principal_id = COALESCE" in sql
+    assert "authored_by_invocation_id = skill_revisions.id" in sql
+    assert "authoring_idempotency_key = 'legacy:' || skill_revisions.id::text" in sql
+    assert "skills.source <> 'agent'" in sql
+    assert "authored_by_run_id = NULL" in sql
 
 
 async def test_edit_conflict() -> None:
@@ -844,6 +985,22 @@ async def test_edit_conflict() -> None:
         _context(scopes={"skill.write"}, invocation_id=84),
     )
     assert replayed_archive.ok is True
+    other = await tool.execute(
+        {
+            "operation": "create",
+            "name": "race-other",
+            "skill_markdown": _skill_markdown("race-other", "Other procedure."),
+        },
+        _context(scopes={"skill.write"}, invocation_id=85),
+    )
+    assert other.ok is True
+    reused_for_other_skill = await tool.execute(
+        {"operation": "archive", "name": "race-other", "expected_revision": 1},
+        _context(scopes={"skill.write"}, invocation_id=84),
+    )
+    assert reused_for_other_skill.ok is False
+    assert reused_for_other_skill.failure is not None
+    assert reused_for_other_skill.failure.reason_code == "skill_authoring_idempotency_conflict"
     changed_replay = await tool.execute(
         {"operation": "archive", "name": "race", "expected_revision": 2},
         replace(

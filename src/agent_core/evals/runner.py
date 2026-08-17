@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
@@ -157,7 +157,7 @@ async def _run_single(
     expected: EvalExpected,
     enabled_skills: list[str],
     arm_name: str | None = None,
-    skill_source: str = "operator",
+    skill_source: Literal["operator", "agent"] = "operator",
     carried_memories: tuple[MemoryRecord, ...] = (),
 ) -> EvalResult:
     script = resolve_model_fixture(fixture_root, case.model_fixture)

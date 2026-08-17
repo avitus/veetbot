@@ -541,7 +541,7 @@ private struct MarkdownBlockView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         case .heading(let level, let text):
             inlineMarkdownText(text)
-                .appFont(headingTextStyle(level), weight: headingWeight(level))
+                .appFont(headingTextStyle(level), weight: markdownHeadingWeight(level))
                 .padding(.top, level <= 2 ? 6 : 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityAddTraits(.isHeader)
@@ -583,12 +583,13 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    private func headingWeight(_ level: Int) -> Font.Weight? {
-        switch level {
-        case 1, 2: return .bold
-        case 3, 5...: return .semibold
-        default: return nil
-        }
+}
+
+func markdownHeadingWeight(_ level: Int) -> Font.Weight? {
+    switch level {
+    case 1, 2: return .bold
+    case 3, 5: return .semibold
+    default: return nil
     }
 }
 

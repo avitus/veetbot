@@ -69,7 +69,12 @@ from agent_core.domain.errors import (
     NotFoundError,
     WorkerFencedError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.events import (
+    CONVERSATION_MESSAGE_EVENTS,
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+)
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -707,6 +712,39 @@ class PostgresEventRepository:
                 raise NotFoundError("session not found")
             return None
         return event_to_domain(row, self._upcasters)
+
+    async def list_conversation_after(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[EventEnvelope]:
+        if limit < 0:
+            raise ValueError("limit must be nonnegative")
+        allowed = await self._session.scalar(
+            select(SessionRow.id).where(
+                SessionRow.id == session_id,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+        )
+        if allowed is None:
+            raise NotFoundError("session not found")
+        rows = (
+            await self._session.scalars(
+                select(EventRow)
+                .where(
+                    EventRow.session_id == session_id,
+                    EventRow.sequence > sequence,
+                    EventRow.event_type.in_(CONVERSATION_MESSAGE_EVENTS),
+                )
+                .order_by(EventRow.sequence, EventRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return [event_to_domain(row, self._upcasters) for row in rows]
 
     async def existing_sequences(
         self,

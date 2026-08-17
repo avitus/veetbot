@@ -171,7 +171,36 @@ import Testing
                         """
                 )
             case ("GET", "/v1/runs/\(runID.uuidString)/events"):
-                return try response(for: request, statusCode: 200, body: "")
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        id: 2
+                        event: user.message.created
+                        data: {"content":[{"type":"text","text":"First question"}]}
+
+                        id: 6
+                        event: assistant.message.completed
+                        data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"First answer"}]}}
+
+                        id: 7
+                        event: user.message.created
+                        data: {"content":[{"type":"text","text":"Second question"}]}
+
+                        id: 11
+                        event: assistant.message.completed
+                        data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"Second answer"}]}}
+
+                        id: 12
+                        event: context.working_state.updated
+                        data: {"working_state":{"objective":"Replay observed","constraints":[],"tasks":[],"established_facts":[],"open_questions":[],"next_action":null}}
+
+                        id: 13
+                        event: run.completed
+                        data: {"run_id":"\(runID.uuidString)"}
+
+                        """
+                )
             default:
                 Issue.record(
                     "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
@@ -189,7 +218,11 @@ import Testing
 
         let entry = try #require(model.history.first)
         await model.selectSession(entry)
+        for _ in 0 ..< 100 where model.runState.workingState == nil {
+            await Task.yield()
+        }
 
+        #expect(model.runState.workingState?.objective == "Replay observed")
         #expect(model.runState.timeline.map(\.text) == [
             "First question",
             "First answer",

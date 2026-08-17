@@ -485,8 +485,12 @@ class SkillRepository(Protocol):
     ) -> list[SkillRevision]: ...
 
     def archive(
-        self, tenant_id: TenantId, name: str, revision: int
-    ) -> None: ...
+        self,
+        tenant_id: TenantId,
+        name: str,
+        revision: int,
+        authored_by: AuthoringContext | None,
+    ) -> SkillRevision: ...
 
 
 class SkillPackageStore(Protocol):
@@ -1164,10 +1168,17 @@ foreground authoring is also enabled. Enabling construction makes the machinery
 available; tenant activation remains a release decision.
 
 The release gate uses paired evaluations over the declared self-authored-skill
-target corpus. At least thirty paired samples are required. The authored arm
-must improve task completion by at least five absolute percentage points, the
-95 percent Wilson lower bound on the paired improvement must be above zero, and
-the authored arm may introduce no additional policy failure. The deterministic
+target corpus. At least thirty paired samples are required. Let `b` be pairs
+completed only by the authored arm, `c` pairs completed only by the baseline,
+and `n` all pairs; the observed paired improvement is `(b - c) / n`. For
+`b + c > 0`, compute a two-sided 95 percent Clopper-Pearson interval
+`[p_low, p_high]` for `p = b / (b + c)` conditional on the number of discordant
+pairs, then transform it to the paired-difference interval
+`[(2 * p_low - 1) * (b + c) / n, (2 * p_high - 1) * (b + c) / n]`. When there
+are no discordant pairs, the paired-difference interval is `[0, 0]`. The
+authored arm must improve task completion by at least five absolute percentage
+points, the lower bound of that paired interval must be above zero, and the
+authored arm may introduce no additional policy failure. The deterministic
 self-authored form of case 27 must also pass. Any policy regression blocks
 rollout regardless of task improvement. Evidence is recorded per model-policy,
 policy-profile, and authoring implementation version; it does not transfer to a

@@ -167,13 +167,13 @@ class InMemorySkillRepository:
                         for item in items
                         if item.archived_by_invocation_id == authored_by.invocation_id
                         and candidate_tenant == tenant_id
-                        and candidate_name == name
                     ),
                     None,
                 )
                 if prior is not None:
                     if (
-                        prior.revision != revision
+                        prior.manifest.name != name
+                        or prior.revision != revision
                         or prior.archive_idempotency_key != authored_by.idempotency_key
                     ):
                         raise ConflictError(

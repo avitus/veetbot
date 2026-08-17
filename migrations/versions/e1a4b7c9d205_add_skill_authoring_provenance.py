@@ -45,9 +45,19 @@ def upgrade() -> None:
     )
     op.execute(
         "UPDATE skill_revisions "
-        "SET authored_by_invocation_id = id, "
-        "authoring_idempotency_key = 'legacy:' || id::text "
-        "WHERE authored_by_run_id IS NOT NULL"
+        "SET authored_by_principal_id = COALESCE("
+        "skill_revisions.authored_by_principal_id, 'legacy:' || skills.tenant_id), "
+        "authored_by_invocation_id = skill_revisions.id, "
+        "authoring_idempotency_key = 'legacy:' || skill_revisions.id::text "
+        "FROM skills AS skills "
+        "WHERE skill_revisions.skill_id = skills.id AND skills.source = 'agent'"
+    )
+    op.execute(
+        "UPDATE skill_revisions "
+        "SET authored_by_run_id = NULL, authored_by_principal_id = NULL, "
+        "authored_by_invocation_id = NULL, authoring_idempotency_key = NULL "
+        "FROM skills AS skills "
+        "WHERE skill_revisions.skill_id = skills.id AND skills.source <> 'agent'"
     )
     op.create_index(
         "uq_skill_revisions_authoring_invocation",

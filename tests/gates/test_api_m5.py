@@ -506,6 +506,7 @@ async def test_session_index_and_delete_are_authoritative_and_idempotent(
 
 async def test_session_message_history_is_complete_paginated_and_validated(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async with _composition(tmp_path) as composition, _client(composition) as client:
         session_id = await _create_session(client)
@@ -535,6 +536,13 @@ async def test_session_message_history_is_complete_paginated_and_validated(
                         payload=payload,
                     )
                 )
+            event_repository = uow.events
+
+        async def reject_unfiltered_scan(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise AssertionError("transcript loading must use the filtered event query")
+
+        monkeypatch.setattr(event_repository, "list_after", reject_unfiltered_scan)
 
         cursor: str | None = None
         messages: list[dict[str, object]] = []

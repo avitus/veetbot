@@ -11,6 +11,16 @@ enum ComposerKeyboardPolicy {
     }
 }
 
+final class ComposerFontRefreshController {
+    var textSize: AppTextSize = .system
+    var refresh: () -> Void = {}
+
+    func systemTextSizeDidChange() {
+        guard textSize == .system else { return }
+        refresh()
+    }
+}
+
 #if os(macOS)
 import AppKit
 
@@ -127,6 +137,7 @@ struct ComposerTextEditor: UIViewRepresentable {
         let textView = ComposerUITextView()
         textView.delegate = context.coordinator
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
+        installFontRefresh(on: textView)
         textView.text = text
         applyFont(to: textView)
         textView.adjustsFontForContentSizeCategory = false
@@ -140,6 +151,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     func updateUIView(_ textView: ComposerUITextView, context: Context) {
         context.coordinator.parent = self
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
+        installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.text != text {
             textView.text = text
@@ -167,6 +179,14 @@ struct ComposerTextEditor: UIViewRepresentable {
         textView.commandReturnHandler = { [weak textView, weak coordinator] in
             guard let textView, let coordinator else { return }
             coordinator.insertNewline(in: textView)
+        }
+    }
+
+    private func installFontRefresh(on textView: ComposerUITextView) {
+        textView.fontRefreshController.textSize = appTextSize
+        textView.fontRefreshController.refresh = { [weak textView] in
+            guard let textView else { return }
+            self.applyFont(to: textView)
         }
     }
 
@@ -208,6 +228,31 @@ struct ComposerTextEditor: UIViewRepresentable {
 final class ComposerUITextView: UITextView {
     var commandReturnHandler: () -> Void = {}
     var isInsertingCommandNewline = false
+    let fontRefreshController = ComposerFontRefreshController()
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemTextSizeDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemTextSizeDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         let command = UIKeyCommand(
@@ -221,6 +266,10 @@ final class ComposerUITextView: UITextView {
 
     @objc private func insertCommandNewline() {
         commandReturnHandler()
+    }
+
+    @objc private func systemTextSizeDidChange() {
+        fontRefreshController.systemTextSizeDidChange()
     }
 }
 #endif

@@ -637,11 +637,13 @@ The route is a transcript projection rather than an event-log export. Only
 `user.message.created` and `assistant.message.completed` produce items, and the
 response converts their content to the public content-block vocabulary. Tool
 lifecycle events, system events, provider continuation data, private reasoning,
-and transient stream deltas are excluded. A client restores every page before
-attaching to `active_run_id` or `last_run_id` and records the returned sequences
-in the same persisted-event deduplication set used by SSE replay. Replaying the
-latest run therefore fills current run state without duplicating its durable
-messages.
+and transient stream deltas are excluded. Persistence applies that event-type
+filter and the page's `limit + 1` bound before hydrating events, so unrelated
+internal events cannot expand one transcript request into an unbounded scan. A
+client restores every page before attaching to `active_run_id` or `last_run_id`
+and records the returned sequences in the same persisted-event deduplication set
+used by SSE replay. Replaying the latest run therefore fills current run state
+without duplicating its durable messages.
 
 ## Submitting a message, and the two mechanisms that share the name
 

@@ -19,7 +19,12 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
-from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.events import (
+    CONVERSATION_MESSAGE_EVENTS,
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+)
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -472,6 +477,24 @@ class InMemoryEventRepository:
                 if event.sequence < sequence and event.event_type == event_type
             ]
             return None if not matching else matching[-1].model_copy(deep=True)
+
+    async def list_conversation_after(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[EventEnvelope]:
+        if limit < 0:
+            raise ValueError("limit must be nonnegative")
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            return [
+                event.model_copy(deep=True)
+                for event in self._events[session_id]
+                if event.sequence > sequence and event.event_type in CONVERSATION_MESSAGE_EVENTS
+            ][:limit]
 
     async def existing_sequences(
         self,

@@ -137,6 +137,11 @@ import Testing
     }
 
     @Test
+    func testLevelSixHeadingKeepsCaptionDefaultWeight() {
+        #expect(markdownHeadingWeight(6) == nil)
+    }
+
+    @Test
     func testParsesBlockquotesListsAndTasks() {
         let blocks = MarkdownContentParser.parse(
             """
