@@ -48,8 +48,6 @@ import Testing
                 body: #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old-server"}}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
-
         let configured = await model.configure(
             baseURLString: "https://veetbot.test",
             token: "replacement-token"
@@ -70,8 +68,6 @@ import Testing
                 body: #"{"error":{"code":"authentication_error","message":"expired","details":{},"request_id":"expired-token"}}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
-
         let configured = await model.configure(
             baseURLString: "https://veetbot.test",
             token: "replacement-token"
@@ -92,8 +88,6 @@ import Testing
                 body: #"{"error":{"code":"internal_error","message":"temporarily unavailable","details":{},"request_id":"server-error"}}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
-
         let configured = await model.configure(
             baseURLString: "https://veetbot.test",
             token: "replacement-token"
@@ -185,10 +179,7 @@ import Testing
                 return try response(for: request, statusCode: 500, body: "")
             }
         }
-        defer {
-            model.newSession()
-            ChatViewModelURLProtocol.handler = nil
-        }
+        defer { model.newSession() }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -226,7 +217,6 @@ import Testing
                     """
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         let model = ChatViewModel(
             tokenStore: InMemoryTokenStore(),
             configurationStore: ConnectionConfigurationStore(
@@ -276,7 +266,6 @@ import Testing
                 body: "{\"items\":[],\"next_cursor\":\(next)}"
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -310,7 +299,6 @@ import Testing
                 body: #"{"items":[],"next_cursor":"repeated"}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -377,7 +365,6 @@ import Testing
                 return try response(for: request, statusCode: 500, body: "")
             }
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -424,8 +411,11 @@ import Testing
     private func urlSession(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
-        ChatViewModelURLProtocol.handler = handler
         let sessionConfiguration = URLSessionConfiguration.ephemeral
+        let handlerID = ChatViewModelURLProtocol.register(handler)
+        sessionConfiguration.httpAdditionalHeaders = [
+            ChatViewModelURLProtocol.handlerHeader: handlerID
+        ]
         sessionConfiguration.protocolClasses = [ChatViewModelURLProtocol.self]
         return URLSession(configuration: sessionConfiguration)
     }
@@ -474,13 +464,23 @@ private actor DeleteFailingHistoryStore: SessionHistoryStore {
 }
 
 private final class ChatViewModelURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    static let handlerHeader = "X-Veetbot-Test-Handler-ID"
+    private static let handlerStore = ChatViewModelURLProtocolHandlerStore()
+
+    static func register(
+        _ handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> String {
+        handlerStore.register(handler)
+    }
 
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        guard let handler = Self.handler else {
+        guard
+            let handlerID = request.value(forHTTPHeaderField: Self.handlerHeader),
+            let handler = Self.handlerStore.handler(for: handlerID)
+        else {
             client?.urlProtocol(self, didFailWithError: URLError(.unknown))
             return
         }
@@ -495,4 +495,21 @@ private final class ChatViewModelURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class ChatViewModelURLProtocolHandlerStore: @unchecked Sendable {
+    typealias Handler = (URLRequest) throws -> (HTTPURLResponse, Data)
+
+    private let lock = NSLock()
+    private var handlers: [String: Handler] = [:]
+
+    func register(_ handler: @escaping Handler) -> String {
+        let id = UUID().uuidString
+        lock.withLock { handlers[id] = handler }
+        return id
+    }
+
+    func handler(for id: String) -> Handler? {
+        lock.withLock { handlers[id] }
+    }
 }
