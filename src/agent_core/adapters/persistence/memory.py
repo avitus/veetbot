@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -19,6 +20,7 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.events import (
     CONVERSATION_MESSAGE_EVENTS,
     EventEnvelope,
@@ -1268,3 +1270,88 @@ class InMemoryMaintenanceRepository:
     async def trajectory_runs(self, limit: int) -> list[UUID]:
         del limit
         return []
+
+
+class InMemoryCapabilityEvaluationRepository:
+    """Single-process capability result store with build-key replacement."""
+
+    def __init__(self) -> None:
+        self._runs: dict[tuple[str, str, str, int], EvalScenarioRun] = {}
+        self._scores: dict[UUID, list[EvalCriterionScore]] = {}
+        self._lock = asyncio.Lock()
+
+    async def replace(
+        self,
+        run: EvalScenarioRun,
+        criteria: Sequence[EvalCriterionScore],
+    ) -> SavedEvalScenario:
+        key = (run.scenario_id, run.build_ref, run.judge_version, run.repeat_index)
+        async with self._lock:
+            previous = self._runs.get(key)
+            stored_run = run.model_copy(
+                update={"id": previous.id if previous is not None else run.id}, deep=True
+            )
+            stored_scores = [
+                score.model_copy(update={"scenario_run_id": stored_run.id}, deep=True)
+                for score in criteria
+            ]
+            if len({score.criterion for score in stored_scores}) != len(stored_scores):
+                raise ConflictError("criterion names must be unique within a scenario run")
+            self._runs[key] = stored_run
+            self._scores[stored_run.id] = stored_scores
+            return SavedEvalScenario(
+                run=stored_run.model_copy(deep=True),
+                criteria=[score.model_copy(deep=True) for score in stored_scores],
+                replaced=previous is not None,
+            )
+
+    async def get_by_key(
+        self,
+        scenario_id: str,
+        build_ref: str,
+        judge_version: str,
+        repeat_index: int,
+    ) -> SavedEvalScenario | None:
+        key = (scenario_id, build_ref, judge_version, repeat_index)
+        async with self._lock:
+            run = self._runs.get(key)
+            if run is None:
+                return None
+            return SavedEvalScenario(
+                run=run.model_copy(deep=True),
+                criteria=[score.model_copy(deep=True) for score in self._scores.get(run.id, [])],
+            )
+
+    async def list_for_build(
+        self,
+        suite: str,
+        build_ref: str,
+        judge_version: str,
+    ) -> list[SavedEvalScenario]:
+        async with self._lock:
+            rows = sorted(
+                (
+                    run
+                    for run in self._runs.values()
+                    if run.suite == suite
+                    and run.build_ref == build_ref
+                    and run.judge_version == judge_version
+                ),
+                key=lambda item: (item.scenario_id, item.repeat_index),
+            )
+            return [
+                SavedEvalScenario(
+                    run=run.model_copy(deep=True),
+                    criteria=[
+                        score.model_copy(deep=True) for score in self._scores.get(run.id, [])
+                    ],
+                )
+                for run in rows
+            ]
+
+    async def cost_since(self, since: datetime) -> Decimal:
+        async with self._lock:
+            return sum(
+                (run.cost_usd for run in self._runs.values() if run.started_at >= since),
+                start=Decimal("0"),
+            )

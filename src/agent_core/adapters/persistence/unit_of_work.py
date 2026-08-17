@@ -22,6 +22,7 @@ from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
     ArtifactRepository,
+    CapabilityEvaluationRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
@@ -79,6 +80,7 @@ class UnitOfWorkRepositories:
     memories: MemoryStore
     traces: TraceStore
     knowledge: KnowledgeStore
+    evaluations: CapabilityEvaluationRepository
     queue: RunQueue | None
 
 
@@ -122,6 +124,7 @@ class MemoryUnitOfWork:
         self.memories = repositories.memories
         self.traces = repositories.traces
         self.knowledge = repositories.knowledge
+        self.evaluations = repositories.evaluations
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -215,6 +218,7 @@ class PostgresUnitOfWork:
         self.memories = repositories.memories
         self.traces = repositories.traces
         self.knowledge = repositories.knowledge
+        self.evaluations = repositories.evaluations
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self
