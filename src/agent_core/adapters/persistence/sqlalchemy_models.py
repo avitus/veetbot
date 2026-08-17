@@ -339,6 +339,51 @@ class ProcessEventRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class EvalScenarioRunRow(Base):
+    __tablename__ = "eval_scenario_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "scenario_id",
+            "build_ref",
+            "judge_version",
+            "repeat_index",
+            name="uq_eval_scenario_run_build_repeat",
+        ),
+        Index("ix_eval_scenario_runs_suite_build", "suite", "build_ref", "judge_version"),
+        Index("ix_eval_scenario_runs_started", "started_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    scenario_id: Mapped[str] = mapped_column(Text)
+    suite: Mapped[str] = mapped_column(Text)
+    repeat_index: Mapped[int] = mapped_column(Integer)
+    run_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    judge_version: Mapped[str] = mapped_column(Text)
+    build_ref: Mapped[str] = mapped_column(Text)
+    score: Mapped[Decimal | None] = mapped_column(Numeric)
+    ceiling_hit: Mapped[str | None] = mapped_column(Text)
+    policy_failures: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class EvalCriterionScoreRow(Base):
+    __tablename__ = "eval_criterion_scores"
+    __table_args__ = (
+        UniqueConstraint("scenario_run_id", "criterion", name="uq_eval_criterion_scenario_run"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    scenario_run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("eval_scenario_runs.id", ondelete="CASCADE"),
+    )
+    criterion: Mapped[str] = mapped_column(Text)
+    observation: Mapped[str] = mapped_column(Text)
+    value: Mapped[Decimal] = mapped_column(Numeric)
+
+
 class ArtifactRow(Base):
     __tablename__ = "artifacts"
     __table_args__ = (

@@ -1,0 +1,9 @@
+id: judge.v1
+provider: anthropic
+model: claude-opus-5
+model_policy: flagship
+prompt: prompt.md
+prompt_sha256: 1738e5dc3521ecb398bddb564acea0ab24d842ea7230a0c611155c9d3aae98de
+rubric_schema_version: 1
+max_model_calls: 2
+max_cost_usd: "0.50"

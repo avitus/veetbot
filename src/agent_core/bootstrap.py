@@ -64,6 +64,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
     InMemoryArtifactRepository,
+    InMemoryCapabilityEvaluationRepository,
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
     InMemoryExportConsentRepository,
@@ -93,6 +94,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
     PostgresArtifactRepository,
+    PostgresCapabilityEvaluationRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
     PostgresExportConsentRepository,
@@ -264,6 +266,7 @@ class Composition:
     executor: RunExecutor
     uow_factory: UnitOfWorkFactory
     clock: Clock
+    ids: IdFactory
     worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
     sandbox: SandboxManager
@@ -429,6 +432,7 @@ def _memory_uow_repositories(
         memories=memories,
         traces=traces,
         knowledge=knowledge,
+        evaluations=InMemoryCapabilityEvaluationRepository(),
         queue=None,
     )
 
@@ -489,6 +493,7 @@ def _postgres_repository_factory(
             memories=memories,
             traces=traces,
             knowledge=knowledge,
+            evaluations=PostgresCapabilityEvaluationRepository(session),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -961,6 +966,7 @@ async def _compose(
                 executor=executor,
                 uow_factory=uow_factory,
                 clock=clock,
+                ids=ids,
                 worker_factory=lambda worker_id: DurableWorker(
                     uow_factory=uow_factory,
                     executor=executor,

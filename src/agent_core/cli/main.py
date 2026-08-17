@@ -98,6 +98,28 @@ class _EvalRunnerModule(Protocol):
     ) -> list[Any]: ...
 
 
+class _EvalGateModule(Protocol):
+    def current_milestone(self, repository_root: Path) -> int: ...
+
+    def collect_status(
+        self,
+        repository_root: Path,
+        *,
+        milestone: int,
+        area: str | None = None,
+    ) -> list[Any]: ...
+
+
+class _CapabilityModule(Protocol):
+    async def run_live_suite(
+        self,
+        repository_root: Path,
+        *,
+        suite: str,
+        build_ref: str | None,
+    ) -> Any | None: ...
+
+
 def version_callback(value: bool) -> None:
     """Print the package version and stop command processing."""
 
@@ -635,3 +657,88 @@ def eval_run(
     for result in results:
         typer.echo(f"pass {result.case.name}", err=True)
     typer.echo(f"{len(results)} passed")
+
+
+@eval_app.command("gates")
+def eval_gates(
+    milestone: Annotated[
+        int | None,
+        typer.Option("--milestone", min=0, max=10, help="Treat gates through MILESTONE as active."),
+    ] = None,
+    area: Annotated[
+        str | None,
+        typer.Option("--area", help="Limit output to one registry area, such as policy."),
+    ] = None,
+) -> None:
+    """Execute active registered gates and show later gates as pending."""
+
+    try:
+        module = cast(_EvalGateModule, importlib.import_module("agent_core.evals.gates"))
+        selected_milestone = (
+            module.current_milestone(Path.cwd()) if milestone is None else milestone
+        )
+        statuses = module.collect_status(Path.cwd(), milestone=selected_milestone, area=area)
+    except (ImportError, OSError, ValueError) as exc:
+        typer.echo(f"gate evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+
+    failures = 0
+    for gate_milestone in sorted({status.milestone for status in statuses}):
+        rows = [status for status in statuses if status.milestone == gate_milestone]
+        counts = {
+            outcome: sum(status.outcome == outcome for status in rows)
+            for outcome in ("pass", "fail", "pending")
+        }
+        typer.echo(
+            f"Milestone {gate_milestone}: {len(rows)} gates  "
+            f"{counts['pass']} pass  {counts['fail']} fail  {counts['pending']} pending"
+        )
+        for status in rows:
+            suffix = f" ({status.detail})" if status.detail else ""
+            typer.echo(f"  {status.id:<46} {status.outcome:<7} {status.kind}{suffix}")
+        failures += counts["fail"]
+    if failures:
+        raise typer.Exit(1)
+
+
+@eval_app.command("capability")
+def eval_capability(
+    suite: Annotated[
+        str,
+        typer.Option("--suite", help="Run one configured live capability suite."),
+    ],
+    build_ref: Annotated[
+        str | None,
+        typer.Option("--build-ref", help="Commit or build identifier; defaults to CI or Git."),
+    ] = None,
+) -> None:
+    """Run repeated, judged live scenarios and persist their distributions."""
+
+    try:
+        module = cast(_CapabilityModule, importlib.import_module("agent_core.evals.capability"))
+        result = asyncio.run(module.run_live_suite(Path.cwd(), suite=suite, build_ref=build_ref))
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"capability evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to run live capability scenarios")
+        return
+    typer.echo(
+        json.dumps(
+            {
+                "suite": result.suite,
+                "build_ref": result.build_ref,
+                "repeats": len(result.runs),
+                "mean": None if result.mean is None else str(result.mean),
+                "floor": None if result.floor is None else str(result.floor),
+                "variance": None if result.variance is None else str(result.variance),
+                "ceiling_hits": result.ceiling_hits,
+                "policy_failures": result.policy_failures,
+                "release_blocked": result.release_blocked,
+                "stopped_by": result.stopped_by,
+            },
+            sort_keys=True,
+        )
+    )
+    if result.release_blocked:
+        raise typer.Exit(1)
