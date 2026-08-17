@@ -424,17 +424,26 @@ the deterministic fallback while preserving the model-assisted design above:
    flagged sessions after 30 seconds without committed activity and invokes
    consolidation; an explicit session close remains an immediate boundary. The
    fixed delay is part of `formation@2`, not a deployment override that can
-   silently change the policy represented by that version. Selection is oldest
-   first without an arbitrary look-ahead window. After extraction, the writer
-   takes a per-principal, per-session claim; PostgreSQL holds a transaction-scoped
-   advisory lock through belief writes, the audit, and watermark advancement, so
-   concurrent workers cannot form the same prefix twice.
+   silently change the policy represented by that version. Both the session-idle
+   cutoff and the flag's persisted `not_before` must be satisfied; `not_before` is
+   authoritative even when the session is otherwise idle, while legacy flags
+   without it fall back to their event time. Selection is oldest first without an
+   arbitrary look-ahead window. The in-memory selector streams the newest-first
+   session pages through a batch-sized oldest-candidate buffer, and PostgreSQL
+   uses an event-type/session/sequence index for the same scan. After extraction,
+   the writer takes a per-principal, per-session claim; PostgreSQL holds a
+   transaction-scoped advisory lock through belief writes, the audit, and
+   watermark advancement, so concurrent workers cannot form the same prefix
+   twice.
 3. `MemoryCandidate` becomes a domain value and `MemoryCandidateExtractor` a
    formation port. The deterministic v2 implementation emits multiple candidates
    for independently addressable ownership, preference, user-attribute,
    relationship, project-decision, and task-outcome spans. It also recognizes
-   ordinary entity retractions. The formation service, rather than any extractor,
-   applies the fixed ceiling of twelve proposals per consolidation.
+   ordinary entity retractions, including coordinated possessives such as “I no
+   longer have my watch and my car” without reasserting the trailing entity. The
+   formation service, rather than any extractor, applies the fixed ceiling of
+   twelve proposals per consolidation and preserves accepted candidate
+   `valid_from` and expiry hints on the resulting record.
 4. The service independently verifies every candidate source against the selected
    log prefix. Every source must be a `user.message.created` event authored by the
    owning principal; this rule applies even when a later model-assisted extractor
@@ -452,7 +461,10 @@ the deterministic fallback while preserving the model-assisted design above:
 6. One consolidation audit covers the claimed event prefix and reports new
    commits, reinforcements, supersessions, safety rejections, and extractor
    overproduction separately. Its elapsed interval begins before extraction.
-   Automatic candidates do not create misleading nested one-candidate audits.
+   Automatic candidates do not create misleading nested one-candidate audits. A
+   PostgreSQL supersession uses a nested transaction so a stale-current conflict
+   rolls back its just-inserted replacement even when the caller catches the
+   conflict and continues the outer consolidation transaction.
 
 The schema-constrained consolidation model remains the normative rich extractor.
 ADR-0045 still requires evaluation evidence before it is activated, and the model
@@ -485,7 +497,8 @@ first formation layer (Section 20).
    cannot become a direct source. **M10.**
 8. **Idle lifecycle** — a terminal run enqueues one idempotent formation flag,
    returns without extracting, and maintenance consolidates the session only once
-   the idle boundary has elapsed. **M10.**
+   both the session-idle boundary and the flag's persisted `not_before` have
+   elapsed. **M10.**
 9. **Bounded automatic formation** — a pathological utterance cannot commit more
    than twelve candidates in one consolidation, a secret-shaped candidate is
    still rejected, and the consolidation audit accounts for extractor

@@ -32,17 +32,23 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
 2. **Consolidate at the idle boundary.** The maintenance role selects flagged
    sessions after 30 seconds without committed activity. Session close remains
    an immediate boundary. The interactive request performs no extraction. The
-   selector considers all in-memory sessions and orders PostgreSQL candidates
-   oldest first, so newer unflagged sessions cannot starve older work.
+   selector requires both the session-idle cutoff and the flag's persisted
+   `not_before`; a legacy flag without `not_before` falls back to its event time.
+   It streams all in-memory session pages through a batch-sized oldest-candidate
+   buffer and orders PostgreSQL candidates oldest first, so newer unflagged
+   sessions cannot starve older work. PostgreSQL adds a composite
+   event-type/session/sequence index for this scan.
 3. **Add structured candidate and extractor boundaries.** `MemoryCandidate` is a
    frozen proposal value carrying type, subject, statement, polarity, source ids,
    confidence, scope, portability, sensitivity, and temporal hints.
    `MemoryCandidateExtractor` is the replaceable port. The deterministic v2
    implementation can emit multiple independently addressable candidates for
    ownership, preferences, user attributes, relationships, decisions, outcomes,
-   and ordinary ownership retractions. New sentence boundaries, first-person
+   and ordinary ownership retractions, including coordinated possessives without
+   reasserting their trailing entity. New sentence boundaries, first-person
    conjunctions, and structured text parts are separate candidate boundaries, so
    unrelated durable statements cannot be combined into one conflict subject.
+   Accepted candidate validity and expiry hints are preserved on the belief.
 4. **Recheck provenance after extraction.** The formation service accepts an
    automatic candidate only when every named source is a selected
    `user.message.created` event authored by the owning principal. This check is
@@ -88,7 +94,10 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    batch limit selects no sessions in either adapter. Because the existing audit
    schema has no `unchanged` field, an idempotent same-source replay counts as a
    rejection; this preserves a reconciled terminal outcome for every proposal
-   without misreporting the no-op as a write or reinforcement.
+   without misreporting the no-op as a write or reinforcement. PostgreSQL wraps
+   each replacement insert and guarded retirement in a savepoint, so catching a
+   stale-current conflict cannot commit an orphan replacement in the outer unit
+   of work.
 
 ## Consequences
 
@@ -97,8 +106,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
 - Runs complete at the same point they did before; memory enrichment is
   eventually consistent and may appear about 30 seconds later.
 - PostgreSQL and in-memory maintenance use the same selection contract. No new
-  table or migration is required because the flag is an event and the existing
-  consolidation watermark is the completion cursor.
+  table is required because the flag is an event and the existing consolidation
+  watermark is the completion cursor; one migration adds the composite event
+  index required to keep the formation scan bounded in PostgreSQL.
 - Multiple maintenance workers may select the same flagged session, but only one
   can claim and commit a given prefix. The aggregate audit distinguishes commits,
   reinforcements, supersessions, rejections, and no-op contention.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -51,7 +52,7 @@ _INJECTION = re.compile(
 )
 _TRANSIENT = re.compile(r"\b(?:right now|this turn|temporary|today only)\b", re.I)
 _CLAUSE_BOUNDARY = re.compile(
-    r"[.!?;\r\n]+|,\s+(?:and\s+)?(?=(?:i|we|my)\b)|\s+and\s+(?=(?:i|we|my)\b)",
+    r"[.!?;\r\n]+|,\s+(?:and\s+)?(?=(?:i|we)\b)|\s+and\s+(?=(?:i|we)\b)",
     re.I,
 )
 _ITEM_BOUNDARY = re.compile(r"\s*(?:,\s*(?:and\s+)?|\s+and\s+)\s*", re.I)
@@ -434,6 +435,8 @@ class GovernedMemoryService:
             authority=authority,
             polarity=polarity,
             confidence=confidence,
+            valid_from=None,
+            expires_at=None,
             trigger=trigger,
             record_audit=True,
         )
@@ -456,6 +459,8 @@ class GovernedMemoryService:
         authority: MemoryAuthority,
         polarity: Polarity,
         confidence: float | None,
+        valid_from: datetime | None,
+        expires_at: datetime | None,
         trigger: str,
         record_audit: bool,
         existing_uow: RepositoryUnitOfWork | None = None,
@@ -566,6 +571,8 @@ class GovernedMemoryService:
                         authority,
                         polarity,
                         confidence,
+                        valid_from,
+                        expires_at,
                     )
                     position = await uow.memories.next_position()
                     superseded = current.model_copy(
@@ -606,6 +613,8 @@ class GovernedMemoryService:
                 authority,
                 polarity,
                 confidence,
+                valid_from,
+                expires_at,
             )
             stored = await uow.memories.upsert_belief(record)
             await self._append_event(uow, session_id, run_id, "memory.formed", stored)
@@ -739,6 +748,8 @@ class GovernedMemoryService:
                             authority=MemoryAuthority.INFERRED,
                             polarity=candidate.polarity,
                             confidence=candidate.model_confidence,
+                            valid_from=candidate.valid_from,
+                            expires_at=candidate.expires_hint,
                             trigger=trigger,
                             record_audit=False,
                             existing_uow=uow,
@@ -921,6 +932,8 @@ class GovernedMemoryService:
         authority: MemoryAuthority,
         polarity: Polarity,
         confidence: float | None,
+        valid_from: datetime | None,
+        expires_at: datetime | None,
     ) -> MemoryRecord:
         now = self._clock.now()
         effective_confidence = confidence if confidence is not None else 0.9
@@ -937,7 +950,8 @@ class GovernedMemoryService:
             source_event_ids=sorted(set(source_event_ids)),
             confidence=effective_confidence,
             sensitivity=sensitivity,
-            valid_from=now,
+            valid_from=valid_from or now,
+            expires_at=expires_at,
             status=MemoryStatus.ACTIVE if explicit else MemoryStatus.PROVISIONAL,
             belief_type=belief_type,
             polarity=polarity,
@@ -991,36 +1005,6 @@ class GovernedMemoryService:
                 payload={"belief": belief.model_dump(mode="json")},
             )
         )
-
-
-def _candidate(event: EventEnvelope) -> tuple[EventEnvelope, str, str, BeliefType] | None:
-    if event.event_type != "user.message.created":
-        return None
-    content = event.payload.get("content")
-    texts: list[str] = []
-    if isinstance(content, str):
-        texts = [content]
-    elif isinstance(content, list):
-        for raw in content:
-            if isinstance(raw, dict):
-                try:
-                    part = TextPart.model_validate(raw)
-                except ValueError:
-                    continue
-                texts.append(part.text)
-    text = " ".join(texts).strip()
-    lowered = text.casefold()
-    if lowered.startswith("remember that "):
-        return event, "user", text[len("remember that ") :].strip(), BeliefType.FACT
-    match = re.match(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", text, re.I)
-    if match is not None:
-        return (
-            event,
-            "user",
-            f"User prefers {match.group(1).strip()}.",
-            BeliefType.PREFERENCE,
-        )
-    return None
 
 
 def _source_session(record: MemoryRecord) -> UUID:

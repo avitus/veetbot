@@ -578,7 +578,7 @@ verification:
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-17T17:00:00Z
+    recorded_at: 2026-08-17T19:21:28Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -594,23 +594,27 @@ verification:
           independent clause and text-part boundaries, truthful overflow audits,
           and inferred-confidence authority. A third hosted review drove two
           further red cases for canonical preference reinforcement and complete
-          audit reconciliation. After the corresponding implementation steps,
-          all 23 Milestone 10 memory gate tests pass.
+          audit reconciliation. The latest full review added red regressions for
+          temporal-hint preservation, coordinated possessive retractions, the
+          persisted formation deadline, and the formation-scan index. After the
+          corresponding implementation steps, all 26 Milestone 10 memory gate
+          tests pass.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 341 source and test
-          files, 421 static tests, 167 contracts, deployment-script checks,
+          files, 425 static tests, 167 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass. The gate
           registry contains 177 entries and retains 166 as the verified ceiling
           through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
-          All 99 tests passed against the Compose PostgreSQL 16 service on an
+          All 100 tests passed against the Compose PostgreSQL 16 service on an
           isolated host port, including terminal formation flags, the idle
-          boundary, concurrent consolidation claims, consolidation watermarks,
-          persistence, and re-composition.
+          and persisted-ready boundaries, concurrent consolidation claims,
+          savepoint rollback of stale replacement attempts, migrations,
+          consolidation watermarks, persistence, and re-composition.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
@@ -626,7 +630,9 @@ verification:
           The durable post-run flag, 30-second idle boundary, structured
           extractor port, source and scope rechecks, semantic conflict subjects,
           independently audited extractor and service caps, inferred-confidence
-          ceiling, and formation@2 policy boundary are recorded for owner review.
+          ceiling, temporal-hint preservation, transactional replacement,
+          formation-scan index, and formation@2 policy boundary are recorded for
+          owner review.
     remaining:
       - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
       - Complete the six skill-authoring gates already assigned to Milestone 10.

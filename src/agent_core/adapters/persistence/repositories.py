@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import Text, case, delete, func, select, update
+from sqlalchemy import DateTime, Text, case, delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1884,6 +1884,7 @@ class PostgresMaintenanceRepository:
         principal: Principal,
         *,
         idle_before: datetime,
+        ready_at: datetime,
         limit: int,
     ) -> list[UUID]:
         if limit <= 0:
@@ -1891,6 +1892,10 @@ class PostgresMaintenanceRepository:
         if not await self._acquire("maintenance.memory_formation"):
             return []
         watermark = func.coalesce(ConsolidationWatermarkRow.sequence, 0)
+        formation_not_before = func.coalesce(
+            sql_cast(EventRow.payload["not_before"].astext, DateTime(timezone=True)),
+            EventRow.created_at,
+        )
         rows = (
             await self._session.scalars(
                 select(SessionRow.id)
@@ -1906,6 +1911,7 @@ class PostgresMaintenanceRepository:
                     SessionRow.principal_id == principal.principal_id,
                     SessionRow.updated_at <= idle_before,
                     EventRow.event_type == "memory.formation.requested",
+                    formation_not_before <= ready_at,
                 )
                 .group_by(SessionRow.id, ConsolidationWatermarkRow.sequence)
                 .having(func.max(EventRow.sequence) > watermark)

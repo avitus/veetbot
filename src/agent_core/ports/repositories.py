@@ -309,6 +309,7 @@ class MaintenanceRepository(Protocol):
         principal: Principal,
         *,
         idle_before: datetime,
+        ready_at: datetime,
         limit: int,
     ) -> list[UUID]: ...
 

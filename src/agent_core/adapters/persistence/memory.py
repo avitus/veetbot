@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -69,6 +69,21 @@ MEMORY_ADAPTER_GAPS = frozenset(
         "concurrent_idempotency_deduplication",
     }
 )
+
+
+def _memory_formation_ready(event: EventEnvelope, ready_at: datetime) -> bool:
+    raw_not_before = event.payload.get("not_before")
+    if raw_not_before is None:
+        return event.created_at <= ready_at
+    if not isinstance(raw_not_before, str):
+        return False
+    try:
+        not_before = datetime.fromisoformat(raw_not_before)
+    except ValueError:
+        return False
+    if not_before.utcoffset() is None:
+        return False
+    return not_before <= ready_at
 
 
 class InMemoryAgentRepository:
@@ -1239,32 +1254,33 @@ class InMemoryMaintenanceRepository:
         principal: Principal,
         *,
         idle_before: datetime,
+        ready_at: datetime,
         limit: int,
     ) -> list[UUID]:
         if limit <= 0:
             return []
         if self._sessions is None or self._events is None or self._memories is None:
             return []
-        sessions: list[Session] = []
+        pending: deque[UUID] = deque(maxlen=limit)
         cursor: SessionCursor | None = None
         while True:
             page = await self._sessions.list(principal, limit=256, cursor=cursor)
-            sessions.extend(page)
+            for session in page:
+                if session.updated_at > idle_before:
+                    continue
+                watermark = await self._memories.consolidation_watermark(session.id, principal)
+                events = await self._events.list_after(session.id, watermark, principal)
+                if any(
+                    event.event_type == "memory.formation.requested"
+                    and _memory_formation_ready(event, ready_at)
+                    for event in events
+                ):
+                    pending.append(session.id)
             if len(page) < 256:
                 break
             last = page[-1]
             cursor = SessionCursor(updated_at=last.updated_at, id=last.id)
-        pending: list[UUID] = []
-        for session in reversed(sessions):
-            if session.updated_at > idle_before:
-                continue
-            watermark = await self._memories.consolidation_watermark(session.id, principal)
-            events = await self._events.list_after(session.id, watermark, principal)
-            if any(event.event_type == "memory.formation.requested" for event in events):
-                pending.append(session.id)
-                if len(pending) >= limit:
-                    break
-        return pending
+        return list(reversed(pending))
 
     async def acquire_memory_session(self, principal: Principal, session_id: UUID) -> bool:
         key = (principal.tenant_id, principal.principal_id, session_id)

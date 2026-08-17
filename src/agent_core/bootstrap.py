@@ -802,10 +802,12 @@ async def _compose(
             return len(await memory_service.expire())
 
         async def sweep_memory_consolidation() -> int:
+            ready_at = clock.now()
             async with uow_factory() as uow:
                 sessions = await uow.maintenance.pending_memory_sessions(
                     principal,
-                    idle_before=clock.now() - timedelta(seconds=SESSION_IDLE_SECONDS),
+                    idle_before=ready_at - timedelta(seconds=SESSION_IDLE_SECONDS),
+                    ready_at=ready_at,
                     limit=100,
                 )
             completed = 0

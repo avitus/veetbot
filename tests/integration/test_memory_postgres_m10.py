@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -15,8 +15,9 @@ from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.persistence.repositories import PostgresMaintenanceRepository
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
-from agent_core.domain.events import EventEnvelope
-from agent_core.domain.memory import MemoryCandidate
+from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.memory import BeliefType, MemoryCandidate
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
@@ -65,17 +66,37 @@ async def test_postgres_terminal_flag_drives_idle_memory_consolidation(tmp_path:
         run = await app.runs.get(run_id)
         async with app.uow_factory() as uow:
             events = await uow.events.list_after(run.session_id, 0, app.principal)
+            formation_event = next(
+                event for event in events if event.event_type == "memory.formation.requested"
+            )
+            not_before = datetime.fromisoformat(cast(str, formation_event.payload["not_before"]))
             assert (
                 await uow.maintenance.pending_memory_sessions(
                     app.principal,
-                    idle_before=NOW,
-                    limit=0,
+                    idle_before=formation_event.created_at - timedelta(microseconds=1),
+                    ready_at=not_before,
+                    limit=10,
                 )
                 == []
             )
+            assert (
+                await uow.maintenance.pending_memory_sessions(
+                    app.principal,
+                    idle_before=formation_event.created_at,
+                    ready_at=not_before - timedelta(microseconds=1),
+                    limit=10,
+                )
+                == []
+            )
+            assert await uow.maintenance.pending_memory_sessions(
+                app.principal,
+                idle_before=formation_event.created_at,
+                ready_at=not_before,
+                limit=10,
+            ) == [run.session_id]
         assert sum(event.event_type == "memory.formation.requested" for event in events) == 1
 
-        clock.advance(timedelta(seconds=30))
+        clock.advance(not_before - clock.now())
         maintenance = cast(MaintenanceWorker, app.maintenance_factory())
         await maintenance.run_once()
         memories = await app.memory.list_memories()
@@ -144,3 +165,69 @@ async def test_postgres_concurrent_consolidators_form_each_candidate_once(
 
     assert [memory.subject for memory in memories] == ["Apple Watch"]
     assert sum(result.run.committed for result in results) == 1
+
+
+async def test_postgres_failed_stale_supersede_rolls_back_its_replacement(
+    tmp_path: Path,
+) -> None:
+    settings = replace(database_settings(), artifact_root=tmp_path / "artifacts")
+    async with build(settings=settings, storage="postgres") as app:
+        session_id = await app.sessions.create()
+        async with app.uow_factory() as uow:
+            first_source = await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=app.principal.principal_id,
+                    payload={"content": "I prefer concise answers."},
+                )
+            )
+        current = await app.memory.remember(
+            session_id=session_id,
+            run_id=None,
+            statement="User prefers concise answers.",
+            subject="answer style",
+            scope="general",
+            belief_type=BeliefType.PREFERENCE,
+            source_event_ids=[first_source.sequence],
+        )
+        async with app.uow_factory() as uow:
+            second_source = await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=None,
+                    event_type="user.message.created",
+                    actor_type="principal",
+                    actor_id=app.principal.principal_id,
+                    payload={"content": "I prefer detailed answers."},
+                )
+            )
+        replacement = await app.memory.remember(
+            session_id=session_id,
+            run_id=None,
+            statement="User prefers detailed answers.",
+            subject="answer style",
+            scope="general",
+            belief_type=BeliefType.PREFERENCE,
+            source_event_ids=[second_source.sequence],
+        )
+
+        orphan_id = uuid4()
+        async with app.uow_factory() as uow:
+            stale = await uow.memories.get(current.id, app.principal)
+            orphan = replacement.model_copy(
+                update={
+                    "id": orphan_id,
+                    "statement": "User prefers medium-length answers.",
+                    "formation_run_id": uuid4(),
+                    "store_position": await uow.memories.next_position(),
+                }
+            )
+            with pytest.raises(ConflictError, match="already inactive"):
+                await uow.memories.supersede(stale, orphan)
+
+        async with app.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.memories.get(orphan_id, app.principal)

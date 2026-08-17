@@ -297,6 +297,41 @@ async def test_inferred_candidates_cannot_claim_explicit_user_confidence() -> No
     assert result.beliefs[0].status is MemoryStatus.PROVISIONAL
 
 
+async def test_automatic_candidates_preserve_temporal_hints() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "I work at Acme Labs.")
+    valid_from = NOW - timedelta(days=30)
+    expires_at = NOW + timedelta(days=365)
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        subject="employment",
+        statement="User works at Acme Labs.",
+        source_event_ids=[source],
+        model_confidence=0.8,
+        proposed_scope="project-a",
+        proposed_portability=Portability.PORTABLE,
+        sensitivity_guess=Sensitivity.INTERNAL,
+        valid_from=valid_from,
+        expires_hint=expires_at,
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(5_750, 6_000)),
+        principal(),
+        extractor=_ScriptedCandidateExtractor([candidate]),
+    )
+
+    result = await service.run(
+        trigger="session_idle",
+        scope="project-a",
+        session_id=SESSION_ID,
+    )
+
+    assert result.beliefs[0].valid_from == valid_from
+    assert result.beliefs[0].expires_at == expires_at
+
+
 async def test_consolidation_audit_measures_extraction_and_commit_duration() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     await user_event(factory, "I own an Apple Watch.")
@@ -332,6 +367,25 @@ async def test_negated_possessive_emits_only_a_retraction_candidate() -> None:
         (candidate.subject, candidate.polarity, candidate.source_event_ids)
         for candidate in candidates
     ] == [("Apple Watch", Polarity.RETRACT, [source])]
+
+
+async def test_plural_possessive_retraction_never_reasserts_the_trailing_entity() -> None:
+    _clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "I no longer have my Apple Watch and my BMW X3.")
+
+    candidates = await DeterministicCandidateExtractor().extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert {
+        (candidate.subject, candidate.polarity, tuple(candidate.source_event_ids))
+        for candidate in candidates
+    } == {
+        ("Apple Watch", Polarity.RETRACT, (source,)),
+        ("BMW X3", Polarity.RETRACT, (source,)),
+    }
 
 
 async def test_unrelated_unclassified_preferences_do_not_share_a_conflict_key() -> None:
@@ -390,6 +444,7 @@ async def test_old_pending_in_memory_session_is_not_starved_by_newer_sessions() 
             await uow.maintenance.pending_memory_sessions(
                 principal(),
                 idle_before=fairness_cutoff,
+                ready_at=fairness_cutoff,
                 limit=0,
             )
             == []
@@ -397,15 +452,49 @@ async def test_old_pending_in_memory_session_is_not_starved_by_newer_sessions() 
         assert await uow.maintenance.pending_memory_sessions(
             principal(),
             idle_before=fairness_cutoff,
+            ready_at=fairness_cutoff,
             limit=2,
         ) == [SESSION_ID, UUID(int=7_000)]
         pending = await uow.maintenance.pending_memory_sessions(
             principal(),
             idle_before=fairness_cutoff,
+            ready_at=fairness_cutoff,
             limit=1,
         )
 
     assert pending == [SESSION_ID]
+
+
+async def test_formation_flag_not_before_is_authoritative() -> None:
+    _clock, factory, _service, _retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="memory.formation.requested",
+                actor_type="runtime",
+                payload={"not_before": (NOW + timedelta(seconds=60)).isoformat()},
+                derivation_key="future-formation-request",
+            )
+        )
+
+    async with factory() as uow:
+        assert (
+            await uow.maintenance.pending_memory_sessions(
+                principal(),
+                idle_before=NOW + timedelta(seconds=30),
+                ready_at=NOW + timedelta(seconds=30),
+                limit=10,
+            )
+            == []
+        )
+        assert await uow.maintenance.pending_memory_sessions(
+            principal(),
+            idle_before=NOW + timedelta(seconds=30),
+            ready_at=NOW + timedelta(seconds=60),
+            limit=10,
+        ) == [SESSION_ID]
 
 
 async def test_same_terminal_run_enqueues_only_one_formation_flag(tmp_path: Path) -> None:

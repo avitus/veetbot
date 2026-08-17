@@ -49,13 +49,13 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Idle lifecycle** — a terminal run enqueues one idempotent formation flag, returns without extracting, and maintenance consolidates the session only once the idle boundary has elapsed."
+  statement: "**Idle lifecycle** — a terminal run enqueues one idempotent formation flag, returns without extracting, and maintenance consolidates the session only once both the session-idle boundary and the flag's persisted `not_before` have elapsed."
   check: tests/gates/test_memory_m10.py::test_terminal_run_is_flagged_then_consolidated_after_idle
 - id: gate.memory.formation_bounded
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Bounded automatic formation** — a pathological utterance cannot commit more than twelve candidates in one consolidation and a secret-shaped candidate is still rejected."
+  statement: "**Bounded automatic formation** — a pathological utterance cannot commit more than twelve candidates in one consolidation, a secret-shaped candidate is still rejected, and the consolidation audit accounts for extractor overproduction rather than silently truncating it."
   check: tests/gates/test_memory_m10.py::test_automatic_formation_caps_candidates_and_rejects_secrets
 - id: gate.memory.correction_isolated
   milestone: 10

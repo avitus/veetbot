@@ -14,7 +14,10 @@ async def test_maintenance_repository_returns_bounded_candidate_sets() -> None:
     assert await repository.checkpoint_runs(10) == []
     assert (
         await repository.pending_memory_sessions(
-            principal(), idle_before=NOW + timedelta(seconds=30), limit=10
+            principal(),
+            idle_before=NOW + timedelta(seconds=30),
+            ready_at=NOW + timedelta(seconds=30),
+            limit=10,
         )
         == []
     )
