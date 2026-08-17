@@ -38,3 +38,6 @@ async def test_extractor_enforces_its_candidate_volume_cap() -> None:
 
     with pytest.raises(ValueError, match="must not exceed"):
         DeterministicCandidateExtractor(maximum_candidates=MAX_EXTRACTOR_PROPOSALS + 1)
+
+    with pytest.raises(ValueError, match="must be positive"):
+        DeterministicCandidateExtractor(maximum_candidates=0)

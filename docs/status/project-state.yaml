@@ -578,7 +578,7 @@ verification:
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-17T19:21:28Z
+    recorded_at: 2026-08-17T19:37:34Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -597,13 +597,14 @@ verification:
           audit reconciliation. The latest full review added red regressions for
           temporal-hint preservation, coordinated possessive retractions, the
           persisted formation deadline, and the formation-scan index. After the
-          corresponding implementation steps, all 26 Milestone 10 memory gate
-          tests pass.
+          corresponding implementation steps, the next full review exposed a
+          duplicate possessive proposal; its red audit-reconciliation regression
+          now passes. All 27 Milestone 10 memory gate tests pass.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 341 source and test
-          files, 425 static tests, 167 contracts, deployment-script checks,
+          files, 426 static tests, 167 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass. The gate
           registry contains 177 entries and retains 166 as the verified ceiling
           through Milestone 9.
@@ -926,5 +927,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-17T17:00:00Z
+last_updated: 2026-08-17T19:37:34Z
 last_reviewed_commit: c7fd4a2

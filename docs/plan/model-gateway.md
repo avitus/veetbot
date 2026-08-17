@@ -765,7 +765,7 @@ This section is that shape.
 ### Where a profile lives, and the two files it is not
 
 The routing section above says the registry is a YAML file per provider
-profile. `bootstrap-and-composition.md:359-360` places `models/policies.yaml`
+profile. `bootstrap-and-composition.md:360-361` places `models/policies.yaml`
 ("model_policies and provider profiles") and `models/catalog.yaml`
 ("aliases, limits, context windows, prices") inside the package. Read
 together those describe two layouts, and the difference is not cosmetic: one
@@ -786,7 +786,7 @@ src/agent_core/models/
 `policies.yaml` keeps `model_policies` unchanged and satisfies its "and
 provider profiles" half with the list of profile names this deployment
 loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
-the four things `bootstrap-and-composition.md:360` names it for and becomes
+the four things `bootstrap-and-composition.md:361` names it for and becomes
 the target of Section 10.5's fourth declaration, the model-catalog import,
 rather than a second place models are defined. A profile either declares a
 model inline or imports a catalog entry for it, never both.
@@ -931,7 +931,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1077-1114` is
+family of the secret scanner at `bootstrap-and-composition.md:1078-1115` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1885,7 +1885,7 @@ These are decisions taken to keep the plan moving. Each is recorded in
    the two declarations and cannot edit the plan's. The reconciliation table
    makes the divergence readable; it does not make it go away.
 7. Is one file per provider profile right, given that
-   `bootstrap-and-composition.md:359` describes a single `models/policies.yaml`
+   `bootstrap-and-composition.md:360` describes a single `models/policies.yaml`
    holding both policies and profiles? One file per profile is what ADR-0012's
    "without editing core" requires of an overlay, and merging the two back is
    a compatible change in the other direction.

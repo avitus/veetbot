@@ -246,16 +246,17 @@ for; `ArtifactWriter` says as much itself, calling itself deliberately
 narrower than `ArtifactStore`. `WorkspaceHandle` is what
 `ExecutionEnvironment` returns.
 
-Three rows still name no type: `ports/telemetry.py`, which is in the
-Section 5 tree while no document declares a telemetry Protocol; the
-formation half of the memory row, which is prose in
-[memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
-rather than a `Protocol` block; and the MCP row, whose adapter imports
-`ports` and `domain` and may well implement `Tool` and `ToolRegistry`
-rather than add a third. This is worth naming here and not only there,
-because [evaluation-harness.md](evaluation-harness.md) gates on a walk of
-`agent_core/ports/` that demands one contract module per Protocol, and a
-port that exists as a sentence has neither a Protocol nor a contract.
+Two rows still name no type: `ports/telemetry.py`, which is in the
+Section 5 tree while no document declares a telemetry Protocol; and the MCP
+row, whose adapter imports `ports` and `domain` and may well implement `Tool`
+and `ToolRegistry` rather than add a third. This is worth naming here and not
+only there, because [evaluation-harness.md](evaluation-harness.md) gates on a
+walk of `agent_core/ports/` that demands one contract module per Protocol, and
+a port that exists as a sentence has neither a Protocol nor a contract. The
+formation row is no longer such a gap: all five memory-formation ports are
+declared as Protocols, and `MemoryStore`, `MemoryConsolidator`,
+`MemoryCandidateExtractor`, `Salience`, and `ConflictResolver` each have a
+dedicated contract suite under `tests/contract/`.
 
 ### The layout additions in full
 

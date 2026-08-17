@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 from uuid import UUID
@@ -138,6 +138,19 @@ async def test_terminal_run_is_flagged_then_consolidated_after_idle(tmp_path: Pa
         run = await app.runs.get(run_id)
         async with app.uow_factory() as uow:
             before_idle = await uow.events.list_after(run.session_id, 0, app.principal)
+            formation_event = next(
+                event for event in before_idle if event.event_type == "memory.formation.requested"
+            )
+            not_before = datetime.fromisoformat(cast(str, formation_event.payload["not_before"]))
+            assert (
+                await uow.maintenance.pending_memory_sessions(
+                    app.principal,
+                    idle_before=not_before + timedelta(seconds=30),
+                    ready_at=not_before - timedelta(microseconds=1),
+                    limit=10,
+                )
+                == []
+            )
 
         assert [
             event.event_type
@@ -174,6 +187,19 @@ async def test_automatic_formation_caps_candidates_and_rejects_secrets() -> None
     assert all("do-not-store" not in belief.statement for belief in result.beliefs)
     assert result.run.candidates_proposed == 30
     assert result.run.rejected == 19
+
+    more_owned = " and ".join(f"a Gadget-{index}" for index in range(1, 14))
+    await user_event(factory, f"I have {more_owned}.")
+    capped = await service.run(
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert len(capped.beliefs) == 12
+    assert capped.run.candidates_proposed == 13
+    assert capped.run.committed == 12
+    assert capped.run.rejected == 1
 
 
 async def test_service_enforces_candidate_cap_against_an_overproducing_extractor() -> None:
@@ -386,6 +412,25 @@ async def test_plural_possessive_retraction_never_reasserts_the_trailing_entity(
         ("Apple Watch", Polarity.RETRACT, (source,)),
         ("BMW X3", Polarity.RETRACT, (source,)),
     }
+
+
+async def test_possessive_ownership_does_not_emit_a_duplicate_candidate() -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    source = await user_event(factory, "I own my Ferrari.")
+
+    result = await service.run(
+        trigger="session_idle",
+        scope="project-a",
+        session_id=SESSION_ID,
+    )
+
+    assert [
+        (belief.subject, belief.statement, belief.source_event_ids) for belief in result.beliefs
+    ] == [("Ferrari", "User owns a Ferrari.", [source])]
+    assert result.run.candidates_proposed == 1
+    assert result.run.committed == 1
+    assert result.run.superseded == 0
+    assert result.run.rejected == 0
 
 
 async def test_unrelated_unclassified_preferences_do_not_share_a_conflict_key() -> None:

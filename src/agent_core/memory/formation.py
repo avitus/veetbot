@@ -171,6 +171,7 @@ class DeterministicCandidateExtractor:
     def _from_text(self, sequence: int, text: str, scope: str) -> list[MemoryCandidate]:
         proposed: list[MemoryCandidate] = []
         retracted_subjects: set[str] = set()
+        proposed_subjects: set[str] = set()
 
         def add(
             *,
@@ -182,6 +183,7 @@ class DeterministicCandidateExtractor:
             confidence: float = 0.72,
             polarity: Polarity = Polarity.ASSERT,
         ) -> None:
+            proposed_subjects.add(subject.casefold())
             proposed.append(
                 MemoryCandidate(
                     belief_type=belief_type,
@@ -328,7 +330,8 @@ class DeterministicCandidateExtractor:
             if cleaned is None:
                 continue
             subject, rendered = cleaned
-            if subject.casefold() in retracted_subjects:
+            normalized_subject = subject.casefold()
+            if normalized_subject in retracted_subjects or normalized_subject in proposed_subjects:
                 continue
             add(
                 subject=subject,

@@ -1195,14 +1195,14 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     that nothing cancels before Milestone 5, drop the handler and the
     deadline check and points 1 through 3 become unreachable until
     then. Reversal cost: low, one handler and one predicate.
-2.  **Whether the original Milestone 9 memory formation set had five
-    gates or seven.** The harness table said seven and this document
-    says five, on the strength of
-    the spec calling four of its eight bullets metrics. If the intent
-    was that formation precision and rejection rate block the
-    milestone, they are gates and need thresholds, which no document
-    states. Reversal cost: low now, high after the harness is written
-    against one reading.
+2.  **The original Milestone 9 memory-formation count is reconciled.**
+    The old harness table said seven, but the formation specification
+    classifies four of its original bullets as tracked metrics and declares
+    four hard gates plus the trailing no-policy-regression gate. Milestone 10
+    memory maturation later added five more. The current formation census is
+    therefore ten owned gates — five at Milestone 9 and five at Milestone 10 —
+    with no unstated threshold turning formation precision or rejection rate
+    into a gate.
 3.  **Whether Milestone 8 should acquire gates of its own** —
     answered yes, by [skills.md](skills.md), which gave it ten and
     gave Milestone 10 its first six. The sentence about a skill doing something
