@@ -2,7 +2,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from agent_core.adapters.persistence.memory import InMemoryMaintenanceRepository
-from tests.contract.support import NOW, principal
+from tests.contract.support import NOW, SESSION_ID, principal
 
 
 async def test_maintenance_repository_returns_bounded_candidate_sets() -> None:
@@ -18,3 +18,15 @@ async def test_maintenance_repository_returns_bounded_candidate_sets() -> None:
         )
         == []
     )
+
+
+async def test_maintenance_repository_claims_one_consolidator_per_session() -> None:
+    repository = InMemoryMaintenanceRepository()
+    owner = principal()
+
+    assert await repository.acquire_memory_session(owner, SESSION_ID)
+    assert not await repository.acquire_memory_session(owner, SESSION_ID)
+
+    await repository.release_memory_session(owner, SESSION_ID)
+    assert await repository.acquire_memory_session(owner, SESSION_ID)
+    await repository.release_memory_session(owner, SESSION_ID)

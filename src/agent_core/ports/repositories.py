@@ -312,6 +312,10 @@ class MaintenanceRepository(Protocol):
         limit: int,
     ) -> list[UUID]: ...
 
+    async def acquire_memory_session(self, principal: Principal, session_id: UUID) -> bool: ...
+
+    async def release_memory_session(self, principal: Principal, session_id: UUID) -> None: ...
+
 
 class SessionDeletionRepository(Protocol):
     async def delete(

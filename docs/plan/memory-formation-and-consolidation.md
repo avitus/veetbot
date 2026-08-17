@@ -407,7 +407,11 @@ the deterministic fallback while preserving the model-assisted design above:
    flagged sessions after 30 seconds without committed activity and invokes
    consolidation; an explicit session close remains an immediate boundary. The
    fixed delay is part of `formation@2`, not a deployment override that can
-   silently change the policy represented by that version.
+   silently change the policy represented by that version. Selection is oldest
+   first without an arbitrary look-ahead window. After extraction, the writer
+   takes a per-principal, per-session claim; PostgreSQL holds a transaction-scoped
+   advisory lock through belief writes, the audit, and watermark advancement, so
+   concurrent workers cannot form the same prefix twice.
 3. `MemoryCandidate` becomes a domain value and `MemoryCandidateExtractor` a
    formation port. The deterministic v2 implementation emits multiple candidates
    for independently addressable ownership, preference, user-attribute,
@@ -423,8 +427,15 @@ the deterministic fallback while preserving the model-assisted design above:
    review.
 5. Candidate subjects are conflict keys, not a generic `user` bucket. Device
    entities remain separate; answer style, interface theme, indentation style,
-   and measurement units are separate preference subjects. A retraction therefore
-   supersedes the matching entity while unrelated memories survive.
+   and measurement units are separate preference subjects. Unclassified
+   preferences derive a stable topic key from the preference object instead of
+   sharing one fallback key. A retraction therefore supersedes the matching
+   entity while unrelated memories survive, and a negated possessive span cannot
+   also propose positive ownership from the same source.
+6. One consolidation audit covers the claimed event prefix and reports new
+   commits, reinforcements, supersessions, safety rejections, and extractor
+   overproduction separately. Its elapsed interval begins before extraction.
+   Automatic candidates do not create misleading nested one-candidate audits.
 
 The schema-constrained consolidation model remains the normative rich extractor.
 ADR-0045 still requires evaluation evidence before it is activated, and the model

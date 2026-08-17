@@ -10,7 +10,7 @@ title: Current Milestone
 - **Authorized milestones:** Milestones 0 through 10
 - **Project status:** Milestones 0 through 9 are complete. The repository owner
   authorized Milestone 10 on 2026-08-17 and selected memory maturation as its
-  first workstream. Milestone 10 is not complete.
+  first workstream. Milestone 10 is incomplete.
 
 Milestone 9 adds governed, provenance-linked belief formation; deterministic
 hybrid retrieval with frozen session snapshots and faithful recall traces; a

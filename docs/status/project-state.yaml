@@ -586,23 +586,26 @@ verification:
         detail: >-
           The initial red run failed all six ordinary-conversation and lifecycle
           tests, the correction/topic expansion failed its two new cases, and an
-          adversarial extractor failed both service-boundary cases. After the
-          smallest implementation steps, all 15 Milestone 10 memory gate tests
-          pass.
+          adversarial extractor failed both service-boundary cases. Review-driven
+          red tests then exposed negated possessive duplication, generic
+          preference collisions, pending-session starvation, inaccurate action
+          counters, and the missing consolidation claim. After the corresponding
+          implementation steps, all 19 Milestone 10 memory gate tests pass.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 341 source and test
-          files, the static and contract partitions, deployment-script checks,
+          files, 417 static tests, 167 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass. The gate
           registry contains 177 entries and retains 166 as the verified ceiling
           through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
-          All 98 tests passed against the Compose PostgreSQL 16 service on an
+          All 99 tests passed against the Compose PostgreSQL 16 service on an
           isolated host port, including terminal formation flags, the idle
-          boundary, consolidation watermarks, persistence, and re-composition.
+          boundary, concurrent consolidation claims, consolidation watermarks,
+          persistence, and re-composition.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-

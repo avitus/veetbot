@@ -1912,3 +1912,13 @@ class PostgresMaintenanceRepository:
             )
         ).all()
         return list(rows)
+
+    async def acquire_memory_session(self, principal: Principal, session_id: UUID) -> bool:
+        return await self._acquire(
+            "maintenance.memory_formation:"
+            f"{principal.tenant_id}:{principal.principal_id}:{session_id}"
+        )
+
+    async def release_memory_session(self, principal: Principal, session_id: UUID) -> None:
+        # pg_try_advisory_xact_lock is released by the surrounding transaction.
+        del principal, session_id

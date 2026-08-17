@@ -31,7 +31,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    run. Waiting runs do not enqueue it.
 2. **Consolidate at the idle boundary.** The maintenance role selects flagged
    sessions after 30 seconds without committed activity. Session close remains
-   an immediate boundary. The interactive request performs no extraction.
+   an immediate boundary. The interactive request performs no extraction. The
+   selector considers all in-memory sessions and orders PostgreSQL candidates
+   oldest first, so newer unflagged sessions cannot starve older work.
 3. **Add structured candidate and extractor boundaries.** `MemoryCandidate` is a
    frozen proposal value carrying type, subject, statement, polarity, source ids,
    confidence, scope, portability, sensitivity, and temporal hints.
@@ -51,6 +53,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    subjects. Common preference domains use stable subjects such as answer style,
    interface theme, indentation style, and measurement units. A correction then
    supersedes only the related belief instead of every preference about the user.
+   Other preferences derive a topic key rather than falling back to `user`, and
+   a subject retracted in a source event is excluded from positive possessive
+   proposals from that same event.
 6. **Bound formation before commit.** The service consumes at most twelve
    automatic candidates even if an extractor overproduces. Existing secret,
    injection, transient-detail, portability, rejection, and conflict gates still
@@ -64,6 +69,14 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
 8. **Version the richer policy separately.** New consolidations record
    `formation@2`. Existing `formation@1` records remain valid history, and the
    explicit version boundary keeps replay and later re-derivation comparable.
+9. **Serialize each committed prefix.** Extraction stays outside a database
+   transaction. Before writing, the service takes a per-principal, per-session
+   claim and rechecks the watermark. PostgreSQL holds a transaction-scoped
+   advisory lock until the beliefs, one aggregate audit, and the watermark commit
+   atomically; the in-memory adapter provides the equivalent process-local claim.
+   Lock contention is a no-op, and a rollback leaves the prefix pending. The
+   aggregate audit owns the formation id stored by every new belief and measures
+   from before extraction through commit preparation.
 
 ## Consequences
 
@@ -74,6 +87,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
 - PostgreSQL and in-memory maintenance use the same selection contract. No new
   table or migration is required because the flag is an event and the existing
   consolidation watermark is the completion cursor.
+- Multiple maintenance workers may select the same flagged session, but only one
+  can claim and commit a given prefix. The aggregate audit distinguishes commits,
+  reinforcements, supersessions, rejections, and no-op contention.
 - The deterministic extractor is substantially broader and fully offline, but
   it is not open-ended natural-language understanding. Model-assisted extraction,
   semantic conflict resolution, graph memory, and re-derivation hints remain

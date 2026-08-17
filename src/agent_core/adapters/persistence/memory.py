@@ -1212,6 +1212,8 @@ class InMemoryMaintenanceRepository:
         self._sessions = sessions
         self._events = events
         self._memories = memories
+        self._memory_claims: set[tuple[str, str, UUID]] = set()
+        self._memory_claim_lock = asyncio.Lock()
 
     async def live_run_leases(self) -> frozenset[tuple[UUID, int]]:
         return frozenset()
@@ -1241,7 +1243,15 @@ class InMemoryMaintenanceRepository:
     ) -> list[UUID]:
         if self._sessions is None or self._events is None or self._memories is None:
             return []
-        sessions = await self._sessions.list(principal, limit=max(limit * 10, limit))
+        sessions: list[Session] = []
+        cursor: SessionCursor | None = None
+        while True:
+            page = await self._sessions.list(principal, limit=256, cursor=cursor)
+            sessions.extend(page)
+            if len(page) < 256:
+                break
+            last = page[-1]
+            cursor = SessionCursor(updated_at=last.updated_at, id=last.id)
         pending: list[UUID] = []
         for session in reversed(sessions):
             if session.updated_at > idle_before:
@@ -1253,3 +1263,16 @@ class InMemoryMaintenanceRepository:
                 if len(pending) >= limit:
                     break
         return pending
+
+    async def acquire_memory_session(self, principal: Principal, session_id: UUID) -> bool:
+        key = (principal.tenant_id, principal.principal_id, session_id)
+        async with self._memory_claim_lock:
+            if key in self._memory_claims:
+                return False
+            self._memory_claims.add(key)
+            return True
+
+    async def release_memory_session(self, principal: Principal, session_id: UUID) -> None:
+        key = (principal.tenant_id, principal.principal_id, session_id)
+        async with self._memory_claim_lock:
+            self._memory_claims.discard(key)
