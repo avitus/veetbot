@@ -305,7 +305,7 @@ joined by dots, of which the last is the action. All fifteen have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1211` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1216` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
@@ -560,6 +560,9 @@ They resolve as follows, without changing any outcome the plan states.
 - **"Allow with restrictions"** (read approved network resource) is `ALLOW`
   guarded by a predicate, with `DENY` when the predicate fails. The restriction
   was always a condition on the argument; the condition column is where it goes.
+  [web-access.md](web-access.md) supplies the first constructed predicate: a
+  `web_provider` execution target whose actual HTTPS API host is fixed by the
+  composition root. Model-authored URL fields do not satisfy the predicate.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in

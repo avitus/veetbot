@@ -125,6 +125,8 @@ from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
     InMemorySkillPackageStore,
 )
+from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
+from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
 from agent_core.application.public_services import (
@@ -157,6 +159,7 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     Settings,
+    WebProviderKind,
     load_config_document,
     load_settings,
     validate_runtime_identity,
@@ -214,6 +217,7 @@ from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import TransactionCallbackRegistrar, UnitOfWorkFactory
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
+from agent_core.ports.web import WebProvider
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
 from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
@@ -237,6 +241,8 @@ from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME, SkillLoadTool
 from agent_core.tools.skill_manage import SkillManageTool
+from agent_core.tools.web_fetch import WebFetchTool
+from agent_core.tools.web_search import WebSearchTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
@@ -542,6 +548,8 @@ async def _compose(
     mcp_scripts: Mapping[str, ScriptedMCPServer] | None,
     credential_resolver: CredentialResolver,
     mcp_server_configs: tuple[MCPServerConfig, ...],
+    web_search_provider: WebProvider | None,
+    web_fetch_provider: WebProvider | None,
 ) -> tuple[Composition, list[ModelProvider]]:
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
@@ -663,6 +671,10 @@ async def _compose(
         SandboxRunCommandTool(sandbox_manager, hard_ceiling_multiplier=hard_ceiling_multiplier)
     )
     registry.register(ArtifactExportTool())
+    if web_search_provider is not None:
+        registry.register(WebSearchTool(web_search_provider))
+    if web_fetch_provider is not None:
+        registry.register(WebFetchTool(web_fetch_provider))
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
     # an unknown capability for an existing session.
@@ -1125,6 +1137,19 @@ def _provider_adapters(settings: Settings, registry: ProviderRegistry) -> dict[s
     return providers
 
 
+def _web_provider(
+    kind: WebProviderKind,
+    credentials: CredentialResolver,
+) -> WebProvider | None:
+    if kind is WebProviderKind.DISABLED:
+        return None
+    if kind is WebProviderKind.TAVILY:
+        return TavilyWebProvider(credentials=credentials)
+    if kind is WebProviderKind.FIRECRAWL:
+        return FirecrawlWebProvider(credentials=credentials)
+    raise ConfigurationError(f"unsupported web provider {kind.value!r}")
+
+
 def _effective_model_policy(
     deployment_mode: DeploymentMode,
     requested_policy: str | None,
@@ -1160,6 +1185,8 @@ async def build(
     storage: Literal["memory", "postgres"] = "memory",
     model_policy: str | None = None,
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
+    web_search_provider_override: WebProvider | None = None,
+    web_fetch_provider_override: WebProvider | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
@@ -1248,6 +1275,34 @@ async def build(
         effective_settings.deployment_mode,
         model_policy,
     )
+    web_search_enabled = (
+        web_search_provider_override is not None
+        or effective_settings.web_search_provider is not WebProviderKind.DISABLED
+    )
+    web_fetch_enabled = (
+        web_fetch_provider_override is not None
+        or effective_settings.web_fetch_provider is not WebProviderKind.DISABLED
+    )
+    default_enabled_tools = [
+        "math.calculate",
+        "conversation.ask_user",
+        "system.current_time",
+        "workspace.read_text",
+        "workspace.write_text",
+        "workspace.list_files",
+        *([] if web_search_enabled or web_fetch_enabled else ["demo.external_write"]),
+        "sandbox.run_command",
+        "artifact.export",
+        WORKING_STATE_TOOL_NAME,
+        SKILL_LOAD_TOOL_NAME,
+        "memory.remember",
+        "memory.search",
+        "memory.recall_episodes",
+        *([] if web_search_enabled and web_fetch_enabled else ["knowledge.ingest"]),
+        "knowledge.search",
+        *(["web.search"] if web_search_enabled else []),
+        *(["web.fetch"] if web_fetch_enabled else []),
+    ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
         version=(
@@ -1258,28 +1313,7 @@ async def build(
         name="Milestone 9 Agent",
         instructions="Answer the user's request and use a declared tool when useful.",
         model_policy=effective_model_policy,
-        enabled_tools=(
-            enabled_tools
-            if enabled_tools is not None
-            else [
-                "math.calculate",
-                "conversation.ask_user",
-                "system.current_time",
-                "workspace.read_text",
-                "workspace.write_text",
-                "workspace.list_files",
-                "demo.external_write",
-                "sandbox.run_command",
-                "artifact.export",
-                WORKING_STATE_TOOL_NAME,
-                SKILL_LOAD_TOOL_NAME,
-                "memory.remember",
-                "memory.search",
-                "memory.recall_episodes",
-                "knowledge.ingest",
-                "knowledge.search",
-            ]
-        ),
+        enabled_tools=enabled_tools if enabled_tools is not None else default_enabled_tools,
         enabled_skills=list(enabled_skills or []),
         policy_profile=policy_profile,
         limits=limits
@@ -1295,6 +1329,7 @@ async def build(
         )
     engine = None
     model_providers: list[ModelProvider] = []
+    web_providers: list[WebProvider] = []
     live_events: LiveEventBroadcaster = (
         InMemoryLiveEventBroadcaster()
         if storage == "memory"
@@ -1360,6 +1395,38 @@ async def build(
                 ),
             )
         provider_adapters = _provider_adapters(effective_settings, provider_registry)
+        effective_credential_resolver = credential_resolver or MappingCredentialResolver(
+            {
+                name: secret.get_secret_value()
+                for name, secret in effective_settings.credentials.items()
+            }
+        )
+        web_search_provider = (
+            web_search_provider_override
+            if web_search_provider_override is not None
+            else _web_provider(
+                effective_settings.web_search_provider,
+                effective_credential_resolver,
+            )
+        )
+        if web_search_provider is not None:
+            web_providers.append(web_search_provider)
+        web_fetch_provider = (
+            web_fetch_provider_override
+            if web_fetch_provider_override is not None
+            else (
+                web_search_provider
+                if web_search_provider_override is None
+                and web_search_provider is not None
+                and effective_settings.web_fetch_provider is effective_settings.web_search_provider
+                else _web_provider(
+                    effective_settings.web_fetch_provider,
+                    effective_credential_resolver,
+                )
+            )
+        )
+        if web_fetch_provider is not None and web_fetch_provider is not web_search_provider:
+            web_providers.append(web_fetch_provider)
         for package, source in skill_packages:
             async with uow_factory() as uow:
                 await uow.skills.install(
@@ -1404,14 +1471,10 @@ async def build(
             skill_store=skill_store,
             mcp_clients=mcp_client_factory,
             mcp_scripts=mcp_scripts,
-            credential_resolver=credential_resolver
-            or MappingCredentialResolver(
-                {
-                    name: secret.get_secret_value()
-                    for name, secret in effective_settings.credentials.items()
-                }
-            ),
+            credential_resolver=effective_credential_resolver,
             mcp_server_configs=mcp_servers,
+            web_search_provider=web_search_provider,
+            web_fetch_provider=web_fetch_provider,
         )
         yield composition
     finally:
@@ -1439,6 +1502,14 @@ async def build(
                 logger.warning(
                     "model_provider_close_failed",
                     extra={"error_class": type(exc).__name__},
+                )
+        for web_provider in web_providers:
+            try:
+                await web_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "web_provider_close_failed",
+                    extra={"provider": web_provider.name, "error_class": type(exc).__name__},
                 )
         try:
             await live_events.close()

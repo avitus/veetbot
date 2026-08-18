@@ -987,20 +987,28 @@ number Section 17 states and this document's own heading repeats.
 
 ### Options
 
-The plan names no flags, and this document adds four, each because a command
-is otherwise unusable rather than merely less convenient:
+The plan names no flags, and this document adds five. Four make their commands
+usable; the fifth prevents a fixed local wait from classifying a slower
+successful run as unreachable:
 
 ```text
 --json           machine-readable result on stdout, on read commands
 --session <id>   reuse a session instead of creating one
 --role <role>    worker | maintenance, on agent worker
 --follow         stream events as they arrive, on agent run events
+--wait-timeout <seconds>
+                 positive terminal-state wait, on agent run; default 300
 ```
 
 `--json` is what makes the CLI scriptable and is what `agent eval run`
 consumes when a harness invokes it. `--role` is how the maintenance role gets
 an entry point at all — the plan names `agent worker` and the runtime spec
 names three roles, and one of the three would otherwise be unreachable.
+`--wait-timeout` controls only how long `agent run` waits for a terminal or
+suspended state and its persisted terminal event. Expiration keeps exit code 5
+and prints the durable run identifier; it neither cancels nor fails the run.
+The API and native clients remain asynchronous and do not inherit this local
+CLI setting.
 
 ### Exit codes
 
@@ -1010,7 +1018,7 @@ names three roles, and one of the three would otherwise be unreachable.
 2  usage error - bad arguments, unknown subcommand
 3  the run suspended on something the CLI could not supply
 4  configuration refused at startup - phase 1 failed
-5  the platform is unreachable - database or API down
+5  the platform is unreachable, or the local run wait expired
 ```
 
 Codes 4 and 5 are separated because the distinction is the only one a calling
@@ -1264,10 +1272,11 @@ the plan's text stands with an annotation rather than a replacement.
     makes the effective document harder to predict from the files. The blunt
     version is chosen for reviewability; if operators find it painful in
     practice, per-key merging is a compatible change.
-4.  **Four CLI options are added where the plan names none.** `--json`,
-    `--session`, `--role`, and `--follow`. Each is defended above, but the
-    plan's silence on flags may have been deliberate minimalism rather than
-    an omission.
+4.  **Five CLI options are added where the plan names none.** `--json`,
+    `--session`, `--role`, `--follow`, and `--wait-timeout`. Each is defended
+    above, but the plan's silence on flags may have been deliberate minimalism
+    rather than an omission. ADR-0055 records the fifth option and supersedes
+    ADR-0024's original count without changing the command roster.
 5.  **The capability-group table for contract suites is described, not
     enumerated.** Which groups exist — durability, isolation, concurrency,
     recovery — should be fixed when the first contract suite is written,

@@ -189,6 +189,28 @@ async def test_openai_tool_names_are_wire_safe_and_round_trip_to_canonical_names
     assert turn.tool_calls[0].name == "math.calculate"
 
 
+async def test_anthropic_tool_names_are_wire_safe_and_round_trip_to_canonical_names() -> None:
+    requests: list[dict[str, Any]] = []
+
+    async def source(payload: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        requests.append(payload)
+        wire_name = str(payload["tools"][0]["name"])
+        for event in anthropic_tool_events(ARGUMENTS):
+            copied = dict(event)
+            block = copied.get("content_block")
+            if isinstance(block, dict):
+                copied["content_block"] = {**block, "name": wire_name}
+            yield copied
+
+    provider = AnthropicMessagesProvider(event_source=source)
+    turn = await collect(provider, "anthropic")
+
+    wire_name = str(requests[0]["tools"][0]["name"])
+    assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}", wire_name)
+    assert wire_name != "math.calculate"
+    assert turn.tool_calls[0].name == "math.calculate"
+
+
 def test_openai_responses_omits_unsupported_temperature() -> None:
     payload = OpenAIResponsesProvider._request_payload(
         request().model_copy(update={"temperature": 0}),
@@ -245,6 +267,10 @@ async def test_call_id_round_trips_through_provider_request(
     rendered = source.requests[0]
     serialized = str(rendered)
     assert serialized.count("call-byte-1") >= 2
+    if provider_name == "anthropic":
+        continuation_name = str(rendered["messages"][1]["content"][0]["name"])
+        assert re.fullmatch(r"[A-Za-z0-9_-]{1,128}", continuation_name)
+        assert continuation_name == rendered["tools"][0]["name"]
 
 
 def test_usage_cost_is_exact_decimal_and_anthropic_reasoning_is_not_double_counted() -> None:
@@ -601,6 +627,38 @@ async def test_anthropic_usage_and_indexes_default_defensively() -> None:
     assert turn.usage.input_tokens == 0
     assert turn.usage.output_tokens == 5
     assert turn.assistant_messages[0].item_index == 0
+
+
+async def test_anthropic_disjoint_input_counters_normalize_to_total_input() -> None:
+    events = anthropic_text_events("safe")
+    events[0]["message"]["usage"] = {
+        "input_tokens": 10,
+        "cache_read_input_tokens": 20,
+        "cache_creation_input_tokens": 30,
+        "output_tokens": 1,
+    }
+    source = ScriptedRawSource([events])
+    provider = AnthropicMessagesProvider(event_source=source)
+    anthropic = resolved("anthropic").model_copy(
+        update={
+            "pricing": ModelPricing(
+                input_per_mtok=Decimal("5"),
+                cached_input_per_mtok=Decimal("0.5"),
+                cache_write_per_mtok=Decimal("6.25"),
+                output_per_mtok=Decimal("25"),
+            )
+        }
+    )
+    try:
+        turn = await collect_turn(provider.stream(request(), anthropic, ATTEMPT))
+    finally:
+        await provider.close()
+
+    assert turn.usage.input_tokens == 60
+    assert turn.usage.cached_input_tokens == 20
+    assert turn.usage.cache_write_input_tokens == 30
+    assert turn.usage.output_tokens == 2
+    assert turn.usage.cost == Decimal("0.0002975")
 
 
 async def test_anthropic_error_type_drives_retry_and_sdk_errors_are_normalized() -> None:

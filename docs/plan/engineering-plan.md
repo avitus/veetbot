@@ -1998,7 +1998,7 @@ Do not expose tracebacks through the API.
 
 ## 17. CLI contract
 
-The detailed design - each command's arguments and options, what it writes to stdout versus stderr, the reserved words after `agent run` and the `--` escape that keeps a prompt beginning with one of them runnable, the six exit codes, the milestone at which each command first works, and the application service each of the seven `agent chat` steps below calls - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024. Four options are added where this section names none, each because a command is otherwise unusable rather than merely less convenient. That document adds no command, removes none, and restates the last rule of this section as a structural check rather than a convention.
+The detailed design - each command's arguments and options, what it writes to stdout versus stderr, the reserved words after `agent run` and the `--` escape that keeps a prompt beginning with one of them runnable, the six exit codes, the milestone at which each command first works, and the application service each of the seven `agent chat` steps below calls - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md), ADR-0024, and ADR-0055. Five options are added where this section names none: four make their commands usable, while `--wait-timeout` prevents a fixed CLI deadline from misreporting a slower successful run as unreachable. Those documents add no command, remove none, and restate the last rule of this section as a structural check rather than a convention.
 
 Provide these commands:
 
@@ -2834,6 +2834,9 @@ These are separately gated extensions. The repository owner authorized Milestone
 10 on 2026-08-17, selected memory maturation as its first workstream, and
 separately authorized the self-authored-skills tranche. That authorization does
 not waive the entry conditions or acceptance gates of the other extensions.
+On 2026-08-18 the owner also authorized the independently deliverable
+public-web-access tranche specified in Section 32; it adds neither scheduling,
+new model routing, nor general-purpose subagents.
 
 A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill.manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document.
 
@@ -3505,3 +3508,47 @@ The event log already records every run in full (Section 6.8). This section adds
 - Export honors tenant scope and per-principal consent.
 - Exported trajectories can be replayed as deterministic eval cases.
 - Failed runs are captured and labeled distinctly from successful ones.
+
+## 32. Web access
+
+The platform exposes current public information through provider-neutral,
+read-only tools. The detailed mechanism is specified in
+[web-access.md](web-access.md) and ADR-0054. The repository owner authorized
+this tranche on 2026-08-18 independently of scheduling, model-routing changes,
+and general-purpose subagents.
+
+### 32.1 Capability contract
+
+- `web.search` discovers public pages and returns normalized source records.
+- `web.fetch` extracts readable content from one public HTTPS page.
+- Provider-specific request and response fields end at an adapter implementing
+  one `WebProvider` port.
+- Search and fetch providers are selected independently. Tavily search plus
+  Firecrawl fetch is the recommended deployment, but either provider may serve
+  either capability without changing the tool names.
+
+### 32.2 Security and rollout
+
+- Both capabilities are disabled by default and absent from the registry until
+  explicitly configured.
+- Provider credentials are broker-resolved at execution and never enter model
+  context, tool arguments, durable events, or results.
+- Actual worker egress is restricted to fixed HTTPS provider API endpoints.
+  A model-authored URL cannot authorize or redirect worker egress.
+- Search results and fetched page content are always
+  `EXTERNAL_UNTRUSTED`, bounded before context entry, and unable to grant
+  policy, memory, or skill-authoring authority.
+- Fetch refuses non-public and non-HTTPS destinations before it delegates the
+  request to a provider.
+
+### 32.3 Acceptance criteria
+
+- Tavily and Firecrawl pass the same search and fetch provider contract.
+- The recommended hybrid and both single-provider configurations compose
+  without changing an agent-visible tool schema.
+- A complete web tool invocation passes validation and policy, persists a
+  bounded external-untrusted result, and can be consumed by the next model
+  step.
+- Missing credentials, rate limits, transport failures, permanent provider
+  rejections, invalid output, and disallowed URLs produce stable failure codes
+  without exposing upstream diagnostics.

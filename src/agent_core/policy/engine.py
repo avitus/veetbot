@@ -5,6 +5,7 @@ from __future__ import annotations
 from agent_core.domain.agents import Principal
 from agent_core.domain.policies import (
     ActionKind,
+    IdempotencyClass,
     LoadedRuleset,
     PolicyCondition,
     PolicyDecision,
@@ -16,6 +17,8 @@ from agent_core.domain.policies import (
 )
 from agent_core.domain.runs import Run
 from agent_core.policy.hardline import hardline_matches
+
+_WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch"})
 
 _RANK = {
     PolicyDecisionType.ALLOW: PolicyDecisionRank.ALLOW,
@@ -55,9 +58,16 @@ def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) 
     if condition is PolicyCondition.PATH_INSIDE_WORKSPACE:
         return _path_inside_workspace(action)
     if condition is PolicyCondition.HOST_ON_ALLOWLIST:
-        # No authoritative network allowlist is configured in the M4 tier.
-        # Model-authored arguments can never grant their own network access.
-        return False
+        # The web-provider target is constructed only for builtins whose actual
+        # egress endpoint is fixed by the composition root. Model-authored URL
+        # arguments therefore cannot authorize direct worker egress.
+        return (
+            action.target.kind == "web_provider"
+            and action.target.network_enabled
+            and action.name in _WEB_PROVIDER_TOOLS
+            and action.side_effect is SideEffectClass.NETWORK_READ
+            and action.idempotency is IdempotencyClass.READ_ONLY
+        )
     if condition is PolicyCondition.TARGET_ISOLATED:
         return action.target.isolated
     return False

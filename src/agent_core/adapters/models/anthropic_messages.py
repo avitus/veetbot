@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -40,6 +42,28 @@ from agent_core.model.cost import price_usage
 from agent_core.model.streaming import ModelStreamAccumulator, ModelStreamError
 
 TRANSIENT_ERROR_TYPES = frozenset({"overloaded_error", "rate_limit_error", "api_error"})
+_ANTHROPIC_TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def _wire_tool_name(name: str) -> str:
+    if _ANTHROPIC_TOOL_NAME.fullmatch(name):
+        return name
+    stem = re.sub(r"[^A-Za-z0-9_-]", "_", name)[:95]
+    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:32]
+    return f"{stem}_{digest}"
+
+
+def _tool_name_maps(request: ModelRequest) -> tuple[dict[str, str], dict[str, str]]:
+    canonical_to_wire: dict[str, str] = {}
+    wire_to_canonical: dict[str, str] = {}
+    for tool in request.tools:
+        wire_name = _wire_tool_name(tool.name)
+        existing = wire_to_canonical.get(wire_name)
+        if existing is not None and existing != tool.name:
+            raise ValueError("Anthropic tool-name aliases collided")
+        canonical_to_wire[tool.name] = wire_name
+        wire_to_canonical[wire_name] = tool.name
+    return canonical_to_wire, wire_to_canonical
 
 
 class AnthropicMessagesProvider:
@@ -100,7 +124,12 @@ class AnthropicMessagesProvider:
             emitted_count = 0
             try:
                 async for event in self._translate(
-                    self._source(payload), resolved, attempt, sent=sent, dropped=dropped
+                    self._source(payload),
+                    request,
+                    resolved,
+                    attempt,
+                    sent=sent,
+                    dropped=dropped,
                 ):
                     emitted_count = event.sequence + 1
                     yield event
@@ -157,12 +186,25 @@ class AnthropicMessagesProvider:
     async def _translate(
         self,
         source: AsyncIterator[dict[str, Any]],
+        request: ModelRequest,
         resolved: ResolvedModel,
         attempt: ModelAttempt,
         *,
         sent: int,
         dropped: int,
     ) -> AsyncIterator[ModelEvent]:
+        try:
+            _, wire_to_canonical = _tool_name_maps(request)
+        except ValueError:
+            yield failed_event(
+                attempt=attempt,
+                provider=self.name,
+                model=resolved.model,
+                sequence=0,
+                category="protocol",
+                detail="Anthropic tool-name aliases collided",
+            )
+            return
         sequence = 0
         accumulator = ModelStreamAccumulator()
         block_types: dict[int, str] = {}
@@ -218,7 +260,8 @@ class AnthropicMessagesProvider:
                 block_types[index] = block_type
                 if block_type == "tool_use":
                     call_id = str(block.get("id", ""))
-                    name = str(block.get("name", ""))
+                    provider_name = str(block.get("name", ""))
+                    name = wire_to_canonical.get(provider_name, provider_name)
                     tool_identity[index] = (call_id, name)
                     tool_event = ToolCallDeltaEvent(
                         attempt_id=attempt.attempt_id,
@@ -416,7 +459,7 @@ class AnthropicMessagesProvider:
         output_tokens: int,
     ) -> ModelUsage:
         normalized = ModelUsage(
-            input_tokens=input_tokens,
+            input_tokens=input_tokens + cached_tokens + cache_write_tokens,
             cached_input_tokens=cached_tokens,
             cache_write_input_tokens=cache_write_tokens,
             output_tokens=output_tokens,
@@ -433,12 +476,17 @@ class AnthropicMessagesProvider:
         from agent_core.model.streaming import validate_conversation_pairing
 
         validate_conversation_pairing(request.conversation)
+        canonical_to_wire, _ = _tool_name_maps(request)
         hints = [] if request.cache_hints is None else request.cache_hints.breakpoints
         sent = min(len(hints), resolved.limits.max_cache_breakpoints)
         dropped = len(hints) - sent
         system: list[dict[str, Any]] = []
         messages: list[dict[str, Any]] = []
-        tools = [tool_definition(tool, anthropic=True) for tool in request.tools]
+        tools: list[dict[str, Any]] = []
+        for tool in request.tools:
+            definition = tool_definition(tool, anthropic=True)
+            definition["name"] = canonical_to_wire[tool.name]
+            tools.append(definition)
         for item in request.conversation:
             if isinstance(item, SystemMessage):
                 system.append({"type": "text", "text": text_content(item.content)})
@@ -461,7 +509,7 @@ class AnthropicMessagesProvider:
                     {
                         "type": "tool_use",
                         "id": item.call_id,
-                        "name": item.name,
+                        "name": canonical_to_wire.get(item.name, _wire_tool_name(item.name)),
                         "input": item.arguments,
                     },
                 )

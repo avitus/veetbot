@@ -3,7 +3,7 @@
 This repository implements the provider-neutral agent platform defined by the
 canonical [engineering plan](docs/plan/engineering-plan.md). Work is strictly
 milestone-gated: Milestones 0 through 9 are complete, and Milestone 10 is in
-progress through two separately authorized workstreams.
+progress through three separately authorized workstreams.
 
 ## Features
 
@@ -31,6 +31,9 @@ progress through two separately authorized workstreams.
 - **Long-term memory and knowledge** — governed memory formation with
   provenance and corrections, hybrid recall with an auditable trace, and
   knowledge-document ingestion with cited passage retrieval.
+- **Provider-neutral web access** — independently selectable Tavily and
+  Firecrawl adapters behind stable `web.search` and `web.fetch` tools, with a
+  recommended Tavily-search/Firecrawl-fetch deployment.
 - **Governed trajectory export** — consent-gated, redacted, and verified
   before any artifact is committed.
 - **Evaluation harness** — deterministic evaluation cases, a 177-entry gate
@@ -42,8 +45,8 @@ progress through two separately authorized workstreams.
 
 ### In progress (Milestone 10)
 
-Two separately authorized workstreams are underway. Both stay behind
-default-off rollout controls until their evidence thresholds pass:
+Three separately authorized workstreams are underway. Optional capabilities
+stay behind default-off controls:
 
 - **Automatic memory formation** — post-run extraction and consolidation of
   durable memories from ordinary conversations, with audited caps, conflict
@@ -51,6 +54,8 @@ default-off rollout controls until their evidence thresholds pass:
 - **Self-authored skills** — the agent creating and revising its own skills
   through `skill.manage` behind diff-carrying approvals, with an optional
   confined background-review child run.
+- **Public-web access** — read-only search and page extraction through
+  independently configured providers; every result remains external-untrusted.
 
 ### Planned
 
@@ -288,6 +293,20 @@ worker to remove expired metadata and bytes. Exported JSON excludes reasoning,
 provider metadata, usage, prices, precise timestamps, and internal execution
 identifiers; mandatory secret rules are applied and then verified before any
 artifact is committed.
+
+Public-web access is also disabled by default. The recommended provider split
+is enabled with:
+
+```bash
+WEB_SEARCH_PROVIDER=tavily
+WEB_FETCH_PROVIDER=firecrawl
+TAVILY_API_KEY=...
+FIRECRAWL_API_KEY=...
+```
+
+Either selector may instead name `firecrawl`, `tavily`, or `disabled`. Provider
+keys are resolved by the credential broker at call time and are never exposed
+to the model.
 
 ## Workflow availability
 

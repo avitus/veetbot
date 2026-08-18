@@ -41,6 +41,11 @@ TOOL_MESSAGES: dict[str, str] = {
     "tool.server_error": "The tool server reported that the call failed.",
     "tool.auth_failed": "The tool server rejected its configured credential.",
     "tool.auth_unsupported": "The tool server requires an unsupported authorization flow.",
+    "tool.web.auth_failed": "The configured web provider rejected its credential.",
+    "tool.web.provider_unavailable": "The configured web provider is temporarily unavailable.",
+    "tool.web.provider_rejected": "The configured web provider rejected this request.",
+    "tool.web.output_invalid": "The web provider returned data outside its declared contract.",
+    "tool.web.url_disallowed": "Only public HTTPS page URLs may be fetched.",
     "policy.scope.missing": "Not performed. The principal lacks a required scope.",
     "policy.milestone1.non_pure": (
         "Not performed. This milestone authorizes only side-effect-free tools."

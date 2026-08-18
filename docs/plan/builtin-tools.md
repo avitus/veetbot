@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Ten more model-callable tools are declared at build time by other
+Twelve more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -143,9 +143,11 @@ memory.search                 capability  memory-retrieval
 memory.recall_episodes        capability  memory-retrieval
 knowledge.ingest              capability  knowledge-documents
 knowledge.search              capability  knowledge-documents
+web.search                    capability  web-access
+web.fetch                     capability  web-access
 ```
 
-Eighteen model-callable tools in total, and this document's roster is
+Twenty model-callable tools in total, and this document's roster is
 eight of them. The rule that keeps both numbers right is
 [knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
 here because a reader who finds it only there has already been
@@ -158,8 +160,9 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other ten, only `skill.manage` is fully
-classified, in [skills.md](skills.md), which gives it six fields;
+nothing else.** Of the other twelve, `skill.manage`, `web.search`, and
+`web.fetch` are fully classified in their subject specifications;
+`skill.manage` is in [skills.md](skills.md), which gives it six fields;
 `skill.load` carries three. The three remaining control tools inherit
 `side_effect: NONE` and `target_kind: in_process` from the
 registration constraint on their kind and declare nothing else. Of the
@@ -174,11 +177,11 @@ with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
 roster.** Its subject is the checked-in builtin specs, which at freeze
-is all eighteen. Step 3, domain membership, already passes for every
+is all twenty. Step 3, domain membership, already passes for every
 one of them: [tool-system.md](tool-system.md)'s partition table lists
 `delegate`, `conversation`, `context`, `skill`, and `memory` as
-builtin domains registered at build time, and `knowledge` beside them.
-It is step 6 that has nothing to read for eight of the eighteen.
+builtin domains registered at build time, with `knowledge` and `web` beside
+them. It is step 6 that has nothing to read for eight of the twenty.
 
 ### Why `artifact.export` is Milestone 6
 
@@ -1597,9 +1600,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; eighteen model-callable tools are
-    declared at build time across the corpus, and ten of them belong
-    to other specifications. Resolved by naming those ten here,
+    is what this document designs; twenty model-callable tools are
+    declared at build time across the corpus, and twelve of them belong
+    to other specifications. Resolved by naming those twelve here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not
