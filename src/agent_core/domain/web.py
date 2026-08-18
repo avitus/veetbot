@@ -29,6 +29,8 @@ def _normalized_public_hostname(value: str) -> str:
         or "." not in candidate
     ):
         raise ValueError("private or single-label hostnames are not allowed")
+    if candidate.rsplit(".", 1)[1].isdigit():
+        raise ValueError("numeric top-level labels are not public-web hostnames")
     try:
         ascii_hostname = candidate.encode("idna").decode("ascii")
     except UnicodeError as exc:

@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from agent_core.adapters.credentials import MappingCredentialResolver
+from agent_core.adapters.web.common import MAXIMUM_RESPONSE_BYTES
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.domain.web import WebProviderError, WebRecency, WebSearchRequest
@@ -192,6 +193,45 @@ async def test_web_provider_never_exposes_upstream_error_text(
     assert upstream_diagnostic not in str(raised.value)
     assert raised.value.reason_code == "tool.web.provider_unavailable"
     assert raised.value.retryable is True
+
+
+@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+async def test_web_provider_rejected_credential_is_a_stable_auth_failure(
+    provider_name: str,
+    factory: ProviderFactory,
+) -> None:
+    del provider_name
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(401, text="invalid api key for account 12345")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(WebProviderError) as raised:
+            await factory(client).search(WebSearchRequest(query="Ada Lovelace"))
+
+    assert raised.value.reason_code == "tool.web.auth_failed"
+    assert raised.value.retryable is False
+
+
+@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+async def test_web_provider_bounds_oversized_responses(
+    provider_name: str,
+    factory: ProviderFactory,
+) -> None:
+    del provider_name
+    oversized = b'{"padding":"' + b"a" * (MAXIMUM_RESPONSE_BYTES + 1) + b'"}'
+
+    async def wire(request: httpx.Request) -> httpx.Response:
+        del request
+        return httpx.Response(200, content=oversized)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(WebProviderError) as raised:
+            await factory(client).search(WebSearchRequest(query="Ada Lovelace"))
+
+    assert raised.value.reason_code == "tool.web.output_invalid"
+    assert raised.value.retryable is False
 
 
 @pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())

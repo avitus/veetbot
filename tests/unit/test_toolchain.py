@@ -1,10 +1,14 @@
 """Repository-foundation smoke tests."""
 
+import asyncio
 import importlib
 import socket
 import subprocess
 import tomllib
+from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -109,8 +113,9 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "PGSSLMODE=disable" in environment
     assert "WEB_SEARCH_PROVIDER=disabled" in environment
     assert "WEB_FETCH_PROVIDER=disabled" in environment
-    assert "TAVILY_API_KEY=" in environment
-    assert "FIRECRAWL_API_KEY=" in environment
+    template_lines = environment.splitlines()
+    assert "TAVILY_API_KEY=" in template_lines
+    assert "FIRECRAWL_API_KEY=" in template_lines
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
         for line in environment.splitlines()
@@ -543,6 +548,69 @@ def test_run_wait_timeout_is_configurable_and_positive(
     assert invalid.exit_code == 2
     assert "--wait-timeout must be greater than zero" in invalid.stderr
     assert seen == [90.5, 300.0]
+
+
+async def _async_value(value: Any) -> Any:
+    return value
+
+
+async def test_submit_uses_one_total_timeout_for_status_and_event_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_id = UUID("00000000-0000-0000-0000-000000000041")
+    observed_timeouts: list[float] = []
+
+    class RecordingTimeout:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    def timeout(seconds: float) -> RecordingTimeout:
+        observed_timeouts.append(seconds)
+        return RecordingTimeout()
+
+    async def stream() -> AsyncIterator[PersistedStreamFrame]:
+        yield PersistedStreamFrame(sequence=1, event="run.completed", data={})
+
+    services = SimpleNamespace(
+        runs=SimpleNamespace(
+            submit=lambda *_args: _async_value(SimpleNamespace(run_id=run_id)),
+            get=lambda *_args: _async_value(SimpleNamespace(id=run_id, status=RunStatus.COMPLETED)),
+            stream=lambda *_args: stream(),
+        )
+    )
+    composition = SimpleNamespace(
+        services=services,
+        principal=object(),
+        runs=SimpleNamespace(interrupt=lambda: None),
+    )
+
+    class BuildContext:
+        async def __aenter__(self) -> Any:
+            return composition
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    def fake_build(**_kwargs: object) -> BuildContext:
+        return BuildContext()
+
+    monkeypatch.setattr(cli_main, "build", fake_build)
+    monkeypatch.setattr(asyncio, "timeout", timeout)
+
+    completed, events = await cli_main._submit(
+        "one total budget",
+        UUID("00000000-0000-0000-0000-000000000020"),
+        None,
+        None,
+        wait_timeout_seconds=12.5,
+    )
+
+    assert completed.status is RunStatus.COMPLETED
+    assert [event.event for event in events] == ["run.completed"]
+    assert observed_timeouts == [12.5]
 
 
 def test_alembic_config_accepts_percent_encoded_database_url() -> None:

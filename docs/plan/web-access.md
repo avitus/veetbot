@@ -47,8 +47,10 @@ literals and private-shaped hostnames are rejected.
 `web.fetch` accepts one URL. It requires HTTPS, forbids credentials and
 non-standard ports in the URL, and rejects IP literals, localhost,
 single-label names, and the `.internal`, `.local`, `.localhost`, `.home`, and
-`.lan` suffixes before a provider call. The remote provider remains responsible
-for DNS-resolution and redirect defenses inside its own fetch boundary.
+`.lan` suffixes before a provider call. An all-numeric final DNS label is also
+rejected so abbreviated IPv4 forms cannot pass as hostnames. The remote provider
+remains responsible for DNS-resolution and redirect defenses inside its own
+fetch boundary.
 
 ## Provider mappings
 

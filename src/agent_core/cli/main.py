@@ -202,6 +202,7 @@ async def _submit(
                 None,
             )
             run_id = submitted.run_id
+            events: list[PersistedStreamFrame] = []
             try:
                 async with asyncio.timeout(wait_timeout_seconds):
                     while True:
@@ -215,24 +216,20 @@ async def _submit(
                         }:
                             break
                         await composition.clock.sleep(0.05)
-            except TimeoutError as exc:
-                raise QueuedRunTimeoutError(run_id) from exc
-            events: list[PersistedStreamFrame] = []
-            stream = cast(
-                AsyncGenerator[StreamFrame, None],
-                composition.services.runs.stream(composition.principal, run_id, None),
-            )
-            try:
-                async with asyncio.timeout(wait_timeout_seconds), aclosing(stream):
-                    async for frame in stream:
-                        if not isinstance(frame, PersistedStreamFrame):
-                            continue
-                        events.append(frame)
-                        if frame.event in {
-                            "run.waiting_for_approval",
-                            "run.waiting_for_user",
-                        }:
-                            break
+                    stream = cast(
+                        AsyncGenerator[StreamFrame, None],
+                        composition.services.runs.stream(composition.principal, run_id, None),
+                    )
+                    async with aclosing(stream):
+                        async for frame in stream:
+                            if not isinstance(frame, PersistedStreamFrame):
+                                continue
+                            events.append(frame)
+                            if frame.event in {
+                                "run.waiting_for_approval",
+                                "run.waiting_for_user",
+                            }:
+                                break
             except TimeoutError as exc:
                 raise QueuedRunTimeoutError(run_id) from exc
             return run, events

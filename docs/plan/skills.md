@@ -1002,8 +1002,9 @@ It retries by reading the new current revision and deciding again.
 
 ### The scope is `skill.write`
 
-`tool-system.md:1346` requires the `skills:write` scope. That string
-is wrong in two ways against
+An earlier draft used the `skills:write` scope. The current contract at
+`tool-system.md:1348` requires `skill.write`. The earlier string was wrong in
+two ways against
 [http-api-and-streaming.md](http-api-and-streaming.md), which
 enumerates the scope vocabulary as dotted `resource.action` strings
 matched by exact string equality with no wildcard, no prefix rule,
@@ -1012,7 +1013,7 @@ it is not in the enumeration. A corpus-wide scan finds it is the only
 colon-separated scope string anywhere in fifty documents, which makes
 it a typo with a long life rather than a second convention.
 
-It becomes `skill.write` and joins the enumeration:
+It was corrected to `skill.write` and joins the enumeration:
 
 ```text
 session.read      session.write

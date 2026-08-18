@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
     IdempotencyClass,
     RiskLevel,
@@ -21,6 +22,7 @@ from tests.contract.support import tool_context
 @dataclass
 class FakeWebProvider:
     name: str = "fake-web"
+    page_content: str = "# Ada Lovelace\n\nA public biographical record."
     searches: list[WebSearchRequest] = field(default_factory=list)
     fetches: list[str] = field(default_factory=list)
 
@@ -39,7 +41,7 @@ class FakeWebProvider:
         return WebPage(
             url=url,
             title="Ada Lovelace",
-            content="# Ada Lovelace\n\nA public biographical record.",
+            content=self.page_content,
         )
 
     async def close(self) -> None:
@@ -90,8 +92,12 @@ async def test_fetch_rejects_non_public_or_non_https_destinations_before_provide
 
     for url in (
         "http://example.org/",
+        "https://example.org:8443/private",
         "https://localhost/private",
         "https://127.0.0.1/private",
+        "https://127.1/private",
+        "https://10.1/private",
+        "https://192.168.1/private",
         "https://169.254.169.254/latest/meta-data/",
         "https://service.internal/private",
         "https://user:" + "password@example.org/private",
@@ -121,3 +127,20 @@ async def test_fetch_returns_page_content_as_external_untrusted() -> None:
         "content": "# Ada Lovelace\n\nA public biographical record.",
     }
     assert provider.fetches == ["https://example.org/ada"]
+
+
+async def test_fetch_bounds_multibyte_content_before_building_both_output_shapes() -> None:
+    provider = FakeWebProvider(page_content="😀" * 300_000)
+
+    result = await WebFetchTool(provider).execute(
+        {"url": "https://example.org/large"},
+        tool_context(),
+    )
+
+    assert result.ok
+    assert isinstance(result.structured, dict)
+    structured_content = result.structured["content"]
+    assert isinstance(structured_content, str)
+    assert result.content == [TextPart(text=structured_content)]
+    assert len(structured_content.encode("utf-8")) <= WebFetchTool.spec.maximum_output_bytes
+    assert structured_content.encode("utf-8").decode("utf-8") == structured_content

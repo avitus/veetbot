@@ -32,6 +32,13 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 }
 
 
+def _bounded_utf8(value: str, maximum_bytes: int) -> str:
+    encoded = value.encode("utf-8")
+    if len(encoded) <= maximum_bytes:
+        return value
+    return encoded[:maximum_bytes].decode("utf-8", errors="ignore")
+
+
 class WebFetchTool:
     spec = ToolSpec(
         name="web.fetch",
@@ -65,13 +72,16 @@ class WebFetchTool:
             page = await self._provider.fetch(url)
         except WebProviderError as error:
             return _provider_failure(error)
+        content = _bounded_utf8(page.content, self.spec.maximum_output_bytes)
         structured = {
             "provider": self._provider.name,
-            **page.model_dump(mode="json"),
+            "url": page.url,
+            "title": page.title,
+            "content": content,
         }
         return ToolResult(
             ok=True,
-            content=[TextPart(text=page.content)],
+            content=[TextPart(text=content)],
             structured=structured,
             output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
         )

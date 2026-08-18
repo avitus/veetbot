@@ -1018,7 +1018,7 @@ CLI setting.
 2  usage error - bad arguments, unknown subcommand
 3  the run suspended on something the CLI could not supply
 4  configuration refused at startup - phase 1 failed
-5  the platform is unreachable - database or API down
+5  the platform is unreachable, or the local run wait expired
 ```
 
 Codes 4 and 5 are separated because the distinction is the only one a calling
