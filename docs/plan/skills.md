@@ -569,9 +569,9 @@ identity rule from above expressed as normalization. `trust` sits on
 is the value that was in force when that revision was written and a
 stored copy is what makes an old event's label verifiable.
 
-A revision is never updated after insert. Archiving writes `status`
-and nothing else, and that is the only `UPDATE` any of this
-subsystem's code performs.
+A revision is never updated after insert except for archiving. Archiving writes
+`status`, `archived_by_invocation_id`, and `archive_idempotency_key`; those are
+the only fields any `UPDATE` in this subsystem changes.
 
 The archive key is derived and never composed:
 

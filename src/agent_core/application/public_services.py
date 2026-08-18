@@ -14,6 +14,7 @@ from typing import Literal
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
+from agent_core.application.errors import SessionMessageCursorError
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
@@ -241,6 +242,10 @@ def _content_view(
                     filename=part.filename,
                 )
             )
+        else:
+            raise TypeError(f"unsupported session message content part: {type(part).__name__}")
+    if not blocks:
+        raise TypeError("unsupported session message content part: empty content")
     return blocks
 
 
@@ -301,7 +306,7 @@ def _decode_message_cursor(value: str | None) -> int:
         UnicodeError,
         json.JSONDecodeError,
     ) as exc:
-        raise ValueError("session message cursor is malformed") from exc
+        raise SessionMessageCursorError("session message cursor is malformed") from exc
 
 
 class PublicSessionService:

@@ -201,7 +201,7 @@ class SkillManageTool:
             except (NotFoundError, SkillValidationError):
                 before_members = {}
         files = arguments.get("files", {})
-        after_members = {} if operation in {"create", "edit", "archive"} else dict(before_members)
+        after_members = dict(before_members) if operation in {"patch", "archive"} else {}
         if operation != "archive" and arguments.get("skill_markdown") is not None:
             after_members["SKILL.md"] = str(arguments["skill_markdown"]).encode("utf-8")
         if isinstance(files, dict):

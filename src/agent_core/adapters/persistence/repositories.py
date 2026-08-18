@@ -2071,31 +2071,36 @@ class PostgresCapabilityEvaluationRepository:
         if len({score.criterion for score in criteria}) != len(criteria):
             raise ConflictError("criterion names must be unique within a scenario run")
         values = run.model_dump()
-        existing_id = await self._session.scalar(
-            select(EvalScenarioRunRow.id).where(
-                EvalScenarioRunRow.scenario_id == run.scenario_id,
-                EvalScenarioRunRow.build_ref == run.build_ref,
-                EvalScenarioRunRow.judge_version == run.judge_version,
-                EvalScenarioRunRow.repeat_index == run.repeat_index,
-            )
+        key_filter = (
+            EvalScenarioRunRow.scenario_id == run.scenario_id,
+            EvalScenarioRunRow.build_ref == run.build_ref,
+            EvalScenarioRunRow.judge_version == run.judge_version,
+            EvalScenarioRunRow.repeat_index == run.repeat_index,
         )
         update_values = {key: value for key, value in values.items() if key != "id"}
         row = (
             await self._session.scalars(
                 pg_insert(EvalScenarioRunRow)
                 .values(**values)
-                .on_conflict_do_update(
-                    constraint="uq_eval_scenario_run_build_repeat",
-                    set_=update_values,
-                )
+                .on_conflict_do_nothing(constraint="uq_eval_scenario_run_build_repeat")
                 .returning(EvalScenarioRunRow),
                 execution_options={"populate_existing": True},
             )
         ).one_or_none()
+        replaced = row is None
+        if row is None:
+            row = (
+                await self._session.scalars(
+                    update(EvalScenarioRunRow)
+                    .where(*key_filter)
+                    .values(**update_values)
+                    .returning(EvalScenarioRunRow),
+                    execution_options={"populate_existing": True},
+                )
+            ).one_or_none()
         if row is None:
             raise ConflictError("capability scenario result was not persisted")
         stored_id = row.id
-        replaced = existing_id is not None
         await self._session.execute(
             pg_insert(EvalScenarioAttemptCostRow)
             .values(

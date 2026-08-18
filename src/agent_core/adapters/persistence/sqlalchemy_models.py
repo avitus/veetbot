@@ -378,7 +378,10 @@ class EvalScenarioRunRow(Base):
 
 class EvalScenarioAttemptCostRow(Base):
     __tablename__ = "eval_scenario_attempt_costs"
-    __table_args__ = (Index("ix_eval_scenario_attempt_costs_started", "started_at"),)
+    __table_args__ = (
+        Index("ix_eval_scenario_attempt_costs_started", "started_at"),
+        Index("ix_eval_scenario_attempt_costs_scenario_run", "scenario_run_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     scenario_run_id: Mapped[UUID] = mapped_column(

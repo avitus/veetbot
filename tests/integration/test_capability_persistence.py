@@ -1,8 +1,9 @@
+import asyncio
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -42,6 +43,21 @@ async def test_postgres_capability_repository_satisfies_shared_contract() -> Non
     ):
         await assert_capability_result_replacement(uow.evaluations)
         await assert_capability_ceiling_hit(uow.evaluations)
+
+
+async def test_concurrent_first_writes_report_one_insert_and_one_replacement() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        build_ref = f"concurrent-{uuid4()}"
+
+        async def replace(row_id: int, score: str) -> bool:
+            async with composition.uow_factory() as uow:
+                candidate = _run(row_id, score).model_copy(update={"build_ref": build_ref})
+                saved = await uow.evaluations.replace(candidate, [])
+                return saved.replaced
+
+        replaced = await asyncio.gather(replace(40, "0.4"), replace(41, "0.6"))
+
+    assert sorted(replaced) == [False, True]
 
 
 async def test_postgres_capability_distribution_batches_criterion_reads() -> None:

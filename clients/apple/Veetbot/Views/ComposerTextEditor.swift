@@ -24,6 +24,14 @@ final class ComposerFontRefreshController {
 #if os(macOS)
 import AppKit
 
+@MainActor
+func composerBaseFont(textSize: AppTextSize) -> NSFont {
+    guard let pointSize = appPointSize(for: .body, textSize: textSize) else {
+        return NSFont.preferredFont(forTextStyle: .body)
+    }
+    return NSFont.systemFont(ofSize: pointSize)
+}
+
 struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
@@ -46,6 +54,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.string = text
+        installFontRefresh(on: textView)
         applyFont(to: textView)
         textView.isRichText = false
         textView.importsGraphics = false
@@ -69,6 +78,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         textView.onSubmit = onSubmit
+        installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.string != text {
             textView.string = text
@@ -76,12 +86,18 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 
     private func applyFont(to textView: NSTextView) {
-        let pointSize =
-            appPointSize(for: .body, textSize: appTextSize)
-            ?? NSFont.systemFontSize
-        let base = NSFont.systemFont(ofSize: pointSize)
+        let base = composerBaseFont(textSize: appTextSize)
+        let pointSize = base.pointSize
         let descriptor = base.fontDescriptor.withDesign(appFontStyle.nsDesign)
         textView.font = descriptor.flatMap { NSFont(descriptor: $0, size: pointSize) } ?? base
+    }
+
+    private func installFontRefresh(on textView: ComposerNSTextView) {
+        textView.fontRefreshController.textSize = appTextSize
+        textView.fontRefreshController.refresh = { [weak textView] in
+            guard let textView else { return }
+            self.applyFont(to: textView)
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -100,6 +116,21 @@ struct ComposerTextEditor: NSViewRepresentable {
 
 final class ComposerNSTextView: NSTextView {
     var onSubmit: () -> Void = {}
+    let fontRefreshController = ComposerFontRefreshController()
+    private var observesSystemTextSize = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, !observesSystemTextSize {
+            observeSystemTextSize()
+        } else if window == nil, observesSystemTextSize {
+            stopObservingSystemTextSize()
+        }
+    }
+
+    deinit {
+        stopObservingSystemTextSize()
+    }
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
@@ -117,6 +148,30 @@ final class ComposerNSTextView: NSTextView {
         case .insertNewline:
             insertNewline(nil)
         }
+    }
+
+    private func observeSystemTextSize() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemTextSizeDidChange),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+        observesSystemTextSize = true
+    }
+
+    private func stopObservingSystemTextSize() {
+        guard observesSystemTextSize else { return }
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+        observesSystemTextSize = false
+    }
+
+    @objc private func systemTextSizeDidChange() {
+        fontRefreshController.systemTextSizeDidChange()
     }
 }
 

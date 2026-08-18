@@ -623,8 +623,8 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 355 source and test
-          files, 466 static tests, 170 contracts, deployment-script checks,
+          Ruff formatting and linting, strict mypy over 359 source and test
+          files, 474 static tests, 170 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass on the
           integrated head. The gate registry contains 177 entries and retains
           166 as the verified ceiling through Milestone 9.
@@ -632,7 +632,7 @@ verification:
         outcome: passed
         detail: >-
           An isolated Compose PostgreSQL 16 database upgraded from empty through
-          revision f7a2c9e4d1b6 and all 104 integration and resilience tests
+          revision a4c8e2f6b913 and all 105 integration and resilience tests
           passed, including memory formation, skill authoring, capability
           persistence, transcript restoration, migrations, and re-composition.
       - check: default-off rollout boundary
@@ -644,8 +644,9 @@ verification:
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 79 Swift Testing cases passed, including complete historical
-          transcript restoration, connection-settings layout, and the
+          All 81 Swift Testing cases passed, including complete historical
+          transcript restoration, forward-compatible message-role decoding,
+          system composer sizing, connection-settings layout, and the
           missing-keychain-entitlement regression.
       - check: real-Docker sandbox security partition
         outcome: passed

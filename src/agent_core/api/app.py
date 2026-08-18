@@ -19,6 +19,7 @@ from agent_core.api.auth import Authenticator
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
 from agent_core.api.sse import encode_sse, heartbeat
+from agent_core.application.errors import SessionMessageCursorError
 from agent_core.application.services import (
     ApprovalService,
     ArtifactService,
@@ -300,7 +301,7 @@ def create_app(
                 limit,
                 cursor,
             )
-        except ValueError as exc:
+        except SessionMessageCursorError as exc:
             raise MalformedRequestError("session message cursor is malformed") from exc
 
     @app.post(

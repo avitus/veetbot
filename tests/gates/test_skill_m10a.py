@@ -8,6 +8,7 @@ import importlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
 import pytest
@@ -21,7 +22,11 @@ from agent_core.adapters.persistence.memory import (
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.adapters.skills.memory import InMemorySkillRepository
 from agent_core.adapters.skills.stores import InMemorySkillPackageStore
-from agent_core.application.skill_review import REVIEW_TOOL_ALLOWLIST, SkillBackgroundReview
+from agent_core.application.skill_review import (
+    REVIEW_DISPATCH_TIMEOUT_SECONDS,
+    REVIEW_TOOL_ALLOWLIST,
+    SkillBackgroundReview,
+)
 from agent_core.bootstrap import _memory_uow_repositories, build
 from agent_core.config import ConfigurationError, SandboxMechanism, load_settings
 from agent_core.context.estimator import ConservativeTokenEstimator
@@ -419,6 +424,23 @@ async def test_authoring_approval_contains_a_canonical_diff() -> None:
     assert bounded["diff_truncated"] is True
     assert len(json.dumps(bounded["canonical_diff"]).encode()) < 40_000
 
+    archive_tool, _repository, _store, _factory = await _authoring_stack()
+    created = await archive_tool.execute(
+        {
+            "operation": "create",
+            "name": "archive-view",
+            "skill_markdown": _skill_markdown("archive-view", "Preserve this package."),
+        },
+        _context(scopes={"skill.write"}, invocation_id=51),
+    )
+    assert created.ok is True
+    _summary, archive_view = await archive_tool.approval_view(
+        {"operation": "archive", "name": "archive-view", "expected_revision": 1},
+        tenant_id="tenant-a",
+    )
+    assert archive_view["canonical_diff"] == []
+    assert archive_view["file_changes"] == []
+
 
 async def test_review_confined() -> None:
     settings = load_settings(
@@ -715,7 +737,34 @@ async def test_review_never_fatal() -> None:
         assert {event.payload.get("status") for event in all_failures} == {None, "FAILED"}
 
 
+async def test_review_failure_for_a_nested_parent_uses_the_reviewed_run_id() -> None:
+    settings = load_settings({**_environment(), "AGENT_SKILL_AUTHORING_ENABLED": "1"})
+    async with build(
+        settings=settings,
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+    ) as composition:
+        source_id = await composition.runs.submit("Complete a source run.")
+        source = await composition.runs.wait_terminal(source_id)
+        nested = source.model_copy(
+            update={"id": UUID(int=9001), "parent_run_id": UUID(int=9000)},
+            deep=True,
+        )
+        async with composition.uow_factory() as uow:
+            await uow.runs.create(nested)
+
+        await composition.skill_reviews._record_failure(nested.id, RuntimeError("dispatch"))
+
+        async with composition.uow_factory() as uow:
+            failures = await uow.process_events.list("skill.background_review.failed")
+
+    assert len(failures) == 1
+    assert failures[0].payload["parent_run_id"] == str(nested.id)
+
+
 async def test_review_dispatch_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert REVIEW_DISPATCH_TIMEOUT_SECONDS <= 10
+
     class HangingDispatch:
         async def dispatch(self, run_id: UUID) -> None:
             del run_id
@@ -759,6 +808,21 @@ async def test_review_dispatch_is_bounded(monkeypatch: pytest.MonkeyPatch) -> No
             activate_session=composition.mcp.activate_session,
             enabled=True,
         )
+        async with composition.uow_factory() as uow:
+            event_repository = uow.events
+        original_list_after = event_repository.list_after
+        observed_sequences: list[int] = []
+
+        async def record_list_after(
+            session_id: UUID,
+            sequence: int,
+            principal: Principal,
+            **kwargs: Any,
+        ) -> Any:
+            observed_sequences.append(sequence)
+            return await original_list_after(session_id, sequence, principal, **kwargs)
+
+        monkeypatch.setattr(event_repository, "list_after", record_list_after)
         monkeypatch.setattr(
             "agent_core.application.skill_review.REVIEW_DISPATCH_TIMEOUT_SECONDS", 0.01
         )
@@ -769,6 +833,7 @@ async def test_review_dispatch_is_bounded(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert len(failures) == 1
     assert failures[0].payload["error_class"] == "TimeoutError"
+    assert observed_sequences == [max(parent.seed_event_sequence - 1, 0)]
 
 
 async def test_provenance_complete(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -798,6 +863,17 @@ async def test_provenance_complete(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert replay.ok is True
     assert repository.revision_count() == 1
+    reused_name = await tool.execute(
+        {
+            "operation": "create",
+            "name": "different-name",
+            "skill_markdown": _skill_markdown("different-name", "Different content."),
+        },
+        _context(scopes={"skill.write"}, invocation_id=77),
+    )
+    assert reused_name.ok is False
+    assert reused_name.failure is not None
+    assert reused_name.failure.reason_code == "skill_authoring_idempotency_conflict"
     conflicting_context = replace(
         _context(scopes={"skill.write"}, invocation_id=77),
         idempotency_key="different-arguments-hash",

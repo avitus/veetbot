@@ -18,6 +18,7 @@ from agent_core.domain.skills import (
     SkillRef,
     SkillRevision,
     SkillSource,
+    SkillStatus,
 )
 from tests.integration.m2_support import database_settings
 
@@ -136,5 +137,7 @@ async def test_postgres_skill_authoring_replay_and_conflict(tmp_path: Path) -> N
                 composition.principal.tenant_id, SkillRef.parse("authoring-m10a")
             )
         assert archived.archived_by_invocation_id == archive_context.invocation_id
+        assert archived.status is SkillStatus.ARCHIVED
         assert replayed_archive.archived_by_invocation_id == archive_context.invocation_id
+        assert replayed_archive.status is SkillStatus.ARCHIVED
         assert fallback.revision == 1

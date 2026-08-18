@@ -693,13 +693,17 @@ def resolve_build_ref(repository_root: Path, explicit: str | None) -> str:
     environment_ref = os.environ.get("CIRCLE_SHA1") or os.environ.get("GIT_COMMIT_SHA")
     if environment_ref:
         return environment_ref
-    completed = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=repository_root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository_root,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError("could not resolve a build ref; pass --build-ref") from exc
     if completed.returncode != 0 or not completed.stdout.strip():
         raise ValueError("could not resolve a build ref; pass --build-ref")
     return completed.stdout.strip()

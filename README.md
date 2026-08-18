@@ -13,7 +13,9 @@ and governed trajectory export.
 Milestones 0 through 9 are complete. The durable runtime, model providers,
 policy and approvals, HTTP API, isolated execution, context engine, skills and
 MCP, and long-term memory and knowledge retrieval are implemented. Milestone 10
-is not authorized and has no complete acceptance criteria.
+is in progress through its separately authorized automatic-memory and
+self-authored-skills workstreams; scheduling, model-routing changes, and
+general-purpose subagents remain deferred.
 
 ## Prerequisites
 

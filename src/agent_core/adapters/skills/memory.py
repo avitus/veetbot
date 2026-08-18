@@ -70,7 +70,10 @@ class InMemorySkillRepository:
                     None,
                 )
                 if prior is not None:
-                    if prior.authoring_idempotency_key != authored_by.idempotency_key:
+                    if (
+                        prior.manifest.name != validated.manifest.name
+                        or prior.authoring_idempotency_key != authored_by.idempotency_key
+                    ):
                         raise ConflictError(
                             "skill authoring invocation was reused with different arguments",
                             reason="skill_authoring_idempotency_conflict",

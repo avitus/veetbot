@@ -249,6 +249,13 @@ def _parse_enum[T: StrEnum](enum_type: type[T], value: str, name: str) -> T:
         raise ConfigurationError(f"{name} must be one of: {choices}") from exc
 
 
+def _parse_flag(values: Mapping[str, str], name: str) -> bool:
+    raw = values.get(name, "0").strip()
+    if raw not in {"0", "1"}:
+        raise ConfigurationError(f"{name} must be 0 or 1")
+    return raw == "1"
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     try:
         loaded: object = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -516,18 +523,9 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     if veetbot_openai_key:
         credentials["openai"] = SecretStr(veetbot_openai_key)
     interpolation = {"OPENAI_MODEL": values.get("OPENAI_MODEL", "")}
-    raw_export_enabled = values.get("AGENT_TRAJECTORY_EXPORT_ENABLED", "0").strip()
-    if raw_export_enabled not in {"0", "1"}:
-        raise ConfigurationError("AGENT_TRAJECTORY_EXPORT_ENABLED must be 0 or 1")
-    trajectory_export_enabled = raw_export_enabled == "1"
-    raw_skill_authoring = values.get("AGENT_SKILL_AUTHORING_ENABLED", "0").strip()
-    if raw_skill_authoring not in {"0", "1"}:
-        raise ConfigurationError("AGENT_SKILL_AUTHORING_ENABLED must be 0 or 1")
-    skill_authoring_enabled = raw_skill_authoring == "1"
-    raw_skill_review = values.get("AGENT_SKILL_BACKGROUND_REVIEW_ENABLED", "0").strip()
-    if raw_skill_review not in {"0", "1"}:
-        raise ConfigurationError("AGENT_SKILL_BACKGROUND_REVIEW_ENABLED must be 0 or 1")
-    skill_background_review_enabled = raw_skill_review == "1"
+    trajectory_export_enabled = _parse_flag(values, "AGENT_TRAJECTORY_EXPORT_ENABLED")
+    skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
+    skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()

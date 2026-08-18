@@ -2835,7 +2835,7 @@ These are separately gated extensions. The repository owner authorized Milestone
 separately authorized the self-authored-skills tranche. That authorization does
 not waive the entry conditions or acceptance gates of the other extensions.
 
-A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill_manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document.
+A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill.manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document.
 
 #### Self-authored skills (authorized tranche)
 

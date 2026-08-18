@@ -17,6 +17,7 @@ import yaml
 
 GateOutcome = Literal["pass", "fail", "pending"]
 CheckExecutor = Callable[[Path, Sequence[str]], dict[str, tuple[bool, str]]]
+GATE_PYTEST_TIMEOUT_SECONDS = 600
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,9 @@ class GateStatus:
 
 
 def _registry_module(repository_root: Path) -> Any:
+    cached = sys.modules.get("_agent_gate_registry")
+    if cached is not None:
+        return cached
     registry_path = repository_root / "scripts" / "gate_registry.py"
     spec = importlib.util.spec_from_file_location("_agent_gate_registry", registry_path)
     if spec is None or spec.loader is None:
@@ -71,23 +75,27 @@ def _execute_pytest_checks(
         report_path = Path(temporary) / "report.json"
         environment = dict(os.environ)
         environment["AGENT_GATE_REPORT"] = str(report_path)
-        completed = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-p",
-                "agent_core.evals.gate_pytest_plugin",
-                "--tb=short",
-                "-q",
-                *checks,
-            ],
-            cwd=repository_root,
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "pytest",
+                    "-p",
+                    "agent_core.evals.gate_pytest_plugin",
+                    "--tb=short",
+                    "-q",
+                    *checks,
+                ],
+                cwd=repository_root,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=GATE_PYTEST_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return dict.fromkeys(checks, (False, "pytest gate execution timed out"))
         if not report_path.is_file():
             detail = (completed.stderr or completed.stdout or "pytest produced no report").strip()
             return dict.fromkeys(checks, (False, detail[-1000:]))

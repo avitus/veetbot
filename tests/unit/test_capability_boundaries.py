@@ -1,4 +1,5 @@
 import json
+import subprocess
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from decimal import Decimal
@@ -18,6 +19,7 @@ from agent_core.evals.capability import (
     CapabilityExecution,
     _live_execution,
     load_scenarios,
+    resolve_build_ref,
     run_suite,
 )
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -60,6 +62,19 @@ def _judge_output() -> str:
             ]
         }
     )
+
+
+def test_build_ref_resolution_bounds_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CIRCLE_SHA1", raising=False)
+    monkeypatch.delenv("GIT_COMMIT_SHA", raising=False)
+
+    def time_out(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(("git",), 1)
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    with pytest.raises(ValueError, match="could not resolve a build ref"):
+        resolve_build_ref(tmp_path, None)
 
 
 async def test_daily_cost_stop_uses_persisted_evaluation_aggregate(tmp_path: Path) -> None:

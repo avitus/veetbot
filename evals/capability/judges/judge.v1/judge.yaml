@@ -3,7 +3,7 @@ provider: anthropic
 model: claude-opus-5
 model_policy: flagship
 prompt: prompt.md
-prompt_sha256: af15dcbae6a6d731000fe7b4f8b2801fc1c2df8de73cc2ebd2827bda21dd0882
+prompt_sha256: fa55c33b31e2f85463764459d876b4e10cfa0c39c5cb3f3e0af91ea79cccedaa
 rubric_schema_version: 1
 max_model_calls: 2
 max_cost_usd: "0.50"

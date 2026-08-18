@@ -158,9 +158,38 @@ public struct SessionView: Codable, Identifiable, Sendable {
     }
 }
 
-public enum SessionMessageRole: String, Codable, Sendable {
+public enum SessionMessageRole: Hashable, Sendable {
     case user
     case assistant
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "user": self = .user
+        case "assistant": self = .assistant
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .user: return "user"
+        case .assistant: return "assistant"
+        case .unknown(let value): return value
+        }
+    }
+}
+
+extension SessionMessageRole: Codable {
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        self.init(rawValue: try container.decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
 }
 
 public struct SessionMessageView: Codable, Sendable {

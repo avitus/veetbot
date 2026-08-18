@@ -1,9 +1,15 @@
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
-from agent_core.evals.gates import _execute_pytest_checks, collect_status, current_milestone
+from agent_core.evals.gates import (
+    _execute_pytest_checks,
+    _registry_module,
+    collect_status,
+    current_milestone,
+)
 
 
 def test_gate_status_executes_active_checks_and_keeps_later_gates_visible() -> None:
@@ -31,6 +37,28 @@ def test_gate_executor_treats_an_active_pytest_skip_as_failure(tmp_path: Path) -
     )
     result = _execute_pytest_checks(tmp_path, ["test_gate.py::test_gate"])
     assert result == {"test_gate.py::test_gate": (False, "active gate skipped")}
+
+
+def test_gate_executor_bounds_the_pytest_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def time_out(*_args: object, **_kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(("pytest",), 1)
+
+    monkeypatch.setattr(subprocess, "run", time_out)
+
+    result = _execute_pytest_checks(tmp_path, ["one", "two"])
+
+    assert result == {
+        "one": (False, "pytest gate execution timed out"),
+        "two": (False, "pytest gate execution timed out"),
+    }
+
+
+def test_gate_registry_module_is_cached() -> None:
+    root = Path(__file__).resolve().parents[2]
+
+    assert _registry_module(root) is _registry_module(root)
 
 
 @pytest.mark.parametrize(

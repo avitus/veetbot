@@ -39,6 +39,18 @@ import UIKit
 
 #if os(macOS)
     @Test @MainActor
+    func testSystemComposerFontUsesThePreferredBodyPointSize() {
+        #expect(
+            composerBaseFont(textSize: .system).pointSize
+                == NSFont.preferredFont(forTextStyle: .body).pointSize
+        )
+        #expect(
+            composerBaseFont(textSize: .large).pointSize
+                == appPointSize(for: .body, textSize: .large)
+        )
+    }
+
+    @Test @MainActor
     func testReturnSendsWithoutEditingText() throws {
         let textView = ComposerNSTextView()
         textView.string = "Send this"

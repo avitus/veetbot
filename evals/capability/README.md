@@ -15,7 +15,7 @@ redacted trajectory is present. Add the first real export under
 Run the track with:
 
 ```text
-RUN_LIVE_MODEL_TESTS=1 agent eval capability --suite research
+RUN_LIVE_MODEL_TESTS=1 uv run agent eval capability --suite research
 ```
 
 Without the live flag, the command skips without loading credentials or making
