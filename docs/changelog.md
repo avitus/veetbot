@@ -4,6 +4,25 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-18 — Configurable CLI run wait
+
+- Added `agent run --wait-timeout <seconds>` with a positive-value boundary
+  and a 300-second default, while preserving the durable run identifier and
+  exit code 5 when the local wait expires.
+- Kept the setting local to CLI submission; the asynchronous HTTP API and
+  native Apple client behavior are unchanged.
+
+## 2026-08-18 — Provider-neutral public-web access
+
+- Added stable `web.search` and `web.fetch` tools with Tavily and Firecrawl
+  adapters behind one provider-neutral port.
+- Selected capability-level routing, recommending Tavily for discovery and
+  Firecrawl for clean page extraction while allowing either provider for either
+  tool.
+- Kept web access default-off, brokered provider credentials at call time,
+  bounded provider responses, rejected non-public fetch targets, and preserved
+  external-untrusted provenance through the complete tool pipeline.
+
 ## 2026-08-17 — Complete historical transcripts in the Apple client
 
 - Added a principal-scoped, paginated session-message read that exposes only

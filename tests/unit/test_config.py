@@ -14,6 +14,7 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     SandboxMechanism,
+    WebProviderKind,
     load_config_document,
     load_settings,
     validate_runtime_identity,
@@ -43,6 +44,25 @@ def test_loads_frozen_settings() -> None:
     assert settings.trajectory_export_enabled is False
     assert settings.artifact_root == Path(".agent/artifacts")
     assert settings.release_id is None
+    assert settings.web_search_provider is WebProviderKind.DISABLED
+    assert settings.web_fetch_provider is WebProviderKind.DISABLED
+
+
+def test_web_provider_selection_is_per_capability() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "WEB_SEARCH_PROVIDER": "tavily",
+            "WEB_FETCH_PROVIDER": "firecrawl",
+        }
+    )
+    assert settings.web_search_provider is WebProviderKind.TAVILY
+    assert settings.web_fetch_provider is WebProviderKind.FIRECRAWL
+
+
+def test_unknown_web_provider_is_refused() -> None:
+    with pytest.raises(ConfigurationError, match="WEB_SEARCH_PROVIDER"):
+        load_settings({**base_environment(), "WEB_SEARCH_PROVIDER": "surprise"})
 
 
 def test_release_identity_is_validated() -> None:

@@ -77,6 +77,7 @@ nav:
       - Sandbox Isolation & Artifacts: plan/sandbox-isolation.md
       - Skills: plan/skills.md
       - Knowledge Documents: plan/knowledge-documents.md
+      - Web Access: plan/web-access.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
@@ -145,4 +146,6 @@ nav:
       - ADR-0051 Milestone 10 automatic memory formation: adr/0051-milestone-10-automatic-memory-formation.md
       - ADR-0052 Milestone 10A skill-authoring seams: adr/0052-milestone-10a-skill-authoring-seams.md
       - ADR-0053 Durable session transcripts: adr/0053-durable-session-transcripts.md
+      - ADR-0054 Provider-neutral web access: adr/0054-provider-neutral-web-access.md
+      - ADR-0055 Configurable CLI run wait: adr/0055-configurable-cli-run-wait.md
   - Changelog: changelog.md

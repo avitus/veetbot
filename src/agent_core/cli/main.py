@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import math
 import os
 import signal
 import socket
@@ -46,7 +47,8 @@ from agent_core.domain.views import (
 )
 
 RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
-RUN_WAIT_TIMEOUT_SECONDS = 30.0
+DEFAULT_RUN_WAIT_TIMEOUT_SECONDS = 300.0
+EVENT_READ_TIMEOUT_SECONDS = 30.0
 API_BIND_HOST = "127.0.0.1"
 
 
@@ -178,6 +180,8 @@ async def _submit(
     session_id: UUID | None,
     idempotency_key: str | None,
     model_policy: str | None,
+    *,
+    wait_timeout_seconds: float,
 ) -> tuple[RunView, list[PersistedStreamFrame]]:
     async with build(storage="postgres", model_policy=model_policy) as composition:
         previous_handler = signal.getsignal(signal.SIGINT)
@@ -198,8 +202,9 @@ async def _submit(
                 None,
             )
             run_id = submitted.run_id
+            events: list[PersistedStreamFrame] = []
             try:
-                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS):
+                async with asyncio.timeout(wait_timeout_seconds):
                     while True:
                         run = await composition.services.runs.get(composition.principal, run_id)
                         if run.status in {
@@ -211,24 +216,20 @@ async def _submit(
                         }:
                             break
                         await composition.clock.sleep(0.05)
-            except TimeoutError as exc:
-                raise QueuedRunTimeoutError(run_id) from exc
-            events: list[PersistedStreamFrame] = []
-            stream = cast(
-                AsyncGenerator[StreamFrame, None],
-                composition.services.runs.stream(composition.principal, run_id, None),
-            )
-            try:
-                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS), aclosing(stream):
-                    async for frame in stream:
-                        if not isinstance(frame, PersistedStreamFrame):
-                            continue
-                        events.append(frame)
-                        if frame.event in {
-                            "run.waiting_for_approval",
-                            "run.waiting_for_user",
-                        }:
-                            break
+                    stream = cast(
+                        AsyncGenerator[StreamFrame, None],
+                        composition.services.runs.stream(composition.principal, run_id, None),
+                    )
+                    async with aclosing(stream):
+                        async for frame in stream:
+                            if not isinstance(frame, PersistedStreamFrame):
+                                continue
+                            events.append(frame)
+                            if frame.event in {
+                                "run.waiting_for_approval",
+                                "run.waiting_for_user",
+                            }:
+                                break
             except TimeoutError as exc:
                 raise QueuedRunTimeoutError(run_id) from exc
             return run, events
@@ -251,6 +252,13 @@ def run_command(
             help="Use a declared model policy for a new session (for example balanced or local).",
         ),
     ] = None,
+    wait_timeout_seconds: Annotated[
+        float,
+        typer.Option(
+            "--wait-timeout",
+            help="Seconds to wait for the run to reach a terminal or suspended state.",
+        ),
+    ] = DEFAULT_RUN_WAIT_TIMEOUT_SECONDS,
     json_output: Annotated[
         bool, typer.Option("--json", help="Print the run record as JSON.")
     ] = False,
@@ -259,8 +267,18 @@ def run_command(
 
     if session_id is not None and model_policy is not None:
         raise typer.BadParameter("--model-policy can only be used for a new session")
+    if not math.isfinite(wait_timeout_seconds) or wait_timeout_seconds <= 0:
+        raise typer.BadParameter("--wait-timeout must be greater than zero")
     try:
-        run, events = asyncio.run(_submit(prompt, session_id, idempotency_key, model_policy))
+        run, events = asyncio.run(
+            _submit(
+                prompt,
+                session_id,
+                idempotency_key,
+                model_policy,
+                wait_timeout_seconds=wait_timeout_seconds,
+            )
+        )
     except QueuedRunTimeoutError as exc:
         typer.echo(f"run did not reach a terminal state: {exc.run_id}", err=True)
         raise typer.Exit(5) from exc
@@ -304,7 +322,7 @@ async def _ephemeral_read(run_id: UUID, *, events: bool) -> str:
                 composition.services.runs.stream(composition.principal, run_id, None),
             )
             try:
-                async with asyncio.timeout(RUN_WAIT_TIMEOUT_SECONDS), aclosing(stream):
+                async with asyncio.timeout(EVENT_READ_TIMEOUT_SECONDS), aclosing(stream):
                     async for frame in stream:
                         if isinstance(frame, PersistedStreamFrame):
                             rows.append(frame)

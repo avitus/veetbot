@@ -905,7 +905,7 @@ security properties were untested for two milestones.
 
 ### `skill_manage` is a capability tool, not a control tool
 
-Section 30.2 at `engineering-plan.md:3451` calls it *"a skill_manage
+Section 30.2 at `engineering-plan.md:3454` calls it *"a skill_manage
 control tool"*, and an earlier draft of `tool-system.md` repeated that
 classification while also giving `skill_manage`
 `idempotency: NON_IDEMPOTENT`. The registration rule at
@@ -920,7 +920,7 @@ tool acts on the run. `skill_manage` acts on durable tenant state
 that outlives the run.** It is a capability tool, and it was never in
 `tool-system.md`'s control-tool table — that table has four entries
 and `skill_manage` is not one of them. The table was right and the
-sentence was wrong, and `tool-system.md:1339` carries the corrected
+sentence was wrong, and `tool-system.md:1344` carries the corrected
 sentence now.
 
 ```text
@@ -1002,8 +1002,9 @@ It retries by reading the new current revision and deciding again.
 
 ### The scope is `skill.write`
 
-`tool-system.md:1341` requires the `skills:write` scope. That string
-is wrong in two ways against
+An earlier draft used the `skills:write` scope. The current contract at
+`tool-system.md:1348` requires `skill.write`. The earlier string was wrong in
+two ways against
 [http-api-and-streaming.md](http-api-and-streaming.md), which
 enumerates the scope vocabulary as dotted `resource.action` strings
 matched by exact string equality with no wildcard, no prefix rule,
@@ -1012,7 +1013,7 @@ it is not in the enumeration. A corpus-wide scan finds it is the only
 colon-separated scope string anywhere in fifty documents, which makes
 it a typo with a long life rather than a second convention.
 
-It becomes `skill.write` and joins the enumeration:
+It was corrected to `skill.write` and joins the enumeration:
 
 ```text
 session.read      session.write
@@ -1236,7 +1237,7 @@ something.
 1  skill_manage called a control tool a capability tool
 2  skill_manage NON_IDEMPOTENT        CONDITIONALLY_IDEMPOTENT
 3  the scope spelled skills:write     skill.write, enumerated
-4  "skills have no design at all"     tool-system.md:1298-1345
+4  "skills have no design at all"     tool-system.md:1303-1350
 5  Milestone 8 had zero gates         ten, a new `skill` area
 6  Milestone 10 had zero gates        six, in the same area
 7  no harness case names a skill      case 27, Milestone 8
@@ -1255,7 +1256,7 @@ above, under the heading that calls `skill_manage`
 Row 4 is a correction to a verdict rather than to a design.
 `readiness.md` says skills have no specification at all and that no
 document outside the plan and ADR-0013 mentions `SKILL.md`. The
-second half is true. The first is not: `tool-system.md:1298-1345` is
+second half is true. The first is not: `tool-system.md:1303-1350` is
 forty-eight lines of real design that settles four questions, and
 this document had to be written to fit inside it rather than on top
 of it. The verdict is corrected where it is stated.

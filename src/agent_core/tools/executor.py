@@ -916,7 +916,7 @@ class ToolPipeline:
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind == "sandbox",
-                network_enabled=False,
+                network_enabled=tool.spec.target_kind == "web_provider",
             ),
             workspace=(
                 None
@@ -1231,7 +1231,7 @@ class ToolPipeline:
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
                 isolated=tool.spec.target_kind == "sandbox",
-                network_enabled=False,
+                network_enabled=tool.spec.target_kind == "web_provider",
                 server_id=tool.spec.server_id,
             ),
             evaluated_at=self._clock.now(),
