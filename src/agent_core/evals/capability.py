@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import statistics
 import subprocess
 from collections.abc import Awaitable, Callable, Sequence
@@ -693,16 +694,19 @@ def resolve_build_ref(repository_root: Path, explicit: str | None) -> str:
     environment_ref = os.environ.get("CIRCLE_SHA1") or os.environ.get("GIT_COMMIT_SHA")
     if environment_ref:
         return environment_ref
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        raise ValueError("could not resolve a build ref; pass --build-ref")
     try:
         completed = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            [git_executable, "rev-parse", "HEAD"],
             cwd=repository_root,
             text=True,
             capture_output=True,
             check=False,
             timeout=10,
         )
-    except subprocess.TimeoutExpired as exc:
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise ValueError("could not resolve a build ref; pass --build-ref") from exc
     if completed.returncode != 0 or not completed.stdout.strip():
         raise ValueError("could not resolve a build ref; pass --build-ref")

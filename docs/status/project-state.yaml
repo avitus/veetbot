@@ -624,7 +624,7 @@ verification:
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 359 source and test
-          files, 474 static tests, 170 contracts, deployment-script checks,
+          files, 475 static tests, 170 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass on the
           integrated head. The gate registry contains 177 entries and retains
           166 as the verified ceiling through Milestone 9.

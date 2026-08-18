@@ -77,6 +77,21 @@ def test_build_ref_resolution_bounds_git(tmp_path: Path, monkeypatch: pytest.Mon
         resolve_build_ref(tmp_path, None)
 
 
+def test_build_ref_resolution_normalizes_git_execution_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("CIRCLE_SHA1", raising=False)
+    monkeypatch.delenv("GIT_COMMIT_SHA", raising=False)
+
+    def fail_execution(*_args: object, **_kwargs: object) -> None:
+        raise OSError("git is unavailable")
+
+    monkeypatch.setattr(subprocess, "run", fail_execution)
+
+    with pytest.raises(ValueError, match="could not resolve a build ref"):
+        resolve_build_ref(tmp_path, None)
+
+
 async def test_daily_cost_stop_uses_persisted_evaluation_aggregate(tmp_path: Path) -> None:
     _fixture(tmp_path)
     factory = EvalUnitOfWorkFactory()
