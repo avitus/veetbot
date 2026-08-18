@@ -1,6 +1,6 @@
 # ADR-0020: Context engine — cache boundary, budget, and trust rendering
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-24
 - Related: Milestone 7 (context budgeting and structured working state),
   Sections 6.6/6.9 (conversation items, checkpoint), 7 (`ContextBuilder` port),

@@ -1,6 +1,6 @@
 # ADR-0048: Atomic CircleCI production delivery
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-10
 
 ## Context

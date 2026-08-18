@@ -1,6 +1,6 @@
 # ADR-0047: A dependency-free zipapp for the first downloadable client
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-10
 - Related: Section 16 (HTTP API), Section 17 (CLI), Section 29 (multi-device
   shared core), ADR-0010 (live event transport), ADR-0011 (multi-device shared

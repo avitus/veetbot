@@ -1,6 +1,6 @@
 # ADR-0042: Milestone 6 sandbox, bridge, and artifact seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Related: Milestone 6, ADR-0008, ADR-0015, ADR-0021, ADR-0029,
   ADR-0031

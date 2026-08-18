@@ -1,6 +1,6 @@
 # ADR-0002: The provider-neutral model protocol
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-25
 - Related: Sections 2.3 (provider list), 6.5 (usage, cost, and cost source),
   6.6/6.7 (conversation items, reasoning items), 6.8 (event types), 6.9

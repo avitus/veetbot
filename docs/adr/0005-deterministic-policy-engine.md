@@ -1,6 +1,6 @@
 # ADR-0005: The deterministic policy engine
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-25
 - Related: Milestone 4 (policy, approvals, complete tool lifecycle),
   Sections 2.5 (a prompt instruction is not an authorization mechanism),
