@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -67,8 +68,11 @@ def _judge_output() -> str:
 def test_build_ref_resolution_bounds_git(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CIRCLE_SHA1", raising=False)
     monkeypatch.delenv("GIT_COMMIT_SHA", raising=False)
+    git_executable = "/test/bin/git"
+    monkeypatch.setattr(shutil, "which", lambda _name: git_executable)
 
-    def time_out(*_args: object, **_kwargs: object) -> None:
+    def time_out(command: list[str], *_args: object, **_kwargs: object) -> None:
+        assert command == [git_executable, "rev-parse", "HEAD"]
         raise subprocess.TimeoutExpired(("git",), 1)
 
     monkeypatch.setattr(subprocess, "run", time_out)
@@ -82,8 +86,11 @@ def test_build_ref_resolution_normalizes_git_execution_errors(
 ) -> None:
     monkeypatch.delenv("CIRCLE_SHA1", raising=False)
     monkeypatch.delenv("GIT_COMMIT_SHA", raising=False)
+    git_executable = "/test/bin/git"
+    monkeypatch.setattr(shutil, "which", lambda _name: git_executable)
 
-    def fail_execution(*_args: object, **_kwargs: object) -> None:
+    def fail_execution(command: list[str], *_args: object, **_kwargs: object) -> None:
+        assert command == [git_executable, "rev-parse", "HEAD"]
         raise OSError("git is unavailable")
 
     monkeypatch.setattr(subprocess, "run", fail_execution)
