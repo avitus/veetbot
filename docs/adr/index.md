@@ -62,3 +62,5 @@ implementation without one.
 - [ADR-0051 — Milestone 10 automatic memory formation (Proposed)](0051-milestone-10-automatic-memory-formation.md)
 - [ADR-0052 — Milestone 10A governed skill-authoring seams (Proposed)](0052-milestone-10a-skill-authoring-seams.md)
 - [ADR-0053 — Durable session transcripts for historical clients (Proposed)](0053-durable-session-transcripts.md)
+- [ADR-0054 — Provider-neutral web access with capability-level routing (Proposed)](0054-provider-neutral-web-access.md)
+- [ADR-0055 — Configurable CLI wait for durable runs (Proposed)](0055-configurable-cli-run-wait.md)

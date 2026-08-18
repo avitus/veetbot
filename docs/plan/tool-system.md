@@ -349,12 +349,17 @@ The first segment is the **domain**, and domains are partitioned:
 | `conversation` `context` | builtin, control | build time |
 | `skill` `memory` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
+| `web` | builtin, external data | build time |
 | `mcp` | reserved for MCP | at discovery |
 | `device` | reserved for device-scoped | at attach |
 
 The control annotation is on the two domains that hold nothing else.
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
+`web` holds the read-only `web.search` and `web.fetch` capabilities designed in
+[web-access.md](web-access.md). Their `web_provider` target is valid only with
+`NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any
+other use of that target.
 
 The reserved-domain list is a constant in the registry, and registering a
 builtin whose domain is `mcp` or `device` is a startup error. That is what

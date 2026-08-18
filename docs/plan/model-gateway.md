@@ -241,6 +241,14 @@ class ModelUsage(BaseModel):
 
 Three things about this shape are decisions rather than transcription.
 
+`input_tokens` is the total input token count, including cache reads and cache
+writes; the two cache fields classify subsets of that total for pricing. The
+Anthropic Messages API reports uncached `input_tokens`,
+`cache_read_input_tokens`, and `cache_creation_input_tokens` as three disjoint
+counters, so its adapter sums them when it constructs the provider-neutral
+total. This preserves the cost invariant that ordinary input is the total less
+the two classified cache subsets.
+
 `cache_write_input_tokens` is the fifth token class Section 10.2 asks for when
 it says of `cache_creation_input_tokens` that we should "track it as a fifth
 class". Section 6.5's `RunUsage` gains the same field, because a class that is
@@ -718,7 +726,7 @@ call sites.
 ### Pinning, and the contradiction with availability routing
 
 Section 10 (`engineering-plan.md:1305`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:2929`) wants routing to move work
+provider. Milestone 10 (`engineering-plan.md:2932`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -931,7 +939,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1078-1115` is
+family of the secret scanner at `bootstrap-and-composition.md:1086-1123` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -968,7 +976,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:632` because it answers the
+`policy_version` at `policy-and-approvals.md:635` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1443,7 +1451,7 @@ renames are.
 
 `engineering-plan.md:592` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:827-856` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:830-859` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.
@@ -1659,12 +1667,13 @@ without native tool calling, and no cache control. It exists because it makes
 a local Ollama endpoint a first-class test target, which is the no-cost live
 test path Milestone 3 asks for.
 
-The OpenAI Responses adapter owns three wire-only compatibility translations.
+The hosted native-tool adapters own wire-only compatibility translations.
 Canonical tool names retain the platform's dotted namespace everywhere inside
-the system, but the adapter replaces a name that violates OpenAI's function-name
-grammar with a deterministic, collision-checked alias containing a readable
-stem and a SHA-256 suffix; returned calls are mapped back before leaving the
-adapter. Function schemas are sent with provider strict mode disabled because
+the system, but the OpenAI and Anthropic adapters replace a name that violates
+the provider's function-name grammar with a deterministic, collision-checked
+alias containing a readable stem and a SHA-256 suffix; returned calls and
+continuation history are mapped across the same boundary. OpenAI function
+schemas are sent with provider strict mode disabled because
 the platform permits optional arguments and applies its own JSON Schema
 validation before policy or execution. The adapter also omits `temperature`:
 the neutral request keeps the field for providers that accept it, while the

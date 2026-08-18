@@ -35,6 +35,7 @@ BUILTIN_DOMAINS = frozenset(
         "skill",
         "memory",
         "knowledge",
+        "web",
     }
 )
 RESERVED_DOMAINS = frozenset({"mcp", "device"})
@@ -110,6 +111,14 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
         raise ToolValidationError("control tool classification is invalid")
     if spec.name in CONTROL_TOOL_NAMES and spec.kind is not ToolKind.CONTROL:
         raise ToolValidationError("declared control tool must use the control kind")
+    if spec.target_kind == "web_provider" and (
+        spec.source is not ToolSource.BUILTIN
+        or domain != "web"
+        or spec.side_effect is not SideEffectClass.NETWORK_READ
+        or spec.idempotency is not IdempotencyClass.READ_ONLY
+        or spec.output_trust is not TrustLevel.EXTERNAL_UNTRUSTED
+    ):
+        raise ToolValidationError("web provider target classification is invalid")
     if spec.source in {ToolSource.MCP, ToolSource.DEVICE, ToolSource.SANDBOX} or (
         spec.target_kind == "sandbox"
     ):

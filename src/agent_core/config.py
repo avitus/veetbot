@@ -40,6 +40,12 @@ class SandboxMechanism(StrEnum):
     FAKE = "fake"
 
 
+class WebProviderKind(StrEnum):
+    DISABLED = "disabled"
+    TAVILY = "tavily"
+    FIRECRAWL = "firecrawl"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Environment-layer settings; tuning values remain in versioned YAML."""
@@ -63,6 +69,8 @@ class Settings:
     sandbox_image: str = "agent-core-sandbox:dev"
     sandbox_passthrough: tuple[str, ...] = ()
     release_id: str | None = None
+    web_search_provider: WebProviderKind = WebProviderKind.DISABLED
+    web_fetch_provider: WebProviderKind = WebProviderKind.DISABLED
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -547,6 +555,16 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         if name.strip()
     )
     release_id = values.get("VEETBOT_RELEASE_ID", "").strip() or None
+    web_search_provider = _parse_enum(
+        WebProviderKind,
+        values.get("WEB_SEARCH_PROVIDER", "disabled").strip(),
+        "WEB_SEARCH_PROVIDER",
+    )
+    web_fetch_provider = _parse_enum(
+        WebProviderKind,
+        values.get("WEB_FETCH_PROVIDER", "disabled").strip(),
+        "WEB_FETCH_PROVIDER",
+    )
     _validate_release_id(release_id)
     if auth_mode is AuthMode.DEV:
         auth_tenant_id = "local"
@@ -575,6 +593,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         sandbox_image=sandbox_image,
         sandbox_passthrough=sandbox_passthrough,
         release_id=release_id,
+        web_search_provider=web_search_provider,
+        web_fetch_provider=web_fetch_provider,
     )
     validate_settings(settings)
     return settings

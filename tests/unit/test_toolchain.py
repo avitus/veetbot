@@ -107,6 +107,10 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert environment.count("REQUIRED_FREE_LOOPBACK_PORT") == 2
     assert "COMPOSE_PROJECT_NAME=veetbot" in environment
     assert "PGSSLMODE=disable" in environment
+    assert "WEB_SEARCH_PROVIDER=disabled" in environment
+    assert "WEB_FETCH_PROVIDER=disabled" in environment
+    assert "TAVILY_API_KEY=" in environment
+    assert "FIRECRAWL_API_KEY=" in environment
     configured_scopes = next(
         line.removeprefix("AUTH_SCOPES=").split(",")
         for line in environment.splitlines()
@@ -403,8 +407,10 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
         session_id: UUID | None,
         idempotency_key: str | None,
         model_policy: str | None,
+        *,
+        wait_timeout_seconds: float,
     ) -> tuple[Run, list[PersistedStreamFrame]]:
-        del idempotency_key, model_policy
+        del idempotency_key, model_policy, wait_timeout_seconds
         seen.append((prompt, session_id))
         completed = run(status=RunStatus.COMPLETED).model_copy(
             update={"final_message": "answer"}, deep=True
@@ -481,8 +487,10 @@ def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPa
         session_id: UUID | None,
         idempotency_key: str | None,
         model_policy: str | None,
+        *,
+        wait_timeout_seconds: float,
     ) -> tuple[Run, list[EventEnvelope]]:
-        del prompt, session_id, idempotency_key, model_policy
+        del prompt, session_id, idempotency_key, model_policy, wait_timeout_seconds
         raise cli_main.QueuedRunTimeoutError(queued_id)
 
     monkeypatch.setattr(cli_main, "_submit", timeout_submit)
@@ -492,6 +500,49 @@ def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPa
     assert "run did not reach a terminal state" in result.stderr
     assert "run queued" not in result.stderr
     assert str(queued_id) in result.stderr
+
+
+def test_run_wait_timeout_is_configurable_and_positive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[float] = []
+
+    async def fake_submit(
+        prompt: str,
+        session_id: UUID | None,
+        idempotency_key: str | None,
+        model_policy: str | None,
+        *,
+        wait_timeout_seconds: float,
+    ) -> tuple[Run, list[PersistedStreamFrame]]:
+        del prompt, session_id, idempotency_key, model_policy
+        seen.append(wait_timeout_seconds)
+        completed = run(status=RunStatus.COMPLETED)
+        event = PersistedStreamFrame(
+            sequence=1,
+            event="run.completed",
+            data={
+                "final_message": AssistantMessage(content=[TextPart(text="answer")]).model_dump(
+                    mode="json"
+                )
+            },
+        )
+        return completed, [event]
+
+    monkeypatch.setattr(cli_main, "_submit", fake_submit)
+    runner = CliRunner()
+
+    configured = runner.invoke(
+        app,
+        ["run", "--wait-timeout", "90.5", "timed work"],
+    )
+    defaulted = runner.invoke(app, ["run", "default wait"])
+    invalid = runner.invoke(app, ["run", "--wait-timeout", "0", "invalid wait"])
+
+    assert configured.exit_code == defaulted.exit_code == 0
+    assert invalid.exit_code == 2
+    assert "--wait-timeout must be greater than zero" in invalid.stderr
+    assert seen == [90.5, 300.0]
 
 
 def test_alembic_config_accepts_percent_encoded_database_url() -> None:

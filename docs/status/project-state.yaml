@@ -52,13 +52,14 @@ milestones:
     title: Long-term memory and knowledge retrieval
     status: complete
   "10":
-    title: Automatic memory formation and self-authored skills tranches
+    title: Automatic memory, self-authored skills, and public-web access tranches
     status: in_progress
     authorized_scope:
       - automatic memory formation and consolidation
       - skill.manage foreground authoring
       - governed background-review child runs
       - authoring metrics and evaluation evidence
+      - provider-neutral public-web search and page extraction
     deferred_scope:
       - scheduling
       - model routing changes
@@ -623,8 +624,8 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 359 source and test
-          files, 475 static tests, 170 contracts, deployment-script checks,
+          Ruff formatting and linting, strict mypy over 371 source and test
+          files, 489 static tests, 186 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass on the
           integrated head. The gate registry contains 177 entries and retains
           166 as the verified ceiling through Milestone 9.
@@ -641,6 +642,14 @@ verification:
           Foreground authoring and background review both default off;
           configuration refuses background review without foreground authoring,
           and skill.manage is absent from the registry until explicitly enabled.
+      - check: provider-neutral web access contract
+        outcome: passed_locally
+        detail: >-
+          The focused 57-test partition covers shared Tavily and Firecrawl
+          search/fetch contracts, capability-level composition, stable auth and
+          retry failures, public-HTTPS fetch validation, fixed-target policy,
+          default-off registration, and an end-to-end persisted
+          external-untrusted tool result.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
@@ -694,9 +703,11 @@ readiness:
   review: docs/plan/readiness.md
   summary: >-
     Milestones 0 through 9 are complete and implementable from the corpus.
-    The owner authorized automatic memory formation and the self-authored-skills
-    tranche of Milestone 10, with eleven registered gates across the two
-    workstreams. Scheduling, routing, and general-purpose subagents remain
+    The owner authorized automatic memory formation, the self-authored-skills
+    tranche, and provider-neutral public-web access in Milestone 10, with eleven
+    registered gates across the two gate-bearing workstreams. The web tranche
+    adds an acceptance contract without changing the gate census. Scheduling,
+    routing, and general-purpose subagents remain
     deferred directions. Milestones 5, 6, and
     8 moved into the covered set when
     docs/plan/http-api-and-streaming.md,
