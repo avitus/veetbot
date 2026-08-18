@@ -33,6 +33,36 @@
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
   statement: "**No policy regression** — adapt LOCOMO-style long-horizon scenarios to exercise the write path. Gate: memory improves target eval cases **without** increasing policy failures."
   check: tests/gates/test_harness_m9.py::test_memory_changes_outcome
+- id: gate.memory.multi_candidate
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Multiple ordinary memories** — one ordinary user utterance naming two durable entities forms two separate, provenance-linked beliefs, and an independent preference in the same utterance remains a third belief."
+  check: tests/gates/test_memory_m10.py::test_ordinary_conversation_forms_one_memory_per_durable_entity
+- id: gate.memory.source_integrity
+  milestone: 10
+  kind: property
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Automatic-source integrity** — automatic candidates name only source events authored by the owning principal; model, tool, and foreign-principal content cannot become a direct source."
+  check: tests/gates/test_memory_m10.py::test_automatic_formation_uses_only_the_owning_principal_user_events
+- id: gate.memory.idle_lifecycle
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Idle lifecycle** — a terminal run enqueues one idempotent formation flag, returns without extracting, and maintenance consolidates the session only once both the session-idle boundary and the flag's persisted `not_before` have elapsed."
+  check: tests/gates/test_memory_m10.py::test_terminal_run_is_flagged_then_consolidated_after_idle
+- id: gate.memory.formation_bounded
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Bounded automatic formation** — a pathological utterance cannot commit more than twelve candidates in one consolidation, a secret-shaped candidate is still rejected, and the consolidation audit accounts for extractor overproduction rather than silently truncating it."
+  check: tests/gates/test_memory_m10.py::test_automatic_formation_caps_candidates_and_rejects_secrets
+- id: gate.memory.correction_isolated
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Ordinary correction isolation** — a natural-language retraction supersedes the matching entity while unrelated entities and preference topics continue to coexist."
+  check: tests/gates/test_memory_m10.py::test_ordinary_retraction_supersedes_the_owned_entity_memory
 - id: gate.memory.currency
   milestone: 9
   kind: case

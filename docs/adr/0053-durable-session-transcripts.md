@@ -1,4 +1,4 @@
-# ADR-0052: Durable session transcripts for historical clients
+# ADR-0053: Durable session transcripts for historical clients
 
 - Status: Proposed
 - Date: 2026-08-17

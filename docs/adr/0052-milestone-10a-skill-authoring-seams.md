@@ -1,4 +1,4 @@
-# ADR-0051: Milestone 10A governed skill-authoring seams
+# ADR-0052: Milestone 10A governed skill-authoring seams
 
 - Status: Proposed
 - Date: 2026-08-17
@@ -54,7 +54,7 @@ its own `AgentSpec`.
    approval text or events.
 9. **The rollout threshold is quantitative and versioned.** Thirty paired
    samples, at least five absolute percentage points of task-completion lift, a
-   positive 95 percent Wilson lower bound, and zero additional policy failures
+   positive 95 percent Clopper-Pearson lower bound, and zero additional policy failures
    are required for each model-policy, policy-profile, and authoring-version
    combination.
 

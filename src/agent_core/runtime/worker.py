@@ -170,6 +170,7 @@ class MaintenanceWorker:
         sweep_sandboxes: SandboxSweep | None = None,
         sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
         sweep_memory: Callable[[], Awaitable[int]] | None = None,
+        sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
     ) -> None:
@@ -182,6 +183,7 @@ class MaintenanceWorker:
         self._sweep_sandboxes = sweep_sandboxes
         self._sweep_artifact_orphans = sweep_artifact_orphans
         self._sweep_memory = sweep_memory
+        self._sweep_memory_consolidation = sweep_memory_consolidation
         self._sweep_session_deletions = sweep_session_deletions
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
@@ -194,9 +196,9 @@ class MaintenanceWorker:
 
     async def run_once(self) -> int:
         async with self._uow_factory() as uow:
-            if uow.queue is None:
-                raise RuntimeError("maintenance worker requires a queue repository")
-            reclaimed = await uow.queue.reclaim_expired(self._reclaim_limit)
+            reclaimed = (
+                0 if uow.queue is None else await uow.queue.reclaim_expired(self._reclaim_limit)
+            )
             live_run_leases = await uow.maintenance.live_run_leases()
         if self._sweep_sandboxes is not None:
 
@@ -238,6 +240,11 @@ class MaintenanceWorker:
                 await self._sweep_memory()
             except Exception:
                 logger.exception("memory expiry sweep failed")
+        if self._sweep_memory_consolidation is not None:
+            try:
+                await self._sweep_memory_consolidation()
+            except Exception:
+                logger.exception("memory consolidation sweep failed")
         if self._sweep_session_deletions is not None:
             try:
                 await self._sweep_session_deletions()

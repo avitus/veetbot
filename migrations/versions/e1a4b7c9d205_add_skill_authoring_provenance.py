@@ -1,7 +1,7 @@
 """Add complete Milestone 10A skill-authoring provenance.
 
 Revision ID: e1a4b7c9d205
-Revises: d7e9f1a2b3c4
+Revises: e8f2a4c6d810
 """
 
 from collections.abc import Sequence
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e1a4b7c9d205"
-down_revision: str | Sequence[str] | None = "d7e9f1a2b3c4"
+down_revision: str | Sequence[str] | None = "e8f2a4c6d810"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

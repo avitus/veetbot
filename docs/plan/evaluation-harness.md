@@ -194,7 +194,7 @@ restates a gate another spec owns.
 | Policy and approvals | 7 | 3 | 1 | 2 | 13 |
 | Event log and persistence | 9 | 2 | 0 | 3 | 14 |
 | Context engine | 2 | 3 | 1 | 0 | 6 |
-| Memory formation | 3 | 0 | 2 | 0 | 5 |
+| Memory formation | 7 | 1 | 2 | 0 | 10 |
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 3 | 0 | 0 | 8 | 11 |
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
@@ -203,12 +203,12 @@ restates a gate another spec owns.
 | Knowledge documents | 8 | 3 | 1 | 0 | 12 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **95** | **22** | **9** | **46** | **172** |
+| **Total** | **99** | **23** | **9** | **46** | **177** |
 
 The counts are the useful output, not the individual assignments:
-**seventy-seven of the hundred and seventy-two declared gates are not case
+**seventy-eight of the hundred and seventy-seven owned registry entries are not case
 gates**, and a harness that only runs cases would report a green build with
-those seventy-seven of the plan's stated invariants unchecked. Two of the
+those seventy-eight of the plan's stated invariants unchecked. Two of the
 four kinds — property and structural — need no runtime at all and can be
 built in Milestone 0, before there is an agent to evaluate.
 

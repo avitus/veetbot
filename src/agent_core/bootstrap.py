@@ -10,7 +10,7 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
 from urllib.parse import urlsplit
@@ -168,7 +168,7 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
-from agent_core.domain.events import ProcessEvent
+from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
     EgressMode,
@@ -188,7 +188,7 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
-from agent_core.domain.runs import CancelReason, RunLimits
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
 from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
@@ -196,7 +196,7 @@ from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_pr
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import validate_mcp_config
 from agent_core.mcp.runtime import MCPRuntime
-from agent_core.memory.formation import GovernedMemoryService
+from agent_core.memory.formation import SESSION_IDLE_SECONDS, GovernedMemoryService
 from agent_core.memory.retrieval import (
     DeterministicQueryFormer,
     EventEpisodeSearch,
@@ -429,7 +429,7 @@ def _memory_uow_repositories(
         export_consent=InMemoryExportConsentRepository(),
         trajectory_exports=trajectory_exports,
         artifacts=artifacts,
-        maintenance=InMemoryMaintenanceRepository(),
+        maintenance=InMemoryMaintenanceRepository(sessions, events, memories),
         skills=skills,
         mcp_servers=mcp_servers,
         memories=memories,
@@ -811,6 +811,32 @@ async def _compose(
         async def sweep_memory() -> int:
             return len(await memory_service.expire())
 
+        async def sweep_memory_consolidation() -> int:
+            ready_at = clock.now()
+            async with uow_factory() as uow:
+                sessions = await uow.maintenance.pending_memory_sessions(
+                    principal,
+                    idle_before=ready_at - timedelta(seconds=SESSION_IDLE_SECONDS),
+                    ready_at=ready_at,
+                    limit=100,
+                )
+            completed = 0
+            for session_id in sessions:
+                try:
+                    await memory_service.run(
+                        trigger="session_idle",
+                        scope="general",
+                        session_id=session_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "memory_session_consolidation_failed",
+                        extra={"session_id": str(session_id)},
+                    )
+                else:
+                    completed += 1
+            return completed
+
         pipeline = ToolPipeline(
             registry,
             uow_factory,
@@ -836,6 +862,29 @@ async def _compose(
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
+            try:
+                async with uow_factory() as uow:
+                    run = await uow.runs.get(run_id, principal)
+                    if run.status not in TERMINAL_RUN_STATUSES:
+                        return
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=run.session_id,
+                            run_id=run.id,
+                            event_type="memory.formation.requested",
+                            actor_type="runtime",
+                            payload={
+                                "trigger": "run_terminal",
+                                "terminal_status": run.status.value,
+                                "not_before": (
+                                    clock.now() + timedelta(seconds=SESSION_IDLE_SECONDS)
+                                ).isoformat(),
+                            },
+                            derivation_key=f"memory.formation.requested:{run.id}",
+                        )
+                    )
+            except Exception:
+                logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 
@@ -1010,6 +1059,7 @@ async def _compose(
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
+                    sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_session_deletions=sweep_session_deletions,
                 ),
                 sandbox=sandbox_manager,

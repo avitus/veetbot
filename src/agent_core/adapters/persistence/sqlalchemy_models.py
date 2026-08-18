@@ -191,6 +191,7 @@ class EventRow(Base):
         UniqueConstraint("session_id", "sequence", name="uq_events_session_sequence"),
         Index("ix_events_run_id", "run_id", "id"),
         Index("ix_events_event_type_created", "event_type", "created_at"),
+        Index("ix_events_type_session_sequence", "event_type", "session_id", "sequence"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

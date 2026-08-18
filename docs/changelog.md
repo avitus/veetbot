@@ -13,7 +13,7 @@ title: Changelog
   run, with persisted-sequence deduplication so SSE replay cannot duplicate the
   final turn.
 - Covered pagination, transient read retry, malformed cursors, scope and
-  principal isolation, and the relaunch regression, and proposed ADR-0052 for
+  principal isolation, and the relaunch regression, and proposed ADR-0053 for
   the seventeenth-route extension.
 
 ## 2026-08-16 — Explicit memory writes after recall

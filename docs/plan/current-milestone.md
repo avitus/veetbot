@@ -4,13 +4,14 @@ title: Current Milestone
 
 # Current milestone
 
-- **Current milestone:** Milestone 10A — self-authored skills
-- **Authorized milestones:** Milestones 0 through 9 are complete; only the
-  self-authored-skills tranche of Milestone 10 is authorized.
-- **Deferred:** Scheduling, routing, general-purpose subagents, and every other
-  Milestone 10 extension.
-- **Project status:** Milestone 10A is in progress behind default-off rollout
-  controls.
+- **Active milestone:** Milestone 10 — scheduling, model routing, subagents, and
+  memory maturation (in progress)
+- **Verified gate ceiling:** Milestone 9
+- **Authorized workstreams:** Automatic memory formation and the independently
+  deliverable self-authored-skills tranche of Milestone 10.
+- **Deferred:** Scheduling, new routing behavior, and general-purpose subagents.
+- **Project status:** Milestones 0 through 9 are complete. Milestone 10 remains
+  in progress; skill authoring stays behind default-off rollout controls.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -36,17 +37,22 @@ substitute.
 - [Milestone 7 — context budgeting and structured working state](engineering-plan.md#milestone-7-context-budgeting-and-structured-working-state)
 - [Milestone 8 — skills and MCP integration](engineering-plan.md#milestone-8-skills-and-mcp-integration)
 - [Milestone 9 — long-term memory and knowledge retrieval](engineering-plan.md#milestone-9-long-term-memory-and-knowledge-retrieval)
+- [Milestone 10 — memory maturation](engineering-plan.md#memory-maturation)
 - [Milestone 10A — self-authored skills](engineering-plan.md#self-authored-skills-authorized-tranche)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-Milestone 10A is authorized independently because the optional extensions under
-Milestone 10 do not share a delivery dependency. Its contract is Section 30.6,
-the six Milestone 10 `gate.skill.*` entries, and the definition of done. This
-authorization does not extend to `delegate.run` or any other optional extension.
+The two authorized workstreams are independently deliverable because the
+optional extensions under Milestone 10 do not share a delivery dependency. The
+self-authored-skills contract is Section 30.6, the six Milestone 10
+`gate.skill.*` entries, and the definition of done. The memory-formation
+specification supplies the five memory-maturation gates. Authorization does not
+extend to `delegate.run`, scheduling, or new model-routing behavior.
 
 ## Completion rule
 
-Milestone 10A is complete only when all six new gates and all 172 cumulative
-gates pass, the self-authored form of case 27 clears its rollout threshold
-without increasing policy failures, all required CI lanes pass on the final
-head, and the final CodeRabbit review has no finding or unresolved conversation.
+The authorized workstreams complete only when all eleven Milestone 10 gates and
+all 177 cumulative gates pass, the self-authored form of case 27 clears its
+rollout threshold without increasing policy failures, all required CI lanes
+pass on the final head, and the final CodeRabbit review has no finding or
+unresolved conversation. Partial work does not advance the verified gate
+ceiling or mark Milestone 10 complete.
