@@ -1,21 +1,70 @@
 # Modular General-Purpose AI Agent
 
-This repository is implementing the provider-neutral agent platform defined by
-the canonical [engineering plan](docs/plan/engineering-plan.md). Work is
-strictly milestone-gated. Milestone 0 established the repository and engineering
-foundation. Milestone 1 added the first complete, in-memory model/tool runtime;
-Milestone 2 replaced its process-local seams with PostgreSQL and workers.
-Milestone 3 adds real model providers, normalized streaming, pinned accounting,
-and governed trajectory export.
+This repository implements the provider-neutral agent platform defined by the
+canonical [engineering plan](docs/plan/engineering-plan.md). Work is strictly
+milestone-gated: Milestones 0 through 9 are complete, and Milestone 10 is in
+progress through two separately authorized workstreams.
 
-## Current status
+## Features
 
-Milestones 0 through 9 are complete. The durable runtime, model providers,
-policy and approvals, HTTP API, isolated execution, context engine, skills and
-MCP, and long-term memory and knowledge retrieval are implemented. Milestone 10
-is in progress through its separately authorized automatic-memory and
-self-authored-skills workstreams; scheduling, model-routing changes, and
-general-purpose subagents remain deferred.
+### Available now
+
+- **Durable, resumable runs** — an append-only PostgreSQL event log, leased
+  queue workers, checkpoints, idempotent submission, and crash recovery across
+  processes.
+- **Real model providers** — OpenAI Responses, Anthropic Messages, and
+  OpenAI-compatible local endpoints behind declared model policies, with
+  normalized streaming and durably pinned models, capabilities, and pricing.
+- **Policy and approvals** — a deterministic policy gate with non-overridable
+  hardline rules; approvals resolve through the CLI, the API, and the clients.
+- **A complete tool lifecycle** — builtin tools with validation,
+  classification, recovery boundaries, and durable invocation records.
+- **HTTP API with SSE** — versioned `/v1` routes, scoped bearer authentication,
+  idempotent submission, and reconnectable, replayable event streams.
+- **Isolated execution and artifacts** — sandboxed tool execution behind
+  Docker/gVisor with default-deny egress, resource limits, and a checksummed
+  artifact store.
+- **Context engineering** — budgeted assembly with a stable prefix,
+  deterministic compaction, and typed, durable working state.
+- **Skills and MCP** — versioned, immutable skill packages pinned at session
+  open, plus MCP servers over the official SDK.
+- **Long-term memory and knowledge** — governed memory formation with
+  provenance and corrections, hybrid recall with an auditable trace, and
+  knowledge-document ingestion with cited passage retrieval.
+- **Governed trajectory export** — consent-gated, redacted, and verified
+  before any artifact is committed.
+- **Evaluation harness** — deterministic evaluation cases, a 177-entry gate
+  registry, and a credential- and cost-gated live capability lane.
+- **Clients** — a dependency-free downloadable terminal client and a native
+  SwiftUI client for iOS and macOS.
+- **Production deployment** — CircleCI-driven atomic releases to
+  `api.veetbot.com` with systemd, Nginx, gVisor, and production validation.
+
+### In progress (Milestone 10)
+
+Two separately authorized workstreams are underway. Both stay behind
+default-off rollout controls until their evidence thresholds pass:
+
+- **Automatic memory formation** — post-run extraction and consolidation of
+  durable memories from ordinary conversations, with audited caps, conflict
+  handling, and provenance.
+- **Self-authored skills** — the agent creating and revising its own skills
+  through `skill.manage` behind diff-carrying approvals, with an optional
+  confined background-review child run.
+
+### Planned
+
+The remaining Milestone 10 extensions are designed but deliberately deferred
+and not yet authorized:
+
+- **Scheduling** — scheduled runs that fire in the cloud regardless of which
+  devices are online.
+- **Model routing** — richer routing behavior across the declared model
+  policies.
+- **General-purpose subagents** — `delegate.run` child runs with their own
+  leases, budgets, and traces.
+- **Multi-device surfaces** — inbound messaging surfaces and device pairing
+  over the shared core.
 
 ## Prerequisites
 
@@ -71,7 +120,7 @@ make check
 ```
 
 It runs formatting validation, linting, strict type checking, the static and
-contract partitions, isolated deployment-script tests, citation validation, the 172-entry gate-registry
+contract partitions, isolated deployment-script tests, citation validation, the 177-entry gate-registry
 reconciliation, and strict documentation builds. It requires neither a database
 nor a provider credential.
 
@@ -85,6 +134,7 @@ Additional targets are explicit about their requirements:
 | `make test-contract` | Run shared port contracts against in-memory/fake adapters |
 | `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
 | `make test-live` | Explicitly enable credentialed provider tests |
+| `make test-apple` | Run the Apple client's Swift Testing suite (requires full Xcode) |
 | `make test-deploy` | Exercise release and Nginx installers against isolated command stubs |
 | `make production-check` | Validate release identity, model credential, gVisor, sandbox image, storage, and migration head |
 | `make docs` | Build the MkDocs site and standalone HTML publication |
@@ -167,7 +217,12 @@ restricted context named
 `live-model` for provider credentials; nightly runs and manually triggered
 pipelines with `run_live: true` are the only workflows that use it.
 
-## Downloadable API client
+## Clients
+
+Two clients speak the public `/v1` API. The shared core remains authoritative
+for sessions, runs, approvals, events, and artifacts in both.
+
+### Downloadable terminal client
 
 Build the dependency-free terminal client with:
 
@@ -191,6 +246,15 @@ The client creates or resumes sessions, submits idempotently, reconnects and
 replays SSE, handles approvals and user questions, and reconciles transient
 output against the durable final message. See the
 [client guide](docs/client.md) for its commands and security boundary.
+
+### Native Apple client
+
+`clients/apple` holds a SwiftUI client for iOS 15+ and macOS 12+ with no
+third-party dependencies. It restores complete durable transcripts, replays the
+active run over SSE, keeps a reconciled local session history, and stores its
+bearer token only in Keychain. See its
+[README](clients/apple/README.md) for signing, settings, and test
+instructions.
 
 ## Configuration
 
@@ -225,30 +289,24 @@ provider metadata, usage, prices, precise timestamps, and internal execution
 identifiers; mandatory secret rules are applied and then verified before any
 artifact is committed.
 
-## Operating roadmap
+## Workflow availability
 
-The engineering plan reserves the following workflows. They are documented
-here so availability is not confused with implementation:
+Every workflow the engineering plan reserved for Milestones 0 through 9 is
+implemented: durable submission and workers, the three provider profiles,
+live-provider tests, normalized usage accounting, consent-gated trajectory
+export, CLI approval resolution, the HTTP API, deterministic evaluation cases,
+and named gate status by milestone or area. Two boundaries remain so
+availability is not confused with implementation:
 
-| Workflow | Availability |
-| --- | --- |
-| Use the fake provider in the deterministic in-memory composition | Milestone 1 |
-| Submit with `agent run` and complete it through the durable worker | Milestone 2 (implemented) |
-| Start the durable worker | Milestone 2 (implemented) |
-| Configure OpenAI, Anthropic, or an OpenAI-compatible endpoint | Milestone 3 (implemented) |
-| Run optional live-provider tests | Milestone 3 (implemented) |
-| Inspect normalized model usage and bounded provider metadata in persistence | Milestone 3 (implemented) |
-| Export a consent-gated redacted trajectory | Milestone 3 (implemented) |
-| Resolve an approval through the CLI | Milestone 4 (implemented) |
-| Start the HTTP API | Milestone 5 (implemented) |
-| Run deterministic evaluation cases | Milestone 1; later cases activate with their owning milestone |
-| Execute named gate status by milestone or area | Implemented |
-| Run repeated live capability scenarios | Harness implemented; awaiting the first real failed trajectory |
+- The live capability harness is implemented but has no publishable scenario;
+  admission requires a real checked-in redacted failed trajectory.
+- Milestone 10's authoring surfaces default off, and the deferred extensions
+  listed under [Planned](#planned) have no commands yet.
 
 `agent run`, `agent run export`, `agent session create`, `agent session
 export-consent`, `agent worker`, `agent api`, and `agent eval run` are available
-now. The separately downloadable client provides interactive remote chat;
-`agent chat` itself remains unavailable.
+now. The separately downloadable client and the native Apple client provide
+interactive remote chat; `agent chat` itself remains unavailable.
 
 ## Documentation and governance
 
