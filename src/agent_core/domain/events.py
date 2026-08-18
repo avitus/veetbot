@@ -22,6 +22,7 @@ CONTENT_ADAPTER: TypeAdapter[list[ContentPart]] = TypeAdapter(list[ContentPart])
 TOOL_RESULT_EVENTS = frozenset(
     {"tool.call.completed", "tool.call.failed", "tool.call.denied", "tool.call.uncertain"}
 )
+CONVERSATION_MESSAGE_EVENTS = frozenset({"user.message.created", "assistant.message.completed"})
 
 
 class NewEvent(BaseModel):

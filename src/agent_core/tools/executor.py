@@ -1255,10 +1255,20 @@ class ToolPipeline:
         approval_arguments = dict(invocation.normalized_arguments)
         approval_view = getattr(tool, "approval_view", None)
         if approval_view is not None:
-            action_summary, approval_arguments = await approval_view(
-                approval_arguments,
-                tenant_id=run.tenant_id,
-            )
+            try:
+                action_summary, approval_arguments = await approval_view(
+                    approval_arguments,
+                    tenant_id=run.tenant_id,
+                )
+            except (RunCancelledError, BudgetExceededError):
+                raise
+            except Exception:
+                logger.exception(
+                    "approval_view_failed",
+                    extra={"tool_name": tool.spec.name},
+                )
+                action_summary = f"Run {tool.spec.name} with validated arguments."
+                approval_arguments = dict(invocation.normalized_arguments)
         approval = ApprovalRequest(
             id=self._ids.new_id(),
             tenant_id=run.tenant_id,

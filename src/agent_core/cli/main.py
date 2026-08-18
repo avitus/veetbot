@@ -101,6 +101,8 @@ class _EvalRunnerModule(Protocol):
 class _EvalGateModule(Protocol):
     def current_milestone(self, repository_root: Path) -> int: ...
 
+    def maximum_milestone(self, repository_root: Path) -> int: ...
+
     def collect_status(
         self,
         repository_root: Path,
@@ -663,7 +665,7 @@ def eval_run(
 def eval_gates(
     milestone: Annotated[
         int | None,
-        typer.Option("--milestone", min=0, max=10, help="Treat gates through MILESTONE as active."),
+        typer.Option("--milestone", min=0, help="Treat gates through MILESTONE as active."),
     ] = None,
     area: Annotated[
         str | None,
@@ -674,6 +676,13 @@ def eval_gates(
 
     try:
         module = cast(_EvalGateModule, importlib.import_module("agent_core.evals.gates"))
+        if milestone is not None:
+            maximum_milestone = module.maximum_milestone(Path.cwd())
+            if milestone > maximum_milestone:
+                raise typer.BadParameter(
+                    f"must not exceed the registry maximum of {maximum_milestone}",
+                    param_hint="--milestone",
+                )
         selected_milestone = (
             module.current_milestone(Path.cwd()) if milestone is None else milestone
         )
@@ -690,7 +699,8 @@ def eval_gates(
             for outcome in ("pass", "fail", "pending")
         }
         typer.echo(
-            f"Milestone {gate_milestone}: {len(rows)} gates  "
+            f"Milestone {gate_milestone}: {len(rows)} "
+            f"{'gate' if len(rows) == 1 else 'gates'}  "
             f"{counts['pass']} pass  {counts['fail']} fail  {counts['pending']} pending"
         )
         for status in rows:

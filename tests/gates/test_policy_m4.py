@@ -209,6 +209,19 @@ class _SchedulingTool:
             self.active -= 1
 
 
+class _FailingApprovalViewTool(_SchedulingTool):
+    def __init__(self, *, name: str, side_effect: SideEffectClass, parallel: bool) -> None:
+        super().__init__(name=name, side_effect=side_effect, parallel=parallel)
+        self.approval_view_called = False
+
+    async def approval_view(
+        self, arguments: dict[str, object], *, tenant_id: str
+    ) -> tuple[str, dict[str, object]]:
+        del arguments, tenant_id
+        self.approval_view_called = True
+        raise RuntimeError("approval presentation failed")
+
+
 def _settings(tmp_path: Path, *, config_dir: Path | None = None) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/unused",
@@ -631,6 +644,80 @@ async def test_approval_compensation_preserves_the_transition_failure(
             )
 
         assert await app.approvals.list_pending(run_id=run_id) == []
+
+
+async def test_approval_presentation_failure_falls_back_and_still_waits(
+    tmp_path: Path,
+) -> None:
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    tool = _FailingApprovalViewTool(
+        name="demo.approval_fallback",
+        side_effect=SideEffectClass.EXTERNAL_WRITE,
+        parallel=False,
+    )
+    registry = StaticToolRegistry()
+    registry.register(tool)
+    async with build(settings=_settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("prepare approval fallback")
+        active_run = await app.runs.get(run_id)
+        async with app.uow_factory() as uow:
+            active_agent = await uow.agents.get_version(
+                active_run.agent_id, active_run.agent_version
+            )
+            normalized, _canonical, arguments_hash = validate_and_normalize(
+                {}, tool.spec.input_schema
+            )
+            invocation = ToolInvocation(
+                id=UUID(int=402),
+                run_id=run_id,
+                session_id=active_run.session_id,
+                step_number=2,
+                call_id="approval-fallback-call",
+                tool_name=tool.spec.name,
+                tool_version=tool.spec.version,
+                idempotency_class=tool.spec.idempotency,
+                side_effect=tool.spec.side_effect,
+                risk=tool.spec.risk,
+                status=ToolInvocationStatus.PROPOSED,
+                raw_arguments="{}",
+                normalized_arguments=normalized,
+                normalized_arguments_hash=arguments_hash,
+                idempotency_key="approval-fallback-key",
+                created_at=app.clock.now(),
+                updated_at=app.clock.now(),
+            )
+            await uow.invocations.create(invocation)
+
+        decision = PolicyDecision(
+            decision=PolicyDecisionType.REQUIRE_APPROVAL,
+            reason_code="policy.test.approval",
+            explanation="Exercise presentation fallback handling.",
+            policy_version="test@approval+h00000000",
+        )
+        pipeline = ToolPipeline(registry, app.uow_factory, app.clock, ids())
+        created = await pipeline._request_approval(
+            active_run,
+            ToolCallItem(
+                call_id=invocation.call_id,
+                item_index=0,
+                name=tool.spec.name,
+                arguments={},
+                raw_arguments="{}",
+            ),
+            principal(),
+            active_agent,
+            tool,
+            invocation,
+            decision,
+            None,
+        )
+        async with app.uow_factory() as uow:
+            waiting = (await uow.invocations.list_for_run(run_id, app.principal))[0]
+
+    assert created.action_summary == "Run demo.approval_fallback with validated arguments."
+    assert created.arguments == {}
+    assert waiting.status is ToolInvocationStatus.WAITING_FOR_APPROVAL
+    assert tool.approval_view_called
 
 
 async def test_operator_policy_overlay_is_hashed_audited_and_evaluated(

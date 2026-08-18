@@ -43,6 +43,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     CheckpointRow,
     DerivedEventKeyRow,
     EvalCriterionScoreRow,
+    EvalScenarioAttemptCostRow,
     EvalScenarioRunRow,
     EventRow,
     ExportConsentRow,
@@ -73,7 +74,12 @@ from agent_core.domain.errors import (
     WorkerFencedError,
 )
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
-from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.events import (
+    CONVERSATION_MESSAGE_EVENTS,
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+)
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -711,6 +717,39 @@ class PostgresEventRepository:
                 raise NotFoundError("session not found")
             return None
         return event_to_domain(row, self._upcasters)
+
+    async def list_conversation_after(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[EventEnvelope]:
+        if limit < 0:
+            raise ValueError("limit must be nonnegative")
+        allowed = await self._session.scalar(
+            select(SessionRow.id).where(
+                SessionRow.id == session_id,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+        )
+        if allowed is None:
+            raise NotFoundError("session not found")
+        rows = (
+            await self._session.scalars(
+                select(EventRow)
+                .where(
+                    EventRow.session_id == session_id,
+                    EventRow.sequence > sequence,
+                    EventRow.event_type.in_(CONVERSATION_MESSAGE_EVENTS),
+                )
+                .order_by(EventRow.sequence, EventRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return [event_to_domain(row, self._upcasters) for row in rows]
 
     async def existing_sequences(
         self,
@@ -1999,6 +2038,16 @@ class PostgresCapabilityEvaluationRepository:
         stored_id = row.id
         replaced = existing_id is not None
         await self._session.execute(
+            pg_insert(EvalScenarioAttemptCostRow)
+            .values(
+                id=run.id,
+                scenario_run_id=stored_id,
+                cost_usd=run.cost_usd,
+                started_at=run.started_at,
+            )
+            .on_conflict_do_nothing(index_elements=[EvalScenarioAttemptCostRow.id])
+        )
+        await self._session.execute(
             delete(EvalCriterionScoreRow).where(EvalCriterionScoreRow.scenario_run_id == stored_id)
         )
         if criteria:
@@ -2073,8 +2122,8 @@ class PostgresCapabilityEvaluationRepository:
 
     async def cost_since(self, since: datetime) -> Decimal:
         value = await self._session.scalar(
-            select(func.coalesce(func.sum(EvalScenarioRunRow.cost_usd), Decimal("0"))).where(
-                EvalScenarioRunRow.started_at >= since
-            )
+            select(
+                func.coalesce(func.sum(EvalScenarioAttemptCostRow.cost_usd), Decimal("0"))
+            ).where(EvalScenarioAttemptCostRow.started_at >= since)
         )
         return Decimal(value or 0)

@@ -40,9 +40,11 @@ its own `AgentSpec`.
    `parent_run_id`, never joins or mutates the completed parent, has a bounded
    deadline and budget, and receives the parent transcript as enveloped data.
 6. **Background review has no archive permission.** Its tool set is the
-   intersection of `memory.*`, `skill.load`, and `skill.manage`; edit and patch
-   additionally require the review to have loaded the current agent-authored
-   revision. Archive remains a foreground/operator action.
+   union of `memory.*`, `skill.load`, and the `create`, `edit`, and `patch`
+   operations of `skill.manage`. Edit and patch additionally require the review
+   to have loaded the current agent-authored revision. The `archive` operation
+   is never available to background review and remains a foreground/operator
+   action.
 7. **A create produces a disabled candidate.** `skill.manage` never edits
    `AgentSpec`. An operator enables a new skill in a later agent version. A
    revision of an already-enabled floating skill appears only in a new session.

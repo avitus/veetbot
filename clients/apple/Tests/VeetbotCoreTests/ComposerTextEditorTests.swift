@@ -22,6 +22,21 @@ import UIKit
         )
     }
 
+    @Test
+    func testSystemSizeChangeRefreshesVisibleComposerOnlyForSystemSetting() {
+        var refreshCount = 0
+        let controller = ComposerFontRefreshController()
+        controller.refresh = { refreshCount += 1 }
+
+        controller.textSize = .system
+        controller.systemTextSizeDidChange()
+        #expect(refreshCount == 1)
+
+        controller.textSize = .large
+        controller.systemTextSizeDidChange()
+        #expect(refreshCount == 1)
+    }
+
 #if os(macOS)
     @Test @MainActor
     func testReturnSendsWithoutEditingText() throws {

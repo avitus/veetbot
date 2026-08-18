@@ -1430,7 +1430,7 @@ is the concrete form of "build evaluations before advanced features."
 
 The harness stores almost nothing, which is deliberate: eval runs are ordinary
 runs in the event log, and a parallel store would be a second source of truth
-about what happened. Two tables, both for the capability track, which is the
+about what happened. Three tables, all for the capability track, which is the
 only part with results that outlive a process.
 
 ```text
@@ -1461,6 +1461,14 @@ eval_criterion_scores
   UNIQUE (scenario_run_id, criterion)
 ```
 
+```text
+eval_scenario_attempt_costs
+  id                UUID PK           -- attempt id; makes retry writes idempotent
+  scenario_run_id   UUID NOT NULL     -- canonical replaceable result row
+  cost_usd          NUMERIC NOT NULL
+  started_at        TIMESTAMPTZ NOT NULL
+```
+
 Per-criterion scores are stored separately rather than as a JSON blob on the
 run, because the question the track is built to answer — *what got worse* — is a
 per-criterion question, and a blob makes it a full-table scan with JSON
@@ -1470,7 +1478,9 @@ model output.
 
 `build_ref` in the unique key is what stops a re-run of the same build from
 inflating a distribution. Re-running a build's scenarios replaces its rows
-rather than appending, and the replacement is recorded as an event.
+rather than appending, and the replacement is recorded as an event. Its cost
+remains in the attempt-cost ledger so the per-day ceiling counts every live
+invocation even though distribution queries expose only the latest result.
 
 The deterministic suite adds no tables. Its results are the test runner's
 results, and its runs are in the event log under `tenant_eval`.

@@ -375,6 +375,19 @@ class EvalScenarioRunRow(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class EvalScenarioAttemptCostRow(Base):
+    __tablename__ = "eval_scenario_attempt_costs"
+    __table_args__ = (Index("ix_eval_scenario_attempt_costs_started", "started_at"),)
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    scenario_run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("eval_scenario_runs.id", ondelete="CASCADE"),
+    )
+    cost_usd: Mapped[Decimal] = mapped_column(Numeric)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class EvalCriterionScoreRow(Base):
     __tablename__ = "eval_criterion_scores"
     __table_args__ = (

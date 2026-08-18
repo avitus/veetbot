@@ -74,6 +74,29 @@ public struct VeetbotAPIClient: Sendable {
         }
     }
 
+    public func listSessionMessages(
+        sessionID: UUID,
+        limit: Int = 200,
+        cursor: String? = nil
+    ) async throws -> Page<SessionMessageView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        do {
+            return try await transport.send(
+                TransportRequest(
+                    method: .get,
+                    path: "/v1/sessions/\(sessionID.uuidString)/messages",
+                    queryItems: query,
+                    retryAttempts: 3
+                )
+            )
+        } catch {
+            throw historyCompatibilityError(from: error) ?? error
+        }
+    }
+
     public func submitMessage(
         sessionID: UUID,
         content: [ContentBlock],

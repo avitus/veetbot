@@ -1,4 +1,4 @@
-import importlib
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -27,14 +27,34 @@ def test_eval_gates_passes_milestone_and_area_through_cli(
             )
         ]
 
-    module = SimpleNamespace(current_milestone=lambda _root: 10, collect_status=collect_status)
-    monkeypatch.setattr(importlib, "import_module", lambda _name: module)
+    module = SimpleNamespace(
+        current_milestone=lambda _root: 10,
+        maximum_milestone=lambda _root: 10,
+        collect_status=collect_status,
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.gates", module)
 
     result = CliRunner().invoke(app, ["eval", "gates", "--milestone", "3", "--area", "policy"])
 
     assert result.exit_code == 0
     assert observed == [(3, "policy")]
-    assert "Milestone 3: 1 gates  1 pass  0 fail  0 pending" in result.stdout
+    assert "Milestone 3: 1 gate  1 pass  0 fail  0 pending" in result.stdout
+
+
+def test_eval_gates_uses_registry_maximum_for_milestone_option(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = SimpleNamespace(
+        current_milestone=lambda _root: 3,
+        maximum_milestone=lambda _root: 3,
+        collect_status=lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.gates", module)
+
+    result = CliRunner().invoke(app, ["eval", "gates", "--milestone", "4"])
+
+    assert result.exit_code == 2
+    assert "must not exceed the registry maximum of 3" in result.stderr
 
 
 def test_eval_gates_normalizes_invalid_registry_errors(
@@ -44,7 +64,7 @@ def test_eval_gates_normalizes_invalid_registry_errors(
         raise ValueError("invalid gate registry: duplicate id")
 
     module = SimpleNamespace(current_milestone=lambda _root: 9, collect_status=fail)
-    monkeypatch.setattr(importlib, "import_module", lambda _name: module)
+    monkeypatch.setitem(sys.modules, "agent_core.evals.gates", module)
 
     result = CliRunner().invoke(app, ["eval", "gates"])
 
@@ -68,7 +88,7 @@ def test_eval_gates_returns_failure_when_an_active_gate_fails(
             )
         ],
     )
-    monkeypatch.setattr(importlib, "import_module", lambda _name: module)
+    monkeypatch.setitem(sys.modules, "agent_core.evals.gates", module)
 
     result = CliRunner().invoke(app, ["eval", "gates"])
 
@@ -81,10 +101,10 @@ def test_eval_capability_reports_opt_in_skip(monkeypatch: pytest.MonkeyPatch) ->
     async def run_live_suite(*_args: object, **_kwargs: object) -> None:
         return None
 
-    monkeypatch.setattr(
-        importlib,
-        "import_module",
-        lambda _name: SimpleNamespace(run_live_suite=run_live_suite),
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.capability",
+        SimpleNamespace(run_live_suite=run_live_suite),
     )
 
     result = CliRunner().invoke(app, ["eval", "capability", "--suite", "research"])
@@ -99,10 +119,10 @@ def test_eval_capability_normalizes_evaluation_errors(
     async def run_live_suite(*_args: object, **_kwargs: object) -> None:
         raise ValueError("judge pin mismatch")
 
-    monkeypatch.setattr(
-        importlib,
-        "import_module",
-        lambda _name: SimpleNamespace(run_live_suite=run_live_suite),
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.capability",
+        SimpleNamespace(run_live_suite=run_live_suite),
     )
 
     result = CliRunner().invoke(app, ["eval", "capability", "--suite", "research"])
@@ -128,10 +148,10 @@ def test_eval_capability_returns_failure_for_release_block(
             stopped_by="daily_cost_usd",
         )
 
-    monkeypatch.setattr(
-        importlib,
-        "import_module",
-        lambda _name: SimpleNamespace(run_live_suite=run_live_suite),
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.capability",
+        SimpleNamespace(run_live_suite=run_live_suite),
     )
 
     result = CliRunner().invoke(

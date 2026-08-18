@@ -59,7 +59,7 @@ class CapabilityScenario(BaseModel):
 
     id: str = Field(pattern=r"^cap-[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}$")
     suite: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
-    milestone: int = Field(ge=0, le=9)
+    milestone: int = Field(ge=0, le=10)
     task: str = Field(min_length=1)
     attachments: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)
@@ -471,22 +471,17 @@ async def run_suite(
             if suite_spend >= suite_settings.cost_usd:
                 stopped_by = "suite_cost_usd"
                 break
+            cost_candidates = (
+                ("cost_usd", scenario.ceiling.cost_usd),
+                ("suite_cost_usd", suite_settings.cost_usd - suite_spend),
+                ("daily_cost_usd", settings.daily_cost_usd - daily_spend),
+            )
+            cost_ceiling_scope, cost_ceiling = min(cost_candidates, key=lambda item: item[1])
             budget = CapabilityBudget(
                 model_calls=scenario.ceiling.model_calls,
                 tool_calls=scenario.ceiling.tool_calls,
-                cost_usd=min(
-                    scenario.ceiling.cost_usd,
-                    suite_settings.cost_usd - suite_spend,
-                    settings.daily_cost_usd - daily_spend,
-                ),
+                cost_usd=cost_ceiling,
                 wall_seconds=scenario.ceiling.wall_seconds,
-            )
-            cost_ceiling_scope = (
-                "daily_cost_usd"
-                if budget.cost_usd == settings.daily_cost_usd - daily_spend
-                else "suite_cost_usd"
-                if budget.cost_usd == suite_settings.cost_usd - suite_spend
-                else "cost_usd"
             )
             subject = await execute(
                 suite_settings.subject_model_policy,
@@ -654,11 +649,7 @@ async def run_suite(
     scores = [row.run.score for row in saved if row.run.score is not None]
     mean = None if not scores else sum(scores, Decimal("0")) / len(scores)
     floor = None if not scores else min(scores)
-    variance = (
-        None
-        if len(scores) < 2
-        else Decimal(str(statistics.pvariance(float(score) for score in scores)))
-    )
+    variance = None if len(scores) < 2 else statistics.pvariance(scores)
     ceiling_hits = sum(row.run.ceiling_hit is not None for row in saved)
     policy_failures = sum(row.run.policy_failures for row in saved)
     rubric_floors = {loaded.scenario.id: loaded.rubric.floor for loaded in scenarios}
@@ -751,7 +742,7 @@ async def _live_execution(
         run = await composition.runs.get(run_id)
         loop = asyncio.get_running_loop()
         poll_deadline = loop.time() + budget.wall_seconds
-        maximum_polls = max(1, budget.wall_seconds)
+        maximum_polls = limits.max_steps
         polls = 0
         while run.status not in TERMINAL_RUN_STATUSES | {
             RunStatus.WAITING_FOR_APPROVAL,

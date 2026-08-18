@@ -14,6 +14,8 @@
 ADR-0050 later supersedes this ADR's local-history constraint by adding an
 authoritative session index and deletion. The transport-only boundary and the
 local store's status as a nonauthoritative cache remain unchanged.
+ADR-0052 further requires selection to restore the durable session transcript
+before the client attaches to the latest run.
 
 ## Context
 

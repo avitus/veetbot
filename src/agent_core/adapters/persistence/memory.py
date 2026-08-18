@@ -21,7 +21,12 @@ from agent_core.domain.approvals import (
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
-from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.events import (
+    CONVERSATION_MESSAGE_EVENTS,
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+)
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -474,6 +479,24 @@ class InMemoryEventRepository:
                 if event.sequence < sequence and event.event_type == event_type
             ]
             return None if not matching else matching[-1].model_copy(deep=True)
+
+    async def list_conversation_after(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[EventEnvelope]:
+        if limit < 0:
+            raise ValueError("limit must be nonnegative")
+        await self._sessions.get(session_id, principal)
+        async with self._lock:
+            return [
+                event.model_copy(deep=True)
+                for event in self._events[session_id]
+                if event.sequence > sequence and event.event_type in CONVERSATION_MESSAGE_EVENTS
+            ][:limit]
 
     async def existing_sequences(
         self,
@@ -1255,6 +1278,7 @@ class InMemoryCapabilityEvaluationRepository:
     def __init__(self) -> None:
         self._runs: dict[tuple[str, str, str, int], EvalScenarioRun] = {}
         self._scores: dict[UUID, list[EvalCriterionScore]] = {}
+        self._attempt_costs: dict[UUID, tuple[datetime, Decimal]] = {}
         self._lock = asyncio.Lock()
 
     async def replace(
@@ -1263,6 +1287,8 @@ class InMemoryCapabilityEvaluationRepository:
         criteria: Sequence[EvalCriterionScore],
     ) -> SavedEvalScenario:
         key = (run.scenario_id, run.build_ref, run.judge_version, run.repeat_index)
+        if len({score.criterion for score in criteria}) != len(criteria):
+            raise ConflictError("criterion names must be unique within a scenario run")
         async with self._lock:
             previous = self._runs.get(key)
             stored_run = run.model_copy(
@@ -1272,10 +1298,9 @@ class InMemoryCapabilityEvaluationRepository:
                 score.model_copy(update={"scenario_run_id": stored_run.id}, deep=True)
                 for score in criteria
             ]
-            if len({score.criterion for score in stored_scores}) != len(stored_scores):
-                raise ConflictError("criterion names must be unique within a scenario run")
             self._runs[key] = stored_run
             self._scores[stored_run.id] = stored_scores
+            self._attempt_costs.setdefault(run.id, (run.started_at, run.cost_usd))
             return SavedEvalScenario(
                 run=stored_run.model_copy(deep=True),
                 criteria=[score.model_copy(deep=True) for score in stored_scores],
@@ -1329,6 +1354,6 @@ class InMemoryCapabilityEvaluationRepository:
     async def cost_since(self, since: datetime) -> Decimal:
         async with self._lock:
             return sum(
-                (run.cost_usd for run in self._runs.values() if run.started_at >= since),
+                (cost for started_at, cost in self._attempt_costs.values() if started_at >= since),
                 start=Decimal("0"),
             )

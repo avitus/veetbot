@@ -12,7 +12,7 @@ import pytest
 import agent_core.bootstrap as bootstrap_module
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.domain.evaluations import EvalScenarioRun
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import FailureReason, RunStatus
 from agent_core.evals.capability import (
     CapabilityBudget,
     CapabilityExecution,
@@ -230,6 +230,61 @@ def test_trajectory_provenance_mismatch_is_rejected(tmp_path: Path) -> None:
         load_scenarios(tmp_path, "research")
 
 
+def test_milestone_ten_capability_scenario_is_accepted(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 10"),
+        encoding="utf-8",
+    )
+
+    _settings, scenarios = load_scenarios(tmp_path, "research")
+
+    assert scenarios[0].scenario.milestone == 10
+
+
+async def test_tied_cost_ceiling_uses_scenario_scope(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    config = tmp_path / "evals" / "capability" / "config.yaml"
+    config.write_text(
+        config.read_text(encoding="utf-8")
+        .replace('daily_cost_usd: "2.00"', 'daily_cost_usd: "0.50"')
+        .replace('cost_usd: "1.00"', 'cost_usd: "0.50"'),
+        encoding="utf-8",
+    )
+    factory = EvalUnitOfWorkFactory()
+
+    async def execute(
+        _model_policy: str, _tools: object, budget: CapabilityBudget, _prompt: str
+    ) -> CapabilityExecution:
+        return CapabilityExecution(
+            run_id=UUID(int=610),
+            status=RunStatus.FAILED,
+            output=None,
+            provider="openai",
+            model="gpt-5.6-sol",
+            model_calls=1,
+            tool_calls=0,
+            cost_usd=budget.cost_usd,
+            policy_failures=0,
+            started_at=NOW,
+            finished_at=NOW + timedelta(seconds=1),
+            failure_reason=FailureReason.BUDGET_EXCEEDED,
+        )
+
+    result = await run_suite(
+        tmp_path,
+        suite="research",
+        build_ref="abc123",
+        uow_factory=cast(UnitOfWorkFactory, factory),
+        execute=execute,
+        clock=FixedClock(NOW),
+        ids=_ids(3950),
+    )
+
+    assert result.runs[0].run.ceiling_hit == "cost_usd"
+
+
 async def test_replaying_build_uses_canonical_process_event_keys(tmp_path: Path) -> None:
     _fixture(tmp_path)
     factory = EvalUnitOfWorkFactory()
@@ -300,7 +355,7 @@ async def test_live_execution_bounds_non_advancing_worker(
 
         async def run_once(self) -> bool:
             self.calls += 1
-            return self.calls == 1
+            return True
 
     worker = FakeWorker()
 
@@ -327,3 +382,5 @@ async def test_live_execution_bounds_non_advancing_worker(
             clock=FixedClock(NOW),
             ids=_ids(4000),
         )
+
+    assert worker.calls == 2

@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-17 — Complete historical transcripts in the Apple client
+
+- Added a principal-scoped, paginated session-message read that exposes only
+  durable user and completed-assistant messages from the authoritative event
+  log.
+- Restored every historical turn before the Apple client attaches to the latest
+  run, with persisted-sequence deduplication so SSE replay cannot duplicate the
+  final turn.
+- Covered pagination, transient read retry, malformed cursors, scope and
+  principal isolation, and the relaunch regression, and proposed ADR-0052 for
+  the seventeenth-route extension.
+
 ## 2026-08-16 — Explicit memory writes after recall
 
 - Preserved the runtime's `MEMORY` provenance through `memory.remember` instead

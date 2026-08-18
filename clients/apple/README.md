@@ -39,6 +39,11 @@ poll. The row action is `Delete Everywhere`: it deletes the authoritative
 session first and removes local state only after the server succeeds. Active
 runs must be stopped before their session can be deleted.
 
+Selecting a conversation reads its complete, paginated durable message
+transcript from the shared core before attaching to the active or latest run.
+The client uses persisted session sequences to prevent the latest run's replay
+from duplicating messages already restored from the transcript.
+
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute
 the Swift Testing suite when `swift test` builds without discovering tests.

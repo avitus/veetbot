@@ -10,6 +10,7 @@ import json
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timedelta
+from typing import Literal
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
@@ -31,12 +32,14 @@ from agent_core.domain.errors import (
     InvalidStateTransition,
     NotFoundError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, conversation_items
 from agent_core.domain.messages import (
+    AssistantMessage,
     FileReferencePart,
     ImageReferencePart,
     TextPart,
     ToolResultItem,
+    UserMessage,
 )
 from agent_core.domain.persistence import IdempotencyRecord
 from agent_core.domain.policies import TrustLevel
@@ -59,6 +62,7 @@ from agent_core.domain.views import (
     RunLimitsView,
     RunUsageView,
     RunView,
+    SessionMessageView,
     SessionView,
     StreamFrame,
     SubmitResult,
@@ -214,6 +218,32 @@ def _wire_content(content: list[ContentBlock]) -> list[dict[str, object]]:
     return [block.model_dump(mode="json") for block in content]
 
 
+def _content_view(
+    content: list[TextPart | ImageReferencePart | FileReferencePart],
+) -> list[ContentBlock]:
+    blocks: list[ContentBlock] = []
+    for part in content:
+        if isinstance(part, TextPart):
+            blocks.append(TextContentBlock(text=part.text))
+        elif isinstance(part, ImageReferencePart):
+            blocks.append(
+                ImageContentBlock(
+                    artifact_id=part.artifact_id,
+                    media_type=part.media_type,
+                    detail=part.detail,
+                )
+            )
+        elif isinstance(part, FileReferencePart):
+            blocks.append(
+                FileContentBlock(
+                    artifact_id=part.artifact_id,
+                    media_type=part.media_type,
+                    filename=part.filename,
+                )
+            )
+    return blocks
+
+
 def _encode_session_cursor(row: Session) -> str:
     payload = json.dumps(
         {"k": row.updated_at.isoformat(), "i": str(row.id)}, separators=(",", ":")
@@ -244,6 +274,34 @@ def _decode_session_cursor(value: str | None) -> SessionCursor | None:
         json.JSONDecodeError,
     ) as exc:
         raise ValueError("session cursor is malformed") from exc
+
+
+def _encode_message_cursor(sequence: int) -> str:
+    payload = json.dumps({"s": sequence}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_message_cursor(value: str | None) -> int:
+    if value is None:
+        return 0
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        raw = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8"))
+        if not isinstance(raw, dict) or set(raw) != {"s"}:
+            raise ValueError
+        sequence = raw["s"]
+        if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+            raise ValueError
+        return sequence
+    except (
+        binascii.Error,
+        ValueError,
+        TypeError,
+        KeyError,
+        UnicodeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise ValueError("session message cursor is malformed") from exc
 
 
 class PublicSessionService:
@@ -367,6 +425,51 @@ class PublicSessionService:
         return Page[SessionView](
             items=[_session_view(session, latest_runs.get(session.id)) for session in page_rows],
             next_cursor=(_encode_session_cursor(page_rows[-1]) if has_more and page_rows else None),
+        )
+
+    async def messages(
+        self,
+        principal: Principal,
+        session_id: UUID,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[SessionMessageView]:
+        require_scope(principal, "session.read")
+        effective_limit = min(max(limit, 1), 200)
+        after_sequence = _decode_message_cursor(cursor)
+        messages: list[SessionMessageView] = []
+        async with self._uow_factory() as uow:
+            events = await uow.events.list_conversation_after(
+                session_id,
+                after_sequence,
+                principal,
+                limit=effective_limit + 1,
+            )
+            for event in events:
+                for item in conversation_items(event):
+                    role: Literal["user", "assistant"]
+                    if isinstance(item, UserMessage):
+                        role = "user"
+                    elif isinstance(item, AssistantMessage):
+                        role = "assistant"
+                    else:
+                        continue
+                    messages.append(
+                        SessionMessageView(
+                            sequence=event.sequence,
+                            role=role,
+                            content=_content_view(item.content),
+                        )
+                    )
+        has_more = len(messages) > effective_limit
+        page_messages = messages[:effective_limit]
+        return Page[SessionMessageView](
+            items=page_messages,
+            next_cursor=(
+                _encode_message_cursor(page_messages[-1].sequence)
+                if has_more and page_messages
+                else None
+            ),
         )
 
     async def delete(self, principal: Principal, session_id: UUID) -> None:

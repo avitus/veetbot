@@ -158,6 +158,17 @@ public struct SessionView: Codable, Identifiable, Sendable {
     }
 }
 
+public enum SessionMessageRole: String, Codable, Sendable {
+    case user
+    case assistant
+}
+
+public struct SessionMessageView: Codable, Sendable {
+    public let sequence: Int
+    public let role: SessionMessageRole
+    public let content: [ContentBlock]
+}
+
 public struct RunUsageView: Codable, Sendable {
     public let inputTokens: Int
     public let outputTokens: Int

@@ -117,6 +117,19 @@ public final class RunStateReducer: ObservableObject {
         activityOrder = []
     }
 
+    public func restore(messages: [SessionMessageView]) {
+        reset()
+        for message in messages.sorted(by: { $0.sequence < $1.sequence }) {
+            guard persistedSequences.insert(message.sequence).inserted else { continue }
+            let id = "event-\(message.sequence)"
+            let role: TimelineItem.Role = message.role == .user ? .user : .assistant
+            activityOrder.append(.message(id))
+            timeline.append(
+                TimelineItem(id: id, role: role, content: message.content)
+            )
+        }
+    }
+
     public func seed(run: RunView) {
         activeRunID = run.id
         runStatus = run.status

@@ -174,6 +174,13 @@ public final class ChatViewModel: ObservableObject {
                 }
                 return
             }
+            let messages = try await loadSessionMessages(
+                api: api,
+                sessionID: session.id,
+                requestID: requestID
+            )
+            guard selectionRequestID == requestID else { return }
+            runState.restore(messages: messages)
             if let runID = session.activeRunID ?? session.lastRunID ?? entry.lastRunID {
                 let run = try await api.getRun(runID)
                 guard selectionRequestID == requestID else { return }
@@ -185,6 +192,26 @@ public final class ChatViewModel: ObservableObject {
                 present(error)
             }
         }
+    }
+
+    private func loadSessionMessages(
+        api: VeetbotAPIClient,
+        sessionID: UUID,
+        requestID: UUID
+    ) async throws -> [SessionMessageView] {
+        var messages: [SessionMessageView] = []
+        var cursor: String?
+        var seenCursors: Set<String> = []
+        repeat {
+            let page = try await api.listSessionMessages(
+                sessionID: sessionID,
+                cursor: cursor
+            )
+            guard selectionRequestID == requestID else { return [] }
+            messages.append(contentsOf: page.items)
+            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+        } while cursor != nil
+        return messages
     }
 
     public func deleteSessionEverywhere(_ entry: SessionHistoryEntry) async {
