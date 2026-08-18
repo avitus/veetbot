@@ -1,7 +1,9 @@
 from pathlib import Path
 
+import pytest
 import yaml
 
+import agent_core.context.planner as planner_module
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryToolInvocationRepository,
@@ -69,6 +71,51 @@ async def test_context_planner_persists_and_rotates_a_session_plan() -> None:
     assert rotated.prefix_sha256 == prefix_rotated.prefix_sha256
     assert conflict_rotated.epoch == 4
     assert conflict_rotated.model_id == "fake:other"
+
+
+async def test_context_planner_rotates_a_plan_from_the_previous_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    config = yaml.safe_load(
+        (Path(__file__).parents[2] / "src/agent_core/context/plan.yaml").read_text(encoding="utf-8")
+    )
+    model = ResolvedModel(provider="fake", model="scripted", resolved_at=NOW)
+    monkeypatch.setattr(planner_module, "BUILDER_VERSION", "context-builder@2")
+    previous = await EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    ).plan(session(), agent(), principal(), model)
+
+    monkeypatch.setattr(planner_module, "BUILDER_VERSION", "context-builder@3")
+    rotated = await EventContextPlanner(
+        factory,
+        StaticToolRegistry(),
+        ConservativeTokenEstimator(),
+        clock,
+        principal(),
+        config,
+        policy_version="contract-policy@1",
+    ).plan(session(), agent(), principal(), model)
+
+    assert previous.builder_version == "context-builder@2"
+    assert rotated.builder_version == "context-builder@3"
+    assert rotated.epoch == previous.epoch + 1
 
 
 async def test_context_planner_does_not_require_snapshot_config_without_memory() -> None:

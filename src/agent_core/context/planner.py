@@ -26,10 +26,12 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@2"
+BUILDER_VERSION = "context-builder@3"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
+_SKILL_LOAD_TOOL_NAME = "skill.load"
+_SKILL_REVIEW_RUN_KIND = "skill_review"
 
 
 class EventContextPlanner:
@@ -203,7 +205,14 @@ class EventContextPlanner:
             principal,
             profile=self._policy_version,
             environment="runtime",
-        )[:maximum_tools]
+        )
+        if (
+            catalog is not None
+            and not catalog.entries
+            and agent.metadata.get("run_kind") != _SKILL_REVIEW_RUN_KIND
+        ):
+            tools = [tool for tool in tools if tool.name != _SKILL_LOAD_TOOL_NAME]
+        tools = tools[:maximum_tools]
         catalog_metadata = (
             () if catalog is None else tuple(entry.metadata for entry in catalog.entries)
         )

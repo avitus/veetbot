@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_core.domain.errors import AgentCoreError
+from agent_core.domain.errors import AgentCoreError, NotFoundError
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import (
     IdempotencyClass,
@@ -29,12 +29,20 @@ SKILL_LOAD_TOOL_NAME = "skill.load"
 class SkillLoadTool:
     spec = ToolSpec(
         name=SKILL_LOAD_TOOL_NAME,
-        version="1.0.0",
-        description="Load or unload content from the session-pinned skill catalog.",
+        version="1.1.0",
+        description=(
+            "Load or unload an exact skill name listed in Available skill metadata; "
+            "never guess names or use this tool to discover capabilities."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "name": {"type": "string", "minLength": 1, "maxLength": 64},
+                "name": {
+                    "type": "string",
+                    "description": "Exact name from Available skill metadata.",
+                    "minLength": 1,
+                    "maxLength": 64,
+                },
                 "path": {"type": "string", "minLength": 1, "maxLength": 512},
                 "unload": {"type": "boolean"},
             },
@@ -70,6 +78,25 @@ class SkillLoadTool:
                     retryable=False,
                 ),
             )
+        try:
+            catalog = self._catalogs.current(context.session_id)
+        except NotFoundError:
+            catalog = None
+        if catalog is not None:
+            available_names = tuple(entry.manifest.name for entry in catalog.entries)
+            if name not in available_names:
+                visible = ", ".join(available_names) or "none"
+                return ToolResult(
+                    ok=False,
+                    content=[],
+                    failure=ToolFailure(
+                        kind=ToolFailureKind.NOT_FOUND,
+                        reason_code="tool.skill.not_in_catalog",
+                        detail=f"skill {name!r} is not in the pinned catalog",
+                        retryable=False,
+                        external_text=f"Available skill names: {visible}",
+                    ),
+                )
         if bool(arguments.get("unload", False)):
             return ToolResult(
                 ok=True,

@@ -143,6 +143,10 @@ pipeline retains ownership of any retry decision within the run deadline.
 - The recommended composition routes Tavily to `web.search` and Firecrawl to
   `web.fetch`; each selector can also choose the other provider independently.
 - Disabled capabilities are neither registered nor advertised by default.
+- A web-enabled context plan advertises the selected `web.search` and
+  `web.fetch` capabilities directly. If the pinned skill catalog is empty, it
+  does not advertise `skill.load`; web discovery is a builtin capability, not
+  a guessed skill name.
 - A complete agent tool call passes schema validation and policy, persists its
   invocation, and returns external-untrusted content to the next model step.
 - Credentials and raw upstream diagnostics never appear in tool results or

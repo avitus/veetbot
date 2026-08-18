@@ -126,3 +126,36 @@ async def test_web_search_runs_through_policy_and_persists_untrusted_result() ->
     assert invocations[0].status is ToolInvocationStatus.SUCCEEDED
     assert invocations[0].result_item is not None
     assert invocations[0].result_item.trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+async def test_web_research_plan_omits_unusable_skill_loader() -> None:
+    provider = FakeWebProvider()
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="No tool call needed.", stop_reason=StopReason.END_TURN)]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        run_id = await composition.runs.submit(
+            "Search for publicly available information about Ada Lovelace.", session_id
+        )
+        await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            plan = await uow.events.latest_before(
+                session_id,
+                (1 << 63) - 1,
+                "context.plan.created",
+                composition.principal,
+            )
+
+    assert plan is not None
+    tool_names = plan.payload["plan"]["tool_names"]
+    assert "web.search" in tool_names
+    assert "web.fetch" in tool_names
+    assert "skill.load" not in tool_names
