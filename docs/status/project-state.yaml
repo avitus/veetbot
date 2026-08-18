@@ -52,8 +52,17 @@ milestones:
     title: Long-term memory and knowledge retrieval
     status: complete
   "10":
-    title: Scheduling, model routing, and subagents
+    title: Automatic memory formation and self-authored skills tranches
     status: in_progress
+    authorized_scope:
+      - automatic memory formation and consolidation
+      - skill.manage foreground authoring
+      - governed background-review child runs
+      - authoring metrics and evaluation evidence
+    deferred_scope:
+      - scheduling
+      - model routing changes
+      - general-purpose subagents and delegate.run
 
 verification:
   milestone_0:
@@ -578,7 +587,7 @@ verification:
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-17T19:54:41Z
+    recorded_at: 2026-08-18T01:45:58Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -603,29 +612,42 @@ verification:
           deadline could poison a sweep; malformed and timezone-naive deadlines
           are now rejected consistently. All 27 Milestone 10 memory gate tests
           pass.
+      - check: Milestone 10A skill-authoring gates
+        outcome: passed_locally
+        detail: >-
+          All six registered gates passed through eleven focused tests covering
+          trust and exact scope denials, canonical bounded approvals, default-off
+          construction, confined child reviews, non-fatal review failure,
+          durable provenance and replay, optimistic conflicts, and the
+          self-authored case 27 outcome change.
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 341 source and test
-          files, 426 static tests, 167 contracts, deployment-script checks,
-          123 citation checks, and strict documentation builds pass. The gate
-          registry contains 177 entries and retains 166 as the verified ceiling
-          through Milestone 9.
+          Ruff formatting and linting, strict mypy over 359 source and test
+          files, 475 static tests, 170 contracts, deployment-script checks,
+          123 citation checks, and strict documentation builds pass on the
+          integrated head. The gate registry contains 177 entries and retains
+          166 as the verified ceiling through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
-          All 101 tests passed against the Compose PostgreSQL 16 service on an
-          isolated host port, including terminal formation flags, the idle
-          and persisted-ready boundaries, malformed and timezone-naive deadline
-          isolation, concurrent consolidation claims, savepoint rollback of
-          stale replacement attempts, migrations, consolidation watermarks,
-          persistence, and re-composition.
+          An isolated Compose PostgreSQL 16 database upgraded from empty through
+          revision a4c8e2f6b913 and all 105 integration and resilience tests
+          passed, including memory formation, skill authoring, capability
+          persistence, transcript restoration, migrations, and re-composition.
+      - check: default-off rollout boundary
+        outcome: passed_locally
+        detail: >-
+          Foreground authoring and background review both default off;
+          configuration refuses background review without foreground authoring,
+          and skill.manage is absent from the registry until explicitly enabled.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 71 Swift Testing cases passed, including the missing-keychain-
-          entitlement regression that verifies the previously merged signing
-          change remains in this branch's ancestry.
+          All 81 Swift Testing cases passed, including complete historical
+          transcript restoration, forward-compatible message-role decoding,
+          system composer sizing, connection-settings layout, and the
+          missing-keychain-entitlement regression.
       - check: real-Docker sandbox security partition
         outcome: passed
         detail: All 10 sandbox security tests passed against a freshly built image.
@@ -638,9 +660,21 @@ verification:
           ceiling, temporal-hint preservation, transactional replacement,
           formation-scan index, and formation@2 policy boundary are recorded for
           owner review.
+      - check: proposed ADR-0052
+        outcome: owner_review_requested
+        detail: >-
+          The independently authorized tranche, invocation idempotency, durable
+          provenance across session erasure, dedicated child-session placement,
+          disabled-candidate activation, no-review-archive rule, and quantitative
+          rollout threshold are recorded for owner review.
     remaining:
       - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
-      - Complete the six skill-authoring gates already assigned to Milestone 10.
+      - Record at least 30 paired rollout samples for each model-policy,
+        policy-profile, and authoring-version combination; require at least five
+        absolute percentage points of completion lift, a positive 95 percent
+        Clopper-Pearson lower bound, and zero additional policy failures.
+      - Run every hosted CI lane and complete the GitHub CodeRabbit review on
+        the same final head, resolving every finding and conversation.
       - Implement separately gated scheduling, routing, and subagent extensions.
 
 documentation:
@@ -659,11 +693,11 @@ documentation:
 readiness:
   review: docs/plan/readiness.md
   summary: >-
-    Milestones 0 through 9 are implementable from the corpus alone.
-    The owner authorized Milestone 10 on 2026-08-17; its first
-    workstream now has memory-maturation acceptance criteria, while
-    skill authoring retains six pending gates and scheduling, routing,
-    and subagents retain their documented entry conditions. Milestones 5, 6, and
+    Milestones 0 through 9 are complete and implementable from the corpus.
+    The owner authorized automatic memory formation and the self-authored-skills
+    tranche of Milestone 10, with eleven registered gates across the two
+    workstreams. Scheduling, routing, and general-purpose subagents remain
+    deferred directions. Milestones 5, 6, and
     8 moved into the covered set when
     docs/plan/http-api-and-streaming.md,
     docs/plan/sandbox-isolation.md, and docs/plan/skills.md were
@@ -928,8 +962,8 @@ readiness:
     open hand-off question should produce the declaration. A numeric
     constants cross-check over retry counts, approval expiries, lease
     and heartbeat intervals, and token budgets found no conflict.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-17T19:54:41Z
+last_updated: 2026-08-18T01:45:58Z
 last_reviewed_commit: c7fd4a2

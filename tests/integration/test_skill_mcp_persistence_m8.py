@@ -223,6 +223,8 @@ async def test_postgres_skill_and_mcp_round_trip(tmp_path: Path) -> None:
                 AuthoringContext(
                     run_id=provenance_run.id,
                     principal_id=composition.principal.principal_id,
+                    invocation_id=UUID("00000000-0000-0000-0000-000000008009"),
+                    idempotency_key="m8-provenance-fixture",
                 ),
             )
         with pytest.raises(IntegrityError):

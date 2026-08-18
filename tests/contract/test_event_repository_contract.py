@@ -95,3 +95,31 @@ async def test_event_repository_reads_the_latest_typed_event_before_a_sequence()
         )
         is None
     )
+
+
+async def test_event_repository_bounds_conversation_event_queries() -> None:
+    _clock, _sessions, _runs, repository = await memory_stack()
+    for event_type in (
+        "run.queued",
+        "user.message.created",
+        "tool.call.started",
+        "assistant.message.completed",
+        "user.message.created",
+    ):
+        await repository.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type=event_type,
+                actor_type="contract",
+            )
+        )
+
+    events = await repository.list_conversation_after(SESSION_ID, 1, principal(), limit=2)
+
+    assert [(event.sequence, event.event_type) for event in events] == [
+        (2, "user.message.created"),
+        (4, "assistant.message.completed"),
+    ]
+    with pytest.raises(ValueError, match="nonnegative"):
+        await repository.list_conversation_after(SESSION_ID, 0, principal(), limit=-1)

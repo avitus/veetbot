@@ -251,6 +251,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         ("POST", "/v1/sessions", {}),
         ("GET", "/v1/sessions?cursor=malformed", None),
         ("GET", f"/v1/sessions/{missing}", None),
+        ("GET", f"/v1/sessions/{missing}/messages", None),
         ("DELETE", f"/v1/sessions/{missing}", None),
         (
             "POST",
@@ -384,7 +385,7 @@ async def test_every_route_declares_exactly_one_scope_except_health(tmp_path: Pa
             composition.readiness_probe,
         )
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
-    assert len(routes) == 16
+    assert len(routes) == 17
     for route in routes:
         declared = (route.openapi_extra or {}).get("required_scope")
         if route.path in {"/health/live", "/health/ready"}:
@@ -427,6 +428,7 @@ async def test_cross_tenant_resource_routes_return_404(tmp_path: Path) -> None:
         async with _client(composition, principal=foreign) as client:
             requests = [
                 ("GET", f"/v1/sessions/{session_id}", None),
+                ("GET", f"/v1/sessions/{session_id}/messages", None),
                 ("DELETE", f"/v1/sessions/{session_id}", None),
                 (
                     "POST",
@@ -500,6 +502,90 @@ async def test_session_index_and_delete_are_authoritative_and_idempotent(
             response = await client.get(path)
             assert response.status_code == 404, (path, response.text)
         assert not list(composition.settings.artifact_root.rglob(f"*{artifact_id}*"))
+
+
+async def test_session_message_history_is_complete_paginated_and_validated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with _composition(tmp_path) as composition, _client(composition) as client:
+        session_id = await _create_session(client)
+        events: list[tuple[str, dict[str, object]]] = [
+            ("user.message.created", {"content": [{"kind": "text", "text": "First"}]}),
+            ("run.queued", {"run_id": str(UUID(int=100))}),
+            (
+                "assistant.message.completed",
+                {"message": {"kind": "assistant", "content": [{"kind": "text", "text": "One"}]}},
+            ),
+            ("user.message.created", {"content": [{"kind": "text", "text": "Second"}]}),
+            ("run.queued", {"run_id": str(UUID(int=101))}),
+            (
+                "assistant.message.completed",
+                {"message": {"kind": "assistant", "content": [{"kind": "text", "text": "Two"}]}},
+            ),
+        ]
+        async with composition.uow_factory() as uow:
+            for event_type, payload in events:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=session_id,
+                        run_id=None,
+                        event_type=event_type,
+                        actor_type="test",
+                        actor_id=composition.principal.principal_id,
+                        payload=payload,
+                    )
+                )
+            event_repository = uow.events
+
+        async def reject_unfiltered_scan(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise AssertionError("transcript loading must use the filtered event query")
+
+        monkeypatch.setattr(event_repository, "list_after", reject_unfiltered_scan)
+
+        cursor: str | None = None
+        messages: list[dict[str, object]] = []
+        while True:
+            response = await client.get(
+                f"/v1/sessions/{session_id}/messages",
+                params={"limit": 2, **({"cursor": cursor} if cursor is not None else {})},
+            )
+            assert response.status_code == 200, response.text
+            page = response.json()
+            messages.extend(page["items"])
+            cursor = page["next_cursor"]
+            if cursor is None:
+                break
+
+        assert [(row["sequence"], row["role"], row["content"]) for row in messages] == [
+            (2, "user", [{"type": "text", "text": "First"}]),
+            (4, "assistant", [{"type": "text", "text": "One"}]),
+            (5, "user", [{"type": "text", "text": "Second"}]),
+            (7, "assistant", [{"type": "text", "text": "Two"}]),
+        ]
+
+        malformed = await client.get(
+            f"/v1/sessions/{session_id}/messages",
+            params={"cursor": "not-a-cursor"},
+        )
+        assert malformed.status_code == 400
+        assert malformed.json()["error"]["code"] == "malformed_request"
+
+        without_session_read = Principal(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            roles=set(composition.principal.roles),
+            scopes=set(composition.principal.scopes) - {"session.read"},
+        )
+        async with _client(
+            composition,
+            principal=without_session_read,
+            client_address=("127.0.0.1", 43107),
+        ) as unauthorized:
+            forbidden = await unauthorized.get(f"/v1/sessions/{session_id}/messages")
+        assert forbidden.status_code == 403
+        assert forbidden.json()["error"]["code"] == "authorization_error"
 
 
 async def test_only_the_first_top_level_message_can_supply_a_session_title(

@@ -71,11 +71,12 @@ Read, in this order, before starting an assignment:
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one
-  (see project state; currently Milestones 0 and 1).
+  (see project state; currently the self-authored-skills tranche of Milestone
+  10).
 - Do not begin later milestones speculatively.
-- Milestones 0 through 9 are implementable from the documentation as it
-  stands. Milestone 10 has a design for its skill-authoring half and no
-  acceptance criteria of its own; do not begin it.
+- Milestones 0 through 9 are complete. Milestone 10 self-authored skills are
+  authorized with their own acceptance contract; scheduling, routing,
+  general-purpose subagents, and other Milestone 10 extensions remain unauthorized.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).

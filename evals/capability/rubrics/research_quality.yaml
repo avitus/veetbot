@@ -1,0 +1,18 @@
+schema_version: 1
+floor: "0.60"
+criteria:
+  - id: task_completion
+    description: The answer completes each requested part of the task.
+    minimum: "0"
+    maximum: "4"
+    weight: "2"
+  - id: evidence_quality
+    description: Claims are grounded in relevant evidence available to the agent.
+    minimum: "0"
+    maximum: "4"
+    weight: "2"
+  - id: precision
+    description: The answer is specific, internally consistent, and avoids unsupported claims.
+    minimum: "0"
+    maximum: "4"
+    weight: "1"

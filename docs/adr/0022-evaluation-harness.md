@@ -211,7 +211,9 @@ test-only bypass has a bypass.
 26. **Tracked metrics never block CI.** A metric with a threshold is a gate
     with a worse name, and should be registered as one.
 27. **The deterministic suite adds no tables.** The capability track adds
-    two, keyed by scenario, build, judge version, and repeat.
+    three: two result tables keyed by scenario, build, judge version, and
+    repeat, plus an idempotent per-attempt cost ledger. Result replacement
+    therefore cannot erase spend from the daily ceiling.
 
 ## Consequences
 

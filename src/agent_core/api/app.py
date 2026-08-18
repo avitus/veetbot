@@ -19,6 +19,7 @@ from agent_core.api.auth import Authenticator
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
 from agent_core.api.sse import encode_sse, heartbeat
+from agent_core.application.errors import SessionMessageCursorError
 from agent_core.application.services import (
     ApprovalService,
     ArtifactService,
@@ -36,6 +37,7 @@ from agent_core.domain.views import (
     ContentBlock,
     Page,
     RunView,
+    SessionMessageView,
     SessionView,
     StreamFrame,
     SubmitResult,
@@ -281,6 +283,26 @@ def create_app(
     ) -> Response:
         await services.sessions.delete(authenticated, session_id)
         return Response(status_code=204)
+
+    @app.get(
+        "/v1/sessions/{session_id}/messages",
+        openapi_extra={"required_scope": "session.read"},
+    )
+    async def list_session_messages(
+        session_id: UUID,
+        authenticated: Annotated[Principal, secured("session.read")],
+        limit: Annotated[int, Query(ge=1)] = 100,
+        cursor: str | None = None,
+    ) -> Page[SessionMessageView]:
+        try:
+            return await services.sessions.messages(
+                authenticated,
+                session_id,
+                limit,
+                cursor,
+            )
+        except SessionMessageCursorError as exc:
+            raise MalformedRequestError("session message cursor is malformed") from exc
 
     @app.post(
         "/v1/sessions/{session_id}/messages",

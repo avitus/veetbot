@@ -16,6 +16,7 @@ arms:
       model_calls: 2
   - name: with_skill
     skills: [rel@1]
+    skill_source: agent
     expected:
       terminal_status: COMPLETED
       final_text: READY_FOR_RELEASE

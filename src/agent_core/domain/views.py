@@ -59,6 +59,12 @@ class SessionView(BaseModel):
     last_run_id: UUID | None
 
 
+class SessionMessageView(BaseModel):
+    sequence: int = Field(ge=1)
+    role: Literal["user", "assistant"]
+    content: list[ContentBlock] = Field(min_length=1)
+
+
 class SubmitResult(BaseModel):
     run_id: UUID
     status: RunStatus

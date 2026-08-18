@@ -48,8 +48,6 @@ import Testing
                 body: #"{"error":{"code":"malformed_request","message":"The HTTP request is not supported.","details":{},"request_id":"old-server"}}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
-
         let configured = await model.configure(
             baseURLString: "https://veetbot.test",
             token: "replacement-token"
@@ -70,8 +68,6 @@ import Testing
                 body: #"{"error":{"code":"authentication_error","message":"expired","details":{},"request_id":"expired-token"}}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
-
         let configured = await model.configure(
             baseURLString: "https://veetbot.test",
             token: "replacement-token"
@@ -92,8 +88,6 @@ import Testing
                 body: #"{"error":{"code":"internal_error","message":"temporarily unavailable","details":{},"request_id":"server-error"}}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
-
         let configured = await model.configure(
             baseURLString: "https://veetbot.test",
             token: "replacement-token"
@@ -103,6 +97,139 @@ import Testing
         #expect(model.isConfigured == false)
         #expect(model.baseURL == nil)
         #expect(model.errorMessage == "temporarily unavailable")
+    }
+
+    @Test
+    func testSelectingHistoricalSessionAfterRelaunchRestoresEveryCompletedTurn() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000123")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let sessionBody = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"First question","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":"\(runID.uuidString)"}
+            """
+        let lock = NSLock()
+        var messageRequests = 0
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(sessionBody)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionBody)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                let attempt = lock.withLock { () -> Int in
+                    messageRequests += 1
+                    return messageRequests
+                }
+                if attempt == 1 {
+                    return try response(
+                        for: request,
+                        statusCode: 503,
+                        body: #"{"error":{"code":"internal_error","message":"retry","details":{},"request_id":"retry-history"}}"#,
+                        headers: ["Retry-After": "0"]
+                    )
+                }
+                let cursor = URLComponents(
+                    url: try #require(request.url),
+                    resolvingAgainstBaseURL: false
+                )?.queryItems?.first { $0.name == "cursor" }?.value
+                if cursor == nil {
+                    return try response(
+                        for: request,
+                        statusCode: 200,
+                        body: """
+                            {"items":[
+                              {"sequence":2,"role":"user","content":[{"type":"text","text":"First question"}]},
+                              {"sequence":6,"role":"assistant","content":[{"type":"text","text":"First answer"}]}
+                            ],"next_cursor":"messages-2"}
+                            """
+                    )
+                }
+                #expect(cursor == "messages-2")
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[
+                          {"sequence":7,"role":"user","content":[{"type":"text","text":"Second question"}]},
+                          {"sequence":11,"role":"assistant","content":[{"type":"text","text":"Second answer"}]}
+                        ],"next_cursor":null}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"COMPLETED","step_count":1,"model_call_count":1,"tool_call_count":0,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        id: 2
+                        event: user.message.created
+                        data: {"content":[{"type":"text","text":"First question"}]}
+
+                        id: 6
+                        event: assistant.message.completed
+                        data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"First answer"}]}}
+
+                        id: 7
+                        event: user.message.created
+                        data: {"content":[{"type":"text","text":"Second question"}]}
+
+                        id: 11
+                        event: assistant.message.completed
+                        data: {"message":{"kind":"assistant","content":[{"kind":"text","text":"Second answer"}]}}
+
+                        id: 12
+                        event: context.working_state.updated
+                        data: {"working_state":{"objective":"Replay observed","constraints":[],"tasks":[],"established_facts":[],"open_questions":[],"next_action":null}}
+
+                        id: 13
+                        event: run.completed
+                        data: {"run_id":"\(runID.uuidString)"}
+
+                        """
+                )
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        defer { model.newSession() }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        let entry = try #require(model.history.first)
+        await model.selectSession(entry)
+        for _ in 0 ..< 100 where model.runState.workingState == nil {
+            await Task.yield()
+        }
+
+        #expect(model.runState.workingState?.objective == "Replay observed")
+        #expect(model.runState.timeline.map(\.text) == [
+            "First question",
+            "First answer",
+            "Second question",
+            "Second answer",
+        ])
+        #expect(lock.withLock { messageRequests } == 3)
     }
 
     @Test
@@ -123,7 +250,6 @@ import Testing
                     """
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         let model = ChatViewModel(
             tokenStore: InMemoryTokenStore(),
             configurationStore: ConnectionConfigurationStore(
@@ -173,7 +299,6 @@ import Testing
                 body: "{\"items\":[],\"next_cursor\":\(next)}"
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -207,7 +332,6 @@ import Testing
                 body: #"{"items":[],"next_cursor":"repeated"}"#
             )
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -274,7 +398,6 @@ import Testing
                 return try response(for: request, statusCode: 500, body: "")
             }
         }
-        defer { ChatViewModelURLProtocol.handler = nil }
         #expect(
             await model.configure(
                 baseURLString: "https://veetbot.test",
@@ -321,8 +444,11 @@ import Testing
     private func urlSession(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) -> URLSession {
-        ChatViewModelURLProtocol.handler = handler
         let sessionConfiguration = URLSessionConfiguration.ephemeral
+        let handlerID = ChatViewModelURLProtocol.register(handler)
+        sessionConfiguration.httpAdditionalHeaders = [
+            ChatViewModelURLProtocol.handlerHeader: handlerID
+        ]
         sessionConfiguration.protocolClasses = [ChatViewModelURLProtocol.self]
         return URLSession(configuration: sessionConfiguration)
     }
@@ -371,13 +497,23 @@ private actor DeleteFailingHistoryStore: SessionHistoryStore {
 }
 
 private final class ChatViewModelURLProtocol: URLProtocol {
-    static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+    static let handlerHeader = "X-Veetbot-Test-Handler-ID"
+    private static let handlerStore = ChatViewModelURLProtocolHandlerStore()
+
+    static func register(
+        _ handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
+    ) -> String {
+        handlerStore.register(handler)
+    }
 
     override static func canInit(with request: URLRequest) -> Bool { true }
     override static func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
-        guard let handler = Self.handler else {
+        guard
+            let handlerID = request.value(forHTTPHeaderField: Self.handlerHeader),
+            let handler = Self.handlerStore.handler(for: handlerID)
+        else {
             client?.urlProtocol(self, didFailWithError: URLError(.unknown))
             return
         }
@@ -392,4 +528,21 @@ private final class ChatViewModelURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class ChatViewModelURLProtocolHandlerStore: @unchecked Sendable {
+    typealias Handler = (URLRequest) throws -> (HTTPURLResponse, Data)
+
+    private let lock = NSLock()
+    private var handlers: [String: Handler] = [:]
+
+    func register(_ handler: @escaping Handler) -> String {
+        let id = UUID().uuidString
+        lock.withLock { handlers[id] = handler }
+        return id
+    }
+
+    func handler(for id: String) -> Handler? {
+        lock.withLock { handlers[id] }
+    }
 }

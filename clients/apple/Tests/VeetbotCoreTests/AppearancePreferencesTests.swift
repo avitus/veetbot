@@ -26,6 +26,17 @@ import Testing
         #expect(reloaded.fontStyle == .serif)
     }
 
+    @Test
+    func testTextSizeChoicesProduceDistinctIncreasingScales() throws {
+        let compact = try #require(appPointSize(for: .body, textSize: .compact))
+        let comfortable = try #require(appPointSize(for: .body, textSize: .comfortable))
+        let large = try #require(appPointSize(for: .body, textSize: .large))
+
+        #expect(appPointSize(for: .body, textSize: .system) == nil)
+        #expect(compact < comfortable)
+        #expect(comfortable < large)
+    }
+
     private func isolatedDefaults() throws -> UserDefaults {
         let suiteName = "AppearancePreferencesTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

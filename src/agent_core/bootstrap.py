@@ -64,6 +64,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
     InMemoryArtifactRepository,
+    InMemoryCapabilityEvaluationRepository,
     InMemoryCheckpointRepository,
     InMemoryEventRepository,
     InMemoryExportConsentRepository,
@@ -93,6 +94,7 @@ from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
     PostgresArtifactRepository,
+    PostgresCapabilityEvaluationRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
     PostgresExportConsentRepository,
@@ -145,6 +147,7 @@ from agent_core.application.services import (
     SessionService as PublicSessionServiceContract,
 )
 from agent_core.application.session_service import SessionService
+from agent_core.application.skill_review import SkillBackgroundReview
 from agent_core.application.trajectory_service import (
     TrajectoryExportService,
     TrajectoryRedactor,
@@ -233,6 +236,7 @@ from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
 from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME, SkillLoadTool
+from agent_core.tools.skill_manage import SkillManageTool
 from agent_core.tools.workspace.list_files import WorkspaceListFilesTool
 from agent_core.tools.workspace.read_text import WorkspaceReadTextTool
 from agent_core.tools.workspace.write_text import WorkspaceWriteTextTool
@@ -264,11 +268,13 @@ class Composition:
     executor: RunExecutor
     uow_factory: UnitOfWorkFactory
     clock: Clock
+    ids: IdFactory
     worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
     sandbox: SandboxManager
     mcp: MCPRuntime
     skill_catalogs: SkillCatalogService
+    skill_reviews: SkillBackgroundReview
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
     memory_retriever: HybridMemoryRetriever
@@ -429,6 +435,7 @@ def _memory_uow_repositories(
         memories=memories,
         traces=traces,
         knowledge=knowledge,
+        evaluations=InMemoryCapabilityEvaluationRepository(),
         queue=None,
     )
 
@@ -489,6 +496,7 @@ def _postgres_repository_factory(
             memories=memories,
             traces=traces,
             knowledge=knowledge,
+            evaluations=PostgresCapabilityEvaluationRepository(session),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -739,6 +747,8 @@ async def _compose(
             maximum_body_tokens=int(skill_bodies_config["max_tokens"]),
         )
         registry.register(SkillLoadTool(skill_catalogs))
+        if settings.skill_authoring_enabled:
+            registry.register(SkillManageTool(uow_factory, skill_store))
         resolved_model = ResolvedModel(
             provider="fake",
             model="scripted",
@@ -845,12 +855,13 @@ async def _compose(
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
         principal_resolver = StaticPrincipalResolver(principal)
+        skill_reviews: SkillBackgroundReview | None = None
 
-        async def after_run(run_id: UUID, lease_epoch: int | None) -> None:
+        async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
-                logger.exception("run_sandbox_release_failed", extra={"run_id": str(run_id)})
+                logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
             try:
                 async with uow_factory() as uow:
                     run = await uow.runs.get(run_id, principal)
@@ -874,6 +885,8 @@ async def _compose(
                     )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
+            if skill_reviews is not None:
+                await skill_reviews.after_run(run_id)
 
         executor = RunExecutor(
             principal=principal,
@@ -895,7 +908,7 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             on_token=token_slot.set,
             on_token_complete=token_slot.discard,
-            on_run_complete=after_run,
+            on_run_complete=complete_run_resources,
             on_model_event=lambda run, event: _publish_model_event(
                 live_events, run.session_id, run.id, event
             ),
@@ -908,6 +921,17 @@ async def _compose(
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
             if storage == "memory"
             else PostgresRunDispatcher()
+        )
+        skill_reviews = SkillBackgroundReview(
+            uow_factory=uow_factory,
+            dispatcher=dispatcher,
+            catalogs=skill_catalogs,
+            principal=principal,
+            clock=clock,
+            seed_checkpoint=checkpoint_seeder,
+            activate_session=mcp_runtime.activate_session,
+            enabled=settings.skill_background_review_enabled,
+            redactor=trajectory_redactor,
         )
         session_service = SessionService(
             uow_factory,
@@ -1017,6 +1041,7 @@ async def _compose(
                 executor=executor,
                 uow_factory=uow_factory,
                 clock=clock,
+                ids=ids,
                 worker_factory=lambda worker_id: DurableWorker(
                     uow_factory=uow_factory,
                     executor=executor,
@@ -1040,6 +1065,7 @@ async def _compose(
                 sandbox=sandbox_manager,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
+                skill_reviews=skill_reviews,
                 tool_pipeline=pipeline,
                 memory=memory_service,
                 memory_retriever=memory_retriever,

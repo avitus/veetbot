@@ -22,7 +22,34 @@ import UIKit
         )
     }
 
+    @Test
+    func testSystemSizeChangeRefreshesVisibleComposerOnlyForSystemSetting() {
+        var refreshCount = 0
+        let controller = ComposerFontRefreshController()
+        controller.refresh = { refreshCount += 1 }
+
+        controller.textSize = .system
+        controller.systemTextSizeDidChange()
+        #expect(refreshCount == 1)
+
+        controller.textSize = .large
+        controller.systemTextSizeDidChange()
+        #expect(refreshCount == 1)
+    }
+
 #if os(macOS)
+    @Test @MainActor
+    func testSystemComposerFontUsesThePreferredBodyPointSize() {
+        #expect(
+            composerBaseFont(textSize: .system).pointSize
+                == NSFont.preferredFont(forTextStyle: .body).pointSize
+        )
+        #expect(
+            composerBaseFont(textSize: .large).pointSize
+                == appPointSize(for: .body, textSize: .large)
+        )
+    }
+
     @Test @MainActor
     func testReturnSendsWithoutEditingText() throws {
         let textView = ComposerNSTextView()

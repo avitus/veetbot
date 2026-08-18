@@ -218,20 +218,24 @@ def package_from_directory(root: Path) -> SkillPackage:
     return SkillPackage(directory_name=root.name, members=tuple(members))
 
 
-def read_archive_member(archive_bytes: bytes, path: str) -> bytes:
-    requested = str(_safe_member_path(path))
+def _decompress_archive(archive_bytes: bytes) -> bytes:
     try:
         content_size = zstandard.frame_content_size(archive_bytes)
         if content_size == zstandard.CONTENTSIZE_ERROR:
             raise _refuse("package.corrupt", "package archive is not valid zstd")
         if content_size != zstandard.CONTENTSIZE_UNKNOWN and content_size > MAX_PACKAGE_BYTES * 4:
             raise _refuse("package.archive_bytes", "expanded archive exceeds 4 MiB")
-        tar_bytes = zstandard.ZstdDecompressor().decompress(
+        return zstandard.ZstdDecompressor().decompress(
             archive_bytes,
             max_output_size=MAX_PACKAGE_BYTES * 4,
         )
     except zstandard.ZstdError as exc:
         raise _refuse("package.corrupt", "package archive is not valid zstd") from exc
+
+
+def read_archive_member(archive_bytes: bytes, path: str) -> bytes:
+    requested = str(_safe_member_path(path))
+    tar_bytes = _decompress_archive(archive_bytes)
     try:
         with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as archive:
             member = archive.getmember(requested)
@@ -246,3 +250,28 @@ def read_archive_member(archive_bytes: bytes, path: str) -> bytes:
             return payload
     except (KeyError, tarfile.TarError) as exc:
         raise _refuse("package.member", f"member {requested!r} was not found") from exc
+
+
+def read_archive_members(archive_bytes: bytes) -> tuple[SkillPackageMember, ...]:
+    """Read every regular member from a validated canonical skill archive."""
+
+    tar_bytes = _decompress_archive(archive_bytes)
+    try:
+        with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as archive:
+            members: list[SkillPackageMember] = []
+            total_bytes = 0
+            for member in archive.getmembers():
+                path = str(_safe_member_path(member.name))
+                if not member.isfile():
+                    raise _refuse("package.member", "archive contains a non-regular member")
+                opened = archive.extractfile(member)
+                if opened is None:
+                    raise _refuse("package.member", "archive member could not be opened")
+                data = opened.read(MAX_PACKAGE_BYTES + 1)
+                total_bytes += len(data)
+                if total_bytes > MAX_PACKAGE_BYTES:
+                    raise _refuse("package.member_bytes", "archive members exceed 1 MiB")
+                members.append(SkillPackageMember(path=path, data=data))
+            return tuple(members)
+    except tarfile.TarError as exc:
+        raise _refuse("package.corrupt", "package archive is not valid tar") from exc

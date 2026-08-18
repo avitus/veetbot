@@ -20,7 +20,9 @@ The `readiness` block in that file is derived from the
 items to the document that designs them. It records what the documentation
 covers; it does not authorize work. Milestones 0 through 9 are implementable
 from the corpus as it stands, no document named there is still missing, and
-Milestone 10 remains a direction rather than a milestone.
+Milestone 10 is in progress only for the workstreams authorized in the project
+state; its scheduling, routing, and general-purpose subagent scope remains
+deferred.
 
 Autonomous decisions taken while the plan was being written, and the questions
 they raise, are recorded in [questions for review](questions-for-review.md).

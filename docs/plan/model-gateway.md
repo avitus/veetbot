@@ -718,7 +718,7 @@ call sites.
 ### Pinning, and the contradiction with availability routing
 
 Section 10 (`engineering-plan.md:1305`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:2880`) wants routing to move work
+provider. Milestone 10 (`engineering-plan.md:2929`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -1544,7 +1544,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2113-2122`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2127-2136`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1646,8 +1646,8 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:157-161` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2537`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2281`
+(`engineering-plan.md:2551`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2295`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the

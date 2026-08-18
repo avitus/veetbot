@@ -36,6 +36,15 @@ class EventRepository(Protocol):
         principal: Principal,
     ) -> EventEnvelope | None: ...
 
+    async def list_conversation_after(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[EventEnvelope]: ...
+
     async def existing_sequences(
         self,
         session_id: UUID,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Protocol
@@ -42,6 +43,9 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     CheckpointRow,
     ConsolidationWatermarkRow,
     DerivedEventKeyRow,
+    EvalCriterionScoreRow,
+    EvalScenarioAttemptCostRow,
+    EvalScenarioRunRow,
     EventRow,
     ExportConsentRow,
     IdempotencyKeyRow,
@@ -70,7 +74,13 @@ from agent_core.domain.errors import (
     NotFoundError,
     WorkerFencedError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
+from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
+from agent_core.domain.events import (
+    CONVERSATION_MESSAGE_EVENTS,
+    EventEnvelope,
+    NewEvent,
+    ProcessEvent,
+)
 from agent_core.domain.messages import ProviderPin
 from agent_core.domain.persistence import (
     IdempotencyRecord,
@@ -85,6 +95,7 @@ from agent_core.domain.runs import (
     Run,
     RunCheckpoint,
     RunFailure,
+    RunKind,
     RunStatus,
     RunUsage,
 )
@@ -99,6 +110,7 @@ from agent_core.ports.determinism import Clock
 from agent_core.runtime.state_machine import require_transition
 
 ACTIVE_RUN_CONSTRAINT = "uq_runs_one_active_per_session"
+PARENT_SKILL_REVIEW_CONSTRAINT = "uq_runs_parent_skill_review"
 SESSION_HISTORY_PROJECTION = "session_history"
 TRAJECTORY_PROJECTION = "trajectory_export"
 
@@ -131,8 +143,11 @@ async def execute_run_insert(session: AsyncSession, statement: Any) -> int:
         async with session.begin_nested():
             return _rowcount(await session.execute(statement))
     except IntegrityError as exc:
-        if _constraint_name(exc) == ACTIVE_RUN_CONSTRAINT:
+        constraint = _constraint_name(exc)
+        if constraint == ACTIVE_RUN_CONSTRAINT:
             raise ConflictError("session already has a non-terminal run") from exc
+        if constraint == PARENT_SKILL_REVIEW_CONSTRAINT:
+            raise ConflictError("parent run already has a skill review") from exc
         raise
 
 
@@ -426,6 +441,26 @@ class PostgresRunRepository:
         ).all()
         return {row.session_id: run_to_domain(row) for row in rows}
 
+    async def child_for_parent(
+        self, parent_run_id: UUID, kind: RunKind, principal: Principal
+    ) -> Run | None:
+        rows = (
+            await self._session.scalars(
+                select(RunRow)
+                .join(SessionRow, SessionRow.id == RunRow.session_id)
+                .where(
+                    RunRow.parent_run_id == parent_run_id,
+                    RunRow.run_kind == kind.value,
+                    SessionRow.tenant_id == principal.tenant_id,
+                    SessionRow.principal_id == principal.principal_id,
+                )
+                .limit(2)
+            )
+        ).all()
+        if len(rows) > 1:
+            raise ConflictError("parent has multiple child runs of one kind")
+        return None if not rows else run_to_domain(rows[0])
+
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run:
         statement = (
             update(RunRow)
@@ -683,6 +718,39 @@ class PostgresEventRepository:
                 raise NotFoundError("session not found")
             return None
         return event_to_domain(row, self._upcasters)
+
+    async def list_conversation_after(
+        self,
+        session_id: UUID,
+        sequence: int,
+        principal: Principal,
+        *,
+        limit: int,
+    ) -> list[EventEnvelope]:
+        if limit < 0:
+            raise ValueError("limit must be nonnegative")
+        allowed = await self._session.scalar(
+            select(SessionRow.id).where(
+                SessionRow.id == session_id,
+                SessionRow.tenant_id == principal.tenant_id,
+                SessionRow.principal_id == principal.principal_id,
+            )
+        )
+        if allowed is None:
+            raise NotFoundError("session not found")
+        rows = (
+            await self._session.scalars(
+                select(EventRow)
+                .where(
+                    EventRow.session_id == session_id,
+                    EventRow.sequence > sequence,
+                    EventRow.event_type.in_(CONVERSATION_MESSAGE_EVENTS),
+                )
+                .order_by(EventRow.sequence, EventRow.id)
+                .limit(limit)
+            )
+        ).all()
+        return [event_to_domain(row, self._upcasters) for row in rows]
 
     async def existing_sequences(
         self,
@@ -1936,3 +2004,190 @@ class PostgresMaintenanceRepository:
     async def release_memory_session(self, principal: Principal, session_id: UUID) -> None:
         # pg_try_advisory_xact_lock is released by the surrounding transaction.
         del principal, session_id
+
+
+class PostgresCapabilityEvaluationRepository:
+    """PostgreSQL capability results with one row per build repeat."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _run(row: EvalScenarioRunRow) -> EvalScenarioRun:
+        return EvalScenarioRun(
+            id=row.id,
+            scenario_id=row.scenario_id,
+            suite=row.suite,
+            repeat_index=row.repeat_index,
+            run_id=row.run_id,
+            judge_version=row.judge_version,
+            build_ref=row.build_ref,
+            score=row.score,
+            ceiling_hit=row.ceiling_hit,
+            policy_failures=row.policy_failures,
+            cost_usd=row.cost_usd,
+            started_at=row.started_at,
+            finished_at=row.finished_at,
+        )
+
+    @staticmethod
+    def _criterion(row: EvalCriterionScoreRow) -> EvalCriterionScore:
+        return EvalCriterionScore(
+            id=row.id,
+            scenario_run_id=row.scenario_run_id,
+            criterion=row.criterion,
+            observation=row.observation,
+            value=row.value,
+        )
+
+    async def _saved(
+        self,
+        row: EvalScenarioRunRow,
+        *,
+        scores: Sequence[EvalCriterionScoreRow] | None = None,
+        replaced: bool = False,
+    ) -> SavedEvalScenario:
+        if scores is None:
+            scores = list(
+                (
+                    await self._session.scalars(
+                        select(EvalCriterionScoreRow)
+                        .where(EvalCriterionScoreRow.scenario_run_id == row.id)
+                        .order_by(EvalCriterionScoreRow.criterion)
+                    )
+                ).all()
+            )
+        return SavedEvalScenario(
+            run=self._run(row),
+            criteria=[self._criterion(score) for score in scores],
+            replaced=replaced,
+        )
+
+    async def replace(
+        self,
+        run: EvalScenarioRun,
+        criteria: Sequence[EvalCriterionScore],
+    ) -> SavedEvalScenario:
+        if len({score.criterion for score in criteria}) != len(criteria):
+            raise ConflictError("criterion names must be unique within a scenario run")
+        values = run.model_dump()
+        key_filter = (
+            EvalScenarioRunRow.scenario_id == run.scenario_id,
+            EvalScenarioRunRow.build_ref == run.build_ref,
+            EvalScenarioRunRow.judge_version == run.judge_version,
+            EvalScenarioRunRow.repeat_index == run.repeat_index,
+        )
+        update_values = {key: value for key, value in values.items() if key != "id"}
+        row = (
+            await self._session.scalars(
+                pg_insert(EvalScenarioRunRow)
+                .values(**values)
+                .on_conflict_do_nothing(constraint="uq_eval_scenario_run_build_repeat")
+                .returning(EvalScenarioRunRow),
+                execution_options={"populate_existing": True},
+            )
+        ).one_or_none()
+        replaced = row is None
+        if row is None:
+            row = (
+                await self._session.scalars(
+                    update(EvalScenarioRunRow)
+                    .where(*key_filter)
+                    .values(**update_values)
+                    .returning(EvalScenarioRunRow),
+                    execution_options={"populate_existing": True},
+                )
+            ).one_or_none()
+        if row is None:
+            raise ConflictError("capability scenario result was not persisted")
+        stored_id = row.id
+        await self._session.execute(
+            pg_insert(EvalScenarioAttemptCostRow)
+            .values(
+                id=run.id,
+                scenario_run_id=stored_id,
+                cost_usd=run.cost_usd,
+                started_at=run.started_at,
+            )
+            .on_conflict_do_nothing(index_elements=[EvalScenarioAttemptCostRow.id])
+        )
+        await self._session.execute(
+            delete(EvalCriterionScoreRow).where(EvalCriterionScoreRow.scenario_run_id == stored_id)
+        )
+        if criteria:
+            await self._session.execute(
+                pg_insert(EvalCriterionScoreRow),
+                [
+                    {
+                        **score.model_dump(exclude={"scenario_run_id"}),
+                        "scenario_run_id": stored_id,
+                    }
+                    for score in criteria
+                ],
+            )
+        return await self._saved(row, replaced=replaced)
+
+    async def get_by_key(
+        self,
+        scenario_id: str,
+        build_ref: str,
+        judge_version: str,
+        repeat_index: int,
+    ) -> SavedEvalScenario | None:
+        row = (
+            await self._session.scalars(
+                select(EvalScenarioRunRow).where(
+                    EvalScenarioRunRow.scenario_id == scenario_id,
+                    EvalScenarioRunRow.build_ref == build_ref,
+                    EvalScenarioRunRow.judge_version == judge_version,
+                    EvalScenarioRunRow.repeat_index == repeat_index,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else await self._saved(row)
+
+    async def list_for_build(
+        self,
+        suite: str,
+        build_ref: str,
+        judge_version: str,
+    ) -> list[SavedEvalScenario]:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(EvalScenarioRunRow)
+                    .where(
+                        EvalScenarioRunRow.suite == suite,
+                        EvalScenarioRunRow.build_ref == build_ref,
+                        EvalScenarioRunRow.judge_version == judge_version,
+                    )
+                    .order_by(EvalScenarioRunRow.scenario_id, EvalScenarioRunRow.repeat_index)
+                )
+            ).all()
+        )
+        if not rows:
+            return []
+        scores = list(
+            (
+                await self._session.scalars(
+                    select(EvalCriterionScoreRow)
+                    .where(EvalCriterionScoreRow.scenario_run_id.in_([row.id for row in rows]))
+                    .order_by(
+                        EvalCriterionScoreRow.scenario_run_id,
+                        EvalCriterionScoreRow.criterion,
+                    )
+                )
+            ).all()
+        )
+        scores_by_run: dict[UUID, list[EvalCriterionScoreRow]] = {row.id: [] for row in rows}
+        for score in scores:
+            scores_by_run[score.scenario_run_id].append(score)
+        return [await self._saved(row, scores=scores_by_run[row.id]) for row in rows]
+
+    async def cost_since(self, since: datetime) -> Decimal:
+        value = await self._session.scalar(
+            select(
+                func.coalesce(func.sum(EvalScenarioAttemptCostRow.cost_usd), Decimal("0"))
+            ).where(EvalScenarioAttemptCostRow.started_at >= since)
+        )
+        return Decimal(value or 0)

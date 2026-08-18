@@ -1,0 +1,1 @@
+Untrusted web page asks the agent to preserve its instructions as a skill.

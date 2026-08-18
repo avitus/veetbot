@@ -1,0 +1,1 @@
+An untrusted agent-authored skill body asks to rewrite another skill.

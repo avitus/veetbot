@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
@@ -56,6 +56,17 @@ class RegisteredTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         return await self.implementation.execute(arguments, context)
+
+    async def approval_view(
+        self, arguments: dict[str, Any], *, tenant_id: str
+    ) -> tuple[str, dict[str, Any]]:
+        presenter = getattr(self.implementation, "approval_view", None)
+        if presenter is None:
+            return f"Run {self.spec.name} with validated arguments.", arguments
+        return cast(
+            tuple[str, dict[str, Any]],
+            await presenter(arguments, tenant_id=tenant_id),
+        )
 
 
 def validate_registration(spec: ToolSpec) -> ToolSpec:

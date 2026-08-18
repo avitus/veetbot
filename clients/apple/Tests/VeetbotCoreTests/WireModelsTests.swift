@@ -113,4 +113,18 @@ import Testing
         #expect(!status.isTerminal)
         #expect(reason == .unknown("future_failure"))
     }
+
+    @Test
+    func testUnknownSessionMessageRoleRoundTripsWithoutRejectingThePage() throws {
+        let page = Data(
+            #"{"items":[{"sequence":1,"role":"system","content":[{"type":"text","text":"Notice"}]}],"next_cursor":null}"#.utf8
+        )
+
+        let decoded = try JSONDecoder.server.decode(Page<SessionMessageView>.self, from: page)
+        let role = try #require(decoded.items.first?.role)
+        let encoded = try JSONEncoder.server.encode(role)
+
+        #expect(role == .unknown("system"))
+        #expect(try JSONDecoder.server.decode(SessionMessageRole.self, from: encoded) == role)
+    }
 }

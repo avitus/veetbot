@@ -534,9 +534,9 @@ design change rather than a configuration.
 policy failures"* half that two memory gates and Section 30.5's rollout
 criterion state in those exact words, and it is a relation because the
 absolute count is a property of the fixture rather than of the system. The
-threshold — how much improvement is enough — is a number nobody has the data
-to choose, and it is an open question below rather than a placeholder in the
-schema.
+Milestone 10A numeric threshold is evaluated across a recorded cohort of
+paired cases, not inside one case, so it does not add numeric syntax to this
+schema; [skills.md](skills.md#rollout-evidence) owns that release calculation.
 
 **Every failure names its arm.** A two-arm case reporting "failed" without
 saying which arm costs an hour to read. The runner prefixes the arm name to
@@ -1072,11 +1072,12 @@ that stays invisible until a second case needs the same shape; case 31 was
 that second case.
 
 It is Milestone 8, not Milestone 10, because it tests the substrate rather
-than the authoring loop. At Milestone 10 the same case runs with the skill
-written by the background review instead of by the fixture, and the delta
-Section 30.5 wants is the difference between those two runs. What the case
-does not supply is the threshold — how much improvement is enough — which
-`skills.md` records as an open question.
+than the authoring loop. The Milestone 10A form installs the fixture as an
+agent-authored, provenance-bearing revision and then runs the same isolated
+two arms. That is the deterministic mechanism gate; it does not pretend one
+scripted review is statistical rollout evidence. The separate paired cohort
+and its quantitative threshold are defined in
+[skills.md](skills.md#rollout-evidence).
 
 ### Cases 28 through 31, and the milestones with no row
 
@@ -1429,7 +1430,7 @@ is the concrete form of "build evaluations before advanced features."
 
 The harness stores almost nothing, which is deliberate: eval runs are ordinary
 runs in the event log, and a parallel store would be a second source of truth
-about what happened. Two tables, both for the capability track, which is the
+about what happened. Three tables, all for the capability track, which is the
 only part with results that outlive a process.
 
 ```text
@@ -1460,6 +1461,14 @@ eval_criterion_scores
   UNIQUE (scenario_run_id, criterion)
 ```
 
+```text
+eval_scenario_attempt_costs
+  id                UUID PK           -- attempt id; makes retry writes idempotent
+  scenario_run_id   UUID NOT NULL     -- canonical replaceable result row
+  cost_usd          NUMERIC NOT NULL
+  started_at        TIMESTAMPTZ NOT NULL
+```
+
 Per-criterion scores are stored separately rather than as a JSON blob on the
 run, because the question the track is built to answer — *what got worse* — is a
 per-criterion question, and a blob makes it a full-table scan with JSON
@@ -1469,7 +1478,9 @@ model output.
 
 `build_ref` in the unique key is what stops a re-run of the same build from
 inflating a distribution. Re-running a build's scenarios replaces its rows
-rather than appending, and the replacement is recorded as an event.
+rather than appending, and the replacement is recorded as an event. Its cost
+remains in the attempt-cost ledger so the per-day ceiling counts every live
+invocation even though distribution queries expose only the latest result.
 
 The deterministic suite adds no tables. Its results are the test runner's
 results, and its runs are in the event log under `tenant_eval`.
@@ -1490,6 +1501,15 @@ Four new families, all on the harness rather than on the run:
 | `eval.gate.failed` | A gate fails | Gate id, milestone, kind |
 | `eval.scenario.scored` | A track repeat scores | Scenario, judge, score |
 | `eval.ceiling.hit` | A ceiling terminates a scenario | Dimension, value |
+
+Capability-event derivation keys distinguish a retry from a real replacement.
+A scenario event derives from the durable scenario-row id and the ordinary run
+id it records. A suite event derives from the suite, build, and the ordered set
+of those ordinary run ids. Replaying the same persisted runs is idempotent;
+running the same build again with new ordinary runs appends replacement evidence
+as required by the schema contract above. A non-ceiling subject or judge failure
+still emits a blocking `eval.suite.completed` outcome before the harness
+propagates the evaluation error.
 
 `eval.gate.failed` carries the gate identifier and nothing about the failure's
 content. A gate failure's detail is the test runner's output, which belongs in
@@ -1758,13 +1778,12 @@ invariants stop being prose.
    discoverable; co-location would make gates easier to find while editing the
    subject.
 
-5. **Whether `delta` needs a numeric form.** Three relations — `same`,
-   `improves`, `not_worse` — cover every delta the corpus states today, all of
-   which are phrased as directions rather than as amounts. Section 30.5's
-   rollout criterion is the one that will eventually want a threshold, and
-   `skills.md` records that as its own open question. A numeric form is
-   additive later; guessing a number now would put it in a schema, where it
-   gets obeyed instead of argued about.
+5. **Resolved for Milestone 10A: `delta` does not need a numeric form.** Three
+   relations — `same`, `improves`, `not_worse` — remain the per-case
+   vocabulary. Section 30.5's numeric threshold is a cohort-level release
+   calculation defined by [skills.md](skills.md#rollout-evidence), so putting
+   it in the single-case schema would conflate a case assertion with rollout
+   evidence.
 
 6. **Whether the judge should be a self-hosted open model rather than a
    provider-pinned one.** Section 10.7 and ADR-0012 make self-hosting a real

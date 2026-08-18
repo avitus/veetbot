@@ -11,14 +11,32 @@ enum ComposerKeyboardPolicy {
     }
 }
 
+final class ComposerFontRefreshController {
+    var textSize: AppTextSize = .system
+    var refresh: () -> Void = {}
+
+    func systemTextSizeDidChange() {
+        guard textSize == .system else { return }
+        refresh()
+    }
+}
+
 #if os(macOS)
 import AppKit
+
+@MainActor
+func composerBaseFont(textSize: AppTextSize) -> NSFont {
+    guard let pointSize = appPointSize(for: .body, textSize: textSize) else {
+        return NSFont.preferredFont(forTextStyle: .body)
+    }
+    return NSFont.systemFont(ofSize: pointSize)
+}
 
 struct ComposerTextEditor: NSViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     @Environment(\.appFontStyle) private var appFontStyle
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appTextSize) private var appTextSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -36,6 +54,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onSubmit = onSubmit
         textView.string = text
+        installFontRefresh(on: textView)
         applyFont(to: textView)
         textView.isRichText = false
         textView.importsGraphics = false
@@ -59,6 +78,7 @@ struct ComposerTextEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? ComposerNSTextView else { return }
         textView.onSubmit = onSubmit
+        installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.string != text {
             textView.string = text
@@ -66,10 +86,18 @@ struct ComposerTextEditor: NSViewRepresentable {
     }
 
     private func applyFont(to textView: NSTextView) {
-        let pointSize = NSFont.systemFontSize * dynamicTypeSize.appScaleFactor
-        let base = NSFont.systemFont(ofSize: pointSize)
+        let base = composerBaseFont(textSize: appTextSize)
+        let pointSize = base.pointSize
         let descriptor = base.fontDescriptor.withDesign(appFontStyle.nsDesign)
         textView.font = descriptor.flatMap { NSFont(descriptor: $0, size: pointSize) } ?? base
+    }
+
+    private func installFontRefresh(on textView: ComposerNSTextView) {
+        textView.fontRefreshController.textSize = appTextSize
+        textView.fontRefreshController.refresh = { [weak textView] in
+            guard let textView else { return }
+            self.applyFont(to: textView)
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -88,6 +116,21 @@ struct ComposerTextEditor: NSViewRepresentable {
 
 final class ComposerNSTextView: NSTextView {
     var onSubmit: () -> Void = {}
+    let fontRefreshController = ComposerFontRefreshController()
+    private var observesSystemTextSize = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, !observesSystemTextSize {
+            observeSystemTextSize()
+        } else if window == nil, observesSystemTextSize {
+            stopObservingSystemTextSize()
+        }
+    }
+
+    deinit {
+        stopObservingSystemTextSize()
+    }
 
     override func keyDown(with event: NSEvent) {
         let isReturn = event.keyCode == 36 || event.keyCode == 76
@@ -106,6 +149,30 @@ final class ComposerNSTextView: NSTextView {
             insertNewline(nil)
         }
     }
+
+    private func observeSystemTextSize() {
+        NSWorkspace.shared.notificationCenter.addObserver(
+            self,
+            selector: #selector(systemTextSizeDidChange),
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+        observesSystemTextSize = true
+    }
+
+    private func stopObservingSystemTextSize() {
+        guard observesSystemTextSize else { return }
+        NSWorkspace.shared.notificationCenter.removeObserver(
+            self,
+            name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil
+        )
+        observesSystemTextSize = false
+    }
+
+    @objc private func systemTextSizeDidChange() {
+        fontRefreshController.systemTextSizeDidChange()
+    }
 }
 
 #elseif os(iOS)
@@ -115,7 +182,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     @Binding var text: String
     let onSubmit: () -> Void
     @Environment(\.appFontStyle) private var appFontStyle
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.appTextSize) private var appTextSize
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -125,6 +192,7 @@ struct ComposerTextEditor: UIViewRepresentable {
         let textView = ComposerUITextView()
         textView.delegate = context.coordinator
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
+        installFontRefresh(on: textView)
         textView.text = text
         applyFont(to: textView)
         textView.adjustsFontForContentSizeCategory = false
@@ -138,6 +206,7 @@ struct ComposerTextEditor: UIViewRepresentable {
     func updateUIView(_ textView: ComposerUITextView, context: Context) {
         context.coordinator.parent = self
         installCommandReturnHandler(on: textView, coordinator: context.coordinator)
+        installFontRefresh(on: textView)
         applyFont(to: textView)
         if textView.text != text {
             textView.text = text
@@ -145,13 +214,15 @@ struct ComposerTextEditor: UIViewRepresentable {
     }
 
     private func applyFont(to textView: UITextView) {
-        let traits = UITraitCollection(
-            preferredContentSizeCategory: dynamicTypeSize.uiContentSizeCategory
-        )
-        let preferred = UIFontDescriptor.preferredFontDescriptor(
-            withTextStyle: .body,
-            compatibleWith: traits
-        )
+        let preferred: UIFontDescriptor
+        if let pointSize = appPointSize(for: .body, textSize: appTextSize) {
+            preferred = UIFont.systemFont(ofSize: pointSize).fontDescriptor
+        } else {
+            preferred = UIFontDescriptor.preferredFontDescriptor(
+                withTextStyle: .body,
+                compatibleWith: nil
+            )
+        }
         let descriptor = preferred.withDesign(appFontStyle.uiDesign) ?? preferred
         textView.font = UIFont(descriptor: descriptor, size: 0)
     }
@@ -163,6 +234,14 @@ struct ComposerTextEditor: UIViewRepresentable {
         textView.commandReturnHandler = { [weak textView, weak coordinator] in
             guard let textView, let coordinator else { return }
             coordinator.insertNewline(in: textView)
+        }
+    }
+
+    private func installFontRefresh(on textView: ComposerUITextView) {
+        textView.fontRefreshController.textSize = appTextSize
+        textView.fontRefreshController.refresh = { [weak textView] in
+            guard let textView else { return }
+            self.applyFont(to: textView)
         }
     }
 
@@ -204,6 +283,31 @@ struct ComposerTextEditor: UIViewRepresentable {
 final class ComposerUITextView: UITextView {
     var commandReturnHandler: () -> Void = {}
     var isInsertingCommandNewline = false
+    let fontRefreshController = ComposerFontRefreshController()
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemTextSizeDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemTextSizeDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
 
     override var keyCommands: [UIKeyCommand]? {
         let command = UIKeyCommand(
@@ -217,6 +321,10 @@ final class ComposerUITextView: UITextView {
 
     @objc private func insertCommandNewline() {
         commandReturnHandler()
+    }
+
+    @objc private func systemTextSizeDidChange() {
+        fontRefreshController.systemTextSizeDidChange()
     }
 }
 #endif

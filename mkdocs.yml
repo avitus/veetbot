@@ -143,4 +143,6 @@ nav:
       - ADR-0049 Native Apple client: adr/0049-native-apple-client.md
       - ADR-0050 Authoritative conversation history and deletion: adr/0050-authoritative-conversation-history-and-deletion.md
       - ADR-0051 Milestone 10 automatic memory formation: adr/0051-milestone-10-automatic-memory-formation.md
+      - ADR-0052 Milestone 10A skill-authoring seams: adr/0052-milestone-10a-skill-authoring-seams.md
+      - ADR-0053 Durable session transcripts: adr/0053-durable-session-transcripts.md
   - Changelog: changelog.md

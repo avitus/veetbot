@@ -18,6 +18,7 @@ from agent_core.ports.repositories import (
     AgentRepository,
     ApprovalRepository,
     ArtifactRepository,
+    CapabilityEvaluationRepository,
     CheckpointRepository,
     ExportConsentRepository,
     IdempotencyRepository,
@@ -59,6 +60,7 @@ class RepositoryUnitOfWork(Protocol):
     memories: MemoryStore
     traces: TraceStore
     knowledge: KnowledgeStore
+    evaluations: CapabilityEvaluationRepository
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None:

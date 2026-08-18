@@ -42,13 +42,19 @@ re-authentication while preserving `403` as an authorization failure.
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 
-Settings use a scrollable, resizable surface with a persistent action bar, so
-connection actions remain visible as new settings sections are added. Appearance
-preferences include app-wide text sizing and system, rounded, serif, or
-monospaced typography. They are stored in device preferences, apply immediately,
-and preserve the system Dynamic Type setting by default. The interface palette
-uses the app icon's turquoise, orange, and navy while retaining semantic colors
-for errors, approvals, and tool risk.
+Settings use a compact header, a scrolling body, and a persistent action bar, so
+connection actions remain visible as sections grow. Connection, Appearance, and
+Data & Privacy cards group controls by user intent. Configured macOS clients open
+settings in a separate window that resizes horizontally and vertically and
+restores its last frame; first-run setup remains embedded in the resizable main
+window. The main window has a separate persisted frame, so its last size and
+position are restored without interfering with the settings window. Appearance
+preferences include app-wide text sizing and system, rounded,
+serif, or monospaced typography. They are stored in device preferences and apply
+immediately. System sizing preserves the platform's accessibility setting, while
+the three explicit sizes use deterministic scales on both platforms. The
+interface palette uses the app icon's turquoise, orange, and navy while retaining
+semantic colors for errors, approvals, and tool risk.
 
 ## Runtime behavior
 

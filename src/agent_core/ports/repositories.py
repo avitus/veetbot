@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
@@ -13,6 +15,7 @@ from agent_core.domain.approvals import (
     ApprovalResolutionOutcome,
     ApprovalResolutionType,
 )
+from agent_core.domain.evaluations import EvalCriterionScore, EvalScenarioRun, SavedEvalScenario
 from agent_core.domain.messages import (
     ModelAttempt,
     ModelRequest,
@@ -32,7 +35,15 @@ from agent_core.domain.persistence import (
     WorkerLease,
 )
 from agent_core.domain.policies import PolicyProfileRecord
-from agent_core.domain.runs import BudgetScope, Run, RunCheckpoint, RunStatus, RunUsage, Step
+from agent_core.domain.runs import (
+    BudgetScope,
+    Run,
+    RunCheckpoint,
+    RunKind,
+    RunStatus,
+    RunUsage,
+    Step,
+)
 from agent_core.domain.sessions import Session, SessionCursor
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, ExportConsent, TrajectoryExport
@@ -80,6 +91,10 @@ class RunRepository(Protocol):
     async def latest_for_sessions(
         self, session_ids: list[UUID], principal: Principal
     ) -> dict[UUID, Run]: ...
+
+    async def child_for_parent(
+        self, parent_run_id: UUID, kind: RunKind, principal: Principal
+    ) -> Run | None: ...
 
     async def request_cancellation(self, run_id: UUID, expected_status: RunStatus) -> Run: ...
 
@@ -225,6 +240,33 @@ class UsageRepository(Protocol):
     async def tenant_usage(
         self, tenant_id: str, *, since: datetime, until: datetime
     ) -> UsageRollup: ...
+
+
+class CapabilityEvaluationRepository(Protocol):
+    """Persist capability repeats without duplicating their ordinary run logs."""
+
+    async def replace(
+        self,
+        run: EvalScenarioRun,
+        criteria: Sequence[EvalCriterionScore],
+    ) -> SavedEvalScenario: ...
+
+    async def get_by_key(
+        self,
+        scenario_id: str,
+        build_ref: str,
+        judge_version: str,
+        repeat_index: int,
+    ) -> SavedEvalScenario | None: ...
+
+    async def list_for_build(
+        self,
+        suite: str,
+        build_ref: str,
+        judge_version: str,
+    ) -> list[SavedEvalScenario]: ...
+
+    async def cost_since(self, since: datetime) -> Decimal: ...
 
 
 class SessionHistoryRepository(Protocol):

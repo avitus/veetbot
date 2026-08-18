@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
@@ -18,6 +19,7 @@ from agent_core.domain.errors import EvalExpectationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.runs import Run, RunLimits, RunStatus
+from agent_core.domain.skills import AuthoringContext, SkillSource
 from agent_core.evals.cases import EvalCase, EvalExpected, load_cases
 from agent_core.evals.fixtures import (
     resolve_mcp_fixture,
@@ -155,6 +157,7 @@ async def _run_single(
     expected: EvalExpected,
     enabled_skills: list[str],
     arm_name: str | None = None,
+    skill_source: Literal["operator", "agent"] = "operator",
     carried_memories: tuple[MemoryRecord, ...] = (),
 ) -> EvalResult:
     script = resolve_model_fixture(fixture_root, case.model_fixture)
@@ -170,6 +173,7 @@ async def _run_single(
     skill_packages = tuple(
         resolve_skill_fixture(fixture_base / "skills", name) for name in case.fixtures.skills
     )
+    bootstrap_skill_packages = skill_packages if skill_source == "operator" else ()
     resolved_mcp = tuple(
         resolve_mcp_fixture(
             fixture_base / "mcp",
@@ -187,12 +191,28 @@ async def _run_single(
         limits=limits,
         enabled_tools=case.fixtures.tools,
         enabled_skills=enabled_skills,
-        skill_packages=skill_packages,
+        skill_packages=bootstrap_skill_packages,
         mcp_servers=tuple(fixture.config for fixture in resolved_mcp),
         mcp_scripts={fixture.config.server_id: fixture.script for fixture in resolved_mcp},
         principal=principal,
         policy_profile=case.policy_profile,
     ) as composition:
+        if skill_source == "agent":
+            async with composition.uow_factory() as uow:
+                for index, (package, _source) in enumerate(skill_packages):
+                    identity = f"eval-self-authored:{case.name}:{arm_name}:{index}"
+                    await uow.skills.install(
+                        principal.tenant_id,
+                        package,
+                        SkillSource.AGENT,
+                        0,
+                        AuthoringContext(
+                            run_id=uuid5(NAMESPACE_URL, f"{identity}:run"),
+                            principal_id=principal.principal_id,
+                            invocation_id=uuid5(NAMESPACE_URL, f"{identity}:invocation"),
+                            idempotency_key=identity,
+                        ),
+                    )
         session_id = None
         prompts = [case.input.text]
         if case.session is not None or carried_memories:
@@ -336,6 +356,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         expected=first_arm.expected,
         enabled_skills=first_arm.skills,
         arm_name=first_arm.name,
+        skill_source=first_arm.skill_source,
     )
     carried_memories = first.memories if "memory" in second_arm.carry else ()
     second = await _run_single(
@@ -344,6 +365,7 @@ async def run_case(case: EvalCase, fixture_root: Path) -> EvalResult:
         expected=second_arm.expected,
         enabled_skills=second_arm.skills,
         arm_name=second_arm.name,
+        skill_source=second_arm.skill_source,
         carried_memories=carried_memories,
     )
     arm_results = (first, second)
