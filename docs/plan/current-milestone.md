@@ -12,7 +12,8 @@ title: Current Milestone
   access.
 - **Deferred:** Scheduling, new routing behavior, and general-purpose subagents.
 - **Project status:** Milestones 0 through 9 are complete. Milestone 10 remains
-  in progress; skill authoring stays behind default-off rollout controls.
+  in progress; skill authoring stays behind default-off rollout controls, and
+  web access is likewise disabled until an operator selects its providers.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;

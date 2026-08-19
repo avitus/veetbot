@@ -1,35 +1,76 @@
 """Artifact writer providers bind platform identity before a tool writes."""
 
-from typing import cast
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import UUID
 
+import pytest
+
+from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
+from agent_core.adapters.determinism import SequenceIdFactory
+from agent_core.adapters.persistence.memory import (
+    InMemoryAgentRepository,
+    InMemoryToolInvocationRepository,
+)
+from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.application.artifact_writer import ArtifactWriterFactory
+from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.domain.artifacts import ArtifactOrigin
-from agent_core.ports.artifacts import ArtifactWriterProvider
+from agent_core.domain.errors import NotFoundError
+from agent_core.domain.policies import TrustLevel
+from tests.contract.support import RUN_ID, SESSION_ID, TENANT, memory_stack, principal
 
 
-class _Provider:
-    def __init__(self) -> None:
-        self.bound: dict[str, object] | None = None
-
-    def for_run(self, **values: object) -> object:
-        self.bound = dict(values)
-        return object()
+async def _one_chunk() -> AsyncIterator[bytes]:
+    yield b"sandbox export bytes"
 
 
-def test_artifact_writer_provider_binds_run_and_tenant() -> None:
-    provider = _Provider()
-    cast(ArtifactWriterProvider, provider).for_run(
-        tenant_id="tenant-a",
-        principal_id="user-a",
-        session_id=UUID(int=80),
-        run_id=UUID(int=81),
+async def test_for_run_binds_platform_identity_onto_the_created_artifact(
+    tmp_path: Path,
+) -> None:
+    clock, sessions, runs, events = await memory_stack()
+    factory = MemoryUnitOfWorkFactory(
+        _memory_uow_repositories(
+            agents=InMemoryAgentRepository(),
+            sessions=sessions,
+            runs=runs,
+            events=events,
+            invocations=InMemoryToolInvocationRepository(runs),
+            clock=clock,
+        )
+    )
+    artifact_id = UUID(int=8810)
+    provider = ArtifactWriterFactory(
+        factory,
+        FilesystemArtifactStore(tmp_path),
+        clock,
+        SequenceIdFactory([artifact_id]),
+    )
+
+    writer = provider.for_run(
+        tenant_id=TENANT,
+        principal_id=principal().principal_id,
+        session_id=SESSION_ID,
+        run_id=RUN_ID,
         origin=ArtifactOrigin.SANDBOX_EXPORT,
     )
-    assert provider.bound is not None
-    assert provider.bound == {
-        "tenant_id": "tenant-a",
-        "principal_id": "user-a",
-        "session_id": UUID(int=80),
-        "run_id": UUID(int=81),
-        "origin": ArtifactOrigin.SANDBOX_EXPORT,
-    }
+    stored = await writer.create(
+        _one_chunk(), "export.bin", "application/octet-stream", TrustLevel.EXTERNAL_UNTRUSTED
+    )
+
+    assert stored.artifact_id == artifact_id
+    async with factory() as uow:
+        row = await uow.artifacts.get(artifact_id, principal())
+        with pytest.raises(NotFoundError):
+            await uow.artifacts.get(
+                artifact_id,
+                principal().model_copy(update={"tenant_id": "tenant-b"}),
+            )
+    assert row.tenant_id == TENANT
+    assert row.principal_id == principal().principal_id
+    assert row.session_id == SESSION_ID
+    assert row.run_id == RUN_ID
+    assert row.origin == ArtifactOrigin.SANDBOX_EXPORT.value
+    assert row.trust is TrustLevel.EXTERNAL_UNTRUSTED

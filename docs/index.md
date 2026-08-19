@@ -29,8 +29,9 @@ as an archival record.
 Milestones 0 through 9 are complete. The shared core, HTTP API, sandbox,
 context engine, skills and MCP, and long-term memory and knowledge retrieval
 have passed their recorded acceptance evidence. Milestone 10 is in progress
-through its separately authorized automatic-memory and self-authored-skills
-workstreams, but the milestone as a whole is incomplete. See the
+through its separately authorized automatic-memory, self-authored-skills, and
+provider-neutral web-access workstreams, but the milestone as a whole is
+incomplete. See the
 [current milestone](plan/current-milestone.md) and
 [project state](status/index.md) pages for recorded evidence.
 

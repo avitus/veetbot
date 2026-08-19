@@ -61,6 +61,7 @@ from agent_core.skills.package import (
     package_from_directory,
     read_archive_member,
 )
+from agent_core.tools.skill_load import SkillLoadTool
 from tests.contract.support import NOW, agent, memory_stack, principal
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -421,6 +422,77 @@ async def test_missing_tool_loads() -> None:
     assert loaded_invocation.structured_result["skill_update"]["notes"] == ["skill.tool.missing"]
     denied = next(event for event in events if event.event_type == "tool.call.denied")
     assert denied.payload["reason_code"] == "policy.matrix.unknown_tool"
+
+
+def test_skill_load_model_contract_prohibits_guessed_names() -> None:
+    assert SkillLoadTool.spec.description == (
+        "Load or unload an exact skill name listed in Available skill metadata; "
+        "never guess names or use this tool to discover capabilities."
+    )
+    assert SkillLoadTool.spec.input_schema["properties"]["name"]["description"] == (
+        "Exact name from Available skill metadata."
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"name": "web-research"},
+        {"name": "web-research", "unload": True},
+    ],
+)
+async def test_missing_skill_load_lists_the_pinned_catalog_for_recovery(
+    arguments: dict[str, object],
+) -> None:
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(tool_calls=[ScriptedToolCall(name="skill.load", arguments=arguments)]),
+            ScriptedTurn(text="I will use a declared capability directly."),
+        ]
+    )
+    async with build(
+        settings=_settings(),
+        script=script,
+        skill_packages=((_package("available", "Use declared tools."), SkillSource.OPERATOR),),
+        enabled_skills=["available"],
+        enabled_tools=["skill.load"],
+    ) as composition:
+        run_id = await composition.runs.submit("Research a current topic.")
+        await composition.runs.wait_terminal(run_id)
+        events = await composition.runs.events(run_id)
+
+    failed = next(event for event in events if event.event_type == "tool.call.failed")
+    assert failed.payload["reason_code"] == "tool.skill.not_in_catalog"
+    content = failed.payload["result_item"]["content"]
+    assert "Choose only a name from the attached available-skill data" in content[0]["text"]
+    assert content[1]["text"] == "Available skill names: available"
+    assert '"remediation":"modify_arguments"' in content[0]["text"]
+
+
+async def test_skill_load_survives_builtin_minor_upgrade() -> None:
+    """A session pinned to skill.load@1.0.0 keeps the capability after the 1.1.0 bump.
+
+    A session keeps the exact tool version it was shown, so the registry must
+    retain compatible builtin history exactly as it does for memory.remember.
+    """
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready")])
+    async with build(
+        settings=_settings(),
+        script=script,
+        skill_packages=((_package("available", "Use declared tools."), SkillSource.OPERATOR),),
+        enabled_skills=["available"],
+        enabled_tools=["skill.load"],
+    ) as composition:
+        registry = composition.tool_pipeline._registry
+        current = registry.get("skill.load")
+        legacy = registry.get("skill.load", "1.0.0")
+
+    assert current.spec.version == "1.1.0"
+    assert legacy.spec.version == "1.0.0"
+    assert legacy.spec.name == current.spec.name
+    assert legacy.spec.kind is current.spec.kind
+    assert legacy.spec.input_schema == current.spec.input_schema
 
 
 async def test_catalog_capped() -> None:

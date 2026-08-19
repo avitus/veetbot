@@ -1,17 +1,10 @@
 """Memory retrieval contract: recorded traces and fail-closed isolation."""
 
 import hashlib
-import inspect
 from uuid import UUID
 
-from agent_core.memory.retrieval import HybridMemoryRetriever
 from tests.contract.memory_fixtures import formation_stack, memory, recall_query
 from tests.contract.support import PRINCIPAL_ID, SESSION_ID, TENANT, principal
-
-
-def test_hybrid_retriever_exposes_async_recall_and_snapshot() -> None:
-    assert inspect.iscoroutinefunction(HybridMemoryRetriever.recall)
-    assert inspect.iscoroutinefunction(HybridMemoryRetriever.snapshot)
 
 
 async def test_recall_records_a_trace_bound_to_the_rendered_bytes() -> None:

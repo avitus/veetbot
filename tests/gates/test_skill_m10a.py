@@ -836,7 +836,7 @@ async def test_review_dispatch_is_bounded(monkeypatch: pytest.MonkeyPatch) -> No
     assert observed_sequences == [max(parent.seed_event_sequence - 1, 0)]
 
 
-async def test_provenance_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_provenance_complete() -> None:
     tool, repository, _store, _factory = await _authoring_stack()
     result = await tool.execute(
         {
@@ -949,7 +949,6 @@ async def test_provenance_complete(monkeypatch: pytest.MonkeyPatch) -> None:
     assert linked.authored_by_invocation_id is not None
     assert linked.authoring_idempotency_key is not None
     _assert_agent_provenance_insert_paths_are_complete()
-    test_agent_provenance_migration_backfills_by_skill_source(monkeypatch)
 
 
 def _assert_agent_provenance_insert_paths_are_complete() -> None:

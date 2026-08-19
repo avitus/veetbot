@@ -588,7 +588,7 @@ verification:
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-18T01:45:58Z
+    recorded_at: 2026-08-19T05:51:46Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -624,18 +624,24 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 371 source and test
-          files, 489 static tests, 186 contracts, deployment-script checks,
+          Ruff formatting and linting, strict mypy over 374 source and test
+          files, 570 static tests, 218 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass on the
-          integrated head. The gate registry contains 177 entries and retains
-          166 as the verified ceiling through Milestone 9.
+          integrated head. The static count includes the 25-case evaluation
+          front end relocated from the DB-gated integration directory. The
+          gate registry contains 177 entries and retains 166 as the verified
+          ceiling through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
           An isolated Compose PostgreSQL 16 database upgraded from empty through
-          revision a4c8e2f6b913 and all 105 integration and resilience tests
-          passed, including memory formation, skill authoring, capability
-          persistence, transcript restoration, migrations, and re-composition.
+          revision a4c8e2f6b913 and all 83 integration and resilience tests
+          passed, including memory formation, durable skill-authoring approval
+          and provenance, capability persistence, persisted web invocations and
+          web-enabled recomposition, transcript restoration, migrations, and
+          re-composition. The count fell from 105 when the 25 declarative
+          evaluation cases moved to the static partition and rose with three
+          new durable web and authoring journeys.
       - check: default-off rollout boundary
         outcome: passed_locally
         detail: >-
@@ -645,11 +651,14 @@ verification:
       - check: provider-neutral web access contract
         outcome: passed_locally
         detail: >-
-          The focused 57-test partition covers shared Tavily and Firecrawl
-          search/fetch contracts, capability-level composition, stable auth and
-          retry failures, public-HTTPS fetch validation, fixed-target policy,
-          default-off registration, and an end-to-end persisted
-          external-untrusted tool result.
+          The focused 112-test web partition covers shared Tavily and Firecrawl
+          search/fetch contracts, domain and URL validation, capability-level
+          composition, stable auth and retry failures, public-HTTPS fetch
+          validation, fixed-target policy, default-off registration, bounded
+          search output, the untrusted envelope reaching the next model step,
+          same-turn trust escalation blocking memory writes, and persisted
+          external-untrusted invocations with web-enabled recomposition on
+          PostgreSQL.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
@@ -676,6 +685,17 @@ verification:
           provenance across session erasure, dedicated child-session placement,
           disabled-candidate activation, no-review-archive rule, and quantitative
           rollout threshold are recorded for owner review.
+      - check: proposed ADR-0054
+        outcome: owner_review_requested
+        detail: >-
+          The provider-neutral web port, capability-level provider selection,
+          fixed HTTPS endpoints, external-untrusted labeling, and default-off
+          registration are recorded for owner review.
+      - check: proposed ADR-0055
+        outcome: owner_review_requested
+        detail: >-
+          The configurable CLI run wait with its positive-value boundary and
+          300-second default is recorded for owner review.
     remaining:
       - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
       - Record at least 30 paired rollout samples for each model-policy,
@@ -976,5 +996,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-18T01:45:58Z
-last_reviewed_commit: c7fd4a2
+last_updated: 2026-08-19T05:51:46Z
+last_reviewed_commit: 69b9122

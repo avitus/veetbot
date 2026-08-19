@@ -571,7 +571,8 @@ They resolve as follows, without changing any outcome the plan states.
   are for.
 
 **Trust overlay.** One rule applies across the table: if any argument's trust
-label is `EXTERNAL_UNTRUSTED`, a decision of `ALLOW` for a class other than
+label is `EXTERNAL_UNTRUSTED`, or the proposing turn's origin trust is
+`EXTERNAL_UNTRUSTED`, a decision of `ALLOW` for a class other than
 `NONE`, `WORKSPACE_READ`, or `NETWORK_READ` is raised to `REQUIRE_APPROVAL`.
 This is a `max` combination like any other, so it can only tighten.
 

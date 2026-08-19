@@ -239,7 +239,11 @@ from agent_core.tools.memory_remember import LegacyMemoryRememberTool, MemoryRem
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
-from agent_core.tools.skill_load import SKILL_LOAD_TOOL_NAME, SkillLoadTool
+from agent_core.tools.skill_load import (
+    SKILL_LOAD_TOOL_NAME,
+    LegacySkillLoadTool,
+    SkillLoadTool,
+)
 from agent_core.tools.skill_manage import SkillManageTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
@@ -758,6 +762,10 @@ async def _compose(
             maximum_loaded=int(skill_bodies_config["max_items"]),
             maximum_body_tokens=int(skill_bodies_config["max_tokens"]),
         )
+        # A session keeps the exact tool version it was shown. Retain compatible
+        # builtin history so the 1.1.0 revision cannot turn an advertised
+        # skill.load into an unknown capability for an existing session.
+        registry.register(LegacySkillLoadTool(skill_catalogs))
         registry.register(SkillLoadTool(skill_catalogs))
         if settings.skill_authoring_enabled:
             registry.register(SkillManageTool(uow_factory, skill_store))

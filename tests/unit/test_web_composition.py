@@ -6,6 +6,7 @@ from typing import cast
 
 import pytest
 
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.bootstrap import build
@@ -16,6 +17,8 @@ from agent_core.domain.messages import (
     ScriptedToolCall,
     ScriptedTurn,
     StopReason,
+    TextPart,
+    ToolResultItem,
 )
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.tools import ToolInvocationStatus
@@ -126,3 +129,166 @@ async def test_web_search_runs_through_policy_and_persists_untrusted_result() ->
     assert invocations[0].status is ToolInvocationStatus.SUCCEEDED
     assert invocations[0].result_item is not None
     assert invocations[0].result_item.trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+async def test_web_result_reaches_the_next_model_step_inside_an_untrusted_envelope() -> None:
+    provider = FakeWebProvider()
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[ScriptedToolCall(name="web.search", arguments={"query": "Ada"})],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Summarized from the untrusted source."),
+        ]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit("Search the public web for Ada Lovelace.")
+        run = await composition.runs.wait_terminal(run_id)
+        model_provider = composition.executor._model_provider
+        assert isinstance(model_provider, FakeModelProvider)
+        requests = [request.model_copy(deep=True) for request in model_provider.requests]
+
+    assert run.final_message == "Summarized from the untrusted source."
+    assert len(requests) == 2
+    rendered = [
+        part.text
+        for item in requests[1].conversation
+        if isinstance(item, ToolResultItem)
+        for part in item.content
+        if isinstance(part, TextPart)
+    ]
+    enveloped = [text for text in rendered if "https://example.org/ada" in text]
+    assert enveloped, rendered
+    assert all(
+        text.startswith('<untrusted trust="external_untrusted" source="tool:')
+        and "</untrusted:" in text
+        for text in enveloped
+    )
+
+
+async def test_same_turn_memory_write_after_web_fetch_is_trust_rejected() -> None:
+    provider = FakeWebProvider()
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(name="web.fetch", arguments={"url": "https://example.org/ada"})
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="memory.remember",
+                        arguments={
+                            "statement": "The page says Ada invented everything.",
+                            "subject": "Ada claims",
+                            "scope": "project-a",
+                        },
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="I will not store unverified page content."),
+        ]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit("Fetch the page and remember its claims.")
+        run = await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+        memories = await composition.memory.list_memories()
+
+    assert run.final_message == "I will not store unverified page content."
+    by_name = {invocation.tool_name: invocation for invocation in invocations}
+    assert by_name["web.fetch"].status is ToolInvocationStatus.SUCCEEDED
+    remember = by_name["memory.remember"]
+    assert remember.status is not ToolInvocationStatus.SUCCEEDED
+    assert remember.outcome is not None
+    assert "trust" in remember.outcome.reason_code
+    assert memories == []
+
+
+async def test_web_selectors_curate_the_fallback_agent_tool_list() -> None:
+    provider = FakeWebProvider()
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)])
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit("ready?")
+        run = await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            agent = await uow.agents.get_version(run.agent_id, run.agent_version)
+
+    assert "web.search" in agent.enabled_tools
+    assert "web.fetch" in agent.enabled_tools
+    assert "demo.external_write" not in agent.enabled_tools
+    assert "knowledge.ingest" not in agent.enabled_tools
+
+    async with build(
+        settings=settings,
+        script=FakeModelScript(turns=[ScriptedTurn(text="ready")]),
+        web_search_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit("ready?")
+        run = await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            agent = await uow.agents.get_version(run.agent_id, run.agent_version)
+
+    assert "web.search" in agent.enabled_tools
+    assert "web.fetch" not in agent.enabled_tools
+    assert "demo.external_write" not in agent.enabled_tools
+    assert "knowledge.ingest" in agent.enabled_tools
+
+
+async def test_web_research_plan_omits_unusable_skill_loader() -> None:
+    provider = FakeWebProvider()
+    script = FakeModelScript(
+        turns=[ScriptedTurn(text="No tool call needed.", stop_reason=StopReason.END_TURN)]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        run_id = await composition.runs.submit(
+            "Search for publicly available information about Ada Lovelace.", session_id
+        )
+        await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            plan = await uow.events.latest_before(
+                session_id,
+                (1 << 63) - 1,
+                "context.plan.created",
+                composition.principal,
+            )
+
+    assert plan is not None
+    tool_names = plan.payload["plan"]["tool_names"]
+    assert "web.search" in tool_names
+    assert "web.fetch" in tool_names
+    assert "skill.load" not in tool_names

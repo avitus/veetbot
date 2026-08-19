@@ -29,6 +29,10 @@ TOOL_MESSAGES: dict[str, str] = {
         "procedure_pointer. Use contextual or local portability for a fact or relationship."
     ),
     "tool.arguments_invalid": "The tool arguments were invalid.",
+    "tool.skill.not_in_catalog": (
+        "That skill is not available in this session. Choose only a name from the attached "
+        "available-skill data."
+    ),
     "tool.trust_rejected": (
         "The tool rejected content whose provenance was not trusted for this operation."
     ),

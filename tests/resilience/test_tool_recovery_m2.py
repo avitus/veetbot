@@ -137,4 +137,23 @@ def test_crash_recovery_action(invocation: ToolInvocation, expected: ToolRecover
 
 
 def test_crash_recovery_table_is_total_across_all_pipeline_boundaries() -> None:
-    assert len(SCENARIOS) == 14
+    """Every status x idempotency x effect combination resolves to one action."""
+
+    terminal_statuses = {
+        ToolInvocationStatus.SUCCEEDED,
+        ToolInvocationStatus.FAILED,
+        ToolInvocationStatus.DENIED,
+        ToolInvocationStatus.UNCERTAIN,
+    }
+    for status in ToolInvocationStatus:
+        for idempotency in IdempotencyClass:
+            for effect_sent in (False, True):
+                action = tool_recovery_action(
+                    _invocation(
+                        status,
+                        idempotency,
+                        effect_sent=effect_sent,
+                        terminal=status in terminal_statuses,
+                    )
+                )
+                assert isinstance(action, ToolRecoveryAction)
