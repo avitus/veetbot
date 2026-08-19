@@ -469,6 +469,32 @@ async def test_missing_skill_load_lists_the_pinned_catalog_for_recovery(
     assert '"remediation":"modify_arguments"' in content[0]["text"]
 
 
+async def test_skill_load_survives_builtin_minor_upgrade() -> None:
+    """A session pinned to skill.load@1.0.0 keeps the capability after the 1.1.0 bump.
+
+    A session keeps the exact tool version it was shown, so the registry must
+    retain compatible builtin history exactly as it does for memory.remember.
+    """
+
+    script = FakeModelScript(turns=[ScriptedTurn(text="ready")])
+    async with build(
+        settings=_settings(),
+        script=script,
+        skill_packages=((_package("available", "Use declared tools."), SkillSource.OPERATOR),),
+        enabled_skills=["available"],
+        enabled_tools=["skill.load"],
+    ) as composition:
+        registry = composition.tool_pipeline._registry
+        current = registry.get("skill.load")
+        legacy = registry.get("skill.load", "1.0.0")
+
+    assert current.spec.version == "1.1.0"
+    assert legacy.spec.version == "1.0.0"
+    assert legacy.spec.name == current.spec.name
+    assert legacy.spec.kind is current.spec.kind
+    assert legacy.spec.input_schema == current.spec.input_schema
+
+
 async def test_catalog_capped() -> None:
     packages = [_package(f"s{index:02d}", f"body {index}") for index in range(40)]
     remote = [

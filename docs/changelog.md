@@ -4,6 +4,26 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-18 — Web output bounds and pinned-version compatibility
+
+- Bounded `web.search` output to its declared 128 KiB tool limit by dropping
+  trailing results before rendering; one schema-bounded result always fits
+  inline.
+- Registered `skill.load` 1.0.0 as a compatibility version so sessions pinned
+  before the 1.1.0 revision keep the capability, following the
+  `memory.remember` precedent.
+
+## 2026-08-18 — Web tool selection with an empty skill catalog
+
+- Dropped `skill.load` from a context plan when the pinned skill catalog is
+  empty, keeping the confined background-review child's exact allowlist, and
+  advanced the context builder version to `context-builder@3` so persisted
+  plans rebuild under the new rule.
+- Revised `skill.load` to 1.1.0: the model-facing contract demands an exact
+  catalog name, a miss returns the stable `tool.skill.not_in_catalog` reason
+  with the visible catalog, and invalid-argument and not-found tool failures
+  now advise `modify_arguments` remediation.
+
 ## 2026-08-18 — Configurable CLI run wait
 
 - Added `agent run --wait-timeout <seconds>` with a positive-value boundary

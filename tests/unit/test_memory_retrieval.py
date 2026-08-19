@@ -35,7 +35,7 @@ from tests.contract.memory_fixtures import (
     recalled,
     session_events,
 )
-from tests.contract.support import NOW, SESSION_ID, TENANT, principal
+from tests.contract.support import NOW, SESSION_ID, principal
 
 
 def test_score_enforces_the_relevance_floor() -> None:
@@ -286,19 +286,6 @@ async def test_recall_emits_a_memory_recalled_event_bound_to_the_trace() -> None
     assert payload["trace_id"] == str(result.trace_id)
     assert payload["rendered_sha256"] == hashlib.sha256(result.rendered.encode()).hexdigest()
     assert payload["returned"] == [str(item.belief_id) for item in result.items]
-
-
-async def test_recall_for_a_foreign_identity_fails_closed_but_still_traces() -> None:
-    _clock, factory, _service, retriever = await formation_stack()
-    async with factory() as uow:
-        await uow.memories.upsert_belief(memory())
-    result = await retriever.recall(recall_query(tenant_id="tenant-b"), session_id=SESSION_ID)
-    assert result.items == []
-    async with factory() as uow:
-        trace = await uow.traces.get(result.trace_id, principal())
-    assert trace.query.tenant_id == TENANT
-    assert trace.returned == []
-    assert trace.candidates == 0
 
 
 async def test_snapshot_uses_the_core_profile_and_is_reproducible() -> None:

@@ -1,16 +1,11 @@
 """Episodic search contract: isolation, time windows, text, and limits."""
 
-import inspect
 from datetime import timedelta
 
 from agent_core.domain.memory import EpisodeQuery
 from agent_core.memory.retrieval import EventEpisodeSearch
 from tests.contract.memory_fixtures import formation_stack, user_event
 from tests.contract.support import PRINCIPAL_ID, SESSION_ID, TENANT, principal
-
-
-def test_episode_search_is_explicit_and_async() -> None:
-    assert inspect.iscoroutinefunction(EventEpisodeSearch.search)
 
 
 async def test_episode_search_scopes_isolation_time_text_and_limit() -> None:

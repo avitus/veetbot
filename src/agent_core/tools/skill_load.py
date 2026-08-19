@@ -141,3 +141,9 @@ class SkillLoadTool:
             },
             output_trust=body.trust,
         )
+
+
+class LegacySkillLoadTool(SkillLoadTool):
+    """Compatibility registration for sessions pinned before the 1.1.0 revision."""
+
+    spec = SkillLoadTool.spec.model_copy(update={"version": "1.0.0"}, deep=True)

@@ -176,8 +176,10 @@ one. Whoever builds a tool on that list supplies its classification
 with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
-roster.** Its subject is the checked-in builtin specs, which at freeze
-is all twenty. Step 3, domain membership, already passes for every
+roster.** Its subject is the checked-in builtin specs. `delegate.run`
+is declared by [tool-system.md](tool-system.md) but deferred with the
+general-purpose-subagent extension, so no spec for it is checked in
+and the composition root registers nineteen of the twenty. Step 3, domain membership, already passes for every
 one of them: [tool-system.md](tool-system.md)'s partition table lists
 `delegate`, `conversation`, `context`, `skill`, and `memory` as
 builtin domains registered at build time, with `knowledge` and `web` beside
