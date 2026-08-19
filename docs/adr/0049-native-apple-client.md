@@ -58,7 +58,11 @@ pretending SwiftData is available there.
 8. **Do not expand the server surface for richer tool cards.** The client renders
    content and trust from public events, consumes classification and structured
    result fields when present, and degrades to generic cards when the public
-   stream does not provide stored invocation details.
+   stream does not provide stored invocation details. As a presentation-only
+   compaction, adjacent successful completions of the same tool render as one
+   count-labelled activity bundle. Every invocation, argument, and result stays
+   available inside the expanded bundle; messages, different tools, approvals,
+   and non-success outcomes break the bundle.
 9. **Execute native tests under full Xcode in hosted CI.** Command Line Tools may
    compile a Swift Testing bundle without running its tests. The repository's
    `make test-apple` target therefore refuses that environment, selects full
@@ -79,6 +83,8 @@ pretending SwiftData is available there.
 - Tool cards cannot invent effect classifications or structured fields omitted
   by the public event contract. A future API expansion would require its own
   authorized contract and security review.
+- Repetitive successful activity stays concise without changing or discarding
+  the durable per-invocation event history.
 - Project milestone status does not change; this is a separately authorized
   client surface over completed API capabilities.
 - Native-client tests are an explicit hosted verification partition because

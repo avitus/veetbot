@@ -75,6 +75,89 @@ struct ToolActivityCard: View {
     }
 }
 
+struct ToolActivityBundleCard: View {
+    let bundle: ToolActivityBundle
+    let openArtifact: (UUID) -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                expanded.toggle()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: taxonomy.icon)
+                        .foregroundColor(taxonomy.color)
+                    Text(bundle.summary).appFont(.headline)
+                    Spacer()
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(bundle.activities.enumerated()), id: \.element.id) {
+                        index, activity in
+                        BundledToolActivityRow(
+                            index: index + 1,
+                            activity: activity,
+                            openArtifact: openArtifact
+                        )
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var taxonomy: TaxonomyStyle {
+        let first = bundle.activities[0]
+        return TaxonomyStyle(sideEffect: first.sideEffect, risk: first.risk)
+    }
+}
+
+private struct BundledToolActivityRow: View {
+    let index: Int
+    let activity: ToolActivity
+    let openArtifact: (UUID) -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                if !activity.arguments.isEmpty {
+                    DetailBlock(
+                        title: "Arguments",
+                        text: JSONValue.object(activity.arguments).prettyPrinted
+                    )
+                }
+                if let result = activity.result {
+                    ToolResultContent(
+                        toolName: activity.name,
+                        result: result,
+                        openArtifact: openArtifact
+                    )
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Text(rowLabel)
+                .lineLimit(1)
+        }
+    }
+
+    private var rowLabel: String {
+        if let query = activity.arguments["query"]?.stringValue, !query.isEmpty {
+            return "\(index). \(query)"
+        }
+        return "Call \(index)"
+    }
+}
+
 struct ApprovalCard: View {
     let approval: ApprovalView
     let resolve: (ApprovalDecision, String?) -> Void

@@ -44,6 +44,11 @@ transcript from the shared core before attaching to the active or latest run.
 The client uses persisted session sequences to prevent the latest run's replay
 from duplicating messages already restored from the transcript.
 
+Adjacent successful completions of the same tool are displayed as one counted
+activity bundle. Expanding the bundle retains access to every call's arguments
+and result. Messages, different tools, approvals, failures, denials, and
+uncertain outcomes remain separate activity items.
+
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute
 the Swift Testing suite when `swift test` builds without discovering tests.
