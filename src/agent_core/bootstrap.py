@@ -158,10 +158,13 @@ from agent_core.config import (
     PACKAGE_ROOT,
     ConfigurationError,
     DeploymentMode,
+    MemoryProviderExtractionMode,
     Settings,
     WebProviderKind,
     load_config_document,
+    load_provider_extraction_evidence,
     load_settings,
+    provider_extraction_evidence_paths,
     validate_runtime_identity,
     validate_settings,
 )
@@ -179,8 +182,8 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
-from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.messages import (
+    Capability,
     FakeModelScript,
     ModelEvent,
     ReasoningDeltaEvent,
@@ -200,16 +203,23 @@ from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_pr
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import validate_mcp_config
 from agent_core.mcp.runtime import MCPRuntime
-from agent_core.memory.formation import SESSION_IDLE_SECONDS, GovernedMemoryService
-from agent_core.memory.model_extraction import (
-    MemoryExtractionAudit,
-    ModelAssistedCandidateExtractor,
+from agent_core.memory.formation import (
+    FORMATION_POLICY_VERSION,
+    SESSION_IDLE_SECONDS,
+    DeterministicCandidateExtractor,
+    GovernedMemoryService,
+)
+from agent_core.memory.provider_extraction import (
+    PROVIDER_FORMATION_POLICY_VERSION,
+    ProviderAssistedCandidateExtractor,
+    provider_extraction_evidence_matches,
 )
 from agent_core.memory.retrieval import (
     DeterministicQueryFormer,
     EventEpisodeSearch,
     HybridMemoryRetriever,
 )
+from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
@@ -559,6 +569,7 @@ async def _compose(
     mcp_server_configs: tuple[MCPServerConfig, ...],
     web_search_provider: WebProvider | None,
     web_fetch_provider: WebProvider | None,
+    memory_provider_evaluation_mode: bool,
 ) -> tuple[Composition, list[ModelProvider]]:
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
@@ -664,54 +675,6 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
-    model_provider = FakeModelProvider(script or default_fake_script(), clock)
-    effective_providers = {"fake": model_provider, **model_providers}
-
-    async def record_memory_extraction(audit: MemoryExtractionAudit) -> None:
-        async with uow_factory() as uow:
-            await uow.process_events.append(
-                ProcessEvent(
-                    id=audit.attempt_id,
-                    event_type="memory.extraction.completed",
-                    actor_type="maintenance",
-                    payload={
-                        "provider": audit.provider,
-                        "model": audit.model,
-                        "model_policy": audit.model_policy,
-                        "usage": audit.usage.model_dump(mode="json"),
-                        "candidates_returned": audit.candidates_returned,
-                        "fallback_used": audit.fallback_used,
-                        "error_class": audit.error_class,
-                    },
-                    derivation_key=f"memory.extraction.completed:{audit.attempt_id}",
-                    created_at=clock.now(),
-                )
-            )
-
-    async def existing_memories_for_extraction() -> list[MemoryRecord]:
-        async with uow_factory() as uow:
-            return await uow.memories.list_memories(
-                principal,
-                include_inactive=True,
-                limit=100,
-            )
-
-    memory_extractor = ModelAssistedCandidateExtractor(
-        router=model_router,
-        providers=effective_providers,
-        clock=clock,
-        ids=ids,
-        model_policy=agent.model_policy,
-        audit=record_memory_extraction,
-        existing_memories=existing_memories_for_extraction,
-    )
-    memory_service = GovernedMemoryService(
-        uow_factory,
-        clock,
-        ids,
-        principal,
-        extractor=memory_extractor,
-    )
     memory_retriever = HybridMemoryRetriever(uow_factory, clock, ids, principal)
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
@@ -731,14 +694,10 @@ async def _compose(
         registry.register(WebSearchTool(web_search_provider))
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
+
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
     # an unknown capability for an existing session.
-    registry.register(LegacyMemoryRememberTool(memory_service))
-    registry.register(MemoryRememberTool(memory_service))
-    registry.register(MemorySearchTool(memory_retriever))
-    registry.register(MemoryRecallEpisodesTool(episode_search))
-
     async def validate_source_events(
         session_id: UUID,
         sequences: set[int],
@@ -779,6 +738,187 @@ async def _compose(
                 created_at=clock.now(),
             )
         )
+    model_provider = FakeModelProvider(script or default_fake_script(), clock)
+    effective_providers = {"fake": model_provider, **model_providers}
+    memory_extractor = None
+    memory_policy_version = FORMATION_POLICY_VERSION
+    memory_mode = settings.memory_provider_extraction_mode
+    extraction_model: ResolvedModel | None = None
+    evidence_build_ref: str | None = None
+    evidence_corpus_sha256: str | None = None
+    evidence_source: str | None = None
+    selection_outcome = "disabled"
+    selection_reason = "configured_off"
+    if memory_mode is not MemoryProviderExtractionMode.OFF or memory_provider_evaluation_mode:
+        try:
+            if agent.model_policy in NON_ROUTED_MODEL_POLICIES:
+                extraction_model = ResolvedModel(
+                    provider="fake",
+                    model="scripted",
+                    credential_ref="fake",
+                    policy_name=agent.model_policy,
+                    resolved_at=clock.now(),
+                )
+            else:
+                extraction_model = await model_router.resolve(
+                    agent.model_policy,
+                    tenant_id=principal.tenant_id,
+                    required=frozenset({Capability.STRUCTURED_OUTPUT, Capability.STREAMING}),
+                )
+        except ConfigurationError:
+            if (
+                memory_provider_evaluation_mode
+                or memory_mode is MemoryProviderExtractionMode.REQUIRED
+            ):
+                raise
+            selection_outcome = "deterministic_fallback"
+            selection_reason = "model_resolution_failed"
+        if extraction_model is not None:
+            extraction_provider = effective_providers.get(extraction_model.provider)
+            provider_unavailable_reason = (
+                "provider_unavailable"
+                if extraction_provider is None
+                else (
+                    "provider_credential_unavailable"
+                    if isinstance(extraction_provider, MissingCredentialProvider)
+                    else None
+                )
+            )
+            if provider_unavailable_reason is not None:
+                if (
+                    memory_provider_evaluation_mode
+                    or memory_mode is MemoryProviderExtractionMode.REQUIRED
+                ):
+                    raise ConfigurationError(
+                        "provider-backed memory extraction resolved to an unavailable "
+                        "adapter or credential"
+                    )
+                selection_outcome = "deterministic_fallback"
+                selection_reason = provider_unavailable_reason
+            elif memory_provider_evaluation_mode:
+                assert extraction_provider is not None
+                memory_extractor = ProviderAssistedCandidateExtractor.for_evaluation(
+                    provider=extraction_provider,
+                    resolved_model=extraction_model,
+                    uow_factory=uow_factory,
+                    clock=clock,
+                    ids=ids,
+                    principal=principal,
+                    agent_id=agent.id,
+                    agent_version=agent.version,
+                    policy_profile=agent.policy_profile,
+                    policy_version=ruleset.policy_version,
+                    fallback=DeterministicCandidateExtractor(),
+                )
+                selection_outcome = "evaluation"
+                selection_reason = "explicit_evaluation_mode"
+            else:
+                selected_evidence = None
+                for evidence_path in provider_extraction_evidence_paths(settings):
+                    try:
+                        candidate_evidence = load_provider_extraction_evidence(evidence_path)
+                    except ConfigurationError:
+                        continue
+                    if provider_extraction_evidence_matches(
+                        candidate_evidence,
+                        extraction_model,
+                        agent.policy_profile,
+                        ruleset.policy_version,
+                    ):
+                        selected_evidence = candidate_evidence
+                        evidence_source = (
+                            "operator"
+                            if evidence_path == settings.memory_provider_extraction_evidence
+                            else "release"
+                        )
+                        break
+                if selected_evidence is None:
+                    if memory_mode is MemoryProviderExtractionMode.REQUIRED:
+                        raise ConfigurationError(
+                            "provider-backed memory extraction requires matching "
+                            "evaluation evidence"
+                        )
+                    selection_outcome = "deterministic_fallback"
+                    selection_reason = "no_matching_evidence"
+                else:
+                    assert extraction_provider is not None
+                    memory_extractor = ProviderAssistedCandidateExtractor(
+                        provider=extraction_provider,
+                        resolved_model=extraction_model,
+                        uow_factory=uow_factory,
+                        clock=clock,
+                        ids=ids,
+                        principal=principal,
+                        agent_id=agent.id,
+                        agent_version=agent.version,
+                        policy_profile=agent.policy_profile,
+                        policy_version=ruleset.policy_version,
+                        evidence=selected_evidence,
+                        fallback=DeterministicCandidateExtractor(),
+                    )
+                    memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+                    evidence_build_ref = selected_evidence.build_ref
+                    evidence_corpus_sha256 = selected_evidence.corpus_sha256
+                    selection_outcome = "activated"
+                    selection_reason = "matching_evidence"
+        if memory_provider_evaluation_mode:
+            memory_policy_version = PROVIDER_FORMATION_POLICY_VERSION
+    selection_identity = ":".join(
+        (
+            principal.tenant_id,
+            principal.principal_id,
+            str(agent.id),
+            agent.version,
+            agent.model_policy,
+            agent.policy_profile,
+            ruleset.policy_version,
+            memory_mode.value,
+            selection_outcome,
+            "none" if extraction_model is None else extraction_model.provider,
+            "none" if extraction_model is None else extraction_model.model,
+            evidence_build_ref or "none",
+            evidence_corpus_sha256 or "none",
+        )
+    )
+    selection_key = f"memory.provider_extraction.selection:{selection_identity}"
+    async with uow_factory() as uow:
+        await uow.process_events.append(
+            ProcessEvent(
+                id=uuid5(NAMESPACE_URL, selection_key),
+                event_type="memory.provider_extraction.selection",
+                actor_type="composition-root",
+                actor_id=principal.principal_id,
+                payload={
+                    "mode": memory_mode.value,
+                    "outcome": selection_outcome,
+                    "reason": selection_reason,
+                    "agent_id": str(agent.id),
+                    "agent_version": agent.version,
+                    "policy_profile": agent.policy_profile,
+                    "policy_version": ruleset.policy_version,
+                    "model_policy": agent.model_policy,
+                    "provider": None if extraction_model is None else extraction_model.provider,
+                    "model": None if extraction_model is None else extraction_model.model,
+                    "evidence_source": evidence_source,
+                    "evidence_build_ref": evidence_build_ref,
+                    "evidence_corpus_sha256": evidence_corpus_sha256,
+                },
+                derivation_key=selection_key,
+                created_at=clock.now(),
+            )
+        )
+    memory_service = GovernedMemoryService(
+        uow_factory,
+        clock,
+        ids,
+        principal,
+        extractor=memory_extractor,
+        policy_version=memory_policy_version,
+    )
+    registry.register(LegacyMemoryRememberTool(memory_service))
+    registry.register(MemoryRememberTool(memory_service))
+    registry.register(MemorySearchTool(memory_retriever))
+    registry.register(MemoryRecallEpisodesTool(episode_search))
     mcp_runtime: MCPRuntime | None = None
     try:
         if mcp_clients is None:
@@ -1246,12 +1386,28 @@ async def build(
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
+    memory_provider_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
     """Construct and own a Milestone 3 application graph for one process role."""
 
     # Phase 1: refusal. Loading Settings enforces production sandbox and auth rules.
     effective_settings = settings or load_settings()
     validate_settings(effective_settings)
+    if (
+        memory_provider_evaluation_mode
+        and effective_settings.memory_provider_extraction_mode
+        is MemoryProviderExtractionMode.REQUIRED
+    ):
+        raise ConfigurationError(
+            "provider memory extraction evaluation and activation are mutually exclusive"
+        )
+    if (
+        memory_provider_evaluation_mode
+        and effective_settings.deployment_mode is DeploymentMode.PRODUCTION
+    ):
+        raise ConfigurationError(
+            "provider memory extraction evaluation mode is unavailable in production"
+        )
     provider_registry = ProviderRegistry.load(
         PACKAGE_ROOT / "models",
         adapters=ADAPTER_DEFINITIONS,
@@ -1533,6 +1689,7 @@ async def build(
             mcp_server_configs=mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
+            memory_provider_evaluation_mode=memory_provider_evaluation_mode,
         )
         yield composition
     finally:

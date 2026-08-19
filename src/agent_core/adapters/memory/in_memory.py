@@ -149,7 +149,12 @@ class InMemoryMemoryStore:
             return current.model_copy(deep=True), replacement.model_copy(deep=True)
 
     async def list_memories(
-        self, principal: Principal, *, include_inactive: bool = False, limit: int = 200
+        self,
+        principal: Principal,
+        *,
+        include_inactive: bool = False,
+        session_id: UUID | None = None,
+        limit: int = 200,
     ) -> list[MemoryRecord]:
         async with self._lock:
             records = [
@@ -158,6 +163,7 @@ class InMemoryMemoryStore:
                 if record.tenant_id == principal.tenant_id
                 and record.principal_id == principal.principal_id
                 and (include_inactive or record.status in _LIVE_MEMORY)
+                and (session_id is None or record.source_session_id == session_id)
             ]
             records.sort(key=lambda item: (-item.store_position, str(item.id)))
             return [item.model_copy(deep=True) for item in records[:limit]]
@@ -213,6 +219,24 @@ class InMemoryMemoryStore:
         async with self._lock:
             self._consolidations[run.id] = run.model_copy(deep=True)
             return run.model_copy(deep=True)
+
+    async def list_consolidations(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None = None,
+        limit: int = 100,
+    ) -> list[ConsolidationRun]:
+        async with self._lock:
+            runs = [
+                run
+                for run in self._consolidations.values()
+                if run.tenant_id == principal.tenant_id
+                and run.principal_id == principal.principal_id
+                and (session_id is None or run.session_id == session_id)
+            ]
+            runs.sort(key=lambda item: (item.started_at, str(item.id)), reverse=True)
+            return [item.model_copy(deep=True) for item in runs[:limit]]
 
     async def consolidation_watermark(self, session_id: UUID, principal: Principal) -> int:
         async with self._lock:

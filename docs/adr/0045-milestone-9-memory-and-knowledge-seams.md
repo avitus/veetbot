@@ -26,15 +26,20 @@ milestone was implemented unattended.
 ## Proposed decisions
 
 1. **Human memory management initially uses the existing CLI.** `agent memory
-   list`, `edit`, and `delete` provide the required inspect-and-correct surface.
-   The closed HTTP route set is unchanged until a later milestone explicitly
-   designs a remote management API.
+   list`, `get`, `edit`, and `delete` provide the required inspect-and-correct
+   surface. `list` can include inactive records and filter by source session.
+   The same command family exposes `formations` for consolidation audits and
+   `trace` for principal-scoped retrieval diagnostics. The closed HTTP route set
+   is unchanged until a later milestone explicitly designs a remote management
+   API. The repository owner explicitly authorized closing this inspection gap
+   on 2026-08-18.
 2. **Formation begins with a deterministic structured extractor.** Explicit
    `memory.remember` requests and a deliberately narrow consolidation grammar
    recognize durable preferences and “remember that” facts. Milestone 10 later
-   activates the hybrid model-assisted implementation recorded by ADR-0051 for
-   routed policies; the deterministic extractor remains its non-routed fallback
-   and cannot be bypassed as the service's safety boundary.
+   added model-assisted implementations, but ADR-0057 supersedes unconditional
+   routed-policy activation: production composition selects provider assistance
+   only for an exactly evaluated tuple. The deterministic extractor remains the
+   fallback and cannot be bypassed as the service's safety boundary.
 3. **A principal has one live belief per normalized subject and belief type.** An
    exact duplicate reinforces the existing belief; a different statement for the
    same pair supersedes it and links both records. Rejected or deleted beliefs

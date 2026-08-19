@@ -124,6 +124,18 @@ class _CapabilityModule(Protocol):
     ) -> Any | None: ...
 
 
+class _MemoryFormationEvalModule(Protocol):
+    async def run_live_evaluation(
+        self,
+        repository_root: Path,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> Any | None: ...
+
+
 def version_callback(value: bool) -> None:
     """Print the package version and stop command processing."""
 
@@ -501,12 +513,30 @@ def session_export_consent(
     typer.echo(consent.model_dump_json())
 
 
-async def _memory_list(include_inactive: bool, limit: int) -> list[Any]:
+async def _memory_list(include_inactive: bool, session_id: UUID | None, limit: int) -> list[Any]:
     async with build(storage="postgres") as composition:
         return await composition.memory.list_memories(
             include_inactive=include_inactive,
+            session_id=session_id,
             limit=limit,
         )
+
+
+async def _memory_get(belief_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.get_memory(belief_id)
+
+
+@memory_app.command("get")
+def memory_get(belief_id: UUID) -> None:
+    """Inspect one governed memory, including formation and source identifiers."""
+
+    try:
+        row = asyncio.run(_memory_get(belief_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(row.model_dump_json())
 
 
 @memory_app.command("list")
@@ -515,12 +545,16 @@ def memory_list(
         bool,
         typer.Option("--include-inactive", help="Include superseded and expired beliefs."),
     ] = False,
+    session_id: Annotated[
+        UUID | None,
+        typer.Option("--session", help="Restrict beliefs to one source session."),
+    ] = None,
     limit: Annotated[int, typer.Option(min=1, max=200)] = 100,
 ) -> None:
     """Inspect the authenticated principal's governed memories."""
 
     try:
-        rows = asyncio.run(_memory_list(include_inactive, limit))
+        rows = asyncio.run(_memory_list(include_inactive, session_id, limit))
     except ConfigurationError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
@@ -575,6 +609,49 @@ def memory_delete(belief_id: UUID) -> None:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(str(belief_id))
+
+
+async def _memory_formations(session_id: UUID | None, limit: int) -> list[Any]:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.list_consolidations(
+            session_id=session_id,
+            limit=limit,
+        )
+
+
+@memory_app.command("formations")
+def memory_formations(
+    session_id: Annotated[
+        UUID | None,
+        typer.Option("--session", help="Restrict formation runs to one source session."),
+    ] = None,
+    limit: Annotated[int, typer.Option(min=1, max=200)] = 100,
+) -> None:
+    """Inspect formation runs, candidate outcomes, policies, and watermarks."""
+
+    try:
+        rows = asyncio.run(_memory_formations(session_id, limit))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    typer.echo(json.dumps([row.model_dump(mode="json") for row in rows], default=str))
+
+
+async def _memory_trace(trace_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.get_recall_trace(trace_id)
+
+
+@memory_app.command("trace")
+def memory_trace(trace_id: UUID) -> None:
+    """Inspect one principal-scoped retrieval trace and its ranked beliefs."""
+
+    try:
+        row = asyncio.run(_memory_trace(trace_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(row.model_dump_json())
 
 
 async def _approval_list() -> list[Any]:
@@ -770,3 +847,47 @@ def eval_capability(
     )
     if result.release_blocked:
         raise typer.Exit(1)
+
+
+@eval_app.command("memory-formation")
+def eval_memory_formation(
+    model_policy: Annotated[
+        str,
+        typer.Option("--model-policy", help="Evaluate one declared model policy."),
+    ],
+    policy_profile: Annotated[
+        str,
+        typer.Option("--policy-profile", help="Evaluate one policy profile."),
+    ],
+    build_ref: Annotated[
+        str,
+        typer.Option("--build-ref", help="Commit or immutable build identifier."),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Write passing activation evidence to this path."),
+    ],
+) -> None:
+    """Compare provider-assisted formation with the deterministic baseline."""
+
+    try:
+        module = cast(
+            _MemoryFormationEvalModule,
+            importlib.import_module("agent_core.evals.memory_formation"),
+        )
+        result = asyncio.run(
+            module.run_live_evaluation(
+                Path.cwd(),
+                model_policy=model_policy,
+                policy_profile=policy_profile,
+                build_ref=build_ref,
+                output=output,
+            )
+        )
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"memory-formation evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to evaluate memory formation")
+        return
+    typer.echo(result.model_dump_json())

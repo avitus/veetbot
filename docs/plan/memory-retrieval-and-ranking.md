@@ -564,6 +564,7 @@ class EpisodeSearch(Protocol):
 class TraceStore(Protocol):
     async def record(self, trace: RecallTrace) -> None: ...
     async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...
+    async def get(self, trace_id: UUID, principal: Principal) -> RecallTrace: ...
     async def user_view(
         self,
         turn_id: UUID,
@@ -583,6 +584,13 @@ Two tools, both returning `TrustLevel.MEMORY` data:
 
 Both are ordinary tools: policy-gated, traced, and counted against the run budget.
 Neither can return anything the hard filter excludes.
+
+For inspection outside the model loop, `agent memory trace <trace-id>` returns
+the authenticated principal's persisted trace as JSON, including its query,
+candidate and returned identifiers, ranked belief scores and arms, safety and
+budget drops, rendered hash, and retrieval-policy version. A trace owned by a
+different principal is indistinguishable from a missing trace. Trace identifiers
+are emitted by `memory.recalled` events and by `memory.search` results.
 
 ## The trace is a user-facing surface
 
@@ -740,8 +748,9 @@ says *"Both are hard gates"* and the registry needs one identifier per gate.
 4. **Feedback loop.** Usage tracking into decay resistance and `utility`; recall misses
    into formation re-derivation hints.
 5. **Inspectable trace and correction.** The `RecallTraceView` projection, the
-   two-ceiling filter, two-tier retention, and the typed rejection path into
-   formation. The record is written from step 1; this step exposes it.
+   two-ceiling filter, two-tier retention, the principal-scoped `agent memory
+   trace` diagnostic, and the typed rejection path into formation. The record is
+   written from step 1; this step exposes it.
 6. **Semantic arm.** `pgvector` plus RRF fusion — only if the harness shows lift over
    lexical (Milestone 9).
 7. **Later arms.** Entity-graph expansion (graph spec), external provider arm

@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -162,3 +163,115 @@ def test_eval_capability_returns_failure_for_release_block(
     assert result.exit_code == 1
     assert '"release_blocked": true' in result.stdout
     assert '"stopped_by": "daily_cost_usd"' in result.stdout
+
+
+def test_eval_memory_formation_generates_evidence_artifact(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed: list[tuple[str, str, str]] = []
+
+    async def run_live_evaluation(
+        _root: object,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: object,
+    ) -> SimpleNamespace:
+        observed.append((model_policy, policy_profile, build_ref))
+        return SimpleNamespace(model_dump_json=lambda **_kwargs: '{"schema_version":1}')
+
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_formation",
+        SimpleNamespace(run_live_evaluation=run_live_evaluation),
+    )
+    output = str(tmp_path) + "/evidence.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-formation",
+            "--model-policy",
+            "balanced",
+            "--policy-profile",
+            "default",
+            "--build-ref",
+            "abc123",
+            "--output",
+            output,
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert observed == [("balanced", "default", "abc123")]
+    assert '"schema_version":1' in result.stdout
+
+
+def test_eval_memory_formation_reports_live_opt_in_skip(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    async def run_live_evaluation(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_formation",
+        SimpleNamespace(run_live_evaluation=run_live_evaluation),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-formation",
+            "--model-policy",
+            "balanced",
+            "--policy-profile",
+            "default",
+            "--build-ref",
+            "abc123",
+            "--output",
+            str(tmp_path) + "/evidence.json",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "skipped: set RUN_LIVE_MODEL_TESTS=1" in result.stdout
+
+
+def test_eval_memory_formation_normalizes_failed_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    async def run_live_evaluation(*_args: object, **_kwargs: object) -> None:
+        raise ValueError("provider extraction evaluation observed fabricated candidates")
+
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_formation",
+        SimpleNamespace(run_live_evaluation=run_live_evaluation),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-formation",
+            "--model-policy",
+            "balanced",
+            "--policy-profile",
+            "default",
+            "--build-ref",
+            "abc123",
+            "--output",
+            str(tmp_path) + "/evidence.json",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "memory-formation evaluation failed" in result.stderr
+    assert "fabricated candidates" in result.stderr

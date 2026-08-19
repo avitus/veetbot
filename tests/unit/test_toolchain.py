@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+import json
 import socket
 import subprocess
 import tomllib
@@ -21,12 +22,14 @@ import scripts.check_production_deployment as production_check
 from agent_core.cli.main import app
 from agent_core.config import load_settings
 from agent_core.domain.events import EventEnvelope
+from agent_core.domain.memory import ConsolidationRun, MemoryEdit
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import PersistedStreamFrame
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.conftest import NETWORK_MODE, _integration_endpoints
-from tests.contract.support import run
+from tests.contract.memory_fixtures import memory, trace
+from tests.contract.support import NOW, SESSION_ID, run
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -501,6 +504,106 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
     )
     assert conflicting_policy.exit_code == 2
     assert "--model-policy can only be used for a new session" in conflicting_policy.stderr
+
+
+def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    belief = memory()
+    recall_trace = trace()
+    formation = ConsolidationRun(
+        id=belief.formation_run_id,
+        tenant_id=belief.tenant_id,
+        principal_id=belief.principal_id,
+        trigger="session_idle",
+        scope=belief.scope,
+        session_id=belief.source_session_id,
+        watermark_before=0,
+        watermark_after=1,
+        model="deterministic-formation-v2",
+        policy_version="formation@2",
+        candidates_proposed=1,
+        committed=1,
+        reinforced=0,
+        superseded=0,
+        rejected=0,
+        started_at=NOW,
+        finished_at=NOW,
+    )
+    seen: list[tuple[str, object]] = []
+
+    async def fake_list(
+        include_inactive: bool, session_id: UUID | None, limit: int
+    ) -> list[object]:
+        seen.append(("list", (include_inactive, session_id, limit)))
+        return [belief]
+
+    async def fake_get(belief_id: UUID) -> object:
+        seen.append(("get", belief_id))
+        return belief
+
+    async def fake_edit(belief_id: UUID, edit: MemoryEdit) -> object:
+        seen.append(("edit", (belief_id, edit.statement)))
+        return belief.model_copy(update={"statement": edit.statement})
+
+    async def fake_delete(belief_id: UUID) -> None:
+        seen.append(("delete", belief_id))
+
+    async def fake_formations(session_id: UUID | None, limit: int) -> list[object]:
+        seen.append(("formations", (session_id, limit)))
+        return [formation]
+
+    async def fake_trace(trace_id: UUID) -> object:
+        seen.append(("trace", trace_id))
+        return recall_trace
+
+    monkeypatch.setattr(cli_main, "_memory_list", fake_list)
+    monkeypatch.setattr(cli_main, "_memory_get", fake_get)
+    monkeypatch.setattr(cli_main, "_memory_edit", fake_edit)
+    monkeypatch.setattr(cli_main, "_memory_delete", fake_delete)
+    monkeypatch.setattr(cli_main, "_memory_formations", fake_formations)
+    monkeypatch.setattr(cli_main, "_memory_trace", fake_trace)
+    runner = CliRunner()
+
+    listed = runner.invoke(
+        app,
+        [
+            "memory",
+            "list",
+            "--include-inactive",
+            "--session",
+            str(SESSION_ID),
+            "--limit",
+            "7",
+        ],
+    )
+    fetched = runner.invoke(app, ["memory", "get", str(belief.id)])
+    edited = runner.invoke(
+        app,
+        ["memory", "edit", str(belief.id), "--statement", "User prefers direct answers"],
+    )
+    formations = runner.invoke(
+        app,
+        ["memory", "formations", "--session", str(SESSION_ID), "--limit", "9"],
+    )
+    traced = runner.invoke(app, ["memory", "trace", str(recall_trace.id)])
+    deleted = runner.invoke(app, ["memory", "delete", str(belief.id)])
+
+    assert all(
+        result.exit_code == 0 for result in (listed, fetched, edited, formations, traced, deleted)
+    )
+    assert json.loads(listed.stdout)[0]["formation_run_id"] == str(formation.id)
+    assert json.loads(fetched.stdout)["source_session_id"] == str(SESSION_ID)
+    assert json.loads(edited.stdout)["statement"] == "User prefers direct answers"
+    assert json.loads(formations.stdout)[0]["committed"] == 1
+    assert json.loads(traced.stdout)["query"]["text"] == "concise answers"
+    assert deleted.stdout.strip() == str(belief.id)
+    assert seen == [
+        ("list", (True, SESSION_ID, 7)),
+        ("get", belief.id),
+        ("edit", (belief.id, "User prefers direct answers")),
+        ("formations", (SESSION_ID, 9)),
+        ("trace", recall_trace.id),
+        ("delete", belief.id),
+    ]
 
 
 def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:

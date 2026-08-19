@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
@@ -94,6 +95,42 @@ class MemoryCandidate(BaseModel):
     sensitivity_guess: Sensitivity
     valid_from: datetime | None = None
     expires_hint: datetime | None = None
+
+
+class ProviderExtractionEvaluationEvidence(BaseModel):
+    """Version-bound evidence required before provider extraction can activate."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    schema_version: Literal[1] = 1
+    extractor_version: str = Field(min_length=1)
+    formation_policy_version: str = Field(min_length=1)
+    model_policy: str = Field(min_length=1)
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    policy_profile: str = Field(min_length=1)
+    policy_version: str = Field(min_length=1)
+    build_ref: str = Field(min_length=1)
+    corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sample_count: int = Field(ge=20)
+    deterministic_supported_candidates: int = Field(ge=0)
+    provider_supported_candidates: int = Field(ge=0)
+    fabricated_candidates: int = Field(ge=0)
+    deterministic_policy_failures: int = Field(ge=0)
+    provider_policy_failures: int = Field(ge=0)
+    evaluated_at: datetime
+
+    @model_validator(mode="after")
+    def passed_activation_gate(self) -> ProviderExtractionEvaluationEvidence:
+        if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
+            raise ValueError("provider extraction evaluation time must be timezone-aware")
+        if self.provider_supported_candidates <= self.deterministic_supported_candidates:
+            raise ValueError("provider extraction evaluation did not demonstrate formation lift")
+        if self.fabricated_candidates:
+            raise ValueError("provider extraction evaluation observed fabricated candidates")
+        if self.provider_policy_failures > self.deterministic_policy_failures:
+            raise ValueError("provider extraction evaluation observed a policy regression")
+        return self
 
 
 class MemoryRecord(BaseModel):

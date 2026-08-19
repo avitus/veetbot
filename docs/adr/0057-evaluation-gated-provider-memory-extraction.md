@@ -1,0 +1,132 @@
+# ADR-0057: Evaluation-gated provider-assisted memory extraction
+
+- Status: Proposed
+- Date: 2026-08-18
+- Related: Milestone 10, ADR-0002, ADR-0018, ADR-0023, ADR-0045,
+  ADR-0051
+- User authorization: replace unconditional provider-memory rollout with an
+  evidence-gated implementation that does not burden ordinary users
+
+## Context
+
+ADR-0051 completed the ordinary-conversation lifecycle and introduced a bounded
+hybrid extractor, but its routed-policy activation relied on focused static tests
+rather than a version-bound evaluation artifact checked at startup. Activating
+an ordinary provider call inside the interactive run would evade the idle
+boundary, and accepting a provider's structured output as a write would evade
+the formation service's provenance and safety gates. Requiring evidence only in
+documentation would still leave startup able to enable a model-policy combination
+that had never passed the required no-fabrication and no-policy-regression tests.
+
+The general-purpose subagent path remains outside the authorized tranche. The
+memory design separately permits a dedicated maintenance job, so provider
+assistance does not require introducing `delegate.run` or changing routing
+behavior.
+
+## Proposed decision
+
+1. **Use a dedicated maintenance extractor.** `ProviderAssistedCandidateExtractor`
+   implements the existing `MemoryCandidateExtractor` port and is called only by
+   session-close or idle consolidation. It never runs in the interactive terminal
+   hook, has no tools, and does not introduce a general-purpose child-run surface.
+2. **Make safe selection automatic.** Provider assistance has three rollout
+   modes: `auto` (the default), `off`, and `required`. `auto` searches an explicit
+   operator artifact and then release-bundled evidence, activates only an exact
+   match, and otherwise continues with deterministic formation while recording
+   why. `off` never resolves or calls a formation provider. `required` preserves
+   fail-closed deployment semantics and refuses startup without a matching
+   artifact. A legacy explicit enable flag maps to `required` so an operator's
+   demand is never silently weakened. Every artifact must cover at least twenty
+   labeled samples and demonstrate strictly more supported candidates than the
+   deterministic baseline, zero fabricated candidates, and no increase in policy
+   failures. It must match the exact extractor version, formation policy, model
+   policy, provider, model, policy profile, and compiled policy version resolved
+   by the composition.
+3. **Give the maintenance call its own fixed budget.** `formation@3` permits one
+   structured-output model call, at most 16,000 input tokens, 4,096 output tokens,
+   USD 0.05, and 30 seconds. Catalog pricing and a conservative input estimate
+   cap requested output tokens before the call so the cost limit is preventive,
+   not only retrospective. The request advertises no tools and requires the
+   schema of a bounded `MemoryCandidate` batch. Crossing a recorded ceiling
+   rejects the provider result and uses the deterministic fallback.
+4. **Treat episodes as data.** The provider sees only selected
+   `user.message.created` events authored by the owning principal, labeled with
+   their exact event sequences, plus a compact view of at most fifty existing
+   beliefs. The prompt and schema state that episode text is data rather than
+   instructions and prohibit assistant or tool content as evidence.
+5. **Keep the deterministic service authoritative.** A valid provider batch is
+   merged with deterministic proposals and still passes the service-owned source,
+   scope, portability, salience, secret, injection, rejection, and conflict gates.
+   The twelve-candidate service ceiling remains unchanged. A failed, timed-out,
+   malformed, or over-budget provider call is non-fatal and falls back to the
+   deterministic extractor. Cancellation is audited and propagated rather than
+   converted into a successful fallback.
+6. **Persist a content-free model-call audit.** Every attempted provider extraction
+   appends one idempotent process event with the principal and session identity,
+   agent and policy versions, authorized scope, empty tool scopes, provider and
+   model, evidence identifiers, fixed budget, deadline, exact selected source
+   event sequences, usage and cost, outcome, and error class. It stores SHA-256
+   hashes rather than raw prompts or responses.
+7. **Separate evaluation from activation.** The extractor has an explicit
+   non-activating evaluation constructor that requires no prior evidence and marks
+   every audit as evaluation mode. The composition exposes that constructor only
+   through an explicit code-level evaluation flag that is mutually exclusive with
+   activation and refused in production. Normal deployment composition constructs
+   the provider extractor only after the evidence check passes.
+8. **Version provider assistance as `formation@3`.** The deterministic default
+   remains `formation@2`. Activating provider assistance records `formation@3` on
+   consolidation audits and beliefs so the two policies remain distinguishable
+   during replay, comparison, and later re-derivation.
+9. **Generate evidence instead of asking users to author it.** `agent eval
+   memory-formation` runs the checked-in labeled corpus through isolated paired
+   deterministic and provider-assisted arms. It computes supported, fabricated,
+   and rejected-policy counts and atomically writes an artifact only when the
+   activation schema passes. The checked-in corpus contains twenty positive and
+   four protected no-memory cases, scored against explicit normalized labels
+   without another model judge. A failure names aggregate counts and case ids but
+   writes no artifact. Real provider execution retains the capability track's
+   explicit live opt-in. The corpus hash and active model tuple are derived by
+   the command rather than entered by hand.
+10. **Use the installed release as the bundle trust boundary.** Evidence under
+    the package's release-evidence directory is reviewed and shipped with the
+    extractor code. The repository has no release-signing trust root; a detached
+    evidence signature would therefore add a private-key workflow without
+    establishing who is trusted. Release-bundled evidence inherits the same
+    authenticity mechanism as the installed code, while an external evidence
+    path is explicitly operator-trusted. A future signed release automatically
+    covers its bundled evidence without a second signature format.
+
+## Consequences
+
+- Open-ended phrasing can propose memories such as “User has at least one
+  daughter” while the existing service remains the only writer.
+- Provider outages cannot suppress deterministic automatic formation and cannot
+  change the completed interactive run.
+- A deployment cannot activate a different model, policy profile, or compiled
+  policy version using evidence gathered for another combination.
+- Ordinary users do not prepare evidence or opt into a provider manually. An
+  officially evaluated release activates a matching tuple automatically; an
+  unevaluated tuple remains deterministic and reports that decision.
+- The evidence command and strict schema do not claim that any live provider has
+  already passed. Until a real artifact is reviewed and bundled, `auto` selects
+  deterministic formation.
+- Model call details are durable without storing episode text, model output, or
+  private reasoning in process events.
+
+## Alternatives considered
+
+- **Call the provider inline after every turn:** rejected because it changes
+  interactive latency and cost and violates the cheap-flag/idle split.
+- **Create a general-purpose subagent:** rejected because that Milestone 10 scope
+  remains unauthorized and is unnecessary for a restricted maintenance call.
+- **Trust schema-constrained output directly:** rejected because schema validity
+  says nothing about source authority, scope, fabrication, or secrets.
+- **Enable with a boolean alone:** rejected because it turns the required
+  evaluation into an unenforced operating convention.
+- **Require every user to provide an artifact:** rejected because evidence is a
+  release-engineering concern for supported models, not an end-user preference.
+- **Add a standalone evidence signature immediately:** rejected because no
+  trusted release key or verification root exists; signing one file would not
+  authenticate the code selecting it.
+- **Fail consolidation when the provider fails:** rejected because provider
+  assistance must not regress the verified deterministic path.

@@ -65,3 +65,4 @@ implementation without one.
 - [ADR-0054 — Provider-neutral web access with capability-level routing (Proposed)](0054-provider-neutral-web-access.md)
 - [ADR-0055 — Configurable CLI wait for durable runs](0055-configurable-cli-run-wait.md)
 - [ADR-0056 — Failure-triggered reflection review (Proposed)](0056-failure-reflection-review.md)
+- [ADR-0057 — Evaluation-gated provider-assisted memory extraction (Proposed)](0057-evaluation-gated-provider-memory-extraction.md)

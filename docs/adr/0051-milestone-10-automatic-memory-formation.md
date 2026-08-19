@@ -2,7 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-17
-- Related: Milestone 10, ADR-0003, ADR-0018, ADR-0023, ADR-0045
+- Related: Milestone 10, ADR-0003, ADR-0018, ADR-0023, ADR-0045, ADR-0057
+- Superseded in part: ADR-0057 replaces decisions 7 through 9 where they govern
+  production activation, the provider budget, call audit, and policy selection.
 - User authorization: authorize Milestone 10 and continue building a rich,
   comprehensive memory system
 - User authorization: activate a richer extractor because memory formation is a
@@ -79,8 +81,8 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    still run for each consumed proposal. The audit records the full returned
    proposal count and counts every excess proposal as rejected, rather than
    allowing the extractor's resource ceiling to masquerade as the policy ceiling.
-7. **Activate hybrid model-assisted extraction only on the maintenance path.**
-   Routed policies make one strict-schema provider call over trusted
+7. **Provide hybrid model-assisted extraction only on the maintenance path.**
+   The reference implementation makes one strict-schema provider call over trusted
    principal-authored events and a compact view of at most one hundred existing
    beliefs; injection-shaped existing statements are replaced by `[BLOCKED]`.
    Non-routed policies, missing credentials, routing
@@ -89,15 +91,19 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    and adds only proposals whose subjects plus named and numeric claims are
    grounded in their cited source text. The formation service still owns every
    provenance, scope, portability, eligibility, rejection, conflict, and commit
-   check.
-8. **Give extraction a separate budget and content-free usage audit.** A model
+   check. ADR-0057 subsequently requires exact evaluation evidence before this
+   kind of extraction can be selected by production composition; a routed policy
+   alone is not activation evidence.
+8. **Give the reference extractor a separate budget and content-free usage audit.** A model
    attempt is limited to one call, 65,536 input bytes, 16,384 reported input
    tokens, 4,096 output tokens, $0.25, 60 seconds, and 256 proposed candidates.
    `memory.extraction.completed` records the provider, resolved model, model
    policy, normalized usage, returned count, fallback state, and error class; it
    stores neither source text nor model output.
-9. **Version the richer policy separately.** Model-assisted consolidations record
-   `formation@3`. `formation@1` and deterministic `formation@2` records remain
+   ADR-0057 defines the tighter production provider budget and its expanded
+   `memory.provider_extraction.*` audit contract.
+9. **Version the richer policy separately.** Evaluated provider-assisted consolidations
+   record `formation@3`. `formation@1` and deterministic `formation@2` records remain
    valid history, and the explicit boundary keeps replay and later re-derivation
    comparable.
 10. **Serialize each committed prefix.** Extraction stays outside a database
@@ -129,9 +135,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
 - Multiple maintenance workers may select the same flagged session, but only one
   can claim and commit a given prefix. The aggregate audit distinguishes commits,
   reinforcements, supersessions, rejections, and no-op contention.
-- Routed production policies now use model-assisted extraction during
-  maintenance. The deterministic extractor remains the direct path for fake and
-  deterministic policies and the fallback for every provider or validation
+- Routed production policies are eligible for model-assisted extraction during
+  maintenance only when ADR-0057's exact evidence check passes. The deterministic
+  extractor remains the default and the fallback for every provider or validation
   failure. Semantic conflict resolution, graph memory, and re-derivation hints
   remain future memory work.
 - Milestone 10 is authorized and in progress. The verified gate ceiling remains

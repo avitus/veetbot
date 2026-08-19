@@ -4,6 +4,18 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-19 — Automatic provider-memory rollout and evidence generation
+
+- Replaced manual default-off provider-memory enablement with `auto`, `off`, and
+  `required` modes. Automatic selection uses matching operator or
+  release-bundled evidence and otherwise retains deterministic formation with a
+  content-free reason audit.
+- Added `agent eval memory-formation`, a checked-in 24-case paired evaluation
+  that derives model and corpus identity and atomically creates evidence only
+  after positive lift, zero fabrication, and no policy regression.
+- Preserved the legacy enable flag as fail-closed `required` mode and retained
+  deterministic fallback for model-resolution and provider-call failures.
+
 ## 2026-08-18 — Web output bounds and pinned-version compatibility
 
 - Bounded `web.search` output to its declared 128 KiB tool limit by dropping
@@ -42,6 +54,24 @@ title: Changelog
 - Kept web access default-off, brokered provider credentials at call time,
   bounded provider responses, rejected non-public fetch targets, and preserved
   external-untrusted provenance through the complete tool pipeline.
+
+## 2026-08-18 — Inspectable and provider-assisted memory formation
+
+- Completed the governed CLI surface with belief `get`, source-session
+  filtering, formation-audit listing, and principal-scoped raw retrieval-trace
+  inspection alongside the existing list, edit, and delete operations.
+- Added in-memory contract, CLI boundary, and PostgreSQL integration coverage
+  for ordering, principal isolation, source-session filtering, consolidation
+  counts, and provenance identifiers.
+- Documented an end-to-end debugging workflow without expanding the closed HTTP
+  route set.
+- Added an evaluation-gated provider extractor for ordinary-language
+  memory proposals. Its restricted maintenance call is schema constrained,
+  tool-free, independently budgeted and audited, and always passes proposals
+  through the existing source and safety gates with deterministic fallback.
+- Added a version-bound activation-evidence schema and an explicit non-production
+  evaluation composition mode. Provider-assisted records use `formation@3` while
+  the deterministic default remains `formation@2`.
 
 ## 2026-08-17 — Complete historical transcripts in the Apple client
 

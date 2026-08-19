@@ -416,8 +416,11 @@ class Settings:
     interpolation: Mapping[str, str]     # what ${VAR} resolves to
 ```
 
-Eight fields, and the whole of `config.py` is this class plus the loader that
-fills it. `credentials` is keyed by provider profile name rather than by a
+These eight fields are the core deployment boundary. Later rollout features add
+typed mode settings and, where activation requires reviewed evidence, a path to
+that evidence artifact; these are deployment controls rather than tuning knobs
+and therefore remain in `Settings`. `credentials` is keyed by
+provider profile name rather than by a
 fixed set of provider fields, because Section 10.7 makes providers plugins;
 adding a provider must not require editing this class. `interpolation` is the
 allow-list of names a YAML file may reference, so a typo in a config file
@@ -977,13 +980,22 @@ command the plan fixed. `agent run -- get` passes the literal string.
 
 The set is open to a subject spec that needs one, on the same terms
 [evaluation-harness.md](evaluation-harness.md) already uses when it adds
-four subcommands under `agent eval` without changing the twelve: a
+five subcommands under `agent eval` without changing the twelve: a
 subcommand under an existing command is not a new command.
 [event-log-and-persistence.md](event-log-and-persistence.md) adds `export`
 on that basis, making the reserved set four words. A spec adding one pays
 exactly two costs — a line here and one more prompt that needs `--` — and
 both are cheaper than a thirteenth top-level noun, because the twelve is a
 number Section 17 states and this document's own heading repeats.
+
+Milestone 9's human-memory acceptance contract is the exception that later
+proved necessary: [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
+and ADR-0045 add the `agent memory` noun. Its management commands are `list`,
+`get`, `edit`, and `delete`; its diagnostic commands are `formations`, which
+may filter by source session, and `trace`, which reads one principal-scoped
+retrieval trace. These remain CLI calls over the ordinary composition and
+repositories. They do not open an HTTP management surface or implement a
+second runtime loop.
 
 ### Options
 
@@ -1009,6 +1021,11 @@ suspended state and its persisted terminal event. Expiration keeps exit code 5
 and prints the durable run identifier; it neither cancels nor fails the run.
 The API and native clients remain asynchronous and do not inherit this local
 CLI setting.
+
+The later `agent memory` extension is JSON-only and adds its own bounded
+inspection options: `--include-inactive`, `--session <id>`, and `--limit
+<1..200>`. The first applies only to belief listing; the source-session and
+limit filters apply to beliefs and formation audits.
 
 ### Exit codes
 

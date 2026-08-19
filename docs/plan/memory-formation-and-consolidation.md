@@ -373,10 +373,12 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 
 ## Ports and runtime placement
 
-- **`MemoryStore` port**: `query`, `upsert_belief`, `reinforce`, `supersede`,
-  `list`, `edit`, `delete`, `reject`, `outstanding_rejections`. Backends: Postgres
-  (FTS + normalized belief tables) first; `pgvector` and an external provider (e.g.
-  Honcho) later, behind the same port (ADR-0014).
+- **`MemoryStore` port**: `get`, `query`, `upsert_belief`, `reinforce`,
+  `supersede`, `list`, `edit`, `delete`, `reject`,
+  `outstanding_rejections`, `record_consolidation`, and principal-scoped
+  consolidation listing. Backends: Postgres (FTS + normalized belief tables)
+  first; `pgvector` and an external provider (e.g. Honcho) later, behind the
+  same port (ADR-0014).
 - **`MemoryConsolidator` port**: `run(trigger, scope, since_watermark) ->
   ConsolidationResult`. The builtin implementation is LLM extraction as above; an
   external memory provider can be delegated to behind this port.
@@ -402,6 +404,13 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
   private reasoning (ADR-0006/0007).
 - **Formation is fully autonomous**: no belief requires synchronous human confirmation. Safety rests on the deterministic eligibility gates, the untrusted-content write ban, and after-the-fact transparency and reversibility; sensitive or ambiguous beliefs are committed but flagged for review.
 - Every write is tenant- and principal-scoped.
+
+The initial human surface is `agent memory`: `list` (optionally including
+inactive beliefs or filtering by source session), `get`, `edit`, and `delete`
+make the belief store inspectable and reversible. `formations` exposes the
+principal-scoped consolidation audits, including model, policy, watermarks, and
+candidate outcome counts. This is a local/operator CLI surface over the same
+composition as the runtime; no separate write path exists.
 
 ## Milestone 10 ordinary-conversation maturation
 
@@ -468,24 +477,70 @@ the deterministic fallback while preserving the model-assisted design above:
    rolls back its just-inserted replacement even when the caller catches the
    conflict and continues the outer consolidation transaction.
 
-The schema-constrained consolidation model is the normative rich extractor and is
-active for routed model policies as `formation@3`. It receives only trusted
-principal-authored events plus a compact view of at most one hundred existing
-beliefs (with injection-shaped statements replaced by `[BLOCKED]`), makes one
-strict-schema call during idle or
-session-close maintenance, and has independent input, output, cost, deadline, and
-candidate ceilings. A content-free `memory.extraction.completed` process event
-records provider, model policy, usage, fallback state, and error class. Named and
-numeric claims must be lexically grounded in their cited source text before they
-reach the formation service, which independently repeats the source, scope,
-portability, salience, rejection, and conflict checks. Malformed output, missing
-credentials, routing failure, timeout, or budget exhaustion returns the
-deterministic v2 candidates instead of failing consolidation. Non-routed fake and
-deterministic policies use that fallback directly. The focused rich-extraction
-suite plus the existing no-fabrication, source-integrity, injection, bounded-
-formation, and no-policy-regression gates are the activation evidence; credentialed
-formation precision and rejection rate remain tracked rollout metrics rather than
-permission to bypass the deterministic gates.
+ADR-0051 introduced a schema-constrained hybrid reference extractor over trusted
+principal-authored events and a compact existing-belief view. Its focused tests
+retain regression coverage for grounding, strict output, independent limits,
+content-free `memory.extraction.completed` auditing, and deterministic fallback.
+Those tests are not production activation evidence. ADR-0057 supersedes the
+earlier routed-policy selection rule: normal composition does not select a
+provider extractor until a version-bound artifact for the exact runtime tuple
+passes startup validation.
+
+### Evaluation-gated provider assistance (`formation@3`)
+
+The first provider-assisted implementation is a dedicated maintenance extractor,
+not an interactive call or a general-purpose subagent. It implements the same
+`MemoryCandidateExtractor` port, receives only the owning principal's selected
+user events plus a compact view of at most fifty existing beliefs, advertises no
+tools, and requests one schema-constrained candidate batch. The fixed policy
+budget is one model call, 16,000 input tokens, 4,096 output tokens, USD 0.05, and
+30 seconds. Before the call, catalog pricing and a conservative input estimate
+reduce the requested output-token maximum as needed to fit the cost ceiling; a
+tuple that cannot afford one output token falls back without calling. Provider
+output is still a proposal: the service rechecks provenance, scope, portability,
+salience, secrets, injection, corrections, conflicts, and its twelve-candidate
+commit ceiling.
+
+Activation uses `auto`, `off`, and `required` rollout modes. `auto` is the default:
+it searches an explicit operator artifact and then evidence bundled with the
+installed release, activates an exact match, and otherwise retains deterministic
+formation with a content-free selection audit. `off` never resolves the formation
+provider. `required` refuses startup without matching evidence. The JSON schema
+binds the result to the extractor version, formation policy, model policy,
+provider, model, policy profile, and compiled policy version. It must report
+strictly more supported candidates than the deterministic baseline across at
+least twenty labeled samples, zero fabricated candidates, and no additional
+policy failures. A
+non-activating evaluation constructor exists to gather that evidence without
+creating the circular requirement that an unevaluated extractor already be
+active. It is reachable only through an explicit code-level evaluation build
+flag, is mutually exclusive with `required`, and is refused in production.
+
+`agent eval memory-formation` removes manual artifact authorship. With the live
+evaluation opt-in, it runs a checked-in labeled corpus through isolated paired
+deterministic and provider-assisted arms, derives the active model tuple and
+corpus hash, and atomically writes evidence only when the schema's lift,
+fabrication, and policy conditions pass. The corpus has twenty positive examples
+and four protected no-memory examples; scoring uses checked-in normalized labels,
+not a second model judge. A failed run reports aggregate counts and the failing
+case identifiers and leaves no artifact. Release engineers may place reviewed
+artifacts in the package evidence directory; those files share the installed
+code's distribution trust boundary. The repository defines no independent
+release-signing root, so it does not pretend that a detached file signature would
+authenticate an otherwise unsigned release.
+
+Every attempted provider extraction emits one process-scoped audit containing its
+principal and session, agent and policy versions, authorized scope, empty tool
+scopes, exact source-event sequences, provider and model, evidence identifiers,
+budget, deadline, usage, cost, and outcome. Prompt and response bodies are never
+stored there; only their SHA-256 hashes are retained. A failed, timed-out,
+malformed, or over-budget call records failure and returns deterministic proposals.
+A cancelled call records the cancellation and propagates it rather than disguising
+shutdown as successful formation.
+A successful batch is merged with the deterministic fallback and passes through
+the same service gates. Provider-assisted consolidations and beliefs record
+`formation@3`; the default deterministic path continues to record `formation@2`.
+The reversible seam and activation decision are recorded in ADR-0057.
 
 ## Hard gates
 
@@ -535,8 +590,8 @@ first formation layer (Section 20).
 
 The **builtin consolidation path is built to parity first** (steps 1-5); an external provider is a later comparison option (step 6), not the initial path.
 
-1. Explicit `memory.remember` + belief store + provenance + user edit/delete +
-   reinforce-on-duplicate. No automatic formation yet.
+1. Explicit `memory.remember` + belief store + provenance + user
+   list/get/edit/delete CLI + reinforce-on-duplicate. No automatic formation yet.
 2. Session-boundary consolidation: extraction + eligibility gate + dedupe.
 3. Conflict detection + supersession + bi-temporal validity.
 4. Typed rejections and their replay, before re-derivation exists to violate them.

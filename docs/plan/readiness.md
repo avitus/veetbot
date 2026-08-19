@@ -351,7 +351,7 @@ only at `engineering-plan.md:459`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:561` named `ApprovalService` as one of
+`bootstrap-and-composition.md:564` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -839,34 +839,24 @@ with its two consumers.
 [knowledge-documents.md](knowledge-documents.md) covers the other half
 of the milestone's name.
 
-Several items are partial.
+Several items remain partial.
 
-The partials are: session history and artifacts as retrieval sources
-(named as sources, not designed as such); expiration (a policy with no
-sweep job); the human-editable surface (no UI contract, no edit
-semantics, no statement of what happens to a belief a human edits);
-the external memory provider port (named, no contract); and the
-persona and identity surface over `AgentSpec.instructions` (no
-statement of how a formed belief reaches the instruction text, or
-whether it may).
+The remaining partials are: session history and artifacts as retrieval sources
+(named as sources, not designed as such); expiration (a policy with no sweep
+job in the corpus reviewed here); the external memory provider port (named, no
+contract); and the persona and identity surface over
+`AgentSpec.instructions` (no statement of how a formed belief reaches the
+instruction text, or whether it may).
 
-One of the five is sharper than this review recorded, and the
-sharpening belongs here. The human-editable surface is not merely
-uncontracted: the `MemoryStore` port declares `list`, `edit`, and
-`delete` at `memory-formation-and-consolidation.md:377`, and no tool,
-route, or command in the corpus calls any of them. The agent-facing
-surface is three tools: `memory.search` and `memory.recall_episodes`
-read, and `memory.remember` creates. None of the three lists, edits,
-or deletes. The twelve CLI commands include no memory command, and
-[http-api-and-streaming.md](http-api-and-streaming.md) registers no
-memory route. So *"A user can inspect and delete stored memories"* at
-`engineering-plan.md:2824` is the one Milestone 9 acceptance criterion
-with nothing behind it to test, and the three port methods are the
-shape of an answer rather than the answer. Whether the surface is a
-management tool on the `skill.manage` precedent, a route set, a CLI
-command, or all three is a Milestone 9 decision this review does not
-make, and it is recorded in
-[questions-for-review.md](../status/questions-for-review.md).
+The human-editable surface gap identified by the readiness review is now
+closed through the CLI decision in ADR-0045. `agent memory list`, `get`, `edit`,
+and `delete` call the governed service and expose full provenance and lifecycle
+metadata; listing can include inactive beliefs and filter by source session.
+`agent memory formations` exposes consolidation policy, watermark, and outcome
+counts, while `agent memory trace` exposes the authenticated principal's
+persisted retrieval diagnostics. Boundary and repository tests cover the
+commands, tenant/principal isolation, ordering, and session filters. The HTTP
+route set remains unchanged.
 
 One item was absent, and it was the larger one. **Knowledge documents
 had no design.** The milestone's own heading is *"Long-term memory and

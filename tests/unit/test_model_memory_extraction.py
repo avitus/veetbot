@@ -206,7 +206,7 @@ async def test_model_assisted_extractor_rejects_output_over_its_dedicated_budget
     assert audits[0].error_class == "MemoryExtractionBudgetError"
 
 
-async def test_routed_composition_activates_rich_extraction_and_persists_usage(
+async def test_routed_composition_does_not_activate_rich_extraction_without_evidence(
     tmp_path: Path,
 ) -> None:
     provider = FakeModelProvider(
@@ -253,11 +253,13 @@ async def test_routed_composition_activates_rich_extraction_and_persists_usage(
         )
         async with app.uow_factory() as uow:
             audits = await uow.process_events.list("memory.extraction.completed")
+            selections = await uow.process_events.list("memory.provider_extraction.selection")
 
-    assert [(item.subject, item.source_event_ids) for item in result.beliefs] == [
-        ("daughter", [source.sequence])
-    ]
-    assert result.run.policy_version == "formation@3"
-    assert len(audits) == 1
-    assert audits[0].payload["usage"]["input_tokens"] == 80
-    assert audits[0].payload["fallback_used"] is False
+    assert result.beliefs == []
+    assert result.run.policy_version == "formation@2"
+    assert provider.requests == []
+    assert audits == []
+    assert len(selections) == 1
+    assert selections[0].payload["outcome"] == "deterministic_fallback"
+    assert selections[0].payload["reason"] == "no_matching_evidence"
+    assert source.sequence == 2

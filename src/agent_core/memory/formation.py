@@ -27,6 +27,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallTrace,
     RejectionKind,
     Sensitivity,
 )
@@ -36,7 +37,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@3"
+FORMATION_POLICY_VERSION = "formation@2"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
@@ -403,7 +404,10 @@ class GovernedMemoryService:
         salience: DeterministicSalience | None = None,
         resolver: DeterministicConflictResolver | None = None,
         extractor: MemoryCandidateExtractor | None = None,
+        policy_version: str = FORMATION_POLICY_VERSION,
     ) -> None:
+        if not policy_version:
+            raise ValueError("memory formation policy version must not be empty")
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
@@ -411,6 +415,7 @@ class GovernedMemoryService:
         self._salience = salience or DeterministicSalience()
         self._resolver = resolver or DeterministicConflictResolver()
         self._extractor = extractor or DeterministicCandidateExtractor()
+        self._policy_version = policy_version
 
     async def remember(
         self,
@@ -508,7 +513,7 @@ class GovernedMemoryService:
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
                 model=self._extractor.name,
-                policy_version=FORMATION_POLICY_VERSION,
+                policy_version=self._policy_version,
                 candidates_proposed=1,
                 committed=0,
                 reinforced=0,
@@ -661,7 +666,7 @@ class GovernedMemoryService:
                 watermark_before=0,
                 watermark_after=0,
                 model=self._extractor.name,
-                policy_version=FORMATION_POLICY_VERSION,
+                policy_version=self._policy_version,
                 candidates_proposed=0,
                 committed=0,
                 reinforced=0,
@@ -708,7 +713,7 @@ class GovernedMemoryService:
                     watermark_before=at_watermark,
                     watermark_after=at_watermark,
                     model=self._extractor.name,
-                    policy_version=FORMATION_POLICY_VERSION,
+                    policy_version=self._policy_version,
                     candidates_proposed=0,
                     committed=0,
                     reinforced=0,
@@ -790,7 +795,7 @@ class GovernedMemoryService:
                     watermark_before=watermark,
                     watermark_after=after,
                     model=self._extractor.name,
-                    policy_version=FORMATION_POLICY_VERSION,
+                    policy_version=self._policy_version,
                     candidates_proposed=len(extracted),
                     committed=committed,
                     reinforced=reinforced,
@@ -805,12 +810,37 @@ class GovernedMemoryService:
         return ConsolidationResult(run=audit, beliefs=beliefs)
 
     async def list_memories(
-        self, *, include_inactive: bool = False, limit: int = 200
+        self,
+        *,
+        include_inactive: bool = False,
+        session_id: UUID | None = None,
+        limit: int = 200,
     ) -> list[MemoryRecord]:
         async with self._uow_factory() as uow:
             return await uow.memories.list_memories(
-                self._principal, include_inactive=include_inactive, limit=limit
+                self._principal,
+                include_inactive=include_inactive,
+                session_id=session_id,
+                limit=limit,
             )
+
+    async def get_memory(self, belief_id: UUID) -> MemoryRecord:
+        async with self._uow_factory() as uow:
+            return await uow.memories.get(belief_id, self._principal)
+
+    async def list_consolidations(
+        self, *, session_id: UUID | None = None, limit: int = 100
+    ) -> list[ConsolidationRun]:
+        async with self._uow_factory() as uow:
+            return await uow.memories.list_consolidations(
+                self._principal,
+                session_id=session_id,
+                limit=limit,
+            )
+
+    async def get_recall_trace(self, trace_id: UUID) -> RecallTrace:
+        async with self._uow_factory() as uow:
+            return await uow.traces.get(trace_id, self._principal)
 
     async def edit(self, belief_id: UUID, edit: MemoryEdit) -> MemoryRecord:
         async with self._uow_factory() as uow:
@@ -973,7 +1003,7 @@ class GovernedMemoryService:
                 not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             ),
             formation_run_id=formation_run_id,
-            consolidation_policy_version=FORMATION_POLICY_VERSION,
+            consolidation_policy_version=self._policy_version,
             authority=authority,
             store_position=await uow.memories.next_position(),
             created_at=now,

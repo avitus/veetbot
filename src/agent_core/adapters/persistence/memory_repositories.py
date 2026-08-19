@@ -288,7 +288,12 @@ class PostgresMemoryStore:
         return current, replacement
 
     async def list_memories(
-        self, principal: Principal, *, include_inactive: bool = False, limit: int = 200
+        self,
+        principal: Principal,
+        *,
+        include_inactive: bool = False,
+        session_id: UUID | None = None,
+        limit: int = 200,
     ) -> list[MemoryRecord]:
         predicates: list[Any] = [
             MemoryRow.tenant_id == principal.tenant_id,
@@ -296,6 +301,8 @@ class PostgresMemoryStore:
         ]
         if not include_inactive:
             predicates.append(MemoryRow.status.in_(_LIVE))
+        if session_id is not None:
+            predicates.append(MemoryRow.source_session_id == session_id)
         rows = list(
             (
                 await self._session.scalars(
@@ -366,6 +373,34 @@ class PostgresMemoryStore:
             .on_conflict_do_nothing(index_elements=[ConsolidationRunRow.id])
         )
         return run
+
+    async def list_consolidations(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None = None,
+        limit: int = 100,
+    ) -> list[ConsolidationRun]:
+        predicates = [
+            ConsolidationRunRow.tenant_id == principal.tenant_id,
+            ConsolidationRunRow.principal_id == principal.principal_id,
+        ]
+        if session_id is not None:
+            predicates.append(ConsolidationRunRow.session_id == session_id)
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(ConsolidationRunRow)
+                    .where(*predicates)
+                    .order_by(
+                        ConsolidationRunRow.started_at.desc(),
+                        ConsolidationRunRow.id.desc(),
+                    )
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return [_consolidation(row) for row in rows]
 
     async def consolidation_watermark(self, session_id: UUID, principal: Principal) -> int:
         value = await self._session.scalar(

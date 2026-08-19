@@ -11,6 +11,7 @@ from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import (
     BeliefRejection,
     BeliefType,
+    ConsolidationRun,
     MemoryEdit,
     MemoryStatus,
     RejectionKind,
@@ -116,6 +117,14 @@ async def test_list_memories_orders_by_recency_and_honors_liveness_and_limit() -
     assert [record.id for record in everything] == [retired.id, second.id, first.id]
     limited = await store.list_memories(principal(), include_inactive=True, limit=1)
     assert [record.id for record in limited] == [retired.id]
+    other_session = second.model_copy(
+        update={"id": UUID(int=514), "source_session_id": UUID(int=999), "store_position": 4}
+    )
+    await store.upsert_belief(other_session)
+    session_only = await store.list_memories(
+        principal(), include_inactive=True, session_id=SESSION_ID
+    )
+    assert [record.id for record in session_only] == [retired.id, second.id, first.id]
 
 
 async def test_edit_and_delete_are_principal_scoped() -> None:
@@ -161,6 +170,49 @@ async def test_consolidation_watermark_is_monotonic_and_principal_scoped() -> No
     assert await store.consolidation_watermark(SESSION_ID, principal()) == 5
     foreign = principal().model_copy(update={"principal_id": "principal-b"})
     assert await store.consolidation_watermark(SESSION_ID, foreign) == 0
+
+
+async def test_consolidation_runs_are_inspectable_and_principal_scoped() -> None:
+    store = _store()
+    older = ConsolidationRun(
+        id=UUID(int=801),
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+        watermark_before=0,
+        watermark_after=5,
+        model="deterministic-formation-v2",
+        policy_version="formation@2",
+        candidates_proposed=1,
+        committed=1,
+        reinforced=0,
+        superseded=0,
+        rejected=0,
+        started_at=NOW - timedelta(minutes=1),
+        finished_at=NOW - timedelta(minutes=1),
+    )
+    newer = older.model_copy(
+        update={
+            "id": UUID(int=802),
+            "watermark_before": 5,
+            "watermark_after": 9,
+            "started_at": NOW,
+            "finished_at": NOW,
+        }
+    )
+    foreign = older.model_copy(
+        update={"id": UUID(int=803), "principal_id": "principal-b", "started_at": NOW}
+    )
+    for run in (older, newer, foreign):
+        await store.record_consolidation(run)
+
+    assert await store.list_consolidations(principal(), session_id=SESSION_ID) == [newer, older]
+    assert await store.list_consolidations(principal(), limit=1) == [newer]
+    assert await store.list_consolidations(
+        principal().model_copy(update={"principal_id": "principal-b"})
+    ) == [foreign]
 
 
 async def test_expire_retires_only_live_records_past_their_expiry() -> None:

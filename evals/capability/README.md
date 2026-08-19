@@ -20,3 +20,18 @@ RUN_LIVE_MODEL_TESTS=1 uv run agent eval capability --suite research
 
 Without the live flag, the command skips without loading credentials or making
 provider calls.
+
+`provider-memory-evidence.example.json` is a schema example, not activation
+evidence. Generate a real artifact with the checked-in 24-case labeled corpus:
+
+```text
+RUN_LIVE_MODEL_TESTS=1 uv run agent eval memory-formation \
+  --model-policy balanced --policy-profile default \
+  --build-ref <immutable-build-ref> --output <new-evidence-path>
+```
+
+The command refuses to overwrite an existing path. It resolves the provider and
+model, computes the corpus hash, compares isolated deterministic and provider
+arms, and atomically creates the artifact only after the typed activation gate
+passes. The 24 provider calls have a combined USD 1.20 policy ceiling. Startup
+still checks the artifact against the exact active extraction tuple.
