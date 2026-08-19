@@ -565,7 +565,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1467`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1473`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -1234,7 +1234,7 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1467` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2501` against
     `model-gateway.md:1795` and `milestone-map.md:917`. The map

@@ -22,7 +22,7 @@ The first client needs to be easy to download, work on common development and
 operator machines, preserve the API's SSE replay rules, and avoid creating the
 Device, presence, pairing, or notification mechanisms that Section 29.8 defers.
 
-## Proposed decision
+## Decision
 
 1. **Distribute a separate terminal client as one Python zipapp.** Its source
    lives under `client/`, uses only the Python 3.12 standard library, and builds

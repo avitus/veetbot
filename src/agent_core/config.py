@@ -469,7 +469,7 @@ def load_provider_extraction_evidence(
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         return ProviderExtractionEvaluationEvidence.model_validate(raw)
-    except (OSError, json.JSONDecodeError, ValidationError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
         raise ConfigurationError(
             "provider-backed memory extraction evaluation evidence did not pass"
         ) from exc
@@ -486,30 +486,33 @@ def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(paths))
 
 
+def _provider_extraction_evidence_is_valid(path: Path) -> bool:
+    try:
+        load_provider_extraction_evidence(path)
+    except ConfigurationError:
+        return False
+    return True
+
+
 def validate_settings(settings: Settings) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
     _validate_release_id(settings.release_id)
-    evidence_paths = provider_extraction_evidence_paths(settings)
-    if (
-        settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED
-        and not evidence_paths
-    ):
-        raise ConfigurationError("provider-backed memory extraction requires evaluation evidence")
     if settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED:
-        if settings.memory_provider_extraction_evidence is not None:
-            load_provider_extraction_evidence(settings.memory_provider_extraction_evidence)
-        elif evidence_paths:
-            errors = 0
-            for evidence_path in evidence_paths:
-                try:
-                    load_provider_extraction_evidence(evidence_path)
-                except ConfigurationError:
-                    errors += 1
-            if errors == len(evidence_paths):
-                raise ConfigurationError(
-                    "provider-backed memory extraction evaluation evidence did not pass"
-                )
+        evidence_paths = provider_extraction_evidence_paths(settings)
+        if not evidence_paths:
+            raise ConfigurationError(
+                "provider-backed memory extraction requires evaluation evidence"
+            )
+        required_paths = (
+            (settings.memory_provider_extraction_evidence,)
+            if settings.memory_provider_extraction_evidence is not None
+            else evidence_paths
+        )
+        if not any(_provider_extraction_evidence_is_valid(path) for path in required_paths):
+            raise ConfigurationError(
+                "provider-backed memory extraction evaluation evidence did not pass"
+            )
     if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
     if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
@@ -593,13 +596,13 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
     raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
-    legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED")
-    if raw_memory_mode and legacy_memory_enablement is not None:
+    legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip()
+    if raw_memory_mode and legacy_memory_enablement:
         raise ConfigurationError(
             "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE and the legacy enablement flag "
             "are mutually exclusive"
         )
-    if legacy_memory_enablement is not None:
+    if legacy_memory_enablement:
         memory_provider_extraction_mode = (
             MemoryProviderExtractionMode.REQUIRED
             if _parse_flag(values, "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED")

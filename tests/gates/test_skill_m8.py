@@ -61,7 +61,7 @@ from agent_core.skills.package import (
     package_from_directory,
     read_archive_member,
 )
-from agent_core.tools.skill_load import SkillLoadTool
+from agent_core.tools.skill_load import LegacySkillLoadTool, SkillLoadTool
 from tests.contract.support import NOW, agent, memory_stack, principal
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -490,9 +490,15 @@ async def test_skill_load_survives_builtin_minor_upgrade() -> None:
 
     assert current.spec.version == "1.1.0"
     assert legacy.spec.version == "1.0.0"
-    assert legacy.spec.name == current.spec.name
-    assert legacy.spec.kind is current.spec.kind
-    assert legacy.spec.input_schema == current.spec.input_schema
+    assert legacy.spec == LegacySkillLoadTool.spec
+    assert (
+        legacy.spec.description == "Load or unload content from the session-pinned skill catalog."
+    )
+    assert legacy.spec.input_schema["properties"]["name"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+    }
 
 
 async def test_catalog_capped() -> None:

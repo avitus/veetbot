@@ -22,7 +22,14 @@ from agent_core.config import (
     load_config_document,
 )
 from agent_core.domain.events import NewEvent
-from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryCandidate,
+    Polarity,
+    Portability,
+    ProviderExtractionEvaluationEvidence,
+    Sensitivity,
+)
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelAttempt,
@@ -35,7 +42,11 @@ from agent_core.domain.messages import (
     ScriptedTurn,
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
-from agent_core.memory.provider_extraction import ProviderAssistedCandidateExtractor
+from agent_core.memory.provider_extraction import (
+    ProviderAssistedCandidateExtractor,
+    _merge_candidates,
+    provider_extraction_evidence_matches,
+)
 from agent_core.policy.loader import load_ruleset_documents
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import AGENT_ID, NOW, principal
@@ -93,13 +104,24 @@ def _runtime_policy_version() -> str:
     ).policy_version
 
 
-def test_evaluation_evidence_binds_the_compiled_policy_version() -> None:
+def test_evaluation_evidence_round_trips_and_must_match_the_compiled_policy_version() -> None:
     evidence = _evidence().model_dump()
     evidence["policy_version"] = "default@profile+hline"
 
     parsed = ProviderExtractionEvaluationEvidence.model_validate(evidence)
 
     assert parsed.policy_version == "default@profile+hline"
+    assert not provider_extraction_evidence_matches(
+        parsed,
+        ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        "default",
+        "different@policy",
+    )
 
 
 async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage() -> None:
@@ -174,6 +196,8 @@ async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage(
     assert payload["budget"]["maximum_model_calls"] == 1
     assert payload["usage"]["input_tokens"] > 0
     assert payload["selected_source_event_ids"] == [source]
+    assert payload["candidate_count"] == 1
+    assert payload["grounded_candidate_count"] == 1
     assert "astronomy club" not in json.dumps(payload)
     assert "at least one daughter" not in json.dumps(payload)
 
@@ -228,6 +252,53 @@ async def test_provider_extractor_rejects_ungrounded_named_claim_with_valid_sour
     )
 
     assert candidates == []
+    async with factory() as uow:
+        audits = await uow.process_events.list("memory.provider_extraction.completed")
+    assert audits[0].payload["candidate_count"] == 1
+    assert audits[0].payload["grounded_candidate_count"] == 0
+
+
+async def test_provider_grounding_accepts_decimal_tokens_present_in_the_source() -> None:
+    _clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "My telescope aperture is 3.5 inches.")
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.FACT,
+        subject="telescope aperture",
+        statement="User's telescope aperture is 3.5 inches.",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[source],
+        model_confidence=0.9,
+        proposed_scope="project-a",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.INTERNAL,
+    )
+
+    assert ProviderAssistedCandidateExtractor._is_grounded(
+        candidate,
+        await session_events(factory),
+        principal(),
+        "project-a",
+    )
+
+
+def test_provider_merge_preserves_opposite_polarities_for_conflict_resolution() -> None:
+    def candidate(statement: str, polarity: Polarity) -> MemoryCandidate:
+        return MemoryCandidate(
+            belief_type=BeliefType.USER_MODEL_ATTR,
+            subject="watch",
+            statement=statement,
+            polarity=polarity,
+            source_event_ids=[1],
+            model_confidence=0.9,
+            proposed_scope="project-a",
+            proposed_portability=Portability.CONTEXTUAL,
+            sensitivity_guess=Sensitivity.INTERNAL,
+        )
+
+    asserted = candidate("User has a watch.", Polarity.ASSERT)
+    retracted = candidate("User no longer has a watch.", Polarity.RETRACT)
+
+    assert _merge_candidates([asserted], [retracted]) == [asserted, retracted]
 
 
 async def test_provider_extractor_caps_output_before_call_to_stay_inside_cost_budget() -> None:
@@ -271,6 +342,51 @@ async def test_provider_extractor_caps_output_before_call_to_stay_inside_cost_bu
     maximum_output = provider.requests[0].maximum_output_tokens
     assert maximum_output is not None
     assert 0 < maximum_output < 4096
+
+
+async def test_provider_extractor_refuses_unaffordable_input_before_provider_io() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    await user_event(factory, "The astronomy club was my daughter's idea.")
+    provider = FakeModelProvider(
+        FakeModelScript(turns=[ScriptedTurn(text='{"candidates":[]}')]),
+        clock,
+    )
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            pricing=ModelPricing(
+                input_per_mtok=Decimal("100000"),
+                output_per_mtok=Decimal("1"),
+            ),
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(8_600, 8_700)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    assert (
+        await extractor.extract(
+            await session_events(factory),
+            principal=principal(),
+            scope="project-a",
+        )
+        == []
+    )
+    assert provider.requests == []
+    async with factory() as uow:
+        audits = await uow.process_events.list("memory.provider_extraction.failed")
+    assert audits[0].payload["outcome"] == "cost_budget_exceeded"
 
 
 async def test_provider_reported_cost_cannot_be_lowered_by_catalog_pricing() -> None:
@@ -540,7 +656,9 @@ async def test_input_budget_is_refused_before_provider_io() -> None:
     assert audits[0].payload["outcome"] == "input_budget_exceeded"
 
 
-async def test_cancellation_is_audited_and_propagated() -> None:
+async def test_cancellation_is_audited_and_propagated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     clock, factory, _service, _retriever = await formation_stack()
     await user_event(factory, "The astronomy club was my daughter's idea.")
     provider = _BlockingProvider()
@@ -563,6 +681,18 @@ async def test_cancellation_is_audited_and_propagated() -> None:
         evidence=_evidence(),
         fallback=DeterministicCandidateExtractor(),
     )
+    original_audit = extractor._audit
+    audit_started = asyncio.Event()
+    release_audit = asyncio.Event()
+    audit_finished = asyncio.Event()
+
+    async def delayed_audit(**kwargs: object) -> None:
+        audit_started.set()
+        await release_audit.wait()
+        await original_audit(**kwargs)  # type: ignore[arg-type]
+        audit_finished.set()
+
+    monkeypatch.setattr(extractor, "_audit", delayed_audit)
     task = asyncio.create_task(
         extractor.extract(
             await session_events(factory),
@@ -573,8 +703,12 @@ async def test_cancellation_is_audited_and_propagated() -> None:
     await provider.started.wait()
 
     task.cancel()
+    await audit_started.wait()
+    task.cancel()
+    release_audit.set()
     with pytest.raises(asyncio.CancelledError):
         await task
+    await asyncio.wait_for(audit_finished.wait(), timeout=1.0)
 
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.failed")
@@ -792,6 +926,7 @@ async def test_auto_mode_falls_back_and_records_why_evidence_did_not_match(
     assert selections[0].payload["mode"] == "auto"
     assert selections[0].payload["outcome"] == "deterministic_fallback"
     assert selections[0].payload["reason"] == "no_matching_evidence"
+    assert ":no_matching_evidence:none:" in selections[0].derivation_key
 
 
 async def test_auto_mode_activates_matching_release_bundled_evidence(
@@ -828,6 +963,7 @@ async def test_auto_mode_activates_matching_release_bundled_evidence(
     assert len(selections) == 1
     assert selections[0].payload["outcome"] == "activated"
     assert selections[0].payload["evidence_source"] == "release"
+    assert ":matching_evidence:release:" in selections[0].derivation_key
     assert selections[0].payload["evidence_build_ref"] == "test-build"
     assert selections[0].payload["evidence_corpus_sha256"] == "a" * 64
 
@@ -887,7 +1023,12 @@ async def test_auto_mode_falls_back_when_no_extraction_model_can_be_resolved(
     assert selections[0].payload["reason"] == "model_resolution_failed"
 
 
-async def test_auto_mode_reports_a_missing_provider_credential(tmp_path: Path) -> None:
+async def test_auto_mode_reports_a_missing_provider_credential(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    for name in ("VEETBOT_OPENAI_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
     settings = replace(
         memory_settings(),
         memory_provider_extraction_mode=MemoryProviderExtractionMode.AUTO,

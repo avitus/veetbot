@@ -115,7 +115,7 @@
     },
     {
       "id": "secret-001",
-      "episodes": ["The club service login is api_token=do-not-store-this-value."],
+      "episodes": ["The club service login is api_token=placeholder."],
       "expected": [],
       "must_remain_empty": true
     },

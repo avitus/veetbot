@@ -7,6 +7,7 @@ import socket
 import subprocess
 import tomllib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +20,7 @@ from typer.testing import CliRunner
 
 import agent_core.cli.main as cli_main
 import scripts.check_production_deployment as production_check
+from agent_core.bootstrap import build
 from agent_core.cli.main import app
 from agent_core.config import load_settings
 from agent_core.domain.events import EventEnvelope
@@ -29,7 +31,8 @@ from agent_core.domain.views import PersistedStreamFrame
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.conftest import NETWORK_MODE, _integration_endpoints
 from tests.contract.memory_fixtures import memory, trace
-from tests.contract.support import NOW, SESSION_ID, run
+from tests.contract.support import NOW, SESSION_ID, principal, run
+from tests.integration.m2_support import memory_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -595,7 +598,7 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
     assert json.loads(edited.stdout)["statement"] == "User prefers direct answers"
     assert json.loads(formations.stdout)[0]["committed"] == 1
     assert json.loads(traced.stdout)["query"]["text"] == "concise answers"
-    assert deleted.stdout.strip() == str(belief.id)
+    assert json.loads(deleted.stdout) == {"id": str(belief.id)}
     assert seen == [
         ("list", (True, SESSION_ID, 7)),
         ("get", belief.id),
@@ -604,6 +607,19 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         ("trace", recall_trace.id),
         ("delete", belief.id),
     ]
+
+
+async def test_in_memory_composition_round_trips_a_recall_trace_through_the_public_service(
+    tmp_path: Path,
+) -> None:
+    value = trace()
+    settings = replace(memory_settings(), artifact_root=tmp_path / "artifacts")
+
+    async with build(settings=settings, storage="memory", principal=principal()) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.traces.record(value)
+
+        assert await composition.memory.get_recall_trace(value.id) == value
 
 
 def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:

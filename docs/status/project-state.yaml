@@ -442,8 +442,8 @@ verification:
           constraints from the log, completed tasks dropped, and next_action
           reset. Compaction left original events replayable and retained source
           event identifiers on every summary.
-      - check: proposed ADR-0043
-        outcome: owner_review_requested
+      - check: accepted ADR-0043
+        outcome: approved_and_implemented
         detail: >-
           The forced implementation decisions are recorded explicitly, including
           first-request plan pinning, conservative plan-time prefix measurement,
@@ -512,8 +512,8 @@ verification:
           resolved. Three incremental summary findings were also fixed. The final
           hosted review of commit 0db9cff completed without new findings, and no
           review threads remain unresolved.
-      - check: proposed ADR-0044
-        outcome: owner_review_requested
+      - check: accepted ADR-0044
+        outcome: approved_and_implemented
         detail: >-
           The forced implementation choices are recorded explicitly, including
           deterministic tar.zst archives, event-reconstructed pins, ephemeral MCP
@@ -580,12 +580,12 @@ verification:
           lanes plus GitGuardian passed on final review-remediation commit
           e5c2140. Every CodeRabbit review thread was answered and resolved, and
           the final incremental review completed without a new finding.
-      - check: proposed ADR-0045
-        outcome: owner_review_requested
+      - check: accepted ADR-0045
+        outcome: approved_and_implemented
         detail: >-
           The reversible CLI, deterministic extraction, conflict, audit,
           PostgreSQL FTS, evaluation carry, tool classification, retained
-          source, and context-snapshot choices are recorded for owner review.
+          source, and context-snapshot choices are approved and implemented.
     remaining: []
   milestone_10:
     recorded_at: 2026-08-19T16:36:17Z
@@ -660,12 +660,13 @@ verification:
           required modes preserve explicit no-resolution and fail-closed choices.
           The 24-case paired CLI evaluator derives the corpus and model tuple and
           creates no artifact unless lift, fabrication, and policy gates pass.
-          All 80 focused provider, evaluator, CLI, and configuration tests pass.
+          All 94 focused provider, evaluator, CLI, configuration, and
+          review-remediation tests pass.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 380 source and test
-          files, 614 static tests, 219 contracts, deployment-script checks,
+          files, 622 static tests, 219 contracts, deployment-script checks,
           121 citation checks, and strict documentation builds pass on the
           integrated head. The static count includes the 25-case evaluation
           front end relocated from the DB-gated integration directory. The

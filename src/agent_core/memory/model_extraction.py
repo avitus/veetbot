@@ -33,7 +33,11 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.formation import _INJECTION, DeterministicCandidateExtractor, _event_text
+from agent_core.memory.formation import (
+    DeterministicCandidateExtractor,
+    _event_text,
+    contains_memory_injection,
+)
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.streaming import collect_turn
 from agent_core.ports.determinism import Clock, IdFactory
@@ -157,7 +161,7 @@ class ModelAssistedCandidateExtractor:
                         "subject": memory.subject,
                         "statement": (
                             "[BLOCKED]"
-                            if _INJECTION.search(memory.statement) is not None
+                            if contains_memory_injection(memory.statement)
                             else memory.statement
                         ),
                         "belief_type": memory.belief_type.value,

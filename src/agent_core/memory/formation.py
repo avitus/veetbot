@@ -70,6 +70,12 @@ _POSSESSIVE_ENTITY = re.compile(
 )
 
 
+def contains_memory_injection(value: str) -> bool:
+    """Return whether memory-shaped text contains a prompt-injection marker."""
+
+    return _INJECTION.search(value) is not None
+
+
 def _event_text(event: EventEnvelope) -> str:
     content = event.payload.get("content")
     texts: list[str] = []
@@ -354,7 +360,7 @@ class DeterministicCandidateExtractor:
 class DeterministicSalience:
     def eligible(self, statement: str, *, explicit: bool) -> bool:
         value = statement.strip()
-        if not value or _SECRET.search(value) is not None or _INJECTION.search(value) is not None:
+        if not value or _SECRET.search(value) is not None or contains_memory_injection(value):
             return False
         if not explicit and _TRANSIENT.search(value) is not None:
             return False

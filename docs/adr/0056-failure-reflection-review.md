@@ -39,7 +39,9 @@ decisions and are named as non-goals below.
 1. **A failure reflection review is the background review's trigger,
    extended — not a new mechanism.** A post-terminal hook enqueued on `FAILED`
    only, at most once per parent run, and only for runs that made at least one
-   tool call. Like the existing hooks it is enqueued after the terminal
+   tool call. A run whose `RunKind` is `SKILL_REVIEW` never triggers failure
+   reflection, preventing a failed review child from recursively creating
+   another review. Like the existing hooks it is enqueued after the terminal
    transition commits, and its failure is logged and never fatal. `CANCELLED`
    does not trigger it: cancellation records the user's decision, not a
    defect.

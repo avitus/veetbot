@@ -10,17 +10,11 @@ import pytest
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.determinism import SequenceIdFactory
-from agent_core.adapters.persistence.memory import (
-    InMemoryAgentRepository,
-    InMemoryToolInvocationRepository,
-)
-from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.application.artifact_writer import ArtifactWriterFactory
-from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.domain.artifacts import ArtifactOrigin
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.policies import TrustLevel
-from tests.contract.support import RUN_ID, SESSION_ID, TENANT, memory_stack, principal
+from tests.contract.support import RUN_ID, SESSION_ID, TENANT, memory_uow_factory, principal
 
 
 async def _one_chunk() -> AsyncIterator[bytes]:
@@ -30,17 +24,7 @@ async def _one_chunk() -> AsyncIterator[bytes]:
 async def test_for_run_binds_platform_identity_onto_the_created_artifact(
     tmp_path: Path,
 ) -> None:
-    clock, sessions, runs, events = await memory_stack()
-    factory = MemoryUnitOfWorkFactory(
-        _memory_uow_repositories(
-            agents=InMemoryAgentRepository(),
-            sessions=sessions,
-            runs=runs,
-            events=events,
-            invocations=InMemoryToolInvocationRepository(runs),
-            clock=clock,
-        )
-    )
+    clock, factory = await memory_uow_factory()
     artifact_id = UUID(int=8810)
     provider = ArtifactWriterFactory(
         factory,

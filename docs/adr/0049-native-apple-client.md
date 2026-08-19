@@ -30,7 +30,7 @@ The requested iOS 15 and macOS 12 deployment floors support incremental
 macOS 14. The client must preserve the lower deployment targets without
 pretending SwiftData is available there.
 
-## Proposed decision
+## Decision
 
 1. **Add a native SwiftUI client under `clients/apple/`.** One Xcode application
    target supports iOS 15+ and macOS 12+ with no third-party dependency.

@@ -13,6 +13,7 @@ from agent_core.config import (
     AuthMode,
     ConfigurationError,
     DeploymentMode,
+    MemoryProviderExtractionMode,
     SandboxMechanism,
     WebProviderKind,
     load_config_document,
@@ -133,6 +134,20 @@ def test_provider_memory_extraction_refuses_failed_evaluation_evidence(tmp_path:
         )
 
 
+def test_provider_memory_extraction_normalizes_non_utf8_evidence_failure(tmp_path: Path) -> None:
+    evidence = tmp_path / "provider-memory-evidence.json"
+    evidence.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(ConfigurationError, match="evaluation evidence did not pass"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(evidence),
+            }
+        )
+
+
 def test_legacy_provider_memory_enablement_remains_fail_closed() -> None:
     with pytest.raises(ConfigurationError, match="evaluation evidence"):
         load_settings(
@@ -141,6 +156,18 @@ def test_legacy_provider_memory_enablement_remains_fail_closed() -> None:
                 "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "1",
             }
         )
+
+
+def test_blank_legacy_provider_memory_enablement_is_unset() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "off",
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "   ",
+        }
+    )
+
+    assert settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.OFF
 
 
 def test_auto_provider_memory_mode_tolerates_unusable_operator_evidence(

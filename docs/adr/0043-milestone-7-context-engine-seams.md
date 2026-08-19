@@ -16,14 +16,14 @@ properties but leave several implementation seams where their example types do
 not carry enough information or where two documents describe different ownership
 of the same checkpoint write.
 
-Two choices below are explicit proposed deviations rather than interpretations.
+The choices below are explicit accepted deviations rather than interpretations.
 The context design says the tool set is pinned at session open, but model routing
 does not occur at session creation in the implemented application boundary. It
 also says compaction is a routed model call, while the engineering plan asks the
-first compactor to stay deliberately unsophisticated. Those choices require owner
-review and must not become invisible precedent.
+first compactor to stay deliberately unsophisticated. Owner review accepted
+those choices as visible precedent for this implementation.
 
-## Proposed decisions
+## Decisions
 
 1. **A context plan is an idempotent session event.** `context.plan.created` and
    `context.epoch.rotated` carry the complete immutable plan. Reconstructing a
@@ -69,8 +69,8 @@ review and must not become invisible precedent.
    This follows the engineering plan's instruction not to build sophisticated
    compaction before the basic loop, but differs from the detailed design's later
    decision to route a versioned compaction prompt through `ModelRouter`. Owner
-   review must either accept this first implementation or require a model-backed
-   compactor before the decision is accepted.
+   review accepted this first implementation without requiring a model-backed
+   compactor.
 8. **Working-state carry is event-derived.** The control tool and runtime question
    lifecycle emit `context.working_state.updated`. A new run queries the latest
    principal-visible state event below its fixed seed sequence, drops completed
@@ -92,9 +92,8 @@ review and must not become invisible precedent.
   when old history creates pressure.
 - The fifty-turn evaluation can cross midnight, change scopes, add memory events,
   and compact repeatedly while observing one prefix hash.
-- Until decisions 2, 4, and 7 are accepted, they remain known differences from
-  literal detailed-design language and must be reconsidered before this ADR moves
-  out of Proposed.
+- Decisions 2, 4, and 7 are accepted, documented differences from literal
+  detailed-design language.
 
 ## Alternatives considered
 

@@ -19,11 +19,11 @@ event log belongs to sessions even though a profile-load event is process-wide,
 and the HTTP transport is Milestone 5 even though the Milestone 4 implement
 list names an approval API.
 
-These choices are proposed for owner review. They do not weaken a hardline
+These choices were accepted after owner review. They do not weaken a hardline
 policy rule, scope check, approval revalidation check, or workspace containment
 rule.
 
-## Proposed decisions
+## Decisions
 
 1. **Policy profiles and hardline rules are strict, content-addressed startup
    files.** The loader rejects unknown fields and incomplete effect matrices,

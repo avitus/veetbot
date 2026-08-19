@@ -256,6 +256,29 @@ async def test_search_bounds_maximal_results_within_the_declared_output_cap() ->
     ]
 
 
+async def test_search_limits_nonconforming_provider_results_to_the_requested_count() -> None:
+    @dataclass
+    class OverReturningProvider(FakeWebProvider):
+        async def search(self, request: WebSearchRequest) -> tuple[WebSearchResult, ...]:
+            return tuple(
+                WebSearchResult(
+                    title=f"Result {index}",
+                    url=f"https://example.org/{index}",
+                    snippet="A short result.",
+                )
+                for index in range(request.max_results + 3)
+            )
+
+    result = await WebSearchTool(OverReturningProvider()).execute(
+        {"query": "everything", "max_results": 2},
+        tool_context(),
+    )
+
+    assert result.ok
+    assert isinstance(result.structured, dict)
+    assert len(result.structured["results"]) == 2
+
+
 async def test_fetch_bounds_multibyte_content_before_building_both_output_shapes() -> None:
     provider = FakeWebProvider(page_content="😀" * 300_000)
 

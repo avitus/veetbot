@@ -1025,7 +1025,9 @@ CLI setting.
 The later `agent memory` extension is JSON-only and adds its own bounded
 inspection options: `--include-inactive`, `--session <id>`, and `--limit
 <1..200>`. The first applies only to belief listing; the source-session and
-limit filters apply to beliefs and formation audits.
+limit filters apply to beliefs and formation audits. A successful
+`agent memory delete <id>` writes `{"id":"<id>"}` so deletion remains inside
+the same JSON-only contract.
 
 ### Exit codes
 

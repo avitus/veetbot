@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import os
 import tempfile
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -157,7 +158,8 @@ async def _evaluate_case(
         roles={"evaluator"},
         scopes=set(PLATFORM_SCOPES),
     )
-    bootstrap: Any = __import__("agent_core.bootstrap", fromlist=["build"])
+    # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
+    bootstrap = importlib.import_module("agent_core.bootstrap")
     async with bootstrap.build(
         settings=settings,
         storage="memory",

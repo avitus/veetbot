@@ -19,11 +19,11 @@ the initial extraction mechanism, conflict granularity, audit-event ownership,
 the first retrieval backend, evaluation carry semantics, and builtin tool
 classification.
 
-These choices preserve the engineering plan's requirements. They are recorded as
-Proposed because the repository owner asked to review decisions made while the
-milestone was implemented unattended.
+These choices preserve the engineering plan's requirements. They were accepted
+after repository-owner review of decisions made while the milestone was
+implemented unattended.
 
-## Proposed decisions
+## Decisions
 
 1. **Human memory management initially uses the existing CLI.** `agent memory
    list`, `get`, `edit`, and `delete` provide the required inspect-and-correct

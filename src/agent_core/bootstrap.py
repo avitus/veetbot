@@ -874,6 +874,8 @@ async def _compose(
             ruleset.policy_version,
             memory_mode.value,
             selection_outcome,
+            selection_reason,
+            evidence_source or "none",
             "none" if extraction_model is None else extraction_model.provider,
             "none" if extraction_model is None else extraction_model.model,
             evidence_build_ref or "none",

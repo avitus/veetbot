@@ -38,7 +38,7 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.formation import _INJECTION
+from agent_core.memory.formation import contains_memory_injection
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import collect_turn
 from agent_core.ports.determinism import Clock, IdFactory
@@ -51,6 +51,7 @@ PROVIDER_FORMATION_POLICY_VERSION = "formation@3"
 
 logger = logging.getLogger(__name__)
 _NAMED_OR_NUMERIC_TOKEN = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*|\d[\d.-]*)\b")
+_GROUNDING_TOKEN = re.compile(r"\d+(?:\.\d+)+|[a-z0-9]+(?:['-][a-z0-9]+)*")
 _IGNORED_GROUNDING_TOKENS = frozenset({"User", "User's", "The"})
 
 
@@ -147,9 +148,13 @@ def _merge_candidates(
     """Prefer evaluated provider proposals while retaining deterministic coverage."""
 
     merged: list[MemoryCandidate] = []
-    occupied: set[tuple[str, str]] = set()
+    occupied: set[tuple[str, str, Polarity]] = set()
     for candidate in [*proposed, *fallback]:
-        key = (candidate.belief_type.value, candidate.subject.casefold())
+        key = (
+            candidate.belief_type.value,
+            candidate.subject.casefold(),
+            candidate.polarity,
+        )
         if key in occupied:
             continue
         occupied.add(key)
@@ -399,18 +404,42 @@ class ProviderAssistedCandidateExtractor:
                 if self._is_grounded(candidate, events, principal, scope)
             ]
         except asyncio.CancelledError:
-            await self._audit(
-                job_id=job_id,
-                attempt_id=attempt_id,
-                events=events,
-                scope=scope,
-                deadline_at=deadline_at,
-                prompt_sha256=prompt_sha256,
-                outcome="cancelled",
-                usage=usage,
-                response_sha256=response_sha256,
-                error_class="CancelledError",
+            audit_task = asyncio.create_task(
+                self._audit(
+                    job_id=job_id,
+                    attempt_id=attempt_id,
+                    events=events,
+                    scope=scope,
+                    deadline_at=deadline_at,
+                    prompt_sha256=prompt_sha256,
+                    outcome="cancelled",
+                    usage=usage,
+                    response_sha256=response_sha256,
+                    error_class="CancelledError",
+                )
             )
+            try:
+                await asyncio.wait_for(asyncio.shield(audit_task), timeout=1.0)
+            except asyncio.CancelledError:
+                try:
+                    await asyncio.wait_for(asyncio.shield(audit_task), timeout=1.0)
+                except TimeoutError:
+                    audit_task.cancel()
+                    await asyncio.gather(audit_task, return_exceptions=True)
+                except Exception as exc:
+                    logger.warning(
+                        "memory_provider_cancellation_audit_failed",
+                        extra={"error_class": type(exc).__name__, "job_id": str(job_id)},
+                    )
+                raise
+            except TimeoutError:
+                audit_task.cancel()
+                await asyncio.gather(audit_task, return_exceptions=True)
+            except Exception as exc:
+                logger.warning(
+                    "memory_provider_cancellation_audit_failed",
+                    extra={"error_class": type(exc).__name__, "job_id": str(job_id)},
+                )
             raise
         except Exception as exc:
             logger.warning(
@@ -442,6 +471,7 @@ class ProviderAssistedCandidateExtractor:
             usage=usage,
             response_sha256=response_sha256,
             candidate_count=len(batch.candidates),
+            grounded_candidate_count=len(grounded),
         )
         return _merge_candidates(grounded, deterministic)
 
@@ -464,9 +494,9 @@ class ProviderAssistedCandidateExtractor:
         if any(sequence not in by_sequence for sequence in candidate.source_event_ids):
             return False
         source = " ".join(by_sequence[sequence] for sequence in candidate.source_event_ids)
-        source_tokens = set(re.findall(r"[a-z0-9'-]+", source.casefold()))
+        source_tokens = set(_GROUNDING_TOKEN.findall(source.casefold()))
         source_tokens.update(token[:-2] for token in tuple(source_tokens) if token.endswith("'s"))
-        subject_tokens = re.findall(r"[a-z0-9'-]+", candidate.subject.casefold())
+        subject_tokens = _GROUNDING_TOKEN.findall(candidate.subject.casefold())
         if subject_tokens and not any(token in source_tokens for token in subject_tokens):
             return False
         named = {
@@ -498,7 +528,7 @@ class ProviderAssistedCandidateExtractor:
                     "subject": belief.subject,
                     "statement": (
                         "[BLOCKED]"
-                        if _INJECTION.search(belief.statement) is not None
+                        if contains_memory_injection(belief.statement)
                         else belief.statement
                     ),
                     "status": belief.status.value,
@@ -525,6 +555,7 @@ class ProviderAssistedCandidateExtractor:
         usage: ModelUsage | None = None,
         response_sha256: str | None = None,
         candidate_count: int = 0,
+        grounded_candidate_count: int = 0,
         error_class: str | None = None,
     ) -> None:
         session_id = events[0].session_id if events else None
@@ -564,6 +595,7 @@ class ProviderAssistedCandidateExtractor:
                 and _event_text(event)
             ],
             "candidate_count": candidate_count,
+            "grounded_candidate_count": grounded_candidate_count,
             "usage": None if usage is None else usage.model_dump(mode="json"),
             "outcome": outcome,
             "error_class": error_class,

@@ -9,7 +9,7 @@
   "policy_version": "replace-with-compiled-policy-version",
   "build_ref": "replace-with-evaluated-build-ref",
   "corpus_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-  "sample_count": 20,
+  "sample_count": 24,
   "deterministic_supported_candidates": 10,
   "provider_supported_candidates": 11,
   "fabricated_candidates": 0,

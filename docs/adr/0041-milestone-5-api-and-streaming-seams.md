@@ -21,10 +21,10 @@ idempotency keys are scoped to a tenant principal.
 ADR-0050 later adds two separately authorized post-Milestone 9 session-history
 routes. That extension does not rewrite this ADR's completed milestone census.
 
-These choices are proposed for owner review. They preserve the route table,
+These choices were accepted after owner review. They preserve the route table,
 authorization order, tenant concealment, durable event log, and hard gates.
 
-## Proposed decisions
+## Decisions
 
 1. **The four public services and their views live above every transport.** The
    CLI and FastAPI routes call the same principal-first session, run, approval,

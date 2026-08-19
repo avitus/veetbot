@@ -128,7 +128,7 @@ class WebSearchTool:
             results = await self._provider.search(request)
         except WebProviderError as error:
             return _provider_failure(error)
-        records = [result.model_dump(mode="json") for result in results]
+        records = [result.model_dump(mode="json") for result in results[: request.max_results]]
         # The declared output limit is a platform contract; a full page of
         # maximal results can exceed it, so drop trailing results until the
         # rendered part list fits. One schema-bounded result always fits.

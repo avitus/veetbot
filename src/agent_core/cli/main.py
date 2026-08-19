@@ -608,7 +608,7 @@ def memory_delete(belief_id: UUID) -> None:
     except (ConfigurationError, NotFoundError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
-    typer.echo(str(belief_id))
+    typer.echo(json.dumps({"id": str(belief_id)}))
 
 
 async def _memory_formations(session_id: UUID | None, limit: int) -> list[Any]:
