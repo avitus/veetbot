@@ -1,6 +1,6 @@
 # ADR-0041: Milestone 5 API, identity, and streaming seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Related: Milestone 5, ADR-0010, ADR-0017, ADR-0024, ADR-0028,
   ADR-0031

@@ -1,6 +1,6 @@
 # ADR-0045: Milestone 9 memory and knowledge seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Related: Milestone 9, ADR-0003, ADR-0006, ADR-0014, ADR-0018,
   ADR-0019, ADR-0020, ADR-0021, ADR-0033

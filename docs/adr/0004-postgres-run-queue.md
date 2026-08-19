@@ -1,6 +1,6 @@
 # ADR-0004: The Postgres run queue, leases, and recovery
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-24
 - Related: Milestone 2 (durable execution), Sections 12.2 (loop persistence),
   13 (failure taxonomy), 14 (durable execution), 15 (data model),

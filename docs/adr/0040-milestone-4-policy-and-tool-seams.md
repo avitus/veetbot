@@ -1,6 +1,6 @@
 # ADR-0040: Milestone 4 policy, approval, and workspace seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Related: Milestone 4, ADR-0005, ADR-0017, ADR-0021, ADR-0023,
   ADR-0026, ADR-0028, ADR-0029

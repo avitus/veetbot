@@ -32,16 +32,25 @@ fetch returns page content rather than an interpretation of it.
 
 ## Provider-neutral contract
 
-`WebProvider` has four operations: `search(WebSearchRequest)`, `fetch(url)`,
-`close()`, and a stable `name`. Search returns only `title`, `url`, and
-`snippet`. Fetch returns only `url`, optional `title`, and `content`. Provider
-request identifiers, scores, usage fields, raw errors, screenshots, images,
-links, and billing data do not cross the port.
+`WebProvider` has three operations — `search(WebSearchRequest)`, `fetch(url)`,
+and `close()` — plus a stable `name` attribute. Search returns only `title`,
+`url`, and `snippet`. Fetch returns only `url`, optional `title`, and
+`content`. Provider request identifiers, scores, usage fields, raw errors,
+screenshots, images, links, and billing data do not cross the port. The tool
+result does name the serving provider in its `provider` field, so the model
+can attribute a source record without the vendor API shaping the contract.
+
+Search-result URLs are held to a looser standard than fetch targets: a result
+may use plain HTTP or a non-standard port because providers index such pages,
+while `web.fetch` still refuses those URLs under its own rule below. Tavily
+extraction never returns a page title; Firecrawl reports the page's canonical
+`sourceURL`, which may differ from the requested URL.
 
 `web.search` accepts a non-empty query of at most 500 characters, one through
 ten results, an optional include-domain list or exclude-domain list, and an
 optional `day`, `week`, `month`, or `year` recency. Include and exclude modes
-are mutually exclusive. Domain filters are normalized DNS hostnames; IP
+are mutually exclusive. Each domain list holds at most ten unique entries;
+duplicates are rejected. Domain filters are normalized DNS hostnames; IP
 literals and private-shaped hostnames are rejected.
 
 `web.fetch` accepts one URL. It requires HTTPS, forbids credentials and
@@ -64,8 +73,9 @@ contracts.
 
 The Firecrawl adapter calls the fixed endpoints
 `https://api.firecrawl.dev/v2/search` and
-`https://api.firecrawl.dev/v2/scrape`. Search requests only the web source and
-maps recency to Firecrawl's `qdr` values. Scrape requests Markdown, main content,
+`https://api.firecrawl.dev/v2/scrape`. Search requests only the web source,
+tolerates invalid indexed URLs (`ignoreInvalidURLs`), and maps recency to
+Firecrawl's `qdr` values. Scrape requests Markdown, main content,
 and explicitly keeps TLS verification enabled. These fields follow the official
 [Firecrawl Search](https://docs.firecrawl.dev/api-reference/endpoint/search)
 and [Firecrawl Scrape](https://docs.firecrawl.dev/api-reference/endpoint/scrape)
@@ -125,16 +135,22 @@ configuration, a credential, or a trusted skill-authoring source.
 ## Bounds and failures
 
 Provider HTTP responses are streamed into a two-MiB hard bound before JSON
-decoding. Search snippets, titles, result counts, fetched content, and final
-tool outputs have lower contract bounds. Redirect following is disabled for
-provider API calls so a bearer credential cannot be forwarded to another host.
+decoding; a larger response is invalid provider output. Search snippets,
+titles, result counts, fetched content, and final tool outputs have lower
+contract bounds: `web.fetch` truncates page content to its declared tool
+output limit, and `web.search` drops trailing results until its rendered
+output fits the declared limit, so one schema-bounded result always returns
+inline. Redirect following is disabled for provider API calls so a bearer
+credential cannot be forwarded to another host.
 
 The adapter never returns upstream response text. Stable failures distinguish
 credential rejection, temporary provider unavailability, permanent provider
-rejection, invalid provider output, and a disallowed fetch URL. Timeouts,
-transport failures, HTTP 408/425/429, and server errors are retryable; auth,
-other client errors, schema failures, and local URL refusals are not. The tool
-pipeline retains ownership of any retry decision within the run deadline.
+rejection, invalid provider output, and a disallowed fetch URL; arguments that
+fail the tool schema return the platform's ordinary `tool.arguments_invalid`.
+Timeouts, transport failures, HTTP 408/425/429, and server errors are
+retryable; auth, other client errors, schema failures, and local URL refusals
+are not. The tool pipeline retains ownership of any retry decision within the
+run deadline.
 
 ## Acceptance criteria
 

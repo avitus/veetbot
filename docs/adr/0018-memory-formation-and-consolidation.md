@@ -1,6 +1,6 @@
 # ADR-0018: Memory formation and consolidation
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-21
 - Related: Milestone 9 (long-term memory), ADR-0006/0007 (no raw reasoning storage),
   ADR-0014 (memory surface and external providers), Section 6.8 (event log),

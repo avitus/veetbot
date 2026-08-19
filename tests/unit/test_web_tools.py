@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
 import pytest
@@ -13,7 +14,8 @@ from agent_core.domain.policies import (
     SideEffectClass,
     TrustLevel,
 )
-from agent_core.domain.web import WebPage, WebSearchRequest, WebSearchResult
+from agent_core.domain.tools import ToolFailureKind
+from agent_core.domain.web import WebPage, WebProviderError, WebSearchRequest, WebSearchResult
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
 from tests.contract.support import tool_context
@@ -127,6 +129,131 @@ async def test_fetch_returns_page_content_as_external_untrusted() -> None:
         "content": "# Ada Lovelace\n\nA public biographical record.",
     }
     assert provider.fetches == ["https://example.org/ada"]
+
+
+@dataclass
+class FailingWebProvider(FakeWebProvider):
+    reason_code: str = "tool.web.provider_unavailable"
+    retryable: bool = True
+
+    async def search(self, request: WebSearchRequest) -> tuple[WebSearchResult, ...]:
+        raise WebProviderError(self.reason_code, retryable=self.retryable)
+
+    async def fetch(self, url: str) -> WebPage:
+        raise WebProviderError(self.reason_code, retryable=self.retryable)
+
+
+@pytest.mark.parametrize(
+    ("reason_code", "retryable", "kind"),
+    [
+        ("tool.web.auth_failed", False, ToolFailureKind.PERMISSION),
+        ("tool.web.output_invalid", False, ToolFailureKind.OUTPUT_INVALID),
+        ("tool.web.provider_unavailable", True, ToolFailureKind.TRANSPORT),
+        ("tool.web.provider_rejected", False, ToolFailureKind.UPSTREAM_ERROR),
+    ],
+)
+async def test_provider_failures_keep_their_stable_kind_and_retryability(
+    reason_code: str,
+    retryable: bool,
+    kind: ToolFailureKind,
+) -> None:
+    provider = FailingWebProvider(reason_code=reason_code, retryable=retryable)
+
+    search_result = await WebSearchTool(provider).execute({"query": "Ada"}, tool_context())
+    fetch_result = await WebFetchTool(provider).execute(
+        {"url": "https://example.org/ada"}, tool_context()
+    )
+
+    for result in (search_result, fetch_result):
+        assert not result.ok
+        assert result.failure is not None
+        assert result.failure.kind is kind
+        assert result.failure.reason_code == reason_code
+        assert result.failure.retryable is retryable
+        assert result.output_trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"query": "   "},
+        {"query": "x" * 501},
+        {"query": "Ada", "max_results": 0},
+        {"query": "Ada", "max_results": 11},
+        {"query": "Ada", "include_domains": ["example.org"], "exclude_domains": ["example.net"]},
+        {"query": "Ada", "include_domains": ["example.org", "example.org"]},
+        {"query": "Ada", "include_domains": ["127.0.0.1"]},
+        {"query": "Ada", "recency": "fortnight"},
+    ],
+)
+async def test_search_rejects_invalid_arguments_before_any_provider_call(
+    arguments: dict[str, object],
+) -> None:
+    provider = FakeWebProvider()
+
+    result = await WebSearchTool(provider).execute(dict(arguments), tool_context())
+
+    assert not result.ok
+    assert result.failure is not None
+    assert result.failure.kind is ToolFailureKind.INVALID_ARGUMENTS
+    assert result.failure.reason_code == "tool.arguments_invalid"
+    assert result.failure.retryable is False
+    assert provider.searches == []
+
+
+async def test_fetch_requires_a_string_url_before_any_provider_call() -> None:
+    provider = FakeWebProvider()
+    tool = WebFetchTool(provider)
+
+    for arguments in ({}, {"url": 7}, {"url": None}):
+        result = await tool.execute(dict(arguments), tool_context())
+        assert not result.ok
+        assert result.failure is not None
+        assert result.failure.reason_code == "tool.web.url_disallowed"
+
+    assert provider.fetches == []
+
+
+async def test_search_bounds_maximal_results_within_the_declared_output_cap() -> None:
+    maximal = WebSearchResult(
+        title="😀" * 1024,
+        url="https://example.org/" + "a" * 4070,
+        snippet="😀" * 8192,
+    )
+
+    @dataclass
+    class MaximalProvider(FakeWebProvider):
+        async def search(self, request: WebSearchRequest) -> tuple[WebSearchResult, ...]:
+            return (maximal,) * request.max_results
+
+    result = await WebSearchTool(MaximalProvider()).execute(
+        {"query": "everything", "max_results": 10},
+        tool_context(),
+    )
+
+    assert result.ok
+    rendered = json.dumps(
+        [part.model_dump(mode="json") for part in result.content],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert len(rendered) <= WebSearchTool.spec.maximum_output_bytes
+    assert isinstance(result.structured, dict)
+    returned = result.structured["results"]
+    assert isinstance(returned, list)
+    assert returned
+    assert returned[0] == maximal.model_dump(mode="json")
+    assert result.content == [
+        TextPart(
+            text=json.dumps(
+                result.structured,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+    ]
 
 
 async def test_fetch_bounds_multibyte_content_before_building_both_output_shapes() -> None:

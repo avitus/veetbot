@@ -1,6 +1,6 @@
 # ADR-0043: Milestone 7 context-engine seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Related: Milestone 7, ADR-0003, ADR-0006, ADR-0007, ADR-0009,
   ADR-0020, ADR-0023, ADR-0024

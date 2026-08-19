@@ -7,6 +7,7 @@ router, not a copy of the plan. Read it fully before making changes.
 
 This repository is building the modular, general-purpose AI agent platform
 defined by the canonical engineering plan:
+
 - `docs/plan/engineering-plan.md`
 
 The plan is normative. Your job is to implement it milestone by milestone,
@@ -193,7 +194,6 @@ End every coding assignment with a report covering:
 
 ## Do not
 
-- Do not start Milestone 0 or later implementation as part of a documentation-only
-  assignment.
+- Do not start implementation work during a documentation-only assignment.
 - Do not edit `archive/` (the archived Word source) or generated `site/` and
   `dist/` outputs.

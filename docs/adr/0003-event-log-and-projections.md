@@ -1,6 +1,6 @@
 # ADR-0003: Event log, projections, and checkpoints
 
-- Status: Proposed (amended 2026-07-24)
+- Status: Accepted (amended 2026-07-24)
 - Date: 2026-07-24
 - Related: Milestone 2 (durable execution), Sections 6.8 (event envelope),
   6.9 (checkpoint), 12.2 (loop persistence), 14 (durable execution),

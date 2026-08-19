@@ -253,14 +253,12 @@ async def test_invalid_memory_arguments_are_corrected_and_retried_to_success() -
     assert run.status is RunStatus.COMPLETED
     assert run.final_message == "Remembered after correcting the request."
     assert _tool_names(events, "tool.call.failed") == ["memory.remember"]
-    assert (
-        next(
-            event.payload["reason_code"]
-            for event in events
-            if event.event_type == "tool.call.failed"
-        )
-        == "tool.arguments_invalid"
+    failed_payload = next(
+        event.payload for event in events if event.event_type == "tool.call.failed"
     )
+    assert failed_payload["reason_code"] == "tool.arguments_invalid"
+    failed_outcome = json.loads(failed_payload["result_item"]["content"][0]["text"])
+    assert failed_outcome["remediation"] == "modify_arguments"
     assert _tool_names(events, "tool.call.completed") == ["memory.remember"]
     assert [memory.statement for memory in memories] == [statement]
 

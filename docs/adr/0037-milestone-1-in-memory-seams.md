@@ -1,6 +1,6 @@
 # ADR-0037: Milestone 1 in-memory seam decisions
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-31
 - Related: Milestone 1, ADR-0021, ADR-0022, ADR-0023, ADR-0024
 - Detailed design: `docs/plan/bootstrap-and-composition.md`

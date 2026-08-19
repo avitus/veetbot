@@ -1,4 +1,9 @@
-"""The declarative evaluation corpus is an integration front end."""
+"""Per-case front end for the declarative evaluation corpus.
+
+The corpus runs against the in-memory composition and needs no database;
+this parametrized entry point exists for one-failing-case-at-a-time
+diagnostics that the gate-side corpus loops cannot give.
+"""
 
 from __future__ import annotations
 

@@ -139,7 +139,11 @@ async def test_all_six_stream_invariants() -> None:
 
 
 async def test_authorization_documentation_is_not_a_credential() -> None:
-    await consume(text(0, 0, "Send Authorization: <token> only after approval."), completed(1))
+    documentation = "Send Authorization: <token> only after approval."
+    events = [
+        event async for event in validated_stream(source(text(0, 0, documentation), completed(1)))
+    ]
+    assert [event.text for event in events if isinstance(event, TextDeltaEvent)] == [documentation]
 
 
 def test_provider_sdks_are_isolated_to_their_own_adapter_modules() -> None:

@@ -128,22 +128,31 @@ class WebSearchTool:
             results = await self._provider.search(request)
         except WebProviderError as error:
             return _provider_failure(error)
-        structured = {
-            "provider": self._provider.name,
-            "results": [result.model_dump(mode="json") for result in results],
-        }
+        records = [result.model_dump(mode="json") for result in results]
+        # The declared output limit is a platform contract; a full page of
+        # maximal results can exceed it, so drop trailing results until the
+        # rendered part list fits. One schema-bounded result always fits.
+        while True:
+            structured: dict[str, Any] = {"provider": self._provider.name, "results": records}
+            part = TextPart(
+                text=json.dumps(
+                    structured,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            )
+            rendered = json.dumps(
+                [part.model_dump(mode="json")],
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(rendered) <= self.spec.maximum_output_bytes or not records:
+                break
+            records = records[:-1]
         return ToolResult(
             ok=True,
-            content=[
-                TextPart(
-                    text=json.dumps(
-                        structured,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                        sort_keys=True,
-                    )
-                )
-            ],
+            content=[part],
             structured=structured,
             output_trust=TrustLevel.EXTERNAL_UNTRUSTED,
         )

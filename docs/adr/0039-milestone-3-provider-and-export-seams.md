@@ -1,6 +1,6 @@
 # ADR-0039: Milestone 3 provider and trajectory-export seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Related: Milestone 3, ADR-0002, ADR-0006, ADR-0007, ADR-0012,
   ADR-0016, ADR-0024, ADR-0029, ADR-0032
