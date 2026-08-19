@@ -40,18 +40,91 @@ public struct ToolActivity: Identifiable, Sendable {
     public var sideEffect: SideEffectClass?
     public var risk: RiskLevel?
     public var approvalID: UUID?
+    fileprivate var hasKnownName: Bool
 
     public var id: String { callID }
+    fileprivate var isBundleCandidate: Bool {
+        hasKnownName && status == .completed && approvalID == nil && result?.isError != true
+    }
+}
+
+public struct ToolActivityBundle: Identifiable, Sendable {
+    public let activities: [ToolActivity]
+
+    public init?(activities: [ToolActivity]) {
+        guard activities.count > 1, let first = activities.first,
+            first.isBundleCandidate,
+            activities.dropFirst().allSatisfy({
+                $0.isBundleCandidate && $0.name == first.name
+            })
+        else { return nil }
+        self.activities = activities
+    }
+
+    public var id: String { activities[0].callID }
+    public var name: String { activities[0].name }
+    public var count: Int { activities.count }
+    public var highestRisk: RiskLevel? {
+        activities.compactMap(\.risk).max {
+            Self.riskRank($0) < Self.riskRank($1)
+        }
+    }
+    public var summary: String {
+        "\(count) \(Self.pluralizedDisplayName(name)) Completed"
+    }
+
+    private static func riskRank(_ risk: RiskLevel) -> Int {
+        switch risk {
+        case .low: 0
+        case .medium: 1
+        case .high: 2
+        case .critical: 3
+        }
+    }
+
+    private static func pluralizedDisplayName(_ name: String) -> String {
+        var segments = name.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard let action = segments.popLast() else { return name }
+        var words = action.split(separator: "_", omittingEmptySubsequences: false).map(String.init)
+        guard let finalWord = words.popLast() else { return name }
+        words.append(pluralized(finalWord))
+        segments.append(words.map(displaySegment).joined(separator: "_"))
+        return segments.map(displaySegment).joined(separator: ".")
+    }
+
+    private static func pluralized(_ word: String) -> String {
+        let lowercased = word.lowercased()
+        if lowercased.hasSuffix("ch") || lowercased.hasSuffix("sh")
+            || lowercased.hasSuffix("s") || lowercased.hasSuffix("x")
+            || lowercased.hasSuffix("z")
+        {
+            return word + "es"
+        }
+        if lowercased.hasSuffix("y"), lowercased.count > 1 {
+            let preceding = lowercased[lowercased.index(lowercased.endIndex, offsetBy: -2)]
+            if !"aeiou".contains(preceding) {
+                return String(word.dropLast()) + "ies"
+            }
+        }
+        return word + "s"
+    }
+
+    private static func displaySegment(_ segment: String) -> String {
+        guard let first = segment.first else { return segment }
+        return first.uppercased() + segment.dropFirst()
+    }
 }
 
 public enum ConversationActivity: Identifiable, Sendable {
     case message(TimelineItem)
     case tool(ToolActivity)
+    case toolBundle(ToolActivityBundle)
 
     public var id: String {
         switch self {
         case .message(let item): "message:\(item.id)"
         case .tool(let activity): "tool:\(activity.id)"
+        case .toolBundle(let bundle): "tool:\(bundle.id)"
         }
     }
 }
@@ -87,7 +160,7 @@ public final class RunStateReducer: ObservableObject {
     public var isRunActive: Bool { runStatus?.isActive == true }
     public var needsApprovalIDs: [UUID] { Array(pendingApprovalIDs) }
     public var activityTimeline: [ConversationActivity] {
-        activityOrder.compactMap { reference in
+        let activities = activityOrder.compactMap { reference in
             switch reference {
             case .message(let id):
                 return timeline.first(where: { $0.id == id }).map(ConversationActivity.message)
@@ -98,6 +171,7 @@ public final class RunStateReducer: ObservableObject {
                 return .tool(tools[index])
             }
         }
+        return bundleSuccessiveCompletedTools(activities)
     }
 
     public func reset() {
@@ -298,26 +372,47 @@ public final class RunStateReducer: ObservableObject {
                 continue
             }
             let callID = object["call_id"]?.stringValue ?? "tool-\(tools.count)"
-            let name = object["name"]?.stringValue ?? "tool"
+            let suppliedName = object["name"]?.stringValue
+            let name = suppliedName ?? "tool"
             let arguments = object["arguments"]?.objectValue ?? [:]
-            ensureTool(callID: callID, name: name, status: .queued)
-            updateTool(callID: callID) { $0.arguments = arguments }
+            ensureTool(
+                callID: callID,
+                name: name,
+                hasKnownName: suppliedName != nil,
+                status: .queued
+            )
+            updateTool(callID: callID) { tool in
+                tool.arguments = arguments
+                if let suppliedName {
+                    tool.name = suppliedName
+                    tool.hasKnownName = true
+                }
+            }
         }
     }
 
     private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
-        let name =
+        let suppliedName =
             frame.data["name"]?.stringValue
             ?? frame.data["tool_name"]?.stringValue
-            ?? "tool"
+        let name = suppliedName ?? "tool"
         let runID =
             frame.data["run_id"]?.stringValue
             ?? activeRunID?.uuidString
             ?? "unknown-run"
         let callID = frame.data["call_id"]?.stringValue ?? "tool-\(runID)-\(name)"
-        ensureTool(callID: callID, name: name, status: status)
+        ensureTool(
+            callID: callID,
+            name: name,
+            hasKnownName: suppliedName != nil,
+            status: status
+        )
         updateTool(callID: callID) { tool in
             tool.status = status
+            if let suppliedName {
+                tool.name = suppliedName
+                tool.hasKnownName = true
+            }
             if let arguments = frame.data["arguments"]?.objectValue {
                 tool.arguments = arguments
             }
@@ -341,7 +436,12 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
-    private func ensureTool(callID: String, name: String, status: ToolActivityStatus) {
+    private func ensureTool(
+        callID: String,
+        name: String,
+        hasKnownName: Bool,
+        status: ToolActivityStatus
+    ) {
         guard toolIndex[callID] == nil else { return }
         toolIndex[callID] = tools.count
         activityOrder.append(.tool(callID))
@@ -354,7 +454,8 @@ public final class RunStateReducer: ObservableObject {
                 result: nil,
                 sideEffect: nil,
                 risk: nil,
-                approvalID: nil
+                approvalID: nil,
+                hasKnownName: hasKnownName
             )
         )
     }
@@ -362,6 +463,41 @@ public final class RunStateReducer: ObservableObject {
     private func updateTool(callID: String, update: (inout ToolActivity) -> Void) {
         guard let index = toolIndex[callID], tools.indices.contains(index) else { return }
         update(&tools[index])
+    }
+
+    private func bundleSuccessiveCompletedTools(
+        _ activities: [ConversationActivity]
+    ) -> [ConversationActivity] {
+        var bundled: [ConversationActivity] = []
+        var pending: [ToolActivity] = []
+
+        func flushPending() {
+            guard !pending.isEmpty else { return }
+            if pending.count == 1 {
+                bundled.append(.tool(pending[0]))
+            } else if let bundle = ToolActivityBundle(activities: pending) {
+                bundled.append(.toolBundle(bundle))
+            } else {
+                bundled.append(contentsOf: pending.map(ConversationActivity.tool))
+            }
+            pending.removeAll(keepingCapacity: true)
+        }
+
+        for activity in activities {
+            guard case .tool(let tool) = activity,
+                tool.isBundleCandidate
+            else {
+                flushPending()
+                bundled.append(activity)
+                continue
+            }
+            if let first = pending.first, first.name != tool.name {
+                flushPending()
+            }
+            pending.append(tool)
+        }
+        flushPending()
+        return bundled
     }
 
     private func reduceWorkingState(_ value: JSONValue?) {
