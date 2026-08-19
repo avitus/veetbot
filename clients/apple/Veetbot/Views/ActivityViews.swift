@@ -32,12 +32,7 @@ struct ToolActivityCard: View {
                     }
                     Spacer()
                     if let risk = activity.risk {
-                        Text(risk.rawValue.uppercased())
-                            .appFont(.caption, weight: .semibold)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(taxonomy.color.opacity(0.14))
-                            .clipShape(Capsule())
+                        RiskBadge(risk: risk, color: taxonomy.color)
                     }
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 }
@@ -72,6 +67,117 @@ struct ToolActivityCard: View {
 
     private var taxonomy: TaxonomyStyle {
         TaxonomyStyle(sideEffect: activity.sideEffect, risk: activity.risk)
+    }
+}
+
+struct ToolActivityBundleCard: View {
+    let bundle: ToolActivityBundle
+    let openArtifact: (UUID) -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button {
+                expanded.toggle()
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: taxonomy.icon)
+                        .foregroundColor(taxonomy.color)
+                    Text(bundle.summary).appFont(.headline)
+                    Spacer()
+                    if let risk = bundle.highestRisk {
+                        RiskBadge(risk: risk, color: taxonomy.color)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(bundle.activities.enumerated()), id: \.element.id) {
+                        index, activity in
+                        BundledToolActivityRow(
+                            index: index + 1,
+                            activity: activity,
+                            openArtifact: openArtifact
+                        )
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var taxonomy: TaxonomyStyle {
+        let first = bundle.activities[0]
+        return TaxonomyStyle(sideEffect: first.sideEffect, risk: bundle.highestRisk)
+    }
+}
+
+private struct BundledToolActivityRow: View {
+    let index: Int
+    let activity: ToolActivity
+    let openArtifact: (UUID) -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                if !activity.arguments.isEmpty {
+                    DetailBlock(
+                        title: "Arguments",
+                        text: JSONValue.object(activity.arguments).prettyPrinted
+                    )
+                }
+                if let result = activity.result {
+                    ToolResultContent(
+                        toolName: activity.name,
+                        result: result,
+                        openArtifact: openArtifact
+                    )
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            HStack {
+                Text(rowLabel)
+                    .lineLimit(1)
+                Spacer()
+                if let risk = activity.risk {
+                    let taxonomy = TaxonomyStyle(
+                        sideEffect: activity.sideEffect,
+                        risk: risk
+                    )
+                    RiskBadge(risk: risk, color: taxonomy.color)
+                }
+            }
+        }
+    }
+
+    private var rowLabel: String {
+        if let query = activity.arguments["query"]?.stringValue, !query.isEmpty {
+            return "\(index). \(query)"
+        }
+        return "Call \(index)"
+    }
+}
+
+private struct RiskBadge: View {
+    let risk: RiskLevel
+    let color: Color
+
+    var body: some View {
+        Text(risk.rawValue.uppercased())
+            .appFont(.caption, weight: .semibold)
+            .foregroundColor(color)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
     }
 }
 

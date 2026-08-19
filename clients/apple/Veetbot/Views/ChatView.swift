@@ -46,6 +46,13 @@ public struct ChatView: View {
                                         artifactSelection = ArtifactSelection(id: artifactID)
                                     }
                                 )
+                            case .toolBundle(let bundle):
+                                ToolActivityBundleCard(
+                                    bundle: bundle,
+                                    openArtifact: { artifactID in
+                                        artifactSelection = ArtifactSelection(id: artifactID)
+                                    }
+                                )
                             }
                         }
                         ForEach(
