@@ -882,9 +882,10 @@ leaving for someone to notice.
     section's criteria in the engineering plan.
     [sandbox-isolation.md](sandbox-isolation.md) gave Milestone 6
     eleven, and [skills.md](skills.md) gave Milestone 8 ten and
-    Milestone 10 six, which is what milestones that add a new trust
-    boundary, a new context class, and a new write path should
-    carry. Milestone 8's MCP half was the last to be covered: it
+    Milestone 10 six. The memory-formation specification later gave
+    Milestone 10 eleven more, for seventeen total. That is what milestones
+    that add a new trust boundary, a new context class, and new write paths
+    should carry. Milestone 8's MCP half was the last to be covered: it
     contributed corpus members to gates 2 and 5 of the tool system and
     nothing of its own, which reads as the right shape for a milestone
     that widens an existing surface until you notice it leaves build

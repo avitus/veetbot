@@ -81,14 +81,18 @@ def test_identifier_grammar() -> None:
 def test_new_memory_guarantees_are_formal_registry_entries() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert {
-        "gate.memory.inspection_governed",
-        "gate.memory.extractor_contract",
-        "gate.memory.provider_activation_bound",
-        "gate.memory.provider_boundary",
-        "gate.memory.provider_audit_fallback",
-        "gate.memory.provider_evidence_publish",
-    } <= {entry.id for entry in entries}
+    expected_kinds = {
+        "gate.memory.inspection_governed": "case",
+        "gate.memory.extractor_contract": "structural",
+        "gate.memory.provider_activation_bound": "property",
+        "gate.memory.provider_boundary": "case",
+        "gate.memory.provider_audit_fallback": "case",
+        "gate.memory.provider_evidence_publish": "case",
+    }
+    by_id = {entry.id: entry for entry in entries}
+    assert expected_kinds.keys() <= by_id.keys()
+    assert all(by_id[gate_id].milestone == 10 for gate_id in expected_kinds)
+    assert {gate_id: by_id[gate_id].kind for gate_id in expected_kinds} == expected_kinds
 
 
 def test_census_is_derived() -> None:

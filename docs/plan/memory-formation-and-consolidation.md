@@ -385,7 +385,10 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - **`MemoryCandidateExtractor` port**: `extract(events, principal, scope) ->
   list[MemoryCandidate]`. Extractors propose only; the service owns the candidate
   cap and every provenance, scope, portability, salience, rejection, and conflict
-  check.
+  check. `agent_core.memory.SHIPPED_MEMORY_CANDIDATE_EXTRACTORS` is the
+  authoritative implementation census; the shared contract parameterizes itself
+  from that production-package registry so a new shipped extractor cannot bypass
+  the common proposal and fallback assertions.
 - **`Salience` and `ConflictResolver`** are replaceable strategies.
 - **Runtime placement.** Consolidation runs as a **restricted child run**
   (subagent, Section 27.6 / Milestone 10) or a dedicated background worker job:

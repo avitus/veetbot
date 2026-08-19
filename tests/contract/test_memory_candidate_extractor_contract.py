@@ -18,6 +18,7 @@ from agent_core.domain.messages import (
     ResolvedModel,
     ScriptedTurn,
 )
+from agent_core.memory import SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
 from agent_core.memory.formation import MAX_EXTRACTOR_PROPOSALS, DeterministicCandidateExtractor
 from agent_core.memory.model_extraction import ModelAssistedCandidateExtractor
 from agent_core.memory.provider_extraction import ProviderAssistedCandidateExtractor
@@ -25,13 +26,11 @@ from agent_core.ports.memory import MemoryCandidateExtractor
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import AGENT_ID, NOW, principal
 
-COVERED_IMPLEMENTATIONS = frozenset(
-    {
-        "agent_core.memory.formation.DeterministicCandidateExtractor",
-        "agent_core.memory.model_extraction.ModelAssistedCandidateExtractor",
-        "agent_core.memory.provider_extraction.ProviderAssistedCandidateExtractor",
-    }
-)
+
+def test_shipped_extractor_census_is_owned_by_the_production_package() -> None:
+    assert SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
+    unique_implementations = set(SHIPPED_MEMORY_CANDIDATE_EXTRACTORS)
+    assert len(unique_implementations) == len(SHIPPED_MEMORY_CANDIDATE_EXTRACTORS)
 
 
 class _StructuredRouter:
@@ -80,17 +79,17 @@ def _evidence() -> ProviderExtractionEvaluationEvidence:
 
 
 async def _extractor_subject(
-    implementation: str,
+    implementation: type[object],
 ) -> tuple[MemoryCandidateExtractor, MemoryUnitOfWorkFactory]:
     clock, factory, _service, _retriever = await formation_stack()
-    if implementation.endswith("DeterministicCandidateExtractor"):
+    if implementation is DeterministicCandidateExtractor:
         return DeterministicCandidateExtractor(), factory
 
     provider = FakeModelProvider(
         FakeModelScript(turns=[ScriptedTurn(text="not-json")]),
         clock,
     )
-    if implementation.endswith("ModelAssistedCandidateExtractor"):
+    if implementation is ModelAssistedCandidateExtractor:
         return (
             ModelAssistedCandidateExtractor(
                 router=_StructuredRouter(),
@@ -101,7 +100,7 @@ async def _extractor_subject(
             ),
             factory,
         )
-    if implementation.endswith("ProviderAssistedCandidateExtractor"):
+    if implementation is ProviderAssistedCandidateExtractor:
         return (
             ProviderAssistedCandidateExtractor(
                 provider=provider,
@@ -124,26 +123,27 @@ async def _extractor_subject(
             ),
             factory,
         )
-    raise AssertionError(f"unregistered extractor contract subject: {implementation}")
-
-
-def _assert_candidate_extractor_contract_covers_every_shipped_implementation() -> None:
-    assert {
-        "agent_core.memory.formation.DeterministicCandidateExtractor",
-        "agent_core.memory.model_extraction.ModelAssistedCandidateExtractor",
-        "agent_core.memory.provider_extraction.ProviderAssistedCandidateExtractor",
-    } == COVERED_IMPLEMENTATIONS
+    raise AssertionError(
+        f"unregistered extractor contract subject: "
+        f"{implementation.__module__}.{implementation.__qualname__}"
+    )
 
 
 def test_candidate_extractor_contract_covers_every_shipped_implementation() -> None:
-    _assert_candidate_extractor_contract_covers_every_shipped_implementation()
+    assert all(
+        implementation.__module__.startswith("agent_core.memory.")
+        for implementation in SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
+    )
 
 
-@pytest.mark.parametrize("implementation", sorted(COVERED_IMPLEMENTATIONS))
+@pytest.mark.parametrize(
+    "implementation",
+    SHIPPED_MEMORY_CANDIDATE_EXTRACTORS,
+    ids=lambda implementation: implementation.__name__,
+)
 async def test_extractor_returns_separate_provenance_bound_candidate_proposals(
-    implementation: str,
+    implementation: type[object],
 ) -> None:
-    _assert_candidate_extractor_contract_covers_every_shipped_implementation()
     extractor, factory = await _extractor_subject(implementation)
     source = await user_event(factory, "I have an Apple Watch and a BMW X3.")
     events = await session_events(factory)

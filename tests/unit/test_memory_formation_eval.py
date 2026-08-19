@@ -162,7 +162,31 @@ class TestProviderEvidencePublicationGate:
         assert evidence.model == "gpt-memory"
         assert evidence.deterministic_supported_candidates == 0
         assert evidence.provider_supported_candidates == evidence.sample_count
-        assert output.read_text(encoding="utf-8").endswith("\n")
+        rendered = output.read_text(encoding="utf-8")
+        persisted = type(evidence).model_validate_json(rendered)
+        assert persisted == evidence
+        assert persisted.extractor_version == "provider-assisted-v1"
+        assert persisted.formation_policy_version == "formation@3"
+        assert (
+            persisted.model_policy,
+            persisted.provider,
+            persisted.model,
+            persisted.policy_profile,
+            persisted.policy_version,
+        ) == (
+            "balanced",
+            "openai",
+            "gpt-memory",
+            "default",
+            "default@profile+hline",
+        )
+        assert persisted.corpus_sha256 == evidence.corpus_sha256
+        assert len(persisted.corpus_sha256) == 64
+        assert persisted.sample_count == evidence.sample_count == 24
+        assert persisted.deterministic_supported_candidates == 0
+        assert persisted.provider_supported_candidates == persisted.sample_count
+        assert persisted.fabricated_candidates == 0
+        assert rendered.endswith("\n")
 
     async def test_failure_leaves_no_activation_artifact(
         self,

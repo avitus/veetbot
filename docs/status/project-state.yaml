@@ -684,7 +684,7 @@ verification:
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 380 source and test
-          files, 633 static tests, 222 contracts, deployment-script checks,
+          files, 633 static tests, 223 contracts, deployment-script checks,
           121 citation checks, and strict documentation builds pass on the
           integrated head. The static count includes the 25-case evaluation
           front end relocated from the DB-gated integration directory. The

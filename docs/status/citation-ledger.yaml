@@ -229,7 +229,7 @@ citations:
   - cite: "docs/plan/readiness.md#docs/plan/memory-retrieval-and-ranking.md:87"
     excerpt: "**3. Child-run recall.** Subagents and consolidation runs (S"
     digest: "de35195dbcf3695d"
-  - cite: "docs/plan/readiness.md#docs/plan/milestone-map.md:924"
+  - cite: "docs/plan/readiness.md#docs/plan/milestone-map.md:925"
     excerpt: "model-gateway 14 all M3"
     digest: "a98cf9596ce2cd17"
   - cite: "docs/plan/readiness.md#docs/plan/model-gateway.md:1795"
