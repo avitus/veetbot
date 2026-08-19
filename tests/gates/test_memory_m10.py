@@ -13,21 +13,30 @@ import pytest
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
     MemoryCandidate,
+    MemoryEdit,
     MemoryStatus,
     Polarity,
     Portability,
+    ProviderExtractionEvaluationEvidence,
     Sensitivity,
 )
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import FakeModelScript, ResolvedModel, ScriptedTurn
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
+from agent_core.memory.provider_extraction import provider_extraction_evidence_matches
 from agent_core.runtime.worker import MaintenanceWorker
-from tests.contract.memory_fixtures import formation_stack, session_events, user_event
+from tests.contract.memory_fixtures import (
+    formation_stack,
+    recall_query,
+    session_events,
+    user_event,
+)
 from tests.contract.support import AGENT_ID, NOW, SESSION_ID, TENANT, principal
 from tests.integration.m2_support import memory_settings
 
@@ -90,6 +99,103 @@ async def test_ordinary_conversation_forms_one_memory_per_durable_entity() -> No
     assert all(belief.formation_run_id == result.run.id for belief in by_subject.values())
     assert all(belief.authority is MemoryAuthority.INFERRED for belief in by_subject.values())
     assert all(belief.status is MemoryStatus.PROVISIONAL for belief in by_subject.values())
+
+
+async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
+    clock, factory, service, retriever = await formation_stack()
+    source = await user_event(factory, "I prefer concise answers.")
+    formed = await service.run(
+        trigger="session_idle",
+        scope="project-a",
+        session_id=SESSION_ID,
+    )
+    belief = formed.beliefs[0]
+    recalled = await retriever.recall(recall_query(), session_id=SESSION_ID)
+
+    assert await service.list_memories(session_id=SESSION_ID) == [belief]
+    assert await service.get_memory(belief.id) == belief
+    assert await service.list_consolidations(session_id=SESSION_ID) == [formed.run]
+    trace = await service.get_recall_trace(recalled.trace_id)
+    assert trace.returned == [belief.id]
+    assert belief.source_event_ids == [source]
+    assert belief.formation_run_id == formed.run.id
+
+    foreign = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(3_000, 3_100)),
+        principal().model_copy(update={"principal_id": "another-principal"}),
+    )
+    assert await foreign.list_memories(include_inactive=True) == []
+    assert await foreign.list_consolidations() == []
+    with pytest.raises(NotFoundError):
+        await foreign.get_memory(belief.id)
+    with pytest.raises(NotFoundError):
+        await foreign.get_recall_trace(recalled.trace_id)
+    with pytest.raises(NotFoundError):
+        await foreign.edit(belief.id, MemoryEdit(statement="Foreign edit"))
+    with pytest.raises(NotFoundError):
+        await foreign.delete(belief.id)
+
+    edited = await service.edit(
+        belief.id,
+        MemoryEdit(statement="User prefers direct answers."),
+    )
+    assert edited.statement == "User prefers direct answers."
+    await service.delete(edited.id, trace_id=recalled.trace_id)
+    assert await service.list_memories(include_inactive=True) == []
+
+
+def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:
+    resolved = ResolvedModel(
+        provider="fake",
+        model="scripted",
+        policy_name="fake-balanced",
+        resolved_at=NOW,
+    )
+    evidence = ProviderExtractionEvaluationEvidence(
+        extractor_version="provider-assisted-v1",
+        formation_policy_version="formation@3",
+        model_policy=resolved.policy_name,
+        provider=resolved.provider,
+        model=resolved.model,
+        policy_profile="default",
+        policy_version="default@test",
+        build_ref="gate-test",
+        corpus_sha256="a" * 64,
+        sample_count=24,
+        deterministic_supported_candidates=10,
+        provider_supported_candidates=11,
+        fabricated_candidates=0,
+        deterministic_policy_failures=0,
+        provider_policy_failures=0,
+        evaluated_at=NOW,
+    )
+
+    assert provider_extraction_evidence_matches(
+        evidence,
+        resolved,
+        "default",
+        "default@test",
+    )
+    mismatches = (
+        evidence.model_copy(update={"extractor_version": "provider-assisted-v2"}),
+        evidence.model_copy(update={"formation_policy_version": "formation@4"}),
+        evidence.model_copy(update={"model_policy": "different-policy"}),
+        evidence.model_copy(update={"provider": "different-provider"}),
+        evidence.model_copy(update={"model": "different-model"}),
+        evidence.model_copy(update={"policy_profile": "different-profile"}),
+        evidence.model_copy(update={"policy_version": "different@policy"}),
+    )
+    assert all(
+        not provider_extraction_evidence_matches(
+            candidate,
+            resolved,
+            "default",
+            "default@test",
+        )
+        for candidate in mismatches
+    )
 
 
 async def test_automatic_formation_uses_only_the_owning_principal_user_events() -> None:

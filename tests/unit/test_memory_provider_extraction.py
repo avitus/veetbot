@@ -636,8 +636,11 @@ async def test_provider_failure_is_audited_and_uses_deterministic_fallback() -> 
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.failed")
     assert len(audits) == 1
-    assert audits[0].payload["outcome"] == "failed"
-    assert audits[0].payload["error_class"] == "ModelStreamError"
+    payload = audits[0].payload
+    assert payload["outcome"] == "failed"
+    assert payload["error_class"] == "ModelStreamError"
+    assert "Apple Watch" not in json.dumps(payload)
+    assert "provider unavailable" not in json.dumps(payload)
 
 
 async def test_input_budget_is_refused_before_provider_io() -> None:

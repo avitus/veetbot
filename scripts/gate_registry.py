@@ -31,7 +31,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "policy-and-approvals.md": (13, 0),
     "event-log-and-persistence.md": (14, 0),
     "context-engine.md": (6, 0),
-    "memory-formation-and-consolidation.md": (10, 0),
+    "memory-formation-and-consolidation.md": (16, 0),
     "memory-retrieval-and-ranking.md": (9, 0),
     "evaluation-harness.md": (11, 0),
     "http-api-and-streaming.md": (10, 0),

@@ -48,7 +48,9 @@ The three authorized workstreams are independently deliverable because the
 optional extensions under Milestone 10 do not share a delivery dependency. The
 self-authored-skills contract is Section 30.6, the six Milestone 10
 `gate.skill.*` entries, and the definition of done. The memory-formation
-specification supplies the five memory-maturation gates. The web-access tranche
+specification supplies eleven memory-maturation gates: five for ordinary
+conversation and lifecycle, plus six for governed inspection and the
+evaluation-gated provider path. The web-access tranche
 uses Section 32.3 and [web-access.md](web-access.md#acceptance-criteria); it adds
 no formal registry gate and does not move the verified gate ceiling.
 Authorization does not extend to `delegate.run`, scheduling, or new
@@ -56,8 +58,8 @@ model-routing behavior.
 
 ## Completion rule
 
-The gate-bearing workstreams complete only when all eleven Milestone 10 gates
-and all 177 cumulative gates pass, the self-authored form of case 27 clears its
+The gate-bearing workstreams complete only when all seventeen Milestone 10 gates
+and all 183 cumulative gates pass, the self-authored form of case 27 clears its
 rollout threshold without increasing policy failures, all required CI lanes
 pass on the final head, and the final CodeRabbit review has no finding or
 unresolved conversation. The web tranche completes against its Section 32.3

@@ -63,6 +63,42 @@
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
   statement: "**Ordinary correction isolation** — a natural-language retraction supersedes the matching entity while unrelated entities and preference topics continue to coexist."
   check: tests/gates/test_memory_m10.py::test_ordinary_retraction_supersedes_the_owned_entity_memory
+- id: gate.memory.inspection_governed
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Governed inspection and reversibility** — the public memory surface exposes beliefs, formation audits, and recall traces through the same principal-scoped service used for edits and deletion; a foreign principal can observe or mutate none of them."
+  check: tests/gates/test_memory_m10.py::test_memory_inspection_surface_is_governed_and_traceable
+- id: gate.memory.extractor_contract
+  milestone: 10
+  kind: structural
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Extractor contract coverage** — every shipped MemoryCandidateExtractor implementation is registered against the shared contract for separate, scope-correct, provenance-bound proposals and deterministic assisted-extractor fallback."
+  check: tests/contract/test_memory_candidate_extractor_contract.py::test_extractor_returns_separate_provenance_bound_candidate_proposals
+- id: gate.memory.provider_activation_bound
+  milestone: 10
+  kind: property
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Evidence-bound activation** — provider assistance is eligible only on an exact extractor, formation-policy, model-policy, provider, model, policy-profile, and compiled-policy tuple match."
+  check: tests/gates/test_memory_m10.py::test_provider_activation_requires_an_exact_evaluation_tuple
+- id: gate.memory.provider_boundary
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Provider safety boundary** — invented source ids and secret-shaped provider proposals cannot pass the governed service's provenance and eligibility checks."
+  check: tests/unit/test_memory_provider_extraction.py::test_provider_proposals_still_pass_source_and_secret_gates
+- id: gate.memory.provider_audit_fallback
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Audited deterministic fallback** — a failed provider attempt records a content-free failure audit and returns independently derived deterministic proposals."
+  check: tests/unit/test_memory_provider_extraction.py::test_provider_failure_is_audited_and_uses_deterministic_fallback
+- id: gate.memory.provider_evidence_publish
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Evidence publication** — the checked-in paired evaluation publishes an exact activation tuple and corpus hash only after lift, fabrication, and policy-regression gates pass, while failures leave no artifact."
+  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate
 - id: gate.memory.currency
   milestone: 9
   kind: case

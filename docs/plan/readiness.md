@@ -163,7 +163,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and seventy-seven gates are green before
+**Forty-one of one hundred and eighty-three gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -921,14 +921,16 @@ closed, so the verdict changes with it.
 
 The project authorizes automatic memory formation and the independently
 deliverable self-authored-skills tranche. The six registered `gate.skill.*`
-entries and five automatic-memory gates form their delivery contracts.
+entries and eleven automatic-memory, inspection, and provider gates form their
+delivery contracts.
 Scheduling, routing, and general-purpose subagents remain deferred directions.
 
 The readiness review originally found this milestone structurally unlike every
 other one in the plan. The repository owner explicitly authorized it on
-2026-08-17 and selected memory maturation as the first workstream. Eleven
-registry entries now belong to Milestone 10: six for skill authoring and five
-for automatic memory formation. Authorization permits implementation; it does
+2026-08-17 and selected memory maturation as the first workstream. Seventeen
+registry entries now belong to Milestone 10: six for skill authoring and eleven
+for automatic memory formation, governed inspection, and provider assistance.
+Authorization permits implementation; it does
 not make the remaining work ready or complete.
 
 When this review was written, it had no `#### Implement` heading and no
@@ -991,14 +993,14 @@ authorizes none.
 The historical verdict was that this was a direction rather than a milestone.
 The authorization and new memory-maturation acceptance criteria change that
 operational verdict: Milestone 10 is now active, but its verified gate ceiling
-remains Milestone 9 until all eleven Milestone 10 gates pass. The scheduling,
+remains Milestone 9 until all seventeen Milestone 10 gates pass. The scheduling,
 routing, subagent, and skill-authoring work described below remains incomplete.
 
 The owner separately authorized provider-neutral public-web access on
 2026-08-18. [web-access.md](web-access.md) now covers its port, two tools,
 capability-level provider selection, fixed egress targets, credential handling,
 trust labels, bounds, failure vocabulary, and acceptance criteria. The tranche
-declares no formal hard gate, so it changes neither the 177-entry registry nor
+declares no formal hard gate, so it changes neither the 183-entry registry nor
 the Milestone 9 verified gate ceiling.
 
 Open question 4 below closes the remaining half of this, which was
@@ -1237,7 +1239,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2501` against
-    `model-gateway.md:1795` and `milestone-map.md:917`. The map
+    `model-gateway.md:1795` and `milestone-map.md:924`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

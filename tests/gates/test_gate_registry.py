@@ -74,8 +74,21 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 177
+    assert len(entries) == 183
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
+
+
+def test_new_memory_guarantees_are_formal_registry_entries() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    assert {
+        "gate.memory.inspection_governed",
+        "gate.memory.extractor_contract",
+        "gate.memory.provider_activation_bound",
+        "gate.memory.provider_boundary",
+        "gate.memory.provider_audit_fallback",
+        "gate.memory.provider_evidence_publish",
+    } <= {entry.id for entry in entries}
 
 
 def test_census_is_derived() -> None:
@@ -92,7 +105,7 @@ def test_census_is_derived() -> None:
         7: 7,
         8: 17,
         9: 26,
-        10: 11,
+        10: 17,
     }
 
 

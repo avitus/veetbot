@@ -43,8 +43,8 @@ gained two more on a later pass, all four at Milestone 3.
 [knowledge-documents.md](knowledge-documents.md) was written last
 and declares twelve more, in a new fourteenth area, all of them at
 Milestone 9. The counts throughout this document are the corpus as
-it now stands: one hundred and seventy-one declared across fourteen
-specs, one hundred and seventy-seven registry entries.
+it now stands: one hundred and seventy-seven declared across fourteen
+specs, one hundred and eighty-three registry entries.
 
 ## What this document is responsible for
 
@@ -572,14 +572,14 @@ about a chosen one.
 The build sequence's seven steps are Milestone 7 except step 1, which
 is Milestone 1 by the same decision.
 
-### Memory formation, ten gates and four metrics
+### Memory formation, sixteen gates and four metrics
 
 The original list of eight bullets separates into four Milestone 9 gates and
 four metrics by what the spec calls them. The trailing sentence *"Gate: memory
 improves target eval cases without increasing policy failures"* is a fifth
-gate, not a closing remark. Milestone 10 memory maturation later adds five
-explicit gates for multiple candidates, source integrity, idle lifecycle,
-bounded formation, and correction isolation.
+gate, not a closing remark. Milestone 10 memory maturation adds eleven explicit
+gates: five for ordinary-conversation formation and lifecycle, then six for the
+governed inspection surface and evaluation-gated provider-assisted extractor.
 
 ```text
 #   id                              kind         M
@@ -594,6 +594,12 @@ bounded formation, and correction isolation.
 8   gate.memory.idle_lifecycle      case        10
 9   gate.memory.formation_bounded   case        10
 10  gate.memory.correction_isolated case        10
+11  gate.memory.inspection_governed case        10
+12  gate.memory.extractor_contract  structural  10
+13  gate.memory.provider_activation_bound property 10
+14  gate.memory.provider_boundary   case        10
+15  gate.memory.provider_audit_fallback case     10
+16  gate.memory.provider_evidence_publish case   10
 ```
 
 Moved to `## Tracked metrics`: formation precision, recall of
@@ -863,8 +869,9 @@ milestone  new gates  cumulative  the earliest of them
                                   boundary, package validation
 9                 26         166  formation, retrieval, ingestion,
                                   and the corpus
-10                11         177  the authoring loop, background
-                                  review, and memory maturation
+10                17         183  the authoring loop, background
+                                  review, governed inspection, and
+                                  memory maturation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -884,17 +891,17 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and seventy-seven gates are green before
-    Milestone 2.** Nearly a third of the plan's stated invariants are
+2.  **Forty-one of one hundred and eighty-three gates are green before
+    Milestone 2.** Nearly a quarter of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and seventy-seven, which is
+The cumulative column reaches one hundred and eighty-three, which is
 every registry entry, at Milestone 10, and the plan defines no
 milestone after it. Six of Milestone 10's gates are `gate.skill.*` and
-five are `gate.memory.*`. Its routing and subagent half adds none,
+eleven are `gate.memory.*`. Its routing and subagent half adds none,
 because routing and subagents are covered by gates registered against
 the runtime loop and the policy engine, and the question this document
 used to raise about Milestone 8 now applies only to that half.
@@ -1199,10 +1206,11 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     The old harness table said seven, but the formation specification
     classifies four of its original bullets as tracked metrics and declares
     four hard gates plus the trailing no-policy-regression gate. Milestone 10
-    memory maturation later added five more. The current formation census is
-    therefore ten owned gates — five at Milestone 9 and five at Milestone 10 —
-    with no unstated threshold turning formation precision or rejection rate
-    into a gate.
+    memory maturation later added eleven more: five for ordinary-conversation
+    formation and six for governed inspection and provider assistance. The
+    current formation census is therefore sixteen owned gates — five at
+    Milestone 9 and eleven at Milestone 10 — with no unstated threshold turning
+    formation precision or rejection rate into a gate.
 3.  **Whether Milestone 8 should acquire gates of its own** —
     answered yes, by [skills.md](skills.md), which gave it ten and
     gave Milestone 10 its first six. The sentence about a skill doing something

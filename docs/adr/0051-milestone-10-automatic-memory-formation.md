@@ -141,8 +141,8 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
   failure. Semantic conflict resolution, graph memory, and re-derivation hints
   remain future memory work.
 - Milestone 10 is authorized and in progress. The verified gate ceiling remains
-  Milestone 9 until its six skill-authoring gates and five memory-maturation
-  gates all pass.
+  Milestone 9 until its six skill-authoring gates and eleven memory-maturation,
+  inspection, and provider-assistance gates all pass.
 
 ## Alternatives considered
 
