@@ -8,11 +8,10 @@ from agent_core.domain.browser import BrowserProviderError
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
 from agent_core.ports.browser import BrowserProvider, bind_browser_execution
-from agent_core.tools.browser_navigate import (
+from agent_core.tools.browser_results import (
     OUTPUT_SCHEMA,
-    _failure,
-    _observation_result,
-    _provider_failure,
+    browser_failure,
+    observation_result,
 )
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -44,7 +43,7 @@ class BrowserObserveTool:
 
     async def execute(self, arguments: dict[str, Any], context: ToolExecutionContext) -> ToolResult:
         if arguments:
-            return _failure(
+            return browser_failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
                 "tool.arguments_invalid",
                 retryable=False,
@@ -53,5 +52,5 @@ class BrowserObserveTool:
             await bind_browser_execution(self._provider, context)
             observation = await self._provider.observe()
         except BrowserProviderError as error:
-            return _provider_failure(error)
-        return _observation_result(self._provider, observation)
+            return browser_failure(error)
+        return observation_result(self._provider, observation, self.spec.maximum_output_bytes)

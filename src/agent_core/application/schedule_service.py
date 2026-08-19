@@ -6,7 +6,6 @@ import base64
 import hashlib
 import json
 import logging
-import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -29,18 +28,13 @@ from agent_core.domain.schedules import (
     ScheduleRevision,
     ScheduleState,
 )
+from agent_core.domain.security import contains_credential
 from agent_core.domain.views import Page
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
 type WakeScheduleWorker = Callable[[], Awaitable[None]]
 logger = logging.getLogger(__name__)
-_SECRET_PATTERN = re.compile(
-    r"(?:api[_ -]?key|secret|password|token|authorization|credential|bearer)"
-    r"\s*[:=]\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----|"
-    r"\b(?:sk|ghp|xox[baprs])[-_][A-Za-z0-9_-]{12,}",
-    re.IGNORECASE,
-)
 
 
 class ScheduleService:
@@ -148,14 +142,17 @@ class ScheduleService:
         parsed = _decode_schedule_cursor(cursor)
         async with self._uow_factory() as uow:
             schedules = await uow.schedules.list(principal, limit=limit + 1, cursor=parsed)
+            visible = schedules[:limit]
+            revisions = await uow.schedules.get_revisions(
+                tuple((schedule.id, schedule.current_revision) for schedule in visible),
+                principal,
+            )
             records = [
                 ScheduleRecord(
                     schedule=schedule,
-                    revision=await uow.schedules.get_revision(
-                        schedule.id, schedule.current_revision, principal
-                    ),
+                    revision=revisions[(schedule.id, schedule.current_revision)],
                 )
-                for schedule in schedules[:limit]
+                for schedule in visible
             ]
         next_cursor = None
         if len(schedules) > limit and records:
@@ -248,9 +245,9 @@ class ScheduleService:
             now = self._clock.now()
             next_fire_at = RecurrenceCalculator.next_after(revision.cadence, now)
             if next_fire_at is None:
-                raise ConflictError(
+                raise ScheduleValidationError(
+                    "schedule.no_future_occurrence",
                     "schedule has no future occurrence",
-                    reason="schedule.no_future_occurrence",
                 )
             updated = current.model_copy(
                 update={
@@ -414,10 +411,15 @@ async def _validate_definition(
             "schedule.scope_not_granted",
             "requested schedule scopes exceed the caller's authority",
         )
-    if _SECRET_PATTERN.search(definition.instruction) is not None:
+    if contains_credential(definition.instruction):
         raise ScheduleValidationError(
             "schedule.instruction_contains_credential",
             "schedule instruction failed credential validation",
+        )
+    if contains_credential(definition.title):
+        raise ScheduleValidationError(
+            "schedule.title_contains_credential",
+            "schedule title failed credential validation",
         )
     ceiling_checks = (
         (
@@ -445,7 +447,11 @@ async def _validate_definition(
     for actual, maximum, reason in ceiling_checks:
         if actual > maximum:
             raise ScheduleValidationError(reason, "schedule definition exceeds tenant limits")
-    assert definition.limits.max_cost is not None
+    if definition.limits.max_cost is None:
+        raise ScheduleValidationError(
+            "schedule.max_cost_limit",
+            "schedule definition must set a finite cost bound",
+        )
     if definition.limits.max_cost > limits.max_cost_per_run:
         raise ScheduleValidationError(
             "schedule.max_cost_limit", "schedule definition exceeds tenant limits"
@@ -468,10 +474,10 @@ def _expected(schedule: Schedule, expected_revision: int) -> None:
 
 
 def _idempotency_key(value: str) -> str:
-    if not value or not value.strip() or len(value) > 256:
+    if not value or not value.strip() or len(value) > 255:
         raise ScheduleValidationError(
             "schedule.idempotency_key_invalid",
-            "Idempotency-Key must contain 1 to 256 characters",
+            "Idempotency-Key must contain 1 to 255 characters",
         )
     return value
 

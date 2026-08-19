@@ -28,14 +28,16 @@ class ProfileRepository:
         return self.profile
 
 
-async def authorizer() -> tuple[StandingBrowserGrantAuthorizer, InMemoryBrowserGrantRepository]:
+async def authorizer(
+    *, now_offset: timedelta = timedelta(hours=1)
+) -> tuple[StandingBrowserGrantAuthorizer, InMemoryBrowserGrantRepository]:
     grants = InMemoryBrowserGrantRepository()
     await grants.create(grant())
     return (
         StandingBrowserGrantAuthorizer(
             grants=grants,
             profiles=ProfileRepository(ready_profile()),  # type: ignore[arg-type]
-            now=lambda: NOW + timedelta(hours=1),
+            now=lambda: NOW + now_offset,
         ),
         grants,
     )
@@ -83,14 +85,21 @@ async def test_exact_routine_action_can_replace_one_approval() -> None:
 
 async def test_expired_revoked_mismatched_or_excluded_grant_fails_closed() -> None:
     service, grants = await authorizer()
+    expired_service, _expired_grants = await authorizer(now_offset=timedelta(days=8))
     excluded = await authorize(service, consequence=BrowserActionConsequence.PURCHASE)
+    expired = await authorize(expired_service)
     await grants.revoke(grant().id, principal(), revoked_at=NOW + timedelta(minutes=30))
     revoked = await authorize(service)
     wrong_policy = await authorize(service, policy_version="other-policy")
 
     assert excluded.allowed is False
+    assert excluded.reason_code == "browser.grant.hard_exclusion"
+    assert expired.allowed is False
+    assert expired.reason_code == "browser.grant.mismatch"
     assert revoked.allowed is False
+    assert revoked.reason_code == "browser.grant.mismatch"
     assert wrong_policy.allowed is False
+    assert wrong_policy.reason_code == "browser.grant.mismatch"
 
 
 async def test_policy_allow_or_deny_is_never_overridden() -> None:
@@ -99,4 +108,6 @@ async def test_policy_allow_or_deny_is_never_overridden() -> None:
     already_allowed = await authorize(service, decision=PolicyDecisionType.ALLOW)
 
     assert denied.allowed is False
+    assert denied.reason_code == "browser.grant.policy_not_approval"
     assert already_allowed.allowed is False
+    assert already_allowed.reason_code == "browser.grant.policy_not_approval"

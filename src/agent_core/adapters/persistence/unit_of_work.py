@@ -211,6 +211,12 @@ class PostgresUnitOfWork:
     def on_rollback(self, callback: TransactionCallback) -> None:
         self._rollback_callbacks.append(callback)
 
+    @property
+    def session(self) -> AsyncSession:
+        if self._session is None:
+            raise RuntimeError("PostgreSQL unit of work is not active")
+        return self._session
+
     async def __aenter__(self) -> PostgresUnitOfWork:
         session = self._maker()
         self._session = session

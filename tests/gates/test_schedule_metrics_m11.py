@@ -73,4 +73,4 @@ def test_schedule_metrics_cover_operations_without_instruction_attributes() -> N
         for point in metric.data.data_points
     ]
     assert all("instruction" not in item for item in attributes)
-    assert all("tenant-private" not in item.values() for item in attributes)
+    assert all("tenant-private" not in str(value) for item in attributes for value in item.values())

@@ -27,8 +27,11 @@ async def test_postgres_schedule_wakeup_crosses_process_connections() -> None:
     publisher = PostgresScheduleWakeup(settings.database_url)
     try:
         waiting = asyncio.create_task(listener.wait(5))
-        await asyncio.sleep(0.1)
-        await publisher.notify()
+        while not waiting.done():
+            await publisher.notify()
+            done, _pending = await asyncio.wait({waiting}, timeout=0.2)
+            if done:
+                break
         await asyncio.wait_for(waiting, timeout=1)
     finally:
         await listener.close()
@@ -136,6 +139,73 @@ async def test_reserved_worker_classes_preserve_interactive_and_async_progress()
         assert interactive_claim.run.id == interactive_run_id
         assert async_claim is not None
         assert async_claim.run.id in async_run_ids
+
+
+async def test_claim_metric_runs_after_commit_and_cannot_rollback_claim() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        pinned_agent = agent()
+        session_id, run_id = uuid4(), uuid4()
+        async with composition.uow_factory() as uow:
+            assert uow.queue is not None
+            await uow.agents.put(pinned_agent)
+            await uow.sessions.create(
+                Session(
+                    id=session_id,
+                    tenant_id=composition.principal.tenant_id,
+                    principal_id=composition.principal.principal_id,
+                    agent_id=pinned_agent.id,
+                    agent_version=pinned_agent.version,
+                    status=SessionStatus.ACTIVE,
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+            await uow.queue.enqueue(
+                Run(
+                    id=run_id,
+                    session_id=session_id,
+                    tenant_id=composition.principal.tenant_id,
+                    agent_id=pinned_agent.id,
+                    agent_version=pinned_agent.version,
+                    status=RunStatus.QUEUED,
+                    limits=RunLimits(),
+                    priority=7,
+                    scheduled_for=NOW,
+                    created_at=NOW,
+                    updated_at=NOW,
+                ),
+                priority=7,
+                scheduled_for=NOW,
+            )
+
+        labels: list[str] = []
+
+        def failing_metric(worker_class: str, duration_seconds: float) -> None:
+            assert duration_seconds >= 0
+            assert not composition.uow_factory.is_open()
+            labels.append(worker_class)
+            raise RuntimeError("metric backend unavailable")
+
+        worker = DurableWorker(
+            uow_factory=composition.uow_factory,
+            executor=composition.executor,
+            clock=composition.clock,
+            worker_id="metric-contract",
+            eligible_classes=(7,),
+            interactive_priority=7,
+            async_priority=9,
+            record_claim_metric=failing_metric,
+        )
+        claimed = await worker.claim()
+
+        assert claimed is not None
+        assert claimed.run.id == run_id
+        assert labels == ["interactive"]
+        async with composition.uow_factory() as uow:
+            stored = await uow.runs.get(run_id, composition.principal)
+        assert stored.status is RunStatus.RUNNING
 
 
 async def test_worker_materializes_one_bounded_postgres_batch() -> None:

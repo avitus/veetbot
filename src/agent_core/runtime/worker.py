@@ -34,6 +34,8 @@ class DurableWorker:
         clock: Clock,
         worker_id: str,
         eligible_classes: Sequence[int] = (0, 10),
+        interactive_priority: int = 0,
+        async_priority: int = 10,
         lease_seconds: float = 30,
         heartbeat_divisor: int = 3,
         poll_interval_seconds: float = 0.25,
@@ -46,6 +48,13 @@ class DurableWorker:
         self._clock = clock
         self._worker_id = worker_id
         self._eligible_classes = tuple(eligible_classes)
+        self._worker_class = (
+            "interactive"
+            if self._eligible_classes == (interactive_priority,)
+            else "async"
+            if self._eligible_classes == (async_priority,)
+            else "other"
+        )
         self._heartbeat_interval = lease_seconds / heartbeat_divisor
         self._poll_interval = poll_interval_seconds
         self._record_claim_metric = record_claim_metric
@@ -60,47 +69,42 @@ class DurableWorker:
             if uow.queue is None:
                 raise RuntimeError("durable worker requires a queue repository")
             claimed = await uow.queue.claim(self._worker_id, self._eligible_classes)
-            worker_class = (
-                "interactive"
-                if self._eligible_classes == (0,)
-                else "async"
-                if self._eligible_classes == (10,)
-                else "other"
-            )
-            if self._record_claim_metric is not None:
-                self._record_claim_metric(worker_class, perf_counter() - started)
-            if claimed is None:
-                return None
-            await uow.events.append(
-                NewEvent(
-                    session_id=claimed.run.session_id,
-                    run_id=claimed.run.id,
-                    event_type="run.claimed",
-                    actor_type="worker",
-                    actor_id=self._worker_id,
-                    payload={
-                        "worker_id": self._worker_id,
-                        "lease_epoch": claimed.lease.lease_epoch,
-                        "attempt": claimed.run.attempts,
-                    },
-                ),
-                lease=claimed.lease,
-            )
-            await uow.events.append(
-                NewEvent(
-                    session_id=claimed.run.session_id,
-                    run_id=claimed.run.id,
-                    event_type="run.started",
-                    actor_type="worker",
-                    actor_id=self._worker_id,
-                    payload={
-                        "lease_epoch": claimed.lease.lease_epoch,
-                        "attempt": claimed.run.attempts,
-                    },
-                ),
-                lease=claimed.lease,
-            )
-            return claimed
+            if claimed is not None:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=claimed.run.session_id,
+                        run_id=claimed.run.id,
+                        event_type="run.claimed",
+                        actor_type="worker",
+                        actor_id=self._worker_id,
+                        payload={
+                            "worker_id": self._worker_id,
+                            "lease_epoch": claimed.lease.lease_epoch,
+                            "attempt": claimed.run.attempts,
+                        },
+                    ),
+                    lease=claimed.lease,
+                )
+                await uow.events.append(
+                    NewEvent(
+                        session_id=claimed.run.session_id,
+                        run_id=claimed.run.id,
+                        event_type="run.started",
+                        actor_type="worker",
+                        actor_id=self._worker_id,
+                        payload={
+                            "lease_epoch": claimed.lease.lease_epoch,
+                            "attempt": claimed.run.attempts,
+                        },
+                    ),
+                    lease=claimed.lease,
+                )
+        if self._record_claim_metric is not None:
+            try:
+                self._record_claim_metric(self._worker_class, perf_counter() - started)
+            except Exception:
+                logger.warning("worker_claim_metric_failed", exc_info=True)
+        return claimed
 
     async def run_once(self) -> bool:
         claimed = await self.claim()

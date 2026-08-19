@@ -465,7 +465,7 @@ def worker_command(
         ),
     ] = WorkerRole.WORKER,
 ) -> None:
-    """Execute the durable worker or maintenance queue role."""
+    """Execute an interactive, async, maintenance, schedule, or legacy worker role."""
 
     try:
         asyncio.run(_serve_worker(role))

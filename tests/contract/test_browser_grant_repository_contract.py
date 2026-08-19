@@ -93,9 +93,7 @@ async def test_in_memory_browser_grant_repository_contract() -> None:
 
 def test_browser_grant_refuses_ambient_or_unbounded_authority() -> None:
     with pytest.raises(ValueError):
-        grant().model_copy(update={"expires_at": NOW + timedelta(days=31)}).model_validate(
-            grant().model_dump() | {"expires_at": NOW + timedelta(days=31)}
-        )
+        BrowserGrant.model_validate(grant().model_dump() | {"expires_at": NOW + timedelta(days=31)})
     with pytest.raises(ValueError):
         BrowserGrant.model_validate(grant().model_dump() | {"action_kinds": []})
     with pytest.raises(ValueError):

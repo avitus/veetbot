@@ -43,6 +43,23 @@ def normalize_browser_origin(value: str) -> str:
     return browser_origin(value)
 
 
+def require_service_origin(value: str, *, message: str) -> str:
+    """Return one HTTPS service origin with no credentials or URL components."""
+
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError(message)
+    return value.rstrip("/")
+
+
 class BrowserActionKind(StrEnum):
     CLICK = "click"
     TYPE = "type"

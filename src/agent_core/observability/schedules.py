@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import secrets
 from datetime import datetime
 from decimal import Decimal
 
@@ -13,7 +15,13 @@ from agent_core.domain.schedules import OccurrenceDisposition
 
 
 class ScheduleMetrics:
-    def __init__(self, meter: Meter | None = None) -> None:
+    def __init__(
+        self,
+        meter: Meter | None = None,
+        *,
+        tenant_hash_key: bytes | None = None,
+    ) -> None:
+        self._tenant_hash_key = tenant_hash_key or secrets.token_bytes(32)
         active_meter = meter or metrics.get_meter("agent_core.scheduling")
         self._scan_duration = active_meter.create_histogram(
             "agent.schedule.scan.duration", unit="s"
@@ -79,7 +87,7 @@ class ScheduleMetrics:
         day_ceiling: Decimal,
         month_ceiling: Decimal,
     ) -> None:
-        attributes = {"tenant_hash": _tenant_hash(tenant_id)}
+        attributes = {"tenant_hash": _tenant_hash(tenant_id, key=self._tenant_hash_key)}
         self._active.record(active_runs, attributes)
         self._day_ratio.record(float(day_cost / day_ceiling), attributes)
         self._month_ratio.record(float(month_cost / month_ceiling), attributes)
@@ -94,7 +102,7 @@ class ScheduleMetrics:
         cancellation_seconds: float | None,
         lease_reclaims: int,
     ) -> None:
-        attributes = {"tenant_hash": _tenant_hash(tenant_id)}
+        attributes = {"tenant_hash": _tenant_hash(tenant_id, key=self._tenant_hash_key)}
         self._run_duration.record(max(0.0, duration_seconds), attributes)
         self._run_outcome.add(1, {**attributes, "status": status})
         self._run_cost.record(float(cost), attributes)
@@ -112,5 +120,11 @@ class ScheduleMetrics:
         self._claim.record(max(0.0, duration_seconds), {"worker_class": worker_class})
 
 
-def _tenant_hash(tenant_id: str) -> str:
-    return hashlib.sha256(tenant_id.encode()).hexdigest()[:16]
+def tenant_hash_key(database_url: str) -> bytes:
+    """Derive one deployment-stable metric key from secret-bearing configuration."""
+
+    return hashlib.sha256(b"veetbot:schedule-metrics\x00" + database_url.encode()).digest()
+
+
+def _tenant_hash(tenant_id: str, *, key: bytes) -> str:
+    return hmac.new(key, tenant_id.encode(), hashlib.sha256).hexdigest()[:16]

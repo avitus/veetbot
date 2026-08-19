@@ -173,15 +173,23 @@ async def test_schedule_routes_cover_lifecycle_idempotency_pagination_and_scopes
             composition.new_request_id,
             composition.readiness_probe,
         )
+        all_routes = [
+            nested
+            for route in app.routes
+            for nested in (
+                route.original_router.routes if hasattr(route, "original_router") else (route,)
+            )
+        ]
         schedule_routes = [
             route
-            for route in app.routes
+            for route in all_routes
             if isinstance(route, APIRoute) and route.path.startswith("/v1/schedules")
         ]
         assert len(schedule_routes) == 8
         assert {
-            (next(iter(route.methods or set())), (route.openapi_extra or {})["required_scope"])
+            (method, (route.openapi_extra or {})["required_scope"])
             for route in schedule_routes
+            for method in (route.methods or set())
         } >= {
             ("POST", "schedule.write"),
             ("GET", "schedule.read"),

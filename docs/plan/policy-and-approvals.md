@@ -307,8 +307,9 @@ schedule.read      schedule.write      schedule.cancel
 ```
 
 The fifteen-string list remains the completed Milestone 4 baseline and the
-subject of its historical gate. When Milestone 11 activates, the executable
-platform vocabulary has eighteen strings. The three additions authorize the
+subject of its historical gate. The four browser scopes added by Milestone 10
+and the three schedule scopes added by Milestone 11 make the executable
+platform vocabulary twenty-two strings. The three scheduling additions authorize the
 application-level schedule routes in [scheduling.md](scheduling.md), not model
 tools: read covers schedule and occurrence reads, write covers create, update,
 pause, and resume, and cancel covers the terminal schedule transition. Exact
@@ -318,7 +319,7 @@ unchanged.
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
-joined by dots, of which the last is the action. All nineteen have
+joined by dots, of which the last is the action. All twenty-two have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
@@ -326,7 +327,7 @@ contributor the list cannot enumerate. `tool-system.md:1216` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the nineteen, or when its first segment is `mcp` and its
+when it is one of the twenty-two, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 
@@ -431,7 +432,7 @@ now so that it does not have to be added later, and the resolution step
 arrives with the second principal.
 
 `AUTH_MODE=dev` binds the full scope set, and this section is what "full"
-means: all nineteen, and no `mcp.` scope. Those exist only once a server
+means: all twenty-two, and no `mcp.` scope. Those exist only once a server
 is configured, and a development principal that silently held every scope
 an operator could declare would make the misdeclaration above the one
 class of mistake development cannot surface.
@@ -1084,7 +1085,7 @@ one blocks the milestone, not a warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
-11. **Scope grammar.** Every entry in the nineteen-string vocabulary and
+11. **Scope grammar.** Every entry in the twenty-two-string vocabulary and
     every `required_scopes` entry on a registered `ToolSpec` matches the
     grammar, and registration rejects an MCP tool declaring a scope that is
     neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**

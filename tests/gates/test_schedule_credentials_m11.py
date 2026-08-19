@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -54,9 +55,9 @@ def _agent() -> AgentSpec:
     )
 
 
-def _definition(instruction: str) -> ScheduleDefinition:
+def _definition(instruction: str, *, title: str = "Credential rejection") -> ScheduleDefinition:
     return ScheduleDefinition(
-        title="Credential rejection",
+        title=title,
         instruction=instruction,
         agent_id=AGENT_ID,
         agent_version="1.0.0",
@@ -89,6 +90,7 @@ def _limits() -> ScheduleDefinitionLimits:
 async def test_credential_shaped_instructions_are_rejected_without_storage_or_logging(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    caplog.set_level(logging.DEBUG)
     members = sorted(CORPUS.glob("*.json"))
     assert len(members) >= 12
     principal = _principal()
@@ -125,6 +127,39 @@ async def test_credential_shaped_instructions_are_rejected_without_storage_or_lo
             ]
         log_text = caplog.text
         assert all(value not in log_text for value in rejected)
+
+
+async def test_credential_shaped_title_is_rejected_before_persistence() -> None:
+    principal = _principal()
+    async with build(
+        settings=memory_settings(),
+        storage="memory",
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(_agent())
+        service = ScheduleService(
+            uow_factory=composition.uow_factory,
+            clock=composition.clock,
+            ids=composition.ids,
+            limits=_limits(),
+        )
+
+        with pytest.raises(ScheduleValidationError) as exc:
+            await service.create(
+                principal,
+                _definition(
+                    "Summarize project changes.",
+                    title="Authorization: " + "Bearer secret-value",
+                ),
+                "credential-title",
+            )
+
+        assert exc.value.reason == "schedule.title_contains_credential"
+        async with composition.uow_factory() as uow:
+            assert await uow.schedules.list(principal, limit=100) == []
 
 
 def test_schedule_domain_and_persistence_models_have_no_credential_fields() -> None:

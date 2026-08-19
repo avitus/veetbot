@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 from pathlib import Path
-from typing import ClassVar
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 import httpx
 import pytest
+from fastapi import FastAPI
 
 from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
@@ -36,11 +37,10 @@ RUN_ID = UUID("00000000-0000-0000-0000-0000000000f8")
 
 
 class FakeRuntime:
-    events: ClassVar[list[BrowserInteractiveEvent]] = []
-
-    def __init__(self) -> None:
+    def __init__(self, events: list[BrowserInteractiveEvent] | None = None) -> None:
         self.origins: tuple[str, ...] = ()
         self.closed = False
+        self.events = events if events is not None else []
 
     async def start(
         self,
@@ -75,7 +75,7 @@ class FakeRuntime:
         return b"synthetic-png-frame"
 
     async def interactive_event(self, event: BrowserInteractiveEvent) -> None:
-        type(self).events.append(event)
+        self.events.append(event)
 
 
 def lifecycle(root: Path) -> HostedProfileLifecycleService:
@@ -89,7 +89,7 @@ def lifecycle(root: Path) -> HostedProfileLifecycleService:
     )
 
 
-def app(root: Path, *, readiness: bool = True):  # type: ignore[no-untyped-def]
+def app(root: Path, *, readiness: bool = True) -> FastAPI:
     return create_profile_service_app(
         lifecycle(root),
         SecretValue(OPAQUE_AUTH_VALUE),
@@ -97,7 +97,11 @@ def app(root: Path, *, readiness: bool = True):  # type: ignore[no-untyped-def]
     )
 
 
-def full_app(root: Path):  # type: ignore[no-untyped-def]
+def full_app(
+    root: Path,
+    *,
+    events: list[BrowserInteractiveEvent] | None = None,
+) -> FastAPI:
     store = FilesystemEncryptedProfileStore(
         root,
         StaticProfileKeyring(
@@ -107,7 +111,7 @@ def full_app(root: Path):  # type: ignore[no-untyped-def]
     )
     sessions = HostedProfileSessionService(
         store,
-        runtime_factory=lambda tenant_id: FakeRuntime(),
+        runtime_factory=lambda tenant_id: FakeRuntime(events),
         now=lambda: NOW,
         process_secret=b"synthetic-http-process-secret-32-bytes",
         ceremony_base_url="https://login.example.test",
@@ -234,6 +238,35 @@ async def test_profile_service_rejects_extra_fields_and_path_body_mismatch(
     assert "unexpected" not in response.text
 
 
+async def test_profile_service_rejects_naive_lease_deadlines_at_the_boundary(
+    tmp_path: Path,
+) -> None:
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    payload = {
+        "profile_id": str(PROFILE_ID),
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "provider_ref": PROVIDER_REF,
+        "run_id": str(RUN_ID),
+        "attempt_number": 1,
+        "deadline_at": "2026-08-20T12:00:00",
+    }
+    headers = {
+        "Authorization": f"Bearer {OPAQUE_AUTH_VALUE}",
+        "Idempotency-Key": f"browser-session:{PROFILE_ID}:{RUN_ID}:1:acquire",
+    }
+
+    async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as client:
+        response = await client.post(
+            "/v1/browser-sessions:acquire",
+            headers=headers,
+            json=payload,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
 async def test_profile_service_health_and_surface_are_minimal(tmp_path: Path) -> None:
     transport = httpx.ASGITransport(app=app(tmp_path / "profiles", readiness=False))
     async with httpx.AsyncClient(transport=transport, base_url="https://service.test") as client:
@@ -284,8 +317,6 @@ async def test_profile_service_suppresses_unexpected_diagnostics(tmp_path: Path)
 async def test_profile_service_data_plane_and_authentication_are_wire_compatible(
     tmp_path: Path,
 ) -> None:
-    from datetime import timedelta
-
     transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
     async with httpx.AsyncClient(
         transport=transport,
@@ -352,8 +383,8 @@ async def test_profile_service_data_plane_and_authentication_are_wire_compatible
 async def test_authentication_surface_binds_fragment_capability_before_interaction_body(
     tmp_path: Path,
 ) -> None:
-    FakeRuntime.events = []
-    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles"))
+    events: list[BrowserInteractiveEvent] = []
+    transport = httpx.ASGITransport(app=full_app(tmp_path / "profiles", events=events))
     async with httpx.AsyncClient(
         transport=transport,
         base_url="https://profiles.internal.example",
@@ -414,4 +445,4 @@ async def test_authentication_surface_binds_fragment_capability_before_interacti
     assert frame.content == b"synthetic-png-frame"
     assert frame.headers["content-type"] == "image/png"
     assert event.status_code == 204
-    assert FakeRuntime.events == [BrowserInteractiveEvent(kind="click", x=100, y=120)]
+    assert events == [BrowserInteractiveEvent(kind="click", x=100, y=120)]

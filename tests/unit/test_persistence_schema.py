@@ -32,7 +32,7 @@ def test_browser_profiles_schema_contains_metadata_only() -> None:
         "last_used_at",
     }
     forbidden = {"cookies", "tokens", "storage_state", "credential", "material", "blob"}
-    assert forbidden.isdisjoint(table.columns)
+    assert forbidden.isdisjoint(table.columns.keys())
     assert {constraint.name for constraint in table.constraints} >= {
         "ck_browser_profiles_generation_nonnegative",
         "ck_browser_profiles_status_closed",
@@ -64,7 +64,7 @@ def test_browser_grants_schema_contains_exact_authority_without_material() -> No
         "updated_at",
     }
     forbidden = {"cookies", "tokens", "storage_state", "credential", "material", "blob"}
-    assert forbidden.isdisjoint(table.columns)
+    assert forbidden.isdisjoint(table.columns.keys())
     assert {constraint.name for constraint in table.constraints} >= {
         "ck_browser_grants_generation_nonnegative",
         "ck_browser_grants_time_window",
@@ -95,7 +95,7 @@ def test_browser_authentications_schema_is_secret_free() -> None:
         "material",
         "blob",
     }
-    assert forbidden.isdisjoint(table.columns)
+    assert forbidden.isdisjoint(table.columns.keys())
     assert {constraint.name for constraint in table.constraints} >= {
         "ck_browser_authentications_status_closed",
         "ck_browser_authentications_time_window",

@@ -56,6 +56,7 @@ async def assert_occurrence_insert_is_idempotent_by_schedule_and_nominal_instant
     )
     await repository.insert(materialized)
     assert await repository.latest_materialized(SCHEDULE_ID) == materialized
+    assert await repository.latest_at_or_before(SCHEDULE_ID, NOW) == occurrence
     link = await repository.get_by_run(RUN_ID)
     assert link is not None
     assert link.occurrence == materialized

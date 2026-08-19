@@ -1,11 +1,13 @@
 """Milestone 11 schedule lifecycle and immutable-revision gates."""
 
+import asyncio
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
 
 import pytest
 from hypothesis import given
+from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
 
 from agent_core.adapters.determinism import FixedClock
@@ -37,37 +39,77 @@ AGENT_ID = UUID("00000000-0000-0000-0000-000000000511")
         max_size=100,
     )
 )
+@hypothesis_settings(max_examples=20, deadline=None)
 def test_generated_lifecycle_histories_never_reopen_or_backfill(
     operations: list[str],
 ) -> None:
-    state = ScheduleState.ACTIVE
-    now = 0
-    next_fire: int | None = 0
-    materialized: list[int] = []
-    terminal_seen = False
-    for operation in operations:
-        if operation == "advance":
-            now += 1
-        elif operation == "scan" and state is ScheduleState.ACTIVE:
-            if next_fire is not None and next_fire <= now:
-                materialized.append(now)
-                next_fire = now + 1
-        elif operation == "pause" and state is ScheduleState.ACTIVE:
-            state = ScheduleState.PAUSED
-            next_fire = None
-        elif operation == "resume" and state is ScheduleState.PAUSED:
-            state = ScheduleState.ACTIVE
-            next_fire = now + 1
-        elif operation == "cancel" and state is not ScheduleState.CANCELLED:
-            state = ScheduleState.CANCELLED
-            next_fire = None
-        if terminal_seen:
-            assert state is ScheduleState.CANCELLED
-            assert next_fire is None
-        terminal_seen = terminal_seen or state is ScheduleState.CANCELLED
-        assert all(fired_at <= now for fired_at in materialized)
-        if state is ScheduleState.PAUSED:
-            assert next_fire is None
+    async def exercise_production_lifecycle() -> None:
+        principal = _principal()
+        async with build(
+            settings=memory_settings(),
+            storage="memory",
+            fixed_clock_at=NOW,
+            sequential_ids=True,
+            principal=principal,
+        ) as composition:
+            async with composition.uow_factory() as uow:
+                await uow.agents.put(_agent())
+            service = ScheduleService(
+                uow_factory=composition.uow_factory,
+                clock=composition.clock,
+                ids=composition.ids,
+                limits=_limits(),
+            )
+            materializer = ScheduleMaterializer(
+                uow_factory=composition.uow_factory,
+                principals=StaticSchedulePrincipalDirectory(principal),
+                admission=AllowScheduleAdmissionController(),
+                clock=composition.clock,
+                ids=composition.ids,
+                seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+            )
+            created = await service.create(principal, _definition(), "generated-lifecycle")
+            schedule_id = created.schedule.id
+            terminal_seen = False
+            clock = composition.clock
+            assert isinstance(clock, FixedClock)
+
+            for operation in operations:
+                current = (await service.get(principal, schedule_id)).schedule
+                if operation == "advance":
+                    clock.advance(timedelta(days=1))
+                elif operation == "scan":
+                    occurrence = await materializer.materialize(schedule_id)
+                    if occurrence is not None and occurrence.run_id is not None:
+                        async with composition.uow_factory() as uow:
+                            linked = await uow.runs.get(occurrence.run_id, principal)
+                            if linked.status is RunStatus.QUEUED:
+                                await uow.runs.transition(
+                                    linked.id, RunStatus.QUEUED, RunStatus.RUNNING
+                                )
+                                await uow.runs.transition(
+                                    linked.id, RunStatus.RUNNING, RunStatus.COMPLETED
+                                )
+                elif operation == "pause" and current.state is ScheduleState.ACTIVE:
+                    await service.pause(principal, schedule_id, current.current_revision)
+                elif operation == "resume" and current.state is ScheduleState.PAUSED:
+                    await service.resume(principal, schedule_id, current.current_revision)
+                elif operation == "cancel" and current.state is not ScheduleState.CANCELLED:
+                    await service.cancel(principal, schedule_id, current.current_revision)
+
+                persisted = (await service.get(principal, schedule_id)).schedule
+                if terminal_seen:
+                    assert persisted.state is ScheduleState.CANCELLED
+                terminal_seen = terminal_seen or persisted.state is ScheduleState.CANCELLED
+                if persisted.state in {ScheduleState.PAUSED, ScheduleState.CANCELLED}:
+                    assert persisted.next_fire_at is None
+                async with composition.uow_factory() as uow:
+                    occurrences = await uow.schedule_occurrences.list(
+                        schedule_id, principal, limit=1000
+                    )
+                assert all(item.nominal_fire_at <= clock.now() for item in occurrences)
+
+    asyncio.run(exercise_production_lifecycle())
 
 
 def _principal() -> Principal:

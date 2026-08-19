@@ -42,6 +42,12 @@ class ScheduleRepository(Protocol):
         self, schedule_id: UUID, revision: int, principal: Principal
     ) -> ScheduleRevision: ...
 
+    async def get_revisions(
+        self,
+        identities: tuple[tuple[UUID, int], ...],
+        principal: Principal,
+    ) -> dict[tuple[UUID, int], ScheduleRevision]: ...
+
     async def list(
         self,
         principal: Principal,

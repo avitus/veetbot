@@ -228,6 +228,7 @@ class InMemorySessionDeletionRepository:
         memories: Any,
         traces: Any,
         knowledge: Any,
+        schedules: Any,
     ) -> None:
         self._sessions = sessions
         self._runs = runs
@@ -242,6 +243,7 @@ class InMemorySessionDeletionRepository:
         self._memories = memories
         self._traces = traces
         self._knowledge = knowledge
+        self._schedules = schedules
         self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
@@ -330,6 +332,21 @@ class InMemorySessionDeletionRepository:
             value.id
             for value in self._memories._records.values()
             if value.source_session_id == session_id or value.formation_run_id in run_ids
+        }
+
+        self._schedules._occurrences = {
+            occurrence_id: (
+                occurrence.model_copy(
+                    update={
+                        "session_id": None,
+                        "run_id": None,
+                        "links_erased_at": deleted_at,
+                    }
+                )
+                if occurrence.session_id == session_id and occurrence.links_erased_at is None
+                else occurrence
+            )
+            for occurrence_id, occurrence in self._schedules._occurrences.items()
         }
 
         self._memories._records = {

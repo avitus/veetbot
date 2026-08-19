@@ -19,7 +19,14 @@ class BrowserProfileRepository(Protocol):
 
     async def get(self, profile_id: UUID, principal: Principal) -> BrowserProfile: ...
 
-    async def list(self, principal: Principal) -> list[BrowserProfile]: ...
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserProfile]: ...
 
     async def bind(
         self,

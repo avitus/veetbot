@@ -22,6 +22,20 @@ SCHEDULE_ID = UUID("00000000-0000-0000-0000-000000000711")
 AGENT_ID = UUID("00000000-0000-0000-0000-000000000712")
 
 
+class RecordingScheduleMetrics:
+    def __init__(self) -> None:
+        self.auto_pauses = 0
+
+    def record_occurrence(self, **_values: object) -> None:
+        return
+
+    def record_misfires(self, **_values: object) -> None:
+        return
+
+    def record_auto_pause(self) -> None:
+        self.auto_pauses += 1
+
+
 def _principal() -> Principal:
     return Principal(tenant_id="local", principal_id="local-user", roles={"user"}, scopes=set())
 
@@ -121,6 +135,69 @@ async def test_failed_runs_auto_pause_once_at_the_revision_failure_limit() -> No
         async with composition.uow_factory() as uow:
             auto_paused = await uow.process_events.list("schedule.auto_paused")
         assert len(auto_paused) == 1
+
+
+async def test_materializer_failure_path_emits_auto_pause_event_and_metric() -> None:
+    principal = _principal()
+    schedule = Schedule(
+        id=SCHEDULE_ID,
+        tenant_id=principal.tenant_id,
+        principal_id=principal.principal_id,
+        state=ScheduleState.ACTIVE,
+        current_revision=1,
+        next_fire_at=NOW,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    revision = ScheduleRevision(
+        schedule_id=SCHEDULE_ID,
+        revision=1,
+        title="Disabled principal",
+        instruction="Fail authority revalidation.",
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        requested_scopes=frozenset(),
+        limits=RunLimits(
+            max_steps=4,
+            max_model_calls=4,
+            max_tool_calls=4,
+            max_cost=Decimal("1"),
+        ),
+        run_timeout_seconds=60,
+        cadence=DailyCadence(local_time=time(16), timezone="UTC"),
+        timezone="UTC",
+        misfire_grace_seconds=60,
+        max_consecutive_failures=1,
+        created_by_principal_id=principal.principal_id,
+        created_at=NOW,
+    )
+    metrics = RecordingScheduleMetrics()
+    async with build(
+        settings=memory_settings(),
+        storage="memory",
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.schedules.create(schedule, revision)
+        occurrence = await ScheduleMaterializer(
+            uow_factory=composition.uow_factory,
+            principals=StaticSchedulePrincipalDirectory(principal, enabled=False),
+            clock=composition.clock,
+            ids=composition.ids,
+            seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+            metrics=metrics,  # type: ignore[arg-type]
+        ).materialize(SCHEDULE_ID)
+
+        assert occurrence is not None
+        async with composition.uow_factory() as uow:
+            [event] = await uow.process_events.list("schedule.auto_paused")
+            paused = await uow.schedules.get(SCHEDULE_ID, principal)
+        assert event.payload["occurrence_id"] == str(occurrence.id)
+        assert paused.state is ScheduleState.PAUSED
+        assert metrics.auto_pauses == 1
 
 
 async def test_executor_completion_hook_resets_schedule_failures() -> None:

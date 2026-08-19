@@ -128,6 +128,7 @@ make_stage() {
     "$stage/docker-compose.yml" \
     "$stage/deploy/docker-compose.production.yml" \
     "$stage/deploy/browser-profile-service.Dockerfile" \
+    "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_production_deployment.py"
   for unit in \
@@ -153,6 +154,7 @@ run_release() {
   BASH_ENV=/dev/null \
   VEETBOT_ROOT="$DEPLOY_ROOT" \
   VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
+  VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
@@ -294,7 +296,17 @@ run_release "$equal_timestamp_id"
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
 
 schedule_env="$TEST_ROOT/schedule.env"
+schedule_worker_env="$TEST_ROOT/veetbot-schedule.env"
 cp "$ENV_FILE" "$schedule_env"
+printf '%s\n' \
+  "DATABASE_URL=$test_database_url" \
+  'DEPLOYMENT_MODE=production' \
+  'AUTH_MODE=token' \
+  'AUTH_TENANT_ID=test' \
+  'AUTH_PRINCIPAL_ID=test' \
+  'AUTH_SCOPES=session.read,schedule.read,schedule.write,schedule.cancel' \
+  'AGENT_SCHEDULE_API_ENABLED=1' \
+  'AGENT_SCHEDULE_WORKER_ENABLED=1' >"$schedule_worker_env"
 printf '%s\n' \
   'AGENT_SCHEDULE_API_ENABLED=1' \
   'AGENT_SCHEDULE_WORKER_ENABLED=1' >>"$schedule_env"
@@ -302,7 +314,9 @@ schedule_id="20260810-152256-0000001"
 make_stage "$schedule_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
 ln -s "$DEPLOY_ROOT/releases/$schedule_id" "$PROCESS_ROOT/4242/cwd"
-VEETBOT_TEST_ENV_FILE="$schedule_env" run_release "$schedule_id"
+VEETBOT_TEST_ENV_FILE="$schedule_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_worker_env" \
+  run_release "$schedule_id"
 grep -Fq \
   'systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"

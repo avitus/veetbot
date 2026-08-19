@@ -21,6 +21,7 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     BrowserProfileView,
 )
+from agent_core.domain.views import Page
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000d7")
@@ -45,12 +46,21 @@ class Profiles:
             updated_at=NOW,
         )
 
-    async def list(self, owner: Principal) -> list[BrowserProfileView]:
-        return [await self.create(owner, ("https://example.org",))]
+    async def list(
+        self,
+        owner: Principal,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserProfileView]:
+        del limit, cursor
+        return Page(
+            items=[await self.create(owner, ("https://example.org",))],
+            next_cursor="next-profile",
+        )
 
     async def get(self, owner: Principal, profile_id: UUID) -> BrowserProfileView:
         assert profile_id == PROFILE_ID
-        return (await self.list(owner))[0]
+        return (await self.list(owner)).items[0]
 
     async def revoke(self, owner: Principal, profile_id: UUID) -> BrowserProfileView:
         return (await self.get(owner, profile_id)).model_copy(
@@ -66,9 +76,8 @@ class Profiles:
         profile_id: UUID,
         *,
         login_url: str,
-        idempotency_key: str | None = None,
     ) -> BrowserAuthenticationView:
-        del owner, login_url, idempotency_key
+        del owner, login_url
         return BrowserAuthenticationView(
             id=AUTHENTICATION_ID,
             profile_id=profile_id,
@@ -133,9 +142,11 @@ class Grants:
         owner: Principal,
         *,
         profile_id: UUID | None = None,
-    ) -> list[BrowserGrantView]:
-        del owner, profile_id
-        return []
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserGrantView]:
+        del owner, profile_id, limit, cursor
+        return Page(items=[], next_cursor="next-grant")
 
     async def get(self, owner: Principal, grant_id: UUID) -> BrowserGrantView:
         assert grant_id == GRANT_ID
@@ -193,7 +204,6 @@ async def test_public_profile_authentication_and_grant_creation_are_secret_free(
         )
         ceremony = await client.post(
             f"/v1/browser-profiles/{PROFILE_ID}/authentication-ceremonies",
-            headers={"Idempotency-Key": "login-1"},
             json={"login_url": "https://example.org/login"},
         )
         status = await client.get(f"/v1/browser-authentication-ceremonies/{AUTHENTICATION_ID}")
@@ -222,6 +232,105 @@ async def test_public_profile_authentication_and_grant_creation_are_secret_free(
     assert "provider_ref" not in serialized
     assert "storage_state" not in serialized
     assert "encryption_key_version" not in serialized
+
+
+async def test_browser_write_requests_reject_malformed_origins_and_grant_windows() -> None:
+    services = SimpleNamespace(
+        sessions=None,
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=Profiles(),
+        browser_grants=Grants(),
+    )
+    owner = principal().model_copy(
+        update={"scopes": {"browser.profile.write", "browser.grant.write"}}
+    )
+    app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://127.0.0.1",
+    ) as client:
+        malformed_origin = await client.post(
+            "/v1/browser-profiles",
+            headers={"Idempotency-Key": "invalid-origin"},
+            json={"allowed_origins": ["https://example.org/path"]},
+        )
+        inverted_window = await client.post(
+            "/v1/browser-grants",
+            headers={"Idempotency-Key": "invalid-window"},
+            json={
+                "profile_id": str(PROFILE_ID),
+                "allowed_origins": ["https://example.org"],
+                "action_kinds": [BrowserActionKind.CLICK],
+                "starts_at": NOW.isoformat(),
+                "expires_at": NOW.isoformat(),
+            },
+        )
+
+    assert malformed_origin.status_code == 400
+    assert inverted_window.status_code == 400
+
+
+async def test_browser_write_routes_reject_principals_without_exact_scopes() -> None:
+    services = SimpleNamespace(
+        sessions=None,
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=Profiles(),
+        browser_grants=Grants(),
+    )
+    insufficient = principal().model_copy(update={"scopes": {"browser.profile.read"}})
+    app = create_app(services, settings(), insufficient, lambda: str(PROFILE_ID), _ready)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://127.0.0.1",
+    ) as client:
+        profile = await client.post(
+            "/v1/browser-profiles",
+            headers={"Idempotency-Key": "scope-profile"},
+            json={"allowed_origins": ["https://example.org"]},
+        )
+        grant = await client.post(
+            "/v1/browser-grants",
+            headers={"Idempotency-Key": "scope-grant"},
+            json={
+                "profile_id": str(PROFILE_ID),
+                "allowed_origins": ["https://example.org"],
+                "action_kinds": [BrowserActionKind.CLICK],
+                "starts_at": NOW.isoformat(),
+                "expires_at": (NOW + timedelta(days=1)).isoformat(),
+            },
+        )
+
+    assert profile.status_code == 403
+    assert grant.status_code == 403
+
+
+async def test_browser_profile_and_grant_collections_use_stable_page_shapes() -> None:
+    services = SimpleNamespace(
+        sessions=None,
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=Profiles(),
+        browser_grants=Grants(),
+    )
+    owner = principal().model_copy(
+        update={"scopes": {"browser.profile.read", "browser.grant.read"}}
+    )
+    app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://127.0.0.1",
+    ) as client:
+        profiles = await client.get("/v1/browser-profiles", params={"limit": 1})
+        grants = await client.get("/v1/browser-grants", params={"limit": 1})
+
+    assert profiles.json()["next_cursor"] == "next-profile"
+    assert profiles.json()["items"][0]["id"] == str(PROFILE_ID)
+    assert grants.json() == {"items": [], "next_cursor": "next-grant"}
 
 
 async def _ready() -> bool:

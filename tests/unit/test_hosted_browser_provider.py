@@ -109,6 +109,7 @@ async def test_hosted_provider_acquires_exact_execution_scope_and_rotates_betwee
         run_id=UUID("00000000-0000-0000-0000-0000000000e8"),
         attempt_number=2,
     )
+    extended = replace(first, deadline_at=first.deadline_at + timedelta(minutes=1))
 
     await provider.bind_execution(first)
     await provider.navigate("https://example.org/lesson")
@@ -120,14 +121,16 @@ async def test_hosted_provider_acquires_exact_execution_scope_and_rotates_betwee
             ref="revision-1:0",
         )
     )
+    await provider.bind_execution(extended)
     await provider.bind_execution(second)
 
     assert sessions.acquisitions == [
         (PROFILE_ID, first.run_id, 1),
+        (PROFILE_ID, first.run_id, 1),
         (PROFILE_ID, second.run_id, 2),
     ]
     assert sessions.sequence == [1]
-    assert len(sessions.closes) == 1
+    assert len(sessions.closes) == 2
 
 
 @pytest.mark.parametrize(

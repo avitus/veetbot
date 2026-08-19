@@ -21,6 +21,7 @@ from agent_core.adapters.persistence.memory import (
     InMemoryTrajectoryExportRepository,
     InMemoryUsageRepository,
 )
+from agent_core.adapters.persistence.schedules import InMemoryScheduleRepository
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
 )
@@ -28,9 +29,11 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.policies import RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.runs import RunStatus
+from agent_core.domain.schedules import OccurrenceDisposition, ScheduleOccurrence
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
+from tests.contract.test_schedule_repository_contract import revision, schedule
 
 
 async def _repository() -> tuple[
@@ -40,11 +43,13 @@ async def _repository() -> tuple[
     InMemoryRunRepository,
     InMemoryToolInvocationRepository,
     InMemoryTrajectoryExportRepository,
+    InMemoryScheduleRepository,
 ]:
     clock, sessions, runs, events = await memory_stack()
     artifacts = InMemoryArtifactRepository()
     invocations = InMemoryToolInvocationRepository(runs)
     trajectory_exports = InMemoryTrajectoryExportRepository()
+    schedules = InMemoryScheduleRepository()
     repository = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -59,12 +64,21 @@ async def _repository() -> tuple[
         memories=InMemoryMemoryStore(clock),
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),
+        schedules=schedules,
     )
-    return repository, artifacts, sessions, runs, invocations, trajectory_exports
+    return repository, artifacts, sessions, runs, invocations, trajectory_exports, schedules
 
 
 async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() -> None:
-    repository, artifacts, sessions, runs, invocations, trajectory_exports = await _repository()
+    (
+        repository,
+        artifacts,
+        sessions,
+        runs,
+        invocations,
+        trajectory_exports,
+        _schedules,
+    ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     artifact = ArtifactRef(
         id=UUID(int=80),
@@ -142,10 +156,38 @@ async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() ->
 
 
 async def test_delete_rejects_a_nonterminal_run_without_removing_the_session() -> None:
-    repository, _artifacts, sessions, runs, _invocations, _exports = await _repository()
+    repository, _artifacts, sessions, runs, _invocations, _exports, _schedules = await _repository()
     await runs.create(run(status=RunStatus.WAITING_FOR_USER))
 
     with pytest.raises(ConflictError) as raised:
         await repository.delete(SESSION_ID, principal(), NOW)
     assert raised.value.reason == "active_run_exists"
     assert await sessions.get(SESSION_ID, principal()) is not None
+
+
+async def test_in_memory_deletion_erases_materialized_occurrence_links() -> None:
+    repository, _artifacts, _sessions, runs, _invocations, _exports, schedules = await _repository()
+    await runs.create(run(status=RunStatus.COMPLETED))
+    scheduled = schedule()
+    await schedules.create(scheduled, revision())
+    occurrence = ScheduleOccurrence(
+        id=UUID(int=83),
+        schedule_id=scheduled.id,
+        schedule_revision=1,
+        nominal_fire_at=NOW,
+        disposition=OccurrenceDisposition.MATERIALIZED,
+        session_id=SESSION_ID,
+        run_id=RUN_ID,
+        authority_version="authority-v1",
+        materialized_at=NOW,
+        created_at=NOW,
+    )
+    await schedules.insert(occurrence)
+
+    erased_at = NOW + timedelta(seconds=1)
+    await repository.delete(SESSION_ID, principal(), erased_at)
+
+    [erased] = await schedules.list_occurrences(scheduled.id, principal(), limit=10)
+    assert erased.session_id is None
+    assert erased.run_id is None
+    assert erased.links_erased_at == erased_at

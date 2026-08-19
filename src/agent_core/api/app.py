@@ -13,7 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.auth import Authenticator
@@ -38,9 +38,15 @@ from agent_core.domain.browser import (
     BrowserAuthenticationView,
     BrowserGrantView,
     BrowserProfileView,
+    normalize_browser_origin,
 )
 from agent_core.domain.errors import AgentCoreError
-from agent_core.domain.schedules import ScheduleDefinition, ScheduleRecord, ScheduleState
+from agent_core.domain.schedules import (
+    ScheduleDefinition,
+    ScheduleOccurrence,
+    ScheduleRecord,
+    ScheduleState,
+)
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -143,6 +149,14 @@ class CreateBrowserProfileRequest(BaseModel):
 
     allowed_origins: tuple[str, ...] = Field(min_length=1, max_length=64)
 
+    @field_validator("allowed_origins")
+    @classmethod
+    def _normalize_origins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(normalize_browser_origin(origin) for origin in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("browser origins must be unique")
+        return normalized
+
 
 class BeginBrowserAuthenticationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -161,6 +175,20 @@ class CreateBrowserGrantRequest(BaseModel):
     purpose: str | None = Field(default=None, min_length=1, max_length=255)
     starts_at: datetime
     expires_at: datetime
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _normalize_origins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(normalize_browser_origin(origin) for origin in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("browser origins must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def _ordered_window(self) -> "CreateBrowserGrantRequest":
+        if self.expires_at <= self.starts_at:
+            raise ValueError("expires_at must be after starts_at")
+        return self
 
 
 class UpdateScheduleRequest(BaseModel):
@@ -617,8 +645,13 @@ def create_app(
     )
     async def list_browser_profiles(
         authenticated: Annotated[Principal, secured("browser.profile.read")],
-    ) -> list[BrowserProfileView]:
-        return await services.browser_profiles.list(authenticated)
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserProfileView]:
+        try:
+            return await services.browser_profiles.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("browser profile cursor is malformed") from exc
 
     @app.get(
         "/v1/browser-profiles/{profile_id}",
@@ -637,12 +670,7 @@ def create_app(
     async def revoke_browser_profile(
         profile_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
-        idempotency_key: Annotated[
-            str,
-            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
-        ],
     ) -> BrowserProfileView:
-        del idempotency_key
         return await services.browser_profiles.revoke(authenticated, profile_id)
 
     @app.delete(
@@ -653,12 +681,7 @@ def create_app(
     async def delete_browser_profile(
         profile_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
-        idempotency_key: Annotated[
-            str,
-            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
-        ],
     ) -> Response:
-        del idempotency_key
         await services.browser_profiles.delete(authenticated, profile_id)
         return Response(status_code=204)
 
@@ -671,16 +694,11 @@ def create_app(
         profile_id: UUID,
         body: BeginBrowserAuthenticationRequest,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
-        idempotency_key: Annotated[
-            str,
-            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
-        ],
     ) -> BrowserAuthenticationView:
         return await services.browser_profiles.begin_authentication(
             authenticated,
             profile_id,
             login_url=body.login_url,
-            idempotency_key=idempotency_key,
         )
 
     @app.get(
@@ -716,12 +734,7 @@ def create_app(
     async def cancel_browser_authentication(
         authentication_id: UUID,
         authenticated: Annotated[Principal, secured("browser.profile.write")],
-        idempotency_key: Annotated[
-            str,
-            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
-        ],
     ) -> BrowserAuthenticationView:
-        del idempotency_key
         return await services.browser_profiles.cancel_authentication(
             authenticated,
             authentication_id,
@@ -760,8 +773,18 @@ def create_app(
     async def list_browser_grants(
         authenticated: Annotated[Principal, secured("browser.grant.read")],
         profile_id: UUID | None = None,
-    ) -> list[BrowserGrantView]:
-        return await services.browser_grants.list(authenticated, profile_id=profile_id)
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserGrantView]:
+        try:
+            return await services.browser_grants.list(
+                authenticated,
+                profile_id=profile_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise MalformedRequestError("browser grant cursor is malformed") from exc
 
     @app.get(
         "/v1/browser-grants/{grant_id}",
@@ -780,12 +803,7 @@ def create_app(
     async def revoke_browser_grant(
         grant_id: UUID,
         authenticated: Annotated[Principal, secured("browser.grant.write")],
-        idempotency_key: Annotated[
-            str,
-            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
-        ],
     ) -> BrowserGrantView:
-        del idempotency_key
         return await services.browser_grants.revoke(authenticated, grant_id)
 
     @app.delete(
@@ -796,12 +814,7 @@ def create_app(
     async def delete_browser_grant(
         grant_id: UUID,
         authenticated: Annotated[Principal, secured("browser.grant.write")],
-        idempotency_key: Annotated[
-            str,
-            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
-        ],
     ) -> Response:
-        del idempotency_key
         await services.browser_grants.delete(authenticated, grant_id)
         return Response(status_code=204)
 
@@ -816,7 +829,11 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.write")],
         idempotency_key: Annotated[
             str,
-            Header(alias="Idempotency-Key", max_length=256),
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+            ),
         ],
     ) -> Response:
         result = await services.schedules.create(authenticated, body, idempotency_key)
@@ -833,15 +850,15 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.read")],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
-    ) -> dict[str, object]:
+    ) -> Page[ScheduleListItem]:
         try:
             page = await services.schedules.list(authenticated, limit, cursor)
         except ValueError as exc:
             raise MalformedRequestError("schedule cursor is malformed") from exc
-        return {
-            "items": [_schedule_summary(record).model_dump(mode="json") for record in page.items],
-            "next_cursor": page.next_cursor,
-        }
+        return Page(
+            items=[_schedule_summary(record) for record in page.items],
+            next_cursor=page.next_cursor,
+        )
 
     @schedule_router.get(
         "/v1/schedules/{schedule_id}",
@@ -911,7 +928,7 @@ def create_app(
         authenticated: Annotated[Principal, secured("schedule.read")],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         cursor: str | None = None,
-    ) -> object:
+    ) -> Page[ScheduleOccurrence]:
         try:
             return await services.schedules.list_occurrences(
                 authenticated,
@@ -923,7 +940,7 @@ def create_app(
             raise MalformedRequestError("schedule occurrence cursor is malformed") from exc
 
     if settings.schedule_api_enabled:
-        app.router.routes.extend(schedule_router.routes)
+        app.include_router(schedule_router)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

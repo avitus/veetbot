@@ -59,7 +59,7 @@ class PostgresScheduleAdmissionController:
                     "ELSE (r.usage->>'cost')::numeric END ELSE 0 END), 0) AS month_cost "
                     "FROM schedule_occurrences o "
                     "JOIN schedules s ON s.id = o.schedule_id "
-                    "JOIN runs r ON r.id = o.run_id "
+                    "LEFT JOIN runs r ON r.id = o.run_id "
                     "WHERE s.tenant_id = :tenant_id "
                     "AND o.disposition = 'MATERIALIZED'"
                 ),
@@ -92,7 +92,11 @@ class PostgresScheduleAdmissionController:
                 reason_code="schedule.rate_limit",
             )
         reservation = revision.limits.max_cost
-        assert reservation is not None
+        if reservation is None:
+            return ScheduleAdmissionDecision(
+                outcome=ScheduleAdmissionOutcome.REJECT,
+                reason_code="schedule.cost_reservation_missing",
+            )
         if Decimal(row.day_cost) + reservation > self._limits.daily_cost:
             return ScheduleAdmissionDecision(
                 outcome=ScheduleAdmissionOutcome.REJECT,

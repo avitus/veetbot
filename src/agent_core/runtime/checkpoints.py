@@ -8,7 +8,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.determinism import Clock
-from agent_core.ports.persistence import RepositoryUnitOfWork
+from agent_core.ports.persistence import RepositoryUnitOfWork, ScheduleUnitOfWork
 
 
 class DurableCheckpointSeeder:
@@ -17,7 +17,7 @@ class DurableCheckpointSeeder:
 
     async def __call__(
         self,
-        uow: RepositoryUnitOfWork,
+        uow: RepositoryUnitOfWork | ScheduleUnitOfWork,
         run: Run,
         through_sequence: int | None,
         lease: WorkerLease | None,

@@ -31,13 +31,23 @@ class InMemoryBrowserGrantRepository:
         principal: Principal,
         *,
         profile_id: UUID | None = None,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
     ) -> list[BrowserGrant]:
         grants = [
             grant.model_copy(deep=True)
             for grant in self._grants.values()
             if _owned(grant, principal) and (profile_id is None or grant.profile_id == profile_id)
         ]
-        return sorted(grants, key=lambda grant: (grant.created_at, str(grant.id)))
+        ordered = sorted(grants, key=lambda grant: (grant.created_at, str(grant.id)))
+        if after_created_at is not None and after_id is not None:
+            ordered = [
+                grant
+                for grant in ordered
+                if (grant.created_at, str(grant.id)) > (after_created_at, str(after_id))
+            ]
+        return ordered if limit is None else ordered[:limit]
 
     async def revoke(
         self,

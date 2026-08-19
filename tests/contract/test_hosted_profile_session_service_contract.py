@@ -215,21 +215,9 @@ async def test_expired_lease_fails_without_sealing_client_material(tmp_path: Pat
     assert runtimes[-1].closed is True
 
 
-@pytest.mark.parametrize(
-    "runtime_status,expected",
-    [
-        (BrowserAuthenticationStatus.READY, BrowserAuthenticationStatus.READY),
-        (BrowserAuthenticationStatus.NEEDS_USER, BrowserAuthenticationStatus.NEEDS_USER),
-        (
-            BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
-            BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
-        ),
-    ],
-)
-async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+async def assert_authentication_ceremony_is_direct_single_use_and_runtime_decided(
     tmp_path: Path,
     runtime_status: BrowserAuthenticationStatus,
-    expected: BrowserAuthenticationStatus,
 ) -> None:
     lifecycle, sessions, runtimes, _times = services(tmp_path)
     await provision(lifecycle)
@@ -247,10 +235,28 @@ async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
     assert ceremony.launch_url is not None
     assert "#capability=" in ceremony.launch_url
     assert public_before.launch_url is None
-    assert result.status is expected
+    assert result.status is runtime_status
     assert "capability" not in result.model_dump_json()
-    if expected is BrowserAuthenticationStatus.READY:
+    if runtime_status is BrowserAuthenticationStatus.READY:
         assert runtimes[0].closed is True
+
+
+@pytest.mark.parametrize(
+    "runtime_status",
+    [
+        BrowserAuthenticationStatus.READY,
+        BrowserAuthenticationStatus.NEEDS_USER,
+        BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
+    ],
+)
+async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+    tmp_path: Path,
+    runtime_status: BrowserAuthenticationStatus,
+) -> None:
+    await assert_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+        tmp_path,
+        runtime_status=runtime_status,
+    )
 
 
 async def test_authentication_scope_mismatch_and_caller_asserted_success_are_absent(
@@ -278,7 +284,7 @@ async def test_authentication_scope_mismatch_and_caller_asserted_success_are_abs
     assert "submit_credential" not in public_methods
 
 
-async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(
+async def assert_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(
     tmp_path: Path,
 ) -> None:
     lifecycle, sessions, runtimes, _times = services(tmp_path)
@@ -296,3 +302,9 @@ async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runti
     assert cancelled.status is BrowserAuthenticationStatus.CANCELLED
     assert replay == cancelled
     assert runtimes[0].closed is True
+
+
+async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(
+    tmp_path: Path,
+) -> None:
+    await assert_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(tmp_path)

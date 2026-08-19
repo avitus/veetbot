@@ -8,6 +8,8 @@ from types import TracebackType
 from typing import Self, cast
 from uuid import UUID
 
+import pytest
+
 from agent_core.adapters.browser.authentications import (
     InMemoryBrowserAuthenticationRepository,
 )
@@ -29,6 +31,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationView,
     BrowserProfileStatus,
 )
+from agent_core.domain.errors import AuthorizationError, ConflictError
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000c7")
@@ -115,6 +118,39 @@ def owner(*scopes: str) -> Principal:
     return principal().model_copy(update={"scopes": set(scopes)})
 
 
+async def test_browser_creation_requires_exact_write_scopes() -> None:
+    uow = FakeUnitOfWorkFactory()
+    profiles = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=FakeAuthenticationControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    grants = BrowserGrantManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([GRANT_ID]),
+        agent_version="agent-v1",
+        policy_version="policy-v1",
+    )
+
+    with pytest.raises(AuthorizationError):
+        await profiles.create(owner("browser.profile.read"), ("https://example.org",))
+    with pytest.raises(AuthorizationError):
+        await grants.create(
+            owner("browser.grant.read"),
+            profile_id=PROFILE_ID,
+            allowed_origins=("https://example.org",),
+            action_kinds=(BrowserActionKind.CLICK,),
+            element_roles=(),
+            element_names=(),
+            purpose=None,
+            starts_at=NOW,
+            expires_at=NOW + timedelta(days=1),
+        )
+
+
 async def test_profile_authentication_is_durable_secret_free_and_runtime_decided() -> None:
     uow = FakeUnitOfWorkFactory()
     authentication = FakeAuthenticationControlPlane()
@@ -198,3 +234,117 @@ async def test_standing_grant_creation_pins_profile_agent_policy_and_approver() 
     assert created.approved_by == principal_with_scopes.principal_id
     assert "tenant_id" not in created.model_dump()
     assert "principal_id" not in created.model_dump()
+
+
+async def test_profile_revoke_invalidates_provider_before_committing_metadata() -> None:
+    operations: list[str] = []
+
+    class OrderedRepository(InMemoryBrowserProfileRepository):
+        async def transition(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            operations.append("metadata:revoked")
+            return await super().transition(*args, **kwargs)  # type: ignore[arg-type]
+
+    class OrderedLifecycle(InMemoryBrowserProfileControlPlane):
+        async def revoke(self, *args: object, **kwargs: object) -> None:
+            operations.append("provider:revoked")
+            await super().revoke(*args, **kwargs)  # type: ignore[arg-type]
+
+    uow = FakeUnitOfWorkFactory()
+    uow.uow.browser_profiles = OrderedRepository()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=OrderedLifecycle(),
+        authentications=FakeAuthenticationControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    created = await service.create(subject, ("https://example.org",))
+    operations.clear()
+
+    await service.revoke(subject, created.id)
+
+    assert operations == ["provider:revoked", "metadata:revoked"]
+
+
+async def test_profile_creation_preserves_original_and_compensation_failures() -> None:
+    class FailingRepository(InMemoryBrowserProfileRepository):
+        async def transition(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            del args, kwargs
+            raise RuntimeError("compensation failed")
+
+    class FailingLifecycle(InMemoryBrowserProfileControlPlane):
+        async def provision(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            del args, kwargs
+            raise RuntimeError("provision failed")
+
+    uow = FakeUnitOfWorkFactory()
+    uow.uow.browser_profiles = FailingRepository()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=FailingLifecycle(),
+        authentications=FakeAuthenticationControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+
+    with pytest.raises(ExceptionGroup) as raised:
+        await service.create(owner("browser.profile.write"), ("https://example.org",))
+
+    assert {str(error) for error in raised.value.exceptions} == {
+        "provision failed",
+        "compensation failed",
+    }
+
+
+async def test_revoked_profile_ignores_late_ready_authentication_status() -> None:
+    uow = FakeUnitOfWorkFactory()
+    authentication = FakeAuthenticationControlPlane()
+    lifecycle = InMemoryBrowserProfileControlPlane()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=lifecycle,
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.read", "browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await service.begin_authentication(
+        subject,
+        PROFILE_ID,
+        login_url="https://example.org/login",
+    )
+    await service.revoke(subject, PROFILE_ID)
+    authentication.status = BrowserAuthenticationStatus.READY
+
+    status = await service.authentication_status(subject, CEREMONY_ID)
+    stored = await uow.uow.browser_profiles.get(PROFILE_ID, subject)
+
+    assert status.status is BrowserAuthenticationStatus.READY
+    assert stored.status is BrowserProfileStatus.REVOKED
+
+
+async def test_active_authentication_ceremony_is_not_replayed_without_launch_capability() -> None:
+    uow = FakeUnitOfWorkFactory()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=FakeAuthenticationControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    await service.begin_authentication(
+        subject,
+        PROFILE_ID,
+        login_url="https://example.org/login",
+    )
+
+    with pytest.raises(ConflictError):
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )

@@ -6,7 +6,7 @@ import builtins
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,6 +88,20 @@ class InMemoryScheduleRepository:
         if value is None:
             raise NotFoundError("schedule revision not found")
         return value
+
+    async def get_revisions(
+        self,
+        identities: tuple[tuple[UUID, int], ...],
+        principal: Principal,
+    ) -> dict[tuple[UUID, int], ScheduleRevision]:
+        result: dict[tuple[UUID, int], ScheduleRevision] = {}
+        for identity in identities:
+            await self.get(identity[0], principal)
+            revision = self._revisions.get(identity)
+            if revision is None:
+                raise NotFoundError("schedule revision not found")
+            result[identity] = revision
+        return result
 
     async def list(
         self,
@@ -401,6 +415,32 @@ class PostgresScheduleRepository:
         if row is None:
             raise NotFoundError("schedule revision not found")
         return schedule_revision_to_domain(row)
+
+    async def get_revisions(
+        self,
+        identities: tuple[tuple[UUID, int], ...],
+        principal: Principal,
+    ) -> dict[tuple[UUID, int], ScheduleRevision]:
+        if not identities:
+            return {}
+        rows = (
+            await self._session.scalars(
+                select(ScheduleRevisionRow)
+                .join(ScheduleRow, ScheduleRow.id == ScheduleRevisionRow.schedule_id)
+                .where(
+                    tuple_(
+                        ScheduleRevisionRow.schedule_id,
+                        ScheduleRevisionRow.revision,
+                    ).in_(identities),
+                    ScheduleRow.tenant_id == principal.tenant_id,
+                    ScheduleRow.principal_id == principal.principal_id,
+                )
+            )
+        ).all()
+        result = {(row.schedule_id, row.revision): schedule_revision_to_domain(row) for row in rows}
+        if len(result) != len(set(identities)):
+            raise NotFoundError("schedule revision not found")
+        return result
 
     async def list(
         self,

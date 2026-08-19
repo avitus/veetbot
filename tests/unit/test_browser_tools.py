@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 
 from agent_core.domain.browser import (
@@ -21,6 +22,7 @@ from agent_core.domain.tools import ToolFailureKind
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
+from agent_core.tools.browser_results import bounded_observation_payload
 from tests.contract.support import tool_context
 
 
@@ -178,6 +180,22 @@ async def test_navigate_bounds_multibyte_element_names_within_tool_ceiling() -> 
     assert result.ok
     assert isinstance(result.content[0], TextPart)
     assert len(result.content[0].text.encode("utf-8")) <= tool.spec.maximum_output_bytes
+
+
+async def test_navigate_bounds_page_controlled_url_and_keeps_views_consistent() -> None:
+    provider = FakeBrowserProvider()
+    structured, serialized = bounded_observation_payload(
+        provider,
+        BrowserObservation(
+            url="https://example.org/" + "a" * 4_000,
+            revision="revision-long-url",
+            text="rendered text",
+        ),
+        64,
+    )
+
+    assert structured["text"] == ""
+    assert json.loads(serialized) == structured
 
 
 async def test_observe_reads_current_page_without_model_selected_profile() -> None:

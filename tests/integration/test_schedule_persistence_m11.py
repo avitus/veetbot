@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import cast
 from uuid import UUID, uuid4
 
 import pytest
@@ -66,8 +65,8 @@ async def test_postgres_schedule_adapters_satisfy_shared_contracts() -> None:
         ):
             with pytest.raises(_RollbackContractError):
                 async with composition.uow_factory() as uow:
-                    database_session = cast(PostgresUnitOfWork, uow)._session
-                    assert database_session is not None
+                    assert isinstance(uow, PostgresUnitOfWork)
+                    database_session = uow.session
                     await database_session.execute(
                         text("SELECT set_config('agent_core.tenant_id', 'tenant-a', true)")
                     )
@@ -76,8 +75,8 @@ async def test_postgres_schedule_adapters_satisfy_shared_contracts() -> None:
 
         with pytest.raises(_RollbackContractError):
             async with composition.uow_factory() as uow:
-                database_session = cast(PostgresUnitOfWork, uow)._session
-                assert database_session is not None
+                assert isinstance(uow, PostgresUnitOfWork)
+                database_session = uow.session
                 await database_session.execute(
                     text("SELECT set_config('agent_core.tenant_id', 'tenant-a', true)")
                 )
@@ -228,8 +227,8 @@ async def test_schedule_rows_are_principal_isolated() -> None:
             with pytest.raises(NotFoundError):
                 await uow.schedules.get(schedule_id, foreign)
 
-            database_session = cast(PostgresUnitOfWork, uow)._session
-            assert database_session is not None
+            assert isinstance(uow, PostgresUnitOfWork)
+            database_session = uow.session
             rows = (
                 await database_session.execute(
                     text(

@@ -6,6 +6,7 @@ from uuid import UUID
 
 import pytest
 
+from agent_core.domain.errors import ToolValidationError
 from agent_core.domain.policies import (
     ActionKind,
     ExecutionTarget,
@@ -122,3 +123,32 @@ def test_browser_act_registration_requires_conservative_write_classification() -
     )
 
     assert validate_registration(act) == act
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("side_effect", SideEffectClass.NETWORK_READ),
+        ("risk", RiskLevel.LOW),
+        ("idempotency", IdempotencyClass.READ_ONLY),
+        ("allow_parallel", True),
+    ],
+)
+def test_browser_act_registration_rejects_permissive_classification(
+    field: str,
+    value: object,
+) -> None:
+    act = BrowserNavigateTool.spec.model_copy(
+        update={
+            "name": "browser.act",
+            "side_effect": SideEffectClass.EXTERNAL_WRITE,
+            "risk": RiskLevel.HIGH,
+            "idempotency": IdempotencyClass.NON_IDEMPOTENT,
+            "allow_parallel": False,
+            field: value,
+        },
+        deep=True,
+    )
+
+    with pytest.raises(ToolValidationError):
+        validate_registration(act)

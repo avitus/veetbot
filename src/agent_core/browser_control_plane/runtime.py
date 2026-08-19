@@ -172,7 +172,7 @@ def _decode_material(material: bytes) -> dict[str, object]:
     storage_state = payload.get("storage_state", {"cookies": [], "origins": []})
     if not isinstance(storage_state, dict):
         raise ValueError("browser profile storage state is invalid")
-    if set(storage_state) != {"cookies", "origins"}:
+    if not {"cookies", "origins"} <= set(storage_state):
         raise ValueError("browser profile storage state is invalid")
     if not isinstance(storage_state["cookies"], list) or not isinstance(
         storage_state["origins"], list

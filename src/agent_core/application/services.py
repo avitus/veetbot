@@ -127,7 +127,12 @@ class BrowserProfileService(Protocol):
 
     async def get(self, principal: Principal, profile_id: UUID) -> BrowserProfileView: ...
 
-    async def list(self, principal: Principal) -> list[BrowserProfileView]: ...
+    async def list(
+        self,
+        principal: Principal,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[BrowserProfileView]: ...
 
     async def revoke(self, principal: Principal, profile_id: UUID) -> BrowserProfileView: ...
 
@@ -139,7 +144,6 @@ class BrowserProfileService(Protocol):
         profile_id: UUID,
         *,
         login_url: str,
-        idempotency_key: str | None = None,
     ) -> BrowserAuthenticationView: ...
 
     async def list_authentications(
@@ -184,7 +188,9 @@ class BrowserGrantService(Protocol):
         principal: Principal,
         *,
         profile_id: UUID | None = None,
-    ) -> list[BrowserGrantView]: ...
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserGrantView]: ...
 
     async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserGrantView: ...
 

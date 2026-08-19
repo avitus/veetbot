@@ -157,6 +157,24 @@ async def assert_schedule_repository_mutates_state_and_revisions_with_cas(
         await repository.replace(current, updated, second_revision)
 
 
+async def assert_schedule_repository_batches_owned_revisions(
+    repository: ScheduleRepository,
+) -> None:
+    second_id = UUID(int=SCHEDULE_ID.int + 1)
+    await repository.create(schedule(), revision())
+    await repository.create(schedule(schedule_id=second_id), revision(second_id))
+
+    revisions = await repository.get_revisions(
+        ((SCHEDULE_ID, 1), (second_id, 1)),
+        principal(),
+    )
+
+    assert revisions == {
+        (SCHEDULE_ID, 1): revision(),
+        (second_id, 1): revision(second_id),
+    }
+
+
 async def test_schedule_repository_is_principal_isolated_and_revisioned() -> None:
     await assert_schedule_repository_is_principal_isolated_and_revisioned(
         InMemoryScheduleRepository()
@@ -179,3 +197,7 @@ async def test_schedule_repository_mutates_state_and_revisions_with_cas() -> Non
     await assert_schedule_repository_mutates_state_and_revisions_with_cas(
         InMemoryScheduleRepository()
     )
+
+
+async def test_schedule_repository_batches_owned_revisions() -> None:
+    await assert_schedule_repository_batches_owned_revisions(InMemoryScheduleRepository())

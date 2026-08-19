@@ -42,11 +42,25 @@ class InMemoryBrowserProfileRepository:
             raise NotFoundError("browser profile not found")
         return _copy(profile)
 
-    async def list(self, principal: Principal) -> list[BrowserProfile]:
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserProfile]:
         profiles = [
             _copy(profile) for profile in self._profiles.values() if _owned(profile, principal)
         ]
-        return sorted(profiles, key=lambda profile: (profile.created_at, str(profile.id)))
+        ordered = sorted(profiles, key=lambda profile: (profile.created_at, str(profile.id)))
+        if after_created_at is not None and after_id is not None:
+            ordered = [
+                profile
+                for profile in ordered
+                if (profile.created_at, str(profile.id)) > (after_created_at, str(after_id))
+            ]
+        return ordered if limit is None else ordered[:limit]
 
     async def bind(
         self,
@@ -64,6 +78,13 @@ class InMemoryBrowserProfileRepository:
             raise ConflictError("browser profile is not awaiting a provider binding")
         if updated_at < profile.updated_at:
             raise ConflictError("browser profile update time moved backwards")
+        if any(
+            existing.id != profile_id
+            and existing.tenant_id == principal.tenant_id
+            and existing.provider_ref == provisioning.provider_ref
+            for existing in self._profiles.values()
+        ):
+            raise ConflictError("browser provider reference is already bound")
         updated = profile.model_copy(
             update={
                 "provider_name": provisioning.provider_name,

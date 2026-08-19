@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, case, delete, func, select, update
+from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1476,17 +1476,32 @@ class PostgresBrowserProfileRepository:
             raise NotFoundError("browser profile not found")
         return _browser_profile_to_domain(row)
 
-    async def list(self, principal: Principal) -> list[BrowserProfile]:
-        rows = (
-            await self._session.scalars(
-                select(BrowserProfileRow)
-                .where(
-                    BrowserProfileRow.tenant_id == principal.tenant_id,
-                    BrowserProfileRow.principal_id == principal.principal_id,
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserProfile]:
+        statement = select(BrowserProfileRow).where(
+            BrowserProfileRow.tenant_id == principal.tenant_id,
+            BrowserProfileRow.principal_id == principal.principal_id,
+        )
+        if after_created_at is not None and after_id is not None:
+            statement = statement.where(
+                or_(
+                    BrowserProfileRow.created_at > after_created_at,
+                    and_(
+                        BrowserProfileRow.created_at == after_created_at,
+                        BrowserProfileRow.id > after_id,
+                    ),
                 )
-                .order_by(BrowserProfileRow.created_at, BrowserProfileRow.id)
             )
-        ).all()
+        statement = statement.order_by(BrowserProfileRow.created_at, BrowserProfileRow.id)
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
         return [_browser_profile_to_domain(row) for row in rows]
 
     async def bind(
@@ -1632,12 +1647,26 @@ class PostgresBrowserGrantRepository:
 
     @staticmethod
     def _values(grant: BrowserGrant) -> dict[str, Any]:
-        values = grant.model_dump(mode="python")
-        values["allowed_origins"] = list(grant.allowed_origins)
-        values["action_kinds"] = [kind.value for kind in grant.action_kinds]
-        values["element_roles"] = list(grant.element_roles)
-        values["element_names"] = list(grant.element_names)
-        return values
+        return {
+            "id": grant.id,
+            "tenant_id": grant.tenant_id,
+            "principal_id": grant.principal_id,
+            "profile_id": grant.profile_id,
+            "profile_generation": grant.profile_generation,
+            "agent_version": grant.agent_version,
+            "policy_version": grant.policy_version,
+            "allowed_origins": list(grant.allowed_origins),
+            "action_kinds": [kind.value for kind in grant.action_kinds],
+            "element_roles": list(grant.element_roles),
+            "element_names": list(grant.element_names),
+            "purpose": grant.purpose,
+            "starts_at": grant.starts_at,
+            "expires_at": grant.expires_at,
+            "approved_by": grant.approved_by,
+            "revoked_at": grant.revoked_at,
+            "created_at": grant.created_at,
+            "updated_at": grant.updated_at,
+        }
 
     async def create(self, grant: BrowserGrant) -> BrowserGrant:
         statement = (
@@ -1668,6 +1697,9 @@ class PostgresBrowserGrantRepository:
         principal: Principal,
         *,
         profile_id: UUID | None = None,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
     ) -> list[BrowserGrant]:
         statement = select(BrowserGrantRow).where(
             BrowserGrantRow.tenant_id == principal.tenant_id,
@@ -1675,11 +1707,20 @@ class PostgresBrowserGrantRepository:
         )
         if profile_id is not None:
             statement = statement.where(BrowserGrantRow.profile_id == profile_id)
-        rows = (
-            await self._session.scalars(
-                statement.order_by(BrowserGrantRow.created_at, BrowserGrantRow.id)
+        if after_created_at is not None and after_id is not None:
+            statement = statement.where(
+                or_(
+                    BrowserGrantRow.created_at > after_created_at,
+                    and_(
+                        BrowserGrantRow.created_at == after_created_at,
+                        BrowserGrantRow.id > after_id,
+                    ),
+                )
             )
-        ).all()
+        statement = statement.order_by(BrowserGrantRow.created_at, BrowserGrantRow.id)
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
         return [_browser_grant_to_domain(row) for row in rows]
 
     async def revoke(
@@ -1698,6 +1739,7 @@ class PostgresBrowserGrantRepository:
                     BrowserGrantRow.principal_id == principal.principal_id,
                     BrowserGrantRow.revoked_at.is_(None),
                     BrowserGrantRow.created_at <= revoked_at,
+                    BrowserGrantRow.updated_at <= revoked_at,
                 )
                 .values(revoked_at=revoked_at, updated_at=revoked_at)
                 .returning(BrowserGrantRow)
@@ -1742,10 +1784,20 @@ class PostgresBrowserAuthenticationRepository:
     async def create(
         self, authentication: BrowserAuthenticationRecord
     ) -> BrowserAuthenticationRecord:
+        values = {
+            "id": authentication.id,
+            "tenant_id": authentication.tenant_id,
+            "principal_id": authentication.principal_id,
+            "profile_id": authentication.profile_id,
+            "status": authentication.status.value,
+            "expires_at": authentication.expires_at,
+            "created_at": authentication.created_at,
+            "updated_at": authentication.updated_at,
+        }
         inserted = _rowcount(
             await self._session.execute(
                 pg_insert(BrowserAuthenticationRow)
-                .values(**authentication.model_dump(mode="python"))
+                .values(**values)
                 .on_conflict_do_nothing(index_elements=[BrowserAuthenticationRow.id])
             )
         )

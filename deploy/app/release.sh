@@ -5,6 +5,7 @@ export LC_ALL=C
 RELEASE_ID="${1:-}"
 DEPLOY_ROOT="${VEETBOT_ROOT:-/opt/veetbot}"
 ENV_FILE="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
+SCHEDULE_ENV_FILE="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
 KEEP_RELEASES="${VEETBOT_KEEP_RELEASES:-5}"
@@ -99,6 +100,7 @@ for required in \
   docker-compose.yml \
   deploy/docker-compose.production.yml \
   deploy/browser-profile-service.Dockerfile \
+  deploy/veetbot-schedule.env.example \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
   deploy/systemd/veetbot-async-worker.service \
@@ -160,6 +162,12 @@ set +a
 [[ "${AGENT_SCHEDULE_API_ENABLED:-0}" == "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" ]] || fail \
   "schedule API and worker flags must be enabled or disabled together"
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  [[ "$SCHEDULE_ENV_FILE" = /* ]] || fail \
+    "VEETBOT_SCHEDULE_ENV_FILE must be an absolute path"
+  [[ -f "$SCHEDULE_ENV_FILE" ]] || fail \
+    "schedule worker environment does not exist: $SCHEDULE_ENV_FILE"
+  [[ ! -L "$SCHEDULE_ENV_FILE" ]] || fail \
+    "schedule worker environment must not be a symlink"
   UNITS=(veetbot-schedule "${UNITS[@]}")
 fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"

@@ -3,6 +3,7 @@
 import ast
 import asyncio
 from dataclasses import replace
+from datetime import timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -78,7 +79,7 @@ async def test_schedule_worker_waits_for_next_fire_with_bounded_fallback_and_bac
     ) as composition:
         clock = composition.clock
         assert isinstance(clock, FixedClock)
-        due_at = future.replace(second=future.second + 7)
+        due_at = future + timedelta(seconds=7)
         async with composition.uow_factory() as uow:
             await uow.schedules.create(
                 schedule(schedule_id=schedule_id, next_fire_at=due_at),

@@ -281,7 +281,7 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
-from agent_core.observability.schedules import ScheduleMetrics
+from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
@@ -298,6 +298,7 @@ from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import (
+    ScheduleUnitOfWork,
     TransactionCallback,
     TransactionCallbackRegistrar,
     UnitOfWorkFactory,
@@ -500,6 +501,7 @@ def _memory_uow_repositories(
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
+    schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -519,6 +521,7 @@ def _memory_uow_repositories(
         memories=memories,
         traces=traces,
         knowledge=knowledge,
+        schedules=schedules,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -549,7 +552,7 @@ def _memory_uow_repositories(
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
         schedules=schedules,
-        schedule_occurrences=InMemoryScheduleOccurrenceRepository(schedules),
+        schedule_occurrences=schedule_occurrences,
         schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
         schedule_admission=AllowScheduleAdmissionController(),
         queue=None,
@@ -637,7 +640,7 @@ def _postgres_repository_factory(
     return repositories
 
 
-class _ScheduleUnitOfWork:
+class _ScheduleUnitOfWork(ScheduleUnitOfWork):
     """Least-privilege repository set for the production scheduler role."""
 
     def __init__(
@@ -811,9 +814,9 @@ async def build_schedule_worker(
     )
     effective_clock = clock or SystemClock()
     effective_ids = ids or RandomIdFactory()
-    metrics = ScheduleMetrics()
-    engine = create_engine(effective_settings.database_url)
     wakeup = PostgresScheduleWakeup(effective_settings.database_url)
+    metrics = ScheduleMetrics(tenant_hash_key=tenant_hash_key(effective_settings.database_url))
+    engine = create_engine(effective_settings.database_url)
     try:
         await assert_schema_revision(engine)
         factory = _ScheduleUnitOfWorkFactory(
@@ -825,9 +828,8 @@ async def build_schedule_worker(
             admission_limits=admission_limits,
             metrics=metrics,
         )
-        uow_factory = cast(UnitOfWorkFactory, factory)
         materializer = ScheduleMaterializer(
-            uow_factory=uow_factory,
+            uow_factory=factory,
             principals=ConfiguredSchedulePrincipalDirectory(principal),
             clock=effective_clock,
             ids=effective_ids,
@@ -835,7 +837,7 @@ async def build_schedule_worker(
             metrics=metrics,
         )
         yield ScheduleWorker(
-            uow_factory=uow_factory,
+            uow_factory=factory,
             materialize=materializer.materialize,
             clock=effective_clock,
             scan_batch=int(scheduling["scan_batch"]),
@@ -1672,6 +1674,8 @@ async def _compose(
                     clock=clock,
                     worker_id=worker_id,
                     eligible_classes=(interactive_priority,),
+                    interactive_priority=interactive_priority,
+                    async_priority=async_priority,
                     lease_seconds=lease_seconds,
                     heartbeat_divisor=heartbeat_divisor,
                     poll_interval_seconds=worker_poll_interval,
@@ -1688,6 +1692,8 @@ async def _compose(
                     clock=clock,
                     worker_id=worker_id,
                     eligible_classes=(async_priority,),
+                    interactive_priority=interactive_priority,
+                    async_priority=async_priority,
                     lease_seconds=lease_seconds,
                     heartbeat_divisor=heartbeat_divisor,
                     poll_interval_seconds=worker_poll_interval,
@@ -2067,7 +2073,9 @@ async def build(
         if storage == "memory"
         else PostgresScheduleWakeup(effective_settings.database_url)
     )
-    schedule_metrics = ScheduleMetrics()
+    schedule_metrics = ScheduleMetrics(
+        tenant_hash_key=tenant_hash_key(effective_settings.database_url)
+    )
     composition: Composition | None = None
     skill_validator = SkillPackageValidator(ConservativeTokenEstimator())
     skill_store: SkillPackageStore
@@ -2144,6 +2152,8 @@ async def build(
                 UnavailableBrowserAuthenticationControlPlane()
             )
         else:
+            # Public profile management uses this control plane even when browser
+            # tools are disabled, so the client is gated by the service URL.
             browser_profile_http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=5.0),
                 follow_redirects=False,

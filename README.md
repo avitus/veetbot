@@ -45,7 +45,7 @@ have separately authorized workstreams in progress.
 
 ### In progress (Milestones 10 and 11)
 
-Three separately authorized workstreams are underway. Optional capabilities
+Five separately authorized workstreams are underway. Optional capabilities
 stay behind default-off controls:
 
 - **Automatic memory formation** — post-run extraction and consolidation of
@@ -56,6 +56,8 @@ stay behind default-off controls:
   confined background-review child run.
 - **Public-web access** — read-only search and page extraction through
   independently configured providers; every result remains external-untrusted.
+- **Authenticated browser automation** — default-off browser navigation,
+  observation, and approval-governed actions with scoped profiles and grants.
 - **Scheduled runs** — default-off one-time, daily, and weekly task management
   with immutable revisions, exact scopes, bounded misfires and costs, a
   least-privilege production scheduler role, and durable offline results. The
@@ -380,6 +382,7 @@ grant, without exposing either identifier to model tool arguments:
 BROWSER_PROVIDER=hosted
 BROWSER_ALLOWED_ORIGINS=https://example.org
 BROWSER_PROFILE_SERVICE_URL=https://browser.example.org
+BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.org
 BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=/run/secrets/browser-control-plane
 BROWSER_PROFILE_ID=00000000-0000-0000-0000-000000000000
 BROWSER_GRANT_ID=

@@ -5,8 +5,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
+
+from sqlalchemy import text
 
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.adapters.schedule_admission import PostgresScheduleAdmissionController
@@ -36,8 +37,8 @@ async def test_postgres_schedule_admission_allows_an_empty_tenant() -> None:
         build(settings=database_settings(), storage="postgres", fixed_clock_at=NOW) as composition,
         composition.uow_factory() as uow,
     ):
-        session = cast(PostgresUnitOfWork, uow)._session
-        assert session is not None
+        assert isinstance(uow, PostgresUnitOfWork)
+        session = uow.session
         controller = PostgresScheduleAdmissionController(session, limits)
         decision = await controller.check(
             composition.principal.tenant_id,
@@ -107,8 +108,8 @@ async def test_postgres_schedule_admission_enforces_concurrency_rate_and_reserva
         )
         for limits, outcome, reason in cases:
             async with composition.uow_factory() as uow:
-                session = cast(PostgresUnitOfWork, uow)._session
-                assert session is not None
+                assert isinstance(uow, PostgresUnitOfWork)
+                session = uow.session
                 decision = await PostgresScheduleAdmissionController(session, limits).check(
                     composition.principal.tenant_id, candidate, NOW
                 )
@@ -142,3 +143,42 @@ async def test_concurrent_tenant_reservations_are_serialized(tmp_path: Path) -> 
             assert len(occurrences) == 1
             due = await uow.schedules.due(NOW, limit=10)
             assert (first_id in due) != (second_id in due)
+
+
+async def test_rate_limit_counts_recent_materialization_after_run_link_erasure() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        schedule_id = uuid4()
+        await _create_due_schedule(composition, schedule_id)
+        occurrence = await _materializer(composition).materialize(schedule_id)
+        assert occurrence is not None
+
+        async with composition.uow_factory() as uow:
+            assert isinstance(uow, PostgresUnitOfWork)
+            await uow.session.execute(
+                text(
+                    "UPDATE schedule_occurrences "
+                    "SET run_id = NULL, session_id = NULL, links_erased_at = :erased_at "
+                    "WHERE id = :occurrence_id"
+                ),
+                {"erased_at": NOW, "occurrence_id": occurrence.id},
+            )
+            decision = await PostgresScheduleAdmissionController(
+                uow.session,
+                ScheduleAdmissionLimits(
+                    max_active_runs_per_tenant=10,
+                    max_materializations_per_minute=1,
+                    daily_cost=Decimal("10"),
+                    monthly_cost=Decimal("10"),
+                ),
+            ).check(
+                composition.principal.tenant_id,
+                revision().model_copy(
+                    update={"created_by_principal_id": composition.principal.principal_id}
+                ),
+                NOW,
+            )
+
+        assert decision.outcome is ScheduleAdmissionOutcome.REJECT
+        assert decision.reason_code == "schedule.rate_limit"

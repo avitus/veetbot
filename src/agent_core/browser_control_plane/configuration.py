@@ -108,14 +108,31 @@ def _assert_owned_private(path: Path, *, directory: bool) -> os.stat_result:
 
 
 def _read_private_text(path: Path, label: str) -> str:
-    metadata = _assert_owned_private(path, directory=False)
-    if metadata.st_size > _MAXIMUM_SECRET_FILE_BYTES:
-        raise ProfileStoreIntegrityError(f"{label} is invalid")
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    if no_follow == 0 and path.is_symlink():
+        raise ProfileStoreIntegrityError("profile service mount is invalid")
     try:
-        raw = path.read_bytes()
+        descriptor = os.open(path, flags | no_follow)
+    except OSError as exc:
+        raise ProfileStoreIntegrityError(f"{label} is invalid") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o077
+            or metadata.st_size > _MAXIMUM_SECRET_FILE_BYTES
+        ):
+            raise ProfileStoreIntegrityError(f"{label} is invalid")
+        raw = os.read(descriptor, _MAXIMUM_SECRET_FILE_BYTES + 1)
+        if len(raw) > _MAXIMUM_SECRET_FILE_BYTES or len(raw) != metadata.st_size:
+            raise ProfileStoreIntegrityError(f"{label} is invalid")
         text = raw.decode("ascii")
     except (OSError, UnicodeDecodeError) as exc:
         raise ProfileStoreIntegrityError(f"{label} is invalid") from exc
+    finally:
+        os.close(descriptor)
     value = text.removesuffix("\n").removesuffix("\r")
     if not value or "\n" in value or "\r" in value:
         raise ProfileStoreIntegrityError(f"{label} is invalid")

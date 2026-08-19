@@ -8,14 +8,14 @@ from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunStatus
 from agent_core.domain.schedules import SchedulePauseReason, ScheduleState
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.persistence import ScheduleUnitOfWorkFactory
 
 
 class ScheduleOutcomeAccountant:
     def __init__(
         self,
         *,
-        uow_factory: UnitOfWorkFactory,
+        uow_factory: ScheduleUnitOfWorkFactory,
         clock: Clock,
         ids: IdFactory,
         metrics: ScheduleMetrics | None = None,

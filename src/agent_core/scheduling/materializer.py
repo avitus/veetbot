@@ -25,9 +25,9 @@ from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import (
-    CheckpointSeeder,
-    RepositoryUnitOfWork,
-    UnitOfWorkFactory,
+    ScheduleCheckpointSeeder,
+    ScheduleUnitOfWork,
+    ScheduleUnitOfWorkFactory,
 )
 from agent_core.ports.schedules import (
     ScheduleAdmissionController,
@@ -43,12 +43,12 @@ class ScheduleMaterializer:
     def __init__(
         self,
         *,
-        uow_factory: UnitOfWorkFactory,
+        uow_factory: ScheduleUnitOfWorkFactory,
         principals: SchedulePrincipalDirectory,
         admission: ScheduleAdmissionController | None = None,
         clock: Clock,
         ids: IdFactory,
-        seed_checkpoint: CheckpointSeeder,
+        seed_checkpoint: ScheduleCheckpointSeeder,
         write_probe: WriteProbe | None = None,
         metrics: ScheduleMetrics | None = None,
     ) -> None:
@@ -318,7 +318,7 @@ class ScheduleMaterializer:
 
     async def _record_failure(
         self,
-        uow: RepositoryUnitOfWork,
+        uow: ScheduleUnitOfWork,
         schedule: Schedule,
         revision: ScheduleRevision,
         nominal: datetime,
@@ -347,13 +347,40 @@ class ScheduleMaterializer:
         )
         await self._append_occurrence_event(uow, occurrence, schedule, advanced.state, now)
         self._write_probe("process_event")
+        if (
+            schedule.state is ScheduleState.ACTIVE
+            and advanced.state is ScheduleState.PAUSED
+            and advanced.pause_reason is SchedulePauseReason.FAILURE_LIMIT
+        ):
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=self._ids.new_id(),
+                    event_type="schedule.auto_paused",
+                    actor_type="scheduler",
+                    actor_id=schedule.principal_id,
+                    payload={
+                        "schedule_id": str(schedule.id),
+                        "revision": schedule.current_revision,
+                        "tenant_id": schedule.tenant_id,
+                        "principal_id": schedule.principal_id,
+                        "previous_state": schedule.state.value,
+                        "next_state": advanced.state.value,
+                        "occurrence_id": str(occurrence.id),
+                        "run_id": None,
+                        "event_time": now.isoformat(),
+                    },
+                    derivation_key=f"schedule.auto_paused:{occurrence.id}",
+                    created_at=now,
+                )
+            )
+            self._metrics.record_auto_pause()
         await uow.schedules.advance(schedule, advanced)
         self._write_probe("schedule")
         return occurrence
 
     async def _append_occurrence_event(
         self,
-        uow: RepositoryUnitOfWork,
+        uow: ScheduleUnitOfWork,
         occurrence: ScheduleOccurrence,
         schedule: Schedule,
         next_state: ScheduleState,
@@ -402,7 +429,7 @@ class ScheduleMaterializer:
 
     async def _append_coalesced_misfires(
         self,
-        uow: RepositoryUnitOfWork,
+        uow: ScheduleUnitOfWork,
         schedule: Schedule,
         revision: ScheduleRevision,
         first_nominal_at: datetime,

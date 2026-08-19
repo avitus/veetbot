@@ -8,10 +8,10 @@ import hashlib
 import hmac
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Protocol
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from agent_core.browser_control_plane.models import (
@@ -29,6 +29,7 @@ from agent_core.domain.browser import (
     BrowserObservation,
     BrowserProviderError,
     browser_origin,
+    require_service_origin,
 )
 from agent_core.domain.errors import ConflictError
 
@@ -53,6 +54,8 @@ class _LeaseState:
     identity: ProfileMaterialIdentity
     runtime: BrowserSessionRuntime
     sequence: int = 0
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    closed: bool = False
 
 
 @dataclass(slots=True)
@@ -66,6 +69,16 @@ class _CeremonyState:
     runtime: BrowserSessionRuntime
     status: BrowserAuthenticationStatus
     capability_digest: bytes
+
+
+@dataclass(frozen=True, slots=True)
+class _TerminalCeremonyState:
+    id: UUID
+    profile_id: UUID
+    tenant_id: str
+    principal_id: str
+    expires_at: datetime
+    status: BrowserAuthenticationStatus
 
 
 class BrowserSessionRuntime(Protocol):
@@ -104,26 +117,20 @@ class HostedProfileSessionService:
         process_secret: bytes,
         ceremony_base_url: str,
     ) -> None:
-        parsed = urlsplit(ceremony_base_url)
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname is None
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("authentication ceremony requires one HTTPS origin")
+        normalized_ceremony_origin = require_service_origin(
+            ceremony_base_url,
+            message="authentication ceremony requires one HTTPS origin",
+        )
         if len(process_secret) < 32:
             raise ValueError("profile session process secret is too short")
         self._store = store
         self._runtime_factory = runtime_factory
         self._now = now
         self._process_secret = bytes(process_secret)
-        self._ceremony_base_url = ceremony_base_url.rstrip("/")
+        self._ceremony_base_url = normalized_ceremony_origin
         self._leases: dict[bytes, _LeaseState] = {}
         self._ceremonies: dict[UUID, _CeremonyState] = {}
+        self._terminal_ceremonies: dict[UUID, _TerminalCeremonyState] = {}
         self._ceremony_counter = 0
         self._lock = asyncio.Lock()
 
@@ -165,7 +172,7 @@ class HostedProfileSessionService:
                 return BrowserLease(lease_ref=lease_ref, expires_at=expires_at)
             if self._active_ceremony_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile has an active authentication ceremony")
-            identity = _identity(metadata)
+            identity = metadata.identity()
             material = await self._store.load(identity)
             runtime = self._runtime_factory(principal.tenant_id)
             try:
@@ -185,11 +192,17 @@ class HostedProfileSessionService:
             state = await self._require_lease_locked(lease_ref)
             if browser_origin(url) not in state.identity.allowed_origins:
                 raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+        async with state.lock:
+            if state.closed:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             return await state.runtime.navigate(url)
 
     async def observe(self, lease_ref: str) -> BrowserObservation:
         async with self._lock:
             state = await self._require_lease_locked(lease_ref)
+        async with state.lock:
+            if state.closed:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             return await state.runtime.observe()
 
     async def act(
@@ -201,6 +214,9 @@ class HostedProfileSessionService:
     ) -> BrowserObservation:
         async with self._lock:
             state = await self._require_lease_locked(lease_ref)
+        async with state.lock:
+            if state.closed:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             if sequence != state.sequence + 1:
                 raise ConflictError("browser lease action sequence is invalid")
             try:
@@ -221,25 +237,36 @@ class HostedProfileSessionService:
             if state is None or key is None:
                 return
             self._leases.pop(key)
+        async with state.lock:
             try:
                 material = await state.runtime.storage_state()
                 await self._store.write(state.identity, material)
             finally:
-                await state.runtime.close()
+                with suppress(Exception):
+                    await state.runtime.close()
+                state.closed = True
 
     async def invalidate_profile(self, profile_id: UUID) -> None:
+        leases: list[_LeaseState] = []
         async with self._lock:
             for key, lease_state in tuple(self._leases.items()):
                 if lease_state.scope.profile_id == profile_id:
                     self._leases.pop(key)
-                    await lease_state.runtime.close()
+                    leases.append(lease_state)
             for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
                 if (
                     ceremony_state.profile_id == profile_id
                     and ceremony_state.status not in _TERMINAL_AUTH_STATUSES
                 ):
                     ceremony_state.status = BrowserAuthenticationStatus.CANCELLED
-                    await ceremony_state.runtime.close()
+                    with suppress(Exception):
+                        await ceremony_state.runtime.close()
+                    await self._finish_ceremony_locked(ceremony_state)
+        for lease_state in leases:
+            async with lease_state.lock:
+                with suppress(Exception):
+                    await lease_state.runtime.close()
+                lease_state.closed = True
 
     async def begin_authentication(
         self,
@@ -264,7 +291,7 @@ class HostedProfileSessionService:
             capability = self._ceremony_capability(profile_id, self._ceremony_counter)
             ceremony_id = UUID(bytes=self._mac(b"ceremony-id:" + capability.encode())[:16])
             expires_at = self._now() + timedelta(seconds=AUTHENTICATION_CEREMONY_SECONDS)
-            identity = _identity(metadata)
+            identity = metadata.identity()
             runtime = self._runtime_factory(principal.tenant_id)
             try:
                 await runtime.start(
@@ -305,6 +332,9 @@ class HostedProfileSessionService:
     ) -> BrowserAuthenticationView:
         async with self._lock:
             await self._expire_locked()
+            terminal = self._owned_terminal_ceremony(ceremony_id, principal)
+            if terminal is not None:
+                return _terminal_ceremony_view(terminal)
             state = self._owned_ceremony(ceremony_id, principal)
             return _ceremony_view(state)
 
@@ -315,6 +345,9 @@ class HostedProfileSessionService:
     ) -> BrowserAuthenticationView:
         async with self._lock:
             await self._expire_locked()
+            terminal = self._owned_terminal_ceremony(ceremony_id, principal)
+            if terminal is not None:
+                return _terminal_ceremony_view(terminal)
             state = self._owned_ceremony(ceremony_id, principal)
             if state.status in _TERMINAL_AUTH_STATUSES:
                 return _ceremony_view(state)
@@ -327,7 +360,9 @@ class HostedProfileSessionService:
                         await state.runtime.storage_state(),
                     )
                 finally:
-                    await state.runtime.close()
+                    with suppress(Exception):
+                        await state.runtime.close()
+                return await self._finish_ceremony_locked(state)
             return _ceremony_view(state)
 
     async def cancel_authentication(
@@ -337,12 +372,16 @@ class HostedProfileSessionService:
     ) -> BrowserAuthenticationView:
         async with self._lock:
             await self._expire_locked()
+            terminal = self._owned_terminal_ceremony(ceremony_id, principal)
+            if terminal is not None:
+                return _terminal_ceremony_view(terminal)
             state = self._owned_ceremony(ceremony_id, principal)
             if state.status in _TERMINAL_AUTH_STATUSES:
                 return _ceremony_view(state)
             state.status = BrowserAuthenticationStatus.CANCELLED
-            await state.runtime.close()
-            return _ceremony_view(state)
+            with suppress(Exception):
+                await state.runtime.close()
+            return await self._finish_ceremony_locked(state)
 
     async def authenticate_surface(self, ceremony_id: UUID, capability: str) -> bool:
         if not 32 <= len(capability) <= 128:
@@ -419,12 +458,16 @@ class HostedProfileSessionService:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         if state.scope.expires_at <= self._now():
             self._leases.pop(key)
-            await state.runtime.close()
+            with suppress(Exception):
+                await state.runtime.close()
+            state.closed = True
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         metadata = await self._store.find_by_profile(state.scope.profile_id)
         if metadata is None or metadata.revoked:
             self._leases.pop(key)
-            await state.runtime.close()
+            with suppress(Exception):
+                await state.runtime.close()
+            state.closed = True
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         return state
 
@@ -433,14 +476,18 @@ class HostedProfileSessionService:
         for key, lease_state in tuple(self._leases.items()):
             if lease_state.scope.expires_at <= now:
                 self._leases.pop(key)
-                await lease_state.runtime.close()
-        for ceremony_state in self._ceremonies.values():
-            if (
-                ceremony_state.expires_at <= now
-                and ceremony_state.status not in _TERMINAL_AUTH_STATUSES
-            ):
+                with suppress(Exception):
+                    await lease_state.runtime.close()
+                lease_state.closed = True
+        for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
+            if ceremony_state.expires_at <= now:
                 ceremony_state.status = BrowserAuthenticationStatus.EXPIRED
-                await ceremony_state.runtime.close()
+                with suppress(Exception):
+                    await ceremony_state.runtime.close()
+                await self._finish_ceremony_locked(ceremony_state)
+        for ceremony_id, terminal_state in tuple(self._terminal_ceremonies.items()):
+            if terminal_state.expires_at <= now:
+                self._terminal_ceremonies.pop(ceremony_id, None)
 
     def _lease_for_profile(self, profile_id: UUID) -> _LeaseState | None:
         return next(
@@ -467,6 +514,34 @@ class HostedProfileSessionService:
         ):
             raise ConflictError("browser authentication ceremony scope mismatch")
         return state
+
+    def _owned_terminal_ceremony(
+        self,
+        ceremony_id: UUID,
+        principal: Principal,
+    ) -> _TerminalCeremonyState | None:
+        state = self._terminal_ceremonies.get(ceremony_id)
+        if state is None:
+            return None
+        if state.tenant_id != principal.tenant_id or state.principal_id != principal.principal_id:
+            raise ConflictError("browser authentication ceremony scope mismatch")
+        return state
+
+    async def _finish_ceremony_locked(
+        self,
+        state: _CeremonyState,
+    ) -> BrowserAuthenticationView:
+        self._ceremonies.pop(state.id, None)
+        terminal = _TerminalCeremonyState(
+            id=state.id,
+            profile_id=state.profile_id,
+            tenant_id=state.tenant_id,
+            principal_id=state.principal_id,
+            expires_at=state.expires_at,
+            status=state.status,
+        )
+        self._terminal_ceremonies[state.id] = terminal
+        return _terminal_ceremony_view(terminal)
 
     async def _surface_ceremony_locked(
         self,
@@ -515,17 +590,16 @@ _TERMINAL_AUTH_STATUSES = frozenset(
 )
 
 
-def _identity(metadata: ProfileMaterialMetadata) -> ProfileMaterialIdentity:
-    return ProfileMaterialIdentity(
-        profile_id=metadata.profile_id,
-        tenant_id=metadata.tenant_id,
-        principal_id=metadata.principal_id,
-        provider_ref=metadata.provider_ref,
-        allowed_origins=metadata.allowed_origins,
+def _ceremony_view(state: _CeremonyState) -> BrowserAuthenticationView:
+    return BrowserAuthenticationView(
+        id=state.id,
+        profile_id=state.profile_id,
+        status=state.status,
+        expires_at=state.expires_at,
     )
 
 
-def _ceremony_view(state: _CeremonyState) -> BrowserAuthenticationView:
+def _terminal_ceremony_view(state: _TerminalCeremonyState) -> BrowserAuthenticationView:
     return BrowserAuthenticationView(
         id=state.id,
         profile_id=state.profile_id,

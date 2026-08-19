@@ -156,6 +156,7 @@ async def test_concurrent_schedulers_materialize_once() -> None:
             _materializer(composition).materialize(schedule_id),
         )
 
+        assert sum(value is not None for value in (first, second)) == 1
         occurrence = first or second
         assert occurrence is not None
         await _assert_complete(composition, schedule_id, occurrence)

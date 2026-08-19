@@ -11,7 +11,7 @@ from uuid import UUID
 from agent_core.domain.schedules import ScheduleOccurrence
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock
-from agent_core.ports.persistence import UnitOfWorkFactory
+from agent_core.ports.persistence import ScheduleUnitOfWorkFactory
 
 type MaterializeSchedule = Callable[[UUID], Awaitable[ScheduleOccurrence | None]]
 type WaitForScheduleWakeup = Callable[[float], Awaitable[None]]
@@ -22,7 +22,7 @@ class ScheduleWorker:
     def __init__(
         self,
         *,
-        uow_factory: UnitOfWorkFactory,
+        uow_factory: ScheduleUnitOfWorkFactory,
         materialize: MaterializeSchedule,
         clock: Clock,
         scan_batch: int,
@@ -46,9 +46,31 @@ class ScheduleWorker:
         self._wait_for_wakeup = wait_for_wakeup
         self._metrics = metrics or ScheduleMetrics()
         self._stopping = False
+        self._stop_event = asyncio.Event()
 
     def stop(self) -> None:
         self._stopping = True
+        self._stop_event.set()
+
+    async def _wait_or_stop(self, awaitable: Awaitable[None]) -> bool:
+        waiting: asyncio.Future[None] = asyncio.ensure_future(awaitable)
+        stopping = asyncio.create_task(self._wait_for_stop())
+        done, pending = await asyncio.wait(
+            {waiting, stopping},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if stopping in done:
+            if waiting in done:
+                await waiting
+            return True
+        await waiting
+        return False
+
+    async def _wait_for_stop(self) -> None:
+        await self._stop_event.wait()
 
     async def run_once(self) -> int:
         started = perf_counter()
@@ -92,12 +114,12 @@ class ScheduleWorker:
                 break
             wait_seconds = await self.wait_seconds()
             if self._wait_for_wakeup is None:
-                await self._clock.sleep(wait_seconds)
+                await self._wait_or_stop(self._clock.sleep(wait_seconds))
                 continue
             try:
-                await self._wait_for_wakeup(wait_seconds)
+                await self._wait_or_stop(self._wait_for_wakeup(wait_seconds))
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("schedule worker wakeup failed; using poll fallback")
-                await self._clock.sleep(wait_seconds)
+                await self._wait_or_stop(self._clock.sleep(wait_seconds))

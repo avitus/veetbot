@@ -2913,7 +2913,10 @@ Acceptance criteria for this workstream:
 - An ordinary correction supersedes only the matching subject and belief type;
   unrelated preferences and entities continue to coexist.
 
-#### Second model provider
+#### Second model provider — deferred
+
+This section is design-only. Milestone 10 does not authorize model-routing or
+second-provider implementation work.
 
 Add a second provider adapter and run the same contract suite against it.
 
@@ -2926,7 +2929,10 @@ Provider routing may then consider:
 - Availability
 - Evaluation performance
 
-#### Subagents
+#### Subagents — deferred
+
+This section is design-only. Milestone 10 does not authorize general-purpose
+subagents or `delegate.run`.
 
 Represent subagents as a special tool:
 

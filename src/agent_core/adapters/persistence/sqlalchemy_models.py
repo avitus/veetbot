@@ -362,6 +362,7 @@ class BrowserProfileRow(Base):
         ),
         Index(
             "uq_browser_profiles_provider_ref",
+            "tenant_id",
             "provider_ref",
             unique=True,
             postgresql_where=text("provider_ref IS NOT NULL"),

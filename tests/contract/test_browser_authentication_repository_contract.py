@@ -43,10 +43,13 @@ async def assert_authentication_repository_contract(
     assert await repository.get(CEREMONY_ID, principal()) == expected
     assert await repository.list(principal(), profile_id=PROFILE_ID) == [expected]
 
-    foreign = principal().model_copy(update={"principal_id": "principal-b"})
-    with pytest.raises(NotFoundError):
-        await repository.get(CEREMONY_ID, foreign)
-    assert await repository.list(foreign, profile_id=PROFILE_ID) == []
+    for foreign in (
+        principal().model_copy(update={"principal_id": "principal-b"}),
+        principal().model_copy(update={"tenant_id": "foreign-tenant"}),
+    ):
+        with pytest.raises(NotFoundError):
+            await repository.get(CEREMONY_ID, foreign)
+        assert await repository.list(foreign, profile_id=PROFILE_ID) == []
     with pytest.raises(ConflictError):
         await repository.create(expected)
 
@@ -66,13 +69,37 @@ async def assert_authentication_repository_contract(
         updated_at=NOW + timedelta(seconds=1),
     )
     assert replay == updated
+    advanced_replay = await repository.transition(
+        CEREMONY_ID,
+        principal(),
+        expected_status=BrowserAuthenticationStatus.NEEDS_USER,
+        status=BrowserAuthenticationStatus.NEEDS_USER,
+        updated_at=NOW + timedelta(seconds=2),
+    )
+    assert advanced_replay.updated_at == NOW + timedelta(seconds=2)
     with pytest.raises(ConflictError):
         await repository.transition(
             CEREMONY_ID,
             principal(),
-            expected_status=BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
+            expected_status=BrowserAuthenticationStatus.NEEDS_USER,
             status=BrowserAuthenticationStatus.READY,
-            updated_at=NOW + timedelta(seconds=2),
+            updated_at=NOW + timedelta(seconds=1),
+        )
+    ready = await repository.transition(
+        CEREMONY_ID,
+        principal(),
+        expected_status=BrowserAuthenticationStatus.NEEDS_USER,
+        status=BrowserAuthenticationStatus.READY,
+        updated_at=NOW + timedelta(seconds=3),
+    )
+    assert ready.status is BrowserAuthenticationStatus.READY
+    with pytest.raises(ConflictError):
+        await repository.transition(
+            CEREMONY_ID,
+            principal(),
+            expected_status=BrowserAuthenticationStatus.READY,
+            status=BrowserAuthenticationStatus.NEEDS_USER,
+            updated_at=NOW + timedelta(seconds=4),
         )
 
 
