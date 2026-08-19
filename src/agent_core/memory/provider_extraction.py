@@ -147,12 +147,14 @@ def _merge_candidates(
     """Prefer evaluated provider proposals while retaining deterministic coverage."""
 
     merged: list[MemoryCandidate] = []
-    occupied: set[tuple[str, str, Polarity]] = set()
+    occupied: set[tuple[str, str, str, Polarity, tuple[int, ...]]] = set()
     for candidate in [*proposed, *fallback]:
         key = (
             candidate.belief_type.value,
             candidate.subject.casefold(),
+            candidate.statement.casefold(),
             candidate.polarity,
+            tuple(candidate.source_event_ids),
         )
         if key in occupied:
             continue

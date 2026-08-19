@@ -663,14 +663,14 @@ verification:
           The 24-case paired CLI evaluator derives the corpus and model tuple and
           creates no artifact unless lift, fabrication, and policy gates pass.
           Focused provider, evaluator, CLI, configuration, and
-          review-remediation tests pass, including distinct candidate polarity
-          and belief types, dotted-number grounding, export consent handling,
-          JSON export, and memory-list boundary validation.
+          review-remediation tests pass, including distinct candidate polarity,
+          belief types, statements, and sources; dotted-number grounding; export
+          consent handling; JSON export; and memory-list boundary validation.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 380 source and test
-          files, 629 static tests, 219 contracts, deployment-script checks,
+          files, 630 static tests, 219 contracts, deployment-script checks,
           121 citation checks, and strict documentation builds pass on the
           integrated head. The static count includes the 25-case evaluation
           front end relocated from the DB-gated integration directory. The

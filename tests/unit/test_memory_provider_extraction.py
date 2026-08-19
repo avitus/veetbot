@@ -301,6 +301,30 @@ def test_provider_merge_preserves_opposite_polarities_for_conflict_resolution() 
     assert _merge_candidates([asserted], [retracted]) == [asserted, retracted]
 
 
+def test_provider_merge_preserves_distinct_statements_and_sources() -> None:
+    def candidate(statement: str, source_event_ids: list[int]) -> MemoryCandidate:
+        return MemoryCandidate(
+            belief_type=BeliefType.FACT,
+            subject="astronomy club",
+            statement=statement,
+            source_event_ids=source_event_ids,
+            model_confidence=0.9,
+            proposed_scope="project-a",
+            proposed_portability=Portability.CONTEXTUAL,
+            sensitivity_guess=Sensitivity.INTERNAL,
+        )
+
+    provider = candidate("User's astronomy club meets weekly.", [1])
+    different_statement = candidate("User's astronomy club meets monthly.", [1])
+    different_source = candidate("User's astronomy club meets weekly.", [2])
+
+    assert _merge_candidates([provider], [different_statement, different_source]) == [
+        provider,
+        different_statement,
+        different_source,
+    ]
+
+
 async def test_provider_extractor_caps_output_before_call_to_stay_inside_cost_budget() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     await user_event(factory, "The astronomy club was my daughter's idea.")
