@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.errors import ConflictError, NotFoundError, ToolValidationError
-from agent_core.domain.policies import IdempotencyClass, SideEffectClass, TrustLevel
+from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
     ToolExecutionContext,
     ToolKind,
@@ -36,6 +36,7 @@ BUILTIN_DOMAINS = frozenset(
         "memory",
         "knowledge",
         "web",
+        "browser",
     }
 )
 RESERVED_DOMAINS = frozenset({"mcp", "device"})
@@ -119,6 +120,27 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
         or spec.output_trust is not TrustLevel.EXTERNAL_UNTRUSTED
     ):
         raise ToolValidationError("web provider target classification is invalid")
+    if spec.target_kind == "browser_provider":
+        browser_read = (
+            spec.name in {"browser.navigate", "browser.observe"}
+            and spec.side_effect is SideEffectClass.NETWORK_READ
+            and spec.risk is RiskLevel.LOW
+            and spec.idempotency is IdempotencyClass.READ_ONLY
+        )
+        browser_write = (
+            spec.name == "browser.act"
+            and spec.side_effect is SideEffectClass.EXTERNAL_WRITE
+            and spec.risk is RiskLevel.HIGH
+            and spec.idempotency is IdempotencyClass.NON_IDEMPOTENT
+            and not spec.allow_parallel
+        )
+        if (
+            spec.source is not ToolSource.BUILTIN
+            or domain != "browser"
+            or not (browser_read or browser_write)
+            or spec.output_trust is not TrustLevel.EXTERNAL_UNTRUSTED
+        ):
+            raise ToolValidationError("browser provider target classification is invalid")
     if spec.source in {ToolSource.MCP, ToolSource.DEVICE, ToolSource.SANDBOX} or (
         spec.target_kind == "sandbox"
     ):

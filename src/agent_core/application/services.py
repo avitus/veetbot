@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import AsyncIterator
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.browser import (
+    BrowserActionKind,
+    BrowserAuthenticationView,
+    BrowserGrantView,
+    BrowserProfileView,
+)
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -102,3 +110,77 @@ class ArtifactService(Protocol):
     async def get(self, principal: Principal, artifact_id: UUID) -> ArtifactView: ...
 
     async def open_content(self, principal: Principal, artifact_id: UUID) -> ArtifactContent: ...
+
+
+class BrowserProfileService(Protocol):
+    async def create(
+        self,
+        principal: Principal,
+        allowed_origins: tuple[str, ...],
+        idempotency_key: str | None = None,
+    ) -> BrowserProfileView: ...
+
+    async def get(self, principal: Principal, profile_id: UUID) -> BrowserProfileView: ...
+
+    async def list(self, principal: Principal) -> list[BrowserProfileView]: ...
+
+    async def revoke(self, principal: Principal, profile_id: UUID) -> BrowserProfileView: ...
+
+    async def delete(self, principal: Principal, profile_id: UUID) -> None: ...
+
+    async def begin_authentication(
+        self,
+        principal: Principal,
+        profile_id: UUID,
+        *,
+        login_url: str,
+        idempotency_key: str | None = None,
+    ) -> BrowserAuthenticationView: ...
+
+    async def list_authentications(
+        self,
+        principal: Principal,
+        profile_id: UUID,
+    ) -> builtins.list[BrowserAuthenticationView]: ...
+
+    async def authentication_status(
+        self,
+        principal: Principal,
+        authentication_id: UUID,
+    ) -> BrowserAuthenticationView: ...
+
+    async def cancel_authentication(
+        self,
+        principal: Principal,
+        authentication_id: UUID,
+    ) -> BrowserAuthenticationView: ...
+
+
+class BrowserGrantService(Protocol):
+    async def create(
+        self,
+        principal: Principal,
+        *,
+        profile_id: UUID,
+        allowed_origins: tuple[str, ...],
+        action_kinds: tuple[BrowserActionKind, ...],
+        element_roles: tuple[str, ...],
+        element_names: tuple[str, ...],
+        purpose: str | None,
+        starts_at: datetime,
+        expires_at: datetime,
+        idempotency_key: str | None = None,
+    ) -> BrowserGrantView: ...
+
+    async def get(self, principal: Principal, grant_id: UUID) -> BrowserGrantView: ...
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        profile_id: UUID | None = None,
+    ) -> list[BrowserGrantView]: ...
+
+    async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserGrantView: ...
+
+    async def delete(self, principal: Principal, grant_id: UUID) -> None: ...

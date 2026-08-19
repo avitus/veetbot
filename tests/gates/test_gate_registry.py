@@ -18,14 +18,14 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_registry_complete() -> None:
-    assert registry_errors(ROOT, current_milestone=9) == []
+    assert registry_errors(ROOT, current_milestone=10) == []
 
 
 def test_no_stale_active_gate() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    active = [entry for entry in entries if entry.milestone <= 9]
-    assert len(active) == 166
+    active = [entry for entry in entries if entry.milestone <= 10]
+    assert len(active) == 200
     assert all(entry.check != "tests/gates/pending.py::pending_gate" for entry in active)
     assert all(not entry.optional for entry in active)
 
@@ -46,6 +46,8 @@ def test_milestone_tokens_present() -> None:
         "sandbox-isolation.md",
         "skills.md",
         "knowledge-documents.md",
+        "web-access.md",
+        "browser-automation.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -74,7 +76,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 183
+    assert len(entries) == 200
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -109,8 +111,34 @@ def test_census_is_derived() -> None:
         7: 7,
         8: 17,
         9: 26,
-        10: 17,
+        10: 34,
     }
+
+
+def test_web_access_has_complete_milestone_10_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    web_entries = [entry for entry in entries if entry.id.startswith("gate.web.")]
+
+    assert len(web_entries) == 7
+    assert all(entry.milestone == 10 for entry in web_entries)
+    assert all(entry.spec == "docs/plan/web-access.md#hard-gates" for entry in web_entries)
+    assert all(entry.check.startswith("tests/gates/test_web_m10.py::") for entry in web_entries)
+
+
+def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    browser_entries = [entry for entry in entries if entry.id.startswith("gate.browser.")]
+
+    assert len(browser_entries) == 10
+    assert all(entry.milestone == 10 for entry in browser_entries)
+    assert all(
+        entry.spec == "docs/plan/browser-automation.md#hard-gates" for entry in browser_entries
+    )
+    assert all(
+        entry.check.startswith("tests/gates/test_browser_m10.py::") for entry in browser_entries
+    )
 
 
 def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> None:

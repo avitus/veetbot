@@ -11,8 +11,18 @@ DEPLOY_ROOT="$TEST_ROOT/opt/veetbot"
 SYSTEMD_DIR="$TEST_ROOT/systemd"
 PROCESS_ROOT="$TEST_ROOT/proc"
 ENV_FILE="$TEST_ROOT/veetbot.env"
+PROFILE_AUTH_FILE="$TEST_ROOT/browser-profile-auth"
+PROFILE_SESSION_FILE="$TEST_ROOT/browser-profile-session-secret"
+PROFILE_KEY_DIR="$TEST_ROOT/browser-profile-keys"
 LOG_FILE="$TEST_ROOT/commands.log"
 mkdir -p "$BIN_DIR" "$DEPLOY_ROOT/releases" "$SYSTEMD_DIR" "$PROCESS_ROOT/4242"
+mkdir -m 0700 "$PROFILE_KEY_DIR"
+printf '%s\n' 'synthetic-browser-profile-auth-value' >"$PROFILE_AUTH_FILE"
+printf '%s\n' 'synthetic-browser-profile-session-secret-value' >"$PROFILE_SESSION_FILE"
+printf '%s\n' 'key-v1' >"$PROFILE_KEY_DIR/current"
+printf '%s\n' 'c3ludGhldGljLWtleS1ub3QtdXNlZC1ieS1zdHVi' >"$PROFILE_KEY_DIR/key-v1.key"
+chmod 0600 "$PROFILE_AUTH_FILE" "$PROFILE_SESSION_FILE" \
+  "$PROFILE_KEY_DIR/current" "$PROFILE_KEY_DIR/key-v1.key"
 : >"$LOG_FILE"
 test_database_url='postgresql+asyncpg://agent:'
 test_database_url+='test@127.0.0.1:5432/agent'
@@ -26,7 +36,12 @@ printf '%s\n' \
   'AUTH_SCOPES=session.read' \
   'SANDBOX_MECHANISM=gvisor' \
   'AGENT_ARTIFACT_ROOT=/tmp' \
-  'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' >"$ENV_FILE"
+  'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE=$PROFILE_AUTH_FILE" \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE=$PROFILE_SESSION_FILE" \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=$PROFILE_AUTH_FILE" \
+  'BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.test' \
+  "BROWSER_PROFILE_KEY_DIR=$PROFILE_KEY_DIR" >"$ENV_FILE"
 
 write_stub() {
   local name="$1"
@@ -102,6 +117,7 @@ make_stage() {
   local stage="$DEPLOY_ROOT/releases/$release_id"
   mkdir -p \
     "$stage/deploy/systemd" \
+    "$stage/deploy" \
     "$stage/execution" \
     "$stage/scripts" \
     "$stage/.venv/bin"
@@ -111,6 +127,7 @@ make_stage() {
     "$stage/alembic.ini" \
     "$stage/docker-compose.yml" \
     "$stage/deploy/docker-compose.production.yml" \
+    "$stage/deploy/browser-profile-service.Dockerfile" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_production_deployment.py"
   for unit in veetbot-api veetbot-worker veetbot-maintenance; do
@@ -169,6 +186,7 @@ run_release "$release_id"
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
 grep -Fq 'alembic upgrade head' "$LOG_FILE"
 grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
+grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
 grep -Fq 'systemctl restart veetbot-maintenance veetbot-worker veetbot-api' "$LOG_FILE"

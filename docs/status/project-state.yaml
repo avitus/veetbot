@@ -52,7 +52,7 @@ milestones:
     title: Long-term memory and knowledge retrieval
     status: complete
   "10":
-    title: Automatic memory, self-authored skills, and public-web access tranches
+    title: Automatic memory, skills, public-web, and authenticated-browser tranches
     status: in_progress
     authorized_scope:
       - automatic memory formation and consolidation
@@ -60,10 +60,17 @@ milestones:
       - governed background-review child runs
       - authoring metrics and evaluation evidence
       - provider-neutral public-web search and page extraction
+      - provider-neutral authenticated browser automation
     deferred_scope:
-      - scheduling
       - model routing changes
       - general-purpose subagents and delegate.run
+  "11":
+    title: Scheduling
+    status: planned
+    authorized_scope: []
+    deferred_scope:
+      - scheduler design and hard gates
+      - recurring and delayed run dispatch
 
 verification:
   milestone_0:
@@ -588,7 +595,7 @@ verification:
           source, and context-snapshot choices are approved and implemented.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-19T18:45:33Z
+    recorded_at: 2026-08-19T21:21:18Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -679,28 +686,27 @@ verification:
           and provider-assisted implementations against the same separate,
           scope-correct, provenance-bound proposal assertions, with both assisted
           paths forced through deterministic fallback. The registry reconciles at
-          183 entries, including 17 at Milestone 10.
+          200 entries, including 34 at Milestone 10.
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 380 source and test
-          files, 633 static tests, 223 contracts, deployment-script checks,
+          Ruff formatting and linting, strict mypy over 439 source and test
+          files, 717 static tests, 296 contracts, deployment-script checks,
           121 citation checks, and strict documentation builds pass on the
           integrated head. The static count includes the 25-case evaluation
           front end relocated from the DB-gated integration directory. The
-          gate registry contains 183 entries and retains 166 as the verified
+          gate registry contains 200 entries and retains 166 as the verified
           ceiling through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
           An isolated Compose PostgreSQL 16 database upgraded from empty through
-          revision a4c8e2f6b913 and all 83 integration and resilience tests
+          revision d2a6f8b1c304 and all 96 integration and resilience tests
           passed, including memory formation, durable skill-authoring approval
           and provenance, capability persistence, persisted web invocations and
-          web-enabled recomposition, transcript restoration, migrations, and
-          re-composition. The count fell from 105 when the 25 declarative
-          evaluation cases moved to the static partition and rose with three
-          new durable web and authoring journeys.
+          web-enabled recomposition, browser profile, authentication, and
+          standing-grant persistence, transcript restoration, migrations, and
+          re-composition.
       - check: default-off rollout boundary
         outcome: passed_locally
         detail: >-
@@ -717,7 +723,56 @@ verification:
           search output, the untrusted envelope reaching the next model step,
           same-turn trust escalation blocking memory writes, and persisted
           external-untrusted invocations with web-enabled recomposition on
-          PostgreSQL.
+          PostgreSQL. Seven formal gate.web entries cover that contract;
+          `agent eval gates
+          --milestone 10 --area web` reports seven passed, zero failed, and zero
+          pending.
+      - check: authenticated browser automation and formal gates
+        outcome: passed_locally
+        detail: >-
+          `agent eval gates --milestone 10 --area browser` reports all ten
+          provider, default-off, origin-isolation, observation-trust,
+          revision-binding, action-authority, uncertain-write, profile-lifecycle,
+          authentication, and standing-grant gates passed with zero failures or
+          pending placeholders. The provider-neutral tools support bounded
+          navigation, observation, and approval-governed actions through both
+          ephemeral Playwright and hosted stateful providers. Stable handles,
+          exact page revisions, trusted profile-origin binding, conservative
+          consequence classification, effect watermarking, uncertain-outcome
+          persistence, DNS-pinned egress, and external-untrusted observations
+          preserve the documented authority and trust boundaries.
+
+          The hosted control plane now provides generation-fenced profile
+          lifecycle, leased sessions, a five-minute user-direct login ceremony,
+          bounded interactive events and screenshots, durable authentication
+          records, and exact routine-action standing grants. Public profile,
+          authentication, and grant routes enforce their dedicated scopes; the
+          execution pipeline re-runs deterministic policy before honoring a
+          matching grant and records the authorization kind and reference.
+          Profile material remains outside PostgreSQL in versioned AES-256-GCM
+          envelopes whose authenticated metadata binds tenant, principal,
+          profile generation, origin scope, format, revocation, and key version.
+          The three browser tables use forced tenant RLS and migrations pass
+          from an empty database through revision d2a6f8b1c304.
+
+          The isolated service authenticates before bounded request buffering,
+          accepts only private-file credentials and key material, returns bounded
+          generic failures, and is the only additional approved process
+          composition root for its secret-bearing package. Its production image
+          installs Chromium and runs as uid 65532 with dropped capabilities,
+          no-new-privileges, a read-only root, private secret mounts, resource
+          limits, a separate outbound network, and only a loopback host binding
+          behind the configured HTTPS reverse proxy. The production Compose
+          overlay validates, the image builds, and an in-container Playwright
+          smoke test launched Chromium 151.0.7922.34 as the unprivileged runtime
+          user. A second smoke test ran the real service entry point as uid
+          65532 with a read-only root, all capabilities dropped, and
+          pre-provisioned private secret and material volumes; its authenticated
+          control-plane flow provisioned a profile, acquired a lease, launched
+          Chromium, navigated through the audited proxy to `https://example.org`,
+          sealed the session, revoked the profile, and deleted its encrypted
+          material. Release preflight validates the service-auth, session-secret,
+          key, and HTTPS ceremony inputs and waits for service health.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
@@ -777,7 +832,8 @@ verification:
         Clopper-Pearson lower bound, and zero additional policy failures.
       - Run every hosted CI lane and complete the GitHub CodeRabbit review on
         the same final head, resolving every finding and conversation.
-      - Implement separately gated scheduling, routing, and subagent extensions.
+      - Design and separately authorize Milestone 11 scheduling; keep routing
+        and subagent extensions independently gated.
 
 documentation:
   canonical_format: markdown
@@ -797,10 +853,9 @@ readiness:
   summary: >-
     Milestones 0 through 9 are complete and implementable from the corpus.
     The owner authorized automatic memory formation, the self-authored-skills
-    tranche, and provider-neutral public-web access in Milestone 10, with seventeen
-    registered gates across the two gate-bearing workstreams. The web tranche
-    adds an acceptance contract without changing the gate census. Scheduling,
-    routing, and general-purpose subagents remain
+    tranche, provider-neutral public-web access, and authenticated browser
+    automation in Milestone 10, with thirty-four registered gates across the
+    four workstreams. Scheduling, routing, and general-purpose subagents remain
     deferred directions. Milestones 5, 6, and
     8 moved into the covered set when
     docs/plan/http-api-and-streaming.md,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -12,11 +13,14 @@ from math import isfinite
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
+from uuid import UUID
 
 import yaml
 from dotenv import dotenv_values
 from pydantic import SecretStr, ValidationError
 
+from agent_core.domain.browser import normalize_browser_origin
 from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
@@ -54,6 +58,12 @@ class MemoryProviderExtractionMode(StrEnum):
     REQUIRED = "required"
 
 
+class BrowserProviderKind(StrEnum):
+    DISABLED = "disabled"
+    PLAYWRIGHT = "playwright"
+    HOSTED = "hosted"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Environment-layer settings; tuning values remain in versioned YAML."""
@@ -83,6 +93,12 @@ class Settings:
     release_id: str | None = None
     web_search_provider: WebProviderKind = WebProviderKind.DISABLED
     web_fetch_provider: WebProviderKind = WebProviderKind.DISABLED
+    browser_provider: BrowserProviderKind = BrowserProviderKind.DISABLED
+    browser_allowed_origins: tuple[str, ...] = ()
+    browser_profile_service_url: str | None = None
+    browser_profile_id: UUID | None = None
+    browser_grant_id: UUID | None = None
+    browser_run_purpose: str | None = None
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
@@ -275,6 +291,36 @@ def _parse_flag(values: Mapping[str, str], name: str) -> bool:
     if raw not in {"0", "1"}:
         raise ConfigurationError(f"{name} must be 0 or 1")
     return raw == "1"
+
+
+def _optional_uuid(values: Mapping[str, str], name: str) -> UUID | None:
+    raw = values.get(name, "").strip()
+    if not raw:
+        return None
+    try:
+        return UUID(raw)
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be a UUID") from exc
+
+
+def _read_private_credential_file(raw_path: str) -> str:
+    path = Path(raw_path)
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError("browser control-plane credential file is invalid")
+    try:
+        metadata = path.stat()
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ConfigurationError("browser control-plane credential file is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_size > 4096:
+        raise ConfigurationError("browser control-plane credential file is invalid")
+    try:
+        value = payload.decode("ascii").removesuffix("\n").removesuffix("\r")
+    except UnicodeDecodeError as exc:
+        raise ConfigurationError("browser control-plane credential file is invalid") from exc
+    if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
+        raise ConfigurationError("browser control-plane credential file is invalid")
+    return value
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -544,6 +590,34 @@ def validate_settings(settings: Settings) -> None:
             raise ConfigurationError(
                 "token authentication requires a configured principal: " + ", ".join(missing)
             )
+    if (
+        settings.browser_provider is not BrowserProviderKind.DISABLED
+        and not settings.browser_allowed_origins
+    ):
+        raise ConfigurationError(
+            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER is enabled"
+        )
+    if settings.browser_provider is BrowserProviderKind.HOSTED:
+        if settings.browser_profile_service_url is None:
+            raise ConfigurationError(
+                "BROWSER_PROFILE_SERVICE_URL is required when BROWSER_PROVIDER=hosted"
+            )
+        if settings.browser_profile_id is None:
+            raise ConfigurationError("BROWSER_PROFILE_ID is required when BROWSER_PROVIDER=hosted")
+        if "browser_profile_control_plane" not in settings.credentials:
+            raise ConfigurationError(
+                "a browser profile control-plane credential is required when "
+                "BROWSER_PROVIDER=hosted"
+            )
+    elif settings.browser_profile_id is not None:
+        raise ConfigurationError("BROWSER_PROFILE_ID requires BROWSER_PROVIDER=hosted")
+    if (
+        settings.browser_grant_id is not None
+        and settings.browser_provider is not BrowserProviderKind.HOSTED
+    ):
+        raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROVIDER=hosted")
+    if settings.browser_run_purpose is not None and settings.browser_grant_id is None:
+        raise ConfigurationError("BROWSER_RUN_PURPOSE requires BROWSER_GRANT_ID")
 
 
 def validate_runtime_identity(
@@ -588,6 +662,18 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         for name, value in values.items()
         if name.endswith("_API_KEY") and name != "VEETBOT_OPENAI_KEY" and value.strip()
     }
+    browser_credential_file = values.get(
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+        "",
+    ).strip()
+    if browser_credential_file:
+        if "browser_profile_control_plane" in credentials:
+            raise ConfigurationError(
+                "configure exactly one browser control-plane credential source"
+            )
+        credentials["browser_profile_control_plane"] = SecretStr(
+            _read_private_credential_file(browser_credential_file)
+        )
     veetbot_openai_key = values.get("VEETBOT_OPENAI_KEY", "").strip()
     if veetbot_openai_key:
         credentials["openai"] = SecretStr(veetbot_openai_key)
@@ -649,6 +735,48 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         values.get("WEB_FETCH_PROVIDER", "disabled").strip(),
         "WEB_FETCH_PROVIDER",
     )
+    browser_provider = _parse_enum(
+        BrowserProviderKind,
+        values.get("BROWSER_PROVIDER", "disabled").strip(),
+        "BROWSER_PROVIDER",
+    )
+    raw_browser_origins = tuple(
+        value.strip()
+        for value in values.get("BROWSER_ALLOWED_ORIGINS", "").split(",")
+        if value.strip()
+    )
+    try:
+        browser_allowed_origins = tuple(
+            normalize_browser_origin(value) for value in raw_browser_origins
+        )
+    except ValueError as exc:
+        raise ConfigurationError("BROWSER_ALLOWED_ORIGINS contains an invalid origin") from exc
+    if len(set(browser_allowed_origins)) != len(browser_allowed_origins):
+        raise ConfigurationError("BROWSER_ALLOWED_ORIGINS contains duplicate origins")
+    browser_profile_service_url = values.get("BROWSER_PROFILE_SERVICE_URL", "").strip() or None
+    if browser_profile_service_url is not None:
+        parsed_profile_service = urlsplit(browser_profile_service_url)
+        if (
+            parsed_profile_service.scheme != "https"
+            or parsed_profile_service.hostname is None
+            or parsed_profile_service.username is not None
+            or parsed_profile_service.password is not None
+            or parsed_profile_service.path not in {"", "/"}
+            or parsed_profile_service.query
+            or parsed_profile_service.fragment
+        ):
+            raise ConfigurationError("BROWSER_PROFILE_SERVICE_URL must be one HTTPS origin")
+        browser_profile_service_url = browser_profile_service_url.rstrip("/")
+        if "browser_profile_control_plane" not in credentials:
+            raise ConfigurationError(
+                "a browser profile control-plane credential is required when "
+                "BROWSER_PROFILE_SERVICE_URL is configured"
+            )
+    browser_profile_id = _optional_uuid(values, "BROWSER_PROFILE_ID")
+    browser_grant_id = _optional_uuid(values, "BROWSER_GRANT_ID")
+    browser_run_purpose = values.get("BROWSER_RUN_PURPOSE", "").strip() or None
+    if browser_run_purpose is not None and len(browser_run_purpose) > 255:
+        raise ConfigurationError("BROWSER_RUN_PURPOSE must not exceed 255 characters")
     _validate_release_id(release_id)
     if auth_mode is AuthMode.DEV:
         auth_tenant_id = "local"
@@ -681,6 +809,12 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         release_id=release_id,
         web_search_provider=web_search_provider,
         web_fetch_provider=web_fetch_provider,
+        browser_provider=browser_provider,
+        browser_allowed_origins=browser_allowed_origins,
+        browser_profile_service_url=browser_profile_service_url,
+        browser_profile_id=browser_profile_id,
+        browser_grant_id=browser_grant_id,
+        browser_run_purpose=browser_run_purpose,
     )
     validate_settings(settings)
     return settings

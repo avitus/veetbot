@@ -1,3 +1,61 @@
 services:
   postgres:
     restart: unless-stopped
+  browser-profile-service:
+    build:
+      context: .
+      dockerfile: deploy/browser-profile-service.Dockerfile
+    image: ${BROWSER_PROFILE_SERVICE_IMAGE:-veetbot-browser-profile-service:local}
+    restart: unless-stopped
+    init: true
+    user: "65532:65532"
+    read_only: true
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 2.0
+    shm_size: 256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      BROWSER_PROFILE_SERVICE_AUTH_FILE: /run/secrets/browser-profile-service-auth
+      BROWSER_PROFILE_SESSION_SECRET_FILE: /run/secrets/browser-profile-session-secret
+      BROWSER_PROFILE_KEY_DIR: /run/secrets/browser-profile-keys
+      BROWSER_PROFILE_MATERIAL_ROOT: /var/lib/veetbot/browser-profiles
+      BROWSER_PROFILE_BIND_HOST: 0.0.0.0
+      BROWSER_PROFILE_BIND_PORT: "8080"
+      BROWSER_PROFILE_CEREMONY_BASE_URL: ${BROWSER_PROFILE_CEREMONY_BASE_URL}
+    ports:
+      - 127.0.0.1:${BROWSER_PROFILE_PORT:-8081}:8080
+    volumes:
+      - ${BROWSER_PROFILE_SERVICE_AUTH_FILE}:/run/secrets/browser-profile-service-auth:ro
+      - ${BROWSER_PROFILE_SESSION_SECRET_FILE}:/run/secrets/browser-profile-session-secret:ro
+      - ${BROWSER_PROFILE_KEY_DIR}:/run/secrets/browser-profile-keys:ro
+      - browser-profile-material:/var/lib/veetbot/browser-profiles
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+    networks:
+      - browser-profile-private
+      - browser-profile-egress
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  browser-profile-material:
+
+networks:
+  browser-profile-private:
+    internal: true
+  browser-profile-egress:
+    internal: false

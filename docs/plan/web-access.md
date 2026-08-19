@@ -170,6 +170,29 @@ run deadline.
 - Fetch rejects non-public or non-HTTPS destinations before provider
   execution, and provider responses and tool outputs are bounded.
 
-This tranche adds no new formal gate-registry entry and does not advance the
-Milestone 9 verified gate ceiling. Its acceptance contract is the shared port
-suite, focused unit tests, composition test, and the repository-wide checks.
+## Hard gates
+
+1. **Provider contract.** Tavily and Firecrawl both pass the complete shared
+   search-and-fetch contract and normalize to the same domain shapes. **M10.**
+2. **Capability routing.** The recommended hybrid and both single-provider
+   configurations bind the requested capabilities without changing either
+   agent-visible tool schema. **M10.**
+3. **Default-off registration.** A disabled capability is absent from both the
+   registry and the advertised default tool set. **M10.**
+4. **Context advertisement.** A web-enabled run advertises the selected web
+   tools directly and does not invent or advertise an unavailable skill loader.
+   **M10.**
+5. **Invocation trust.** A complete web invocation passes validation and
+   policy, persists its invocation, and returns `EXTERNAL_UNTRUSTED` content to
+   the next model step. **M10.**
+6. **Failure and secret boundary.** Missing or rejected credentials, rate
+   limits, transport failures, permanent rejections, and invalid output produce
+   stable platform failures without exposing credentials or upstream text.
+   **M10.**
+7. **Fetch confinement and bounds.** Non-public and non-HTTPS URLs are rejected
+   before provider dispatch, provider responses are hard-bounded, and complete
+   tool output remains within its declared byte ceiling. **M10.**
+
+These seven registry-backed gates, the shared port contract, and repository
+checks are the tranche's blocking delivery contract. They do not advance the
+verified gate ceiling until Milestone 10 as a whole completes.

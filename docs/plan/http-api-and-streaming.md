@@ -337,6 +337,8 @@ run.read          run.write        run.cancel
 approval.read     approval.resolve
 artifact.read
 skill.write
+browser.profile.read   browser.profile.write
+browser.grant.read     browser.grant.write
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow
@@ -377,6 +379,20 @@ is not an authorization input.
 | `POST /v1/approvals/{id}/resolve` | `approval.resolve` |
 | `GET /v1/artifacts/{id}` | `artifact.read` |
 | `GET /v1/artifacts/{id}/content` | `artifact.read` |
+| `POST /v1/browser-profiles` | `browser.profile.write` |
+| `GET /v1/browser-profiles` | `browser.profile.read` |
+| `GET /v1/browser-profiles/{id}` | `browser.profile.read` |
+| `POST /v1/browser-profiles/{id}/revoke` | `browser.profile.write` |
+| `DELETE /v1/browser-profiles/{id}` | `browser.profile.write` |
+| `POST /v1/browser-profiles/{id}/authentication-ceremonies` | `browser.profile.write` |
+| `GET /v1/browser-profiles/{id}/authentication-ceremonies` | `browser.profile.read` |
+| `GET /v1/browser-authentication-ceremonies/{id}` | `browser.profile.read` |
+| `POST /v1/browser-authentication-ceremonies/{id}/cancel` | `browser.profile.write` |
+| `POST /v1/browser-grants` | `browser.grant.write` |
+| `GET /v1/browser-grants` | `browser.grant.read` |
+| `GET /v1/browser-grants/{id}` | `browser.grant.read` |
+| `POST /v1/browser-grants/{id}/revoke` | `browser.grant.write` |
+| `DELETE /v1/browser-grants/{id}` | `browser.grant.write` |
 | `GET /health/live` | none |
 | `GET /health/ready` | none |
 
@@ -403,7 +419,7 @@ governs. There is no `skill.read`: nothing reads skills over the API in
 `skill.write` is not the only such scope, and the rest arrive a milestone
 earlier than this document does.
 [policy-and-approvals.md](policy-and-approvals.md) enumerates the whole
-closed vocabulary — these nine plus the six that
+closed vocabulary — these thirteen plus the six that
 `ToolSpec.required_scopes` carries — states the grammar that lets an MCP
 server's operator-configured scopes exist outside a closed list, and
 specifies the subset test the pipeline runs. Nothing there changes what a
@@ -1313,6 +1329,18 @@ is already stored and an artifact is immutable once written. A
 Range requests are not supported in 0.1. A `Range` header is ignored
 and the full body is returned with `200`, which is the behaviour the
 HTTP specification permits for a server that does not implement ranges.
+
+## Browser profiles, authentication, and grants
+
+Milestone 10 adds the fourteen scoped browser routes enumerated in the scope
+table, bringing the current public route surface to thirty-one without changing
+the completed fourteen-route Milestone 5 baseline. The canonical request,
+response, tenancy, secret-exclusion, lifecycle, and idempotency contracts are in
+[browser-automation.md](browser-automation.md#profile-api-contract). Public
+views never include provider references, key versions, lease references,
+launch capabilities after ceremony creation, cookies, storage state, or
+provider diagnostics. Cross-principal identifiers remain `404`, and every
+mutation uses the ordinary HTTP idempotency boundary.
 
 ## Health
 

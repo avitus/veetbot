@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -331,6 +332,126 @@ class PolicyProfileRow(Base):
     rule_count: Mapped[int] = mapped_column(Integer)
     loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     loaded_by: Mapped[str] = mapped_column(Text)
+
+
+class BrowserProfileRow(Base):
+    __tablename__ = "browser_profiles"
+    __table_args__ = (
+        CheckConstraint("generation >= 0", name="generation_nonnegative"),
+        CheckConstraint(
+            "status IN ('provisioning','authentication_required','ready','needs_user','revoked')",
+            name="status_closed",
+        ),
+        CheckConstraint(
+            "(status = 'provisioning' AND provider_name IS NULL "
+            "AND provider_ref IS NULL AND encryption_key_version IS NULL) OR "
+            "(status = 'revoked' AND ((provider_name IS NULL "
+            "AND provider_ref IS NULL AND encryption_key_version IS NULL) OR "
+            "(provider_name IS NOT NULL AND provider_ref IS NOT NULL "
+            "AND encryption_key_version IS NOT NULL))) OR "
+            "(status IN ('authentication_required','ready','needs_user') "
+            "AND provider_name IS NOT NULL AND provider_ref IS NOT NULL "
+            "AND encryption_key_version IS NOT NULL)",
+            name="binding_consistent",
+        ),
+        Index(
+            "ix_browser_profiles_tenant_principal_created",
+            "tenant_id",
+            "principal_id",
+            "created_at",
+        ),
+        Index(
+            "uq_browser_profiles_provider_ref",
+            "provider_ref",
+            unique=True,
+            postgresql_where=text("provider_ref IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    provider_name: Mapped[str | None] = mapped_column(Text)
+    provider_ref: Mapped[str | None] = mapped_column(Text)
+    allowed_origins: Mapped[list[str]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text)
+    generation: Mapped[int] = mapped_column(Integer)
+    encryption_key_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserGrantRow(Base):
+    __tablename__ = "browser_grants"
+    __table_args__ = (
+        CheckConstraint("profile_generation >= 0", name="generation_nonnegative"),
+        CheckConstraint(
+            "expires_at > starts_at AND expires_at <= starts_at + interval '30 days'",
+            name="time_window",
+        ),
+        CheckConstraint("jsonb_array_length(action_kinds) > 0", name="action_kinds_nonempty"),
+        Index(
+            "ix_browser_grants_tenant_principal_profile",
+            "tenant_id",
+            "principal_id",
+            "profile_id",
+        ),
+        Index("ix_browser_grants_active_expiry", "expires_at", "revoked_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("browser_profiles.id", ondelete="CASCADE")
+    )
+    profile_generation: Mapped[int] = mapped_column(Integer)
+    agent_version: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(Text)
+    allowed_origins: Mapped[list[str]] = mapped_column(JSONB)
+    action_kinds: Mapped[list[str]] = mapped_column(JSONB)
+    element_roles: Mapped[list[str]] = mapped_column(JSONB)
+    element_names: Mapped[list[str]] = mapped_column(JSONB)
+    purpose: Mapped[str | None] = mapped_column(Text)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str] = mapped_column(Text)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserAuthenticationRow(Base):
+    __tablename__ = "browser_authentications"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('authentication_required','needs_user','ready','expired','cancelled')",
+            name="status_closed",
+        ),
+        CheckConstraint(
+            "expires_at > created_at AND expires_at <= created_at + interval '5 minutes'",
+            name="time_window",
+        ),
+        Index(
+            "ix_browser_authentications_tenant_principal_profile",
+            "tenant_id",
+            "principal_id",
+            "profile_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("browser_profiles.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ProcessEventRow(Base):

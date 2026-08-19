@@ -9,6 +9,9 @@ from typing import Protocol, Self
 from agent_core.domain.agents import Principal
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
+from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
+from agent_core.ports.browser_grants import BrowserGrantRepository
+from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
@@ -40,6 +43,9 @@ class RepositoryUnitOfWork(Protocol):
     agents: AgentRepository
     approvals: ApprovalRepository
     policy_profiles: PolicyProfileRepository
+    browser_profiles: BrowserProfileRepository
+    browser_grants: BrowserGrantRepository
+    browser_authentications: BrowserAuthenticationRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
     session_deletions: SessionDeletionRepository

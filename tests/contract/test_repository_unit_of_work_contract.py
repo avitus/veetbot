@@ -22,6 +22,7 @@ async def test_repository_unit_of_work_exposes_one_repository_set() -> None:
         )
     )
     async with factory() as uow:
+        assert uow.browser_profiles is not None
         configured = agent()
         await uow.agents.put(configured)
         assert await uow.agents.latest_version(configured.id) == configured

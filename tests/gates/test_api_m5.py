@@ -385,7 +385,7 @@ async def test_every_route_declares_exactly_one_scope_except_health(tmp_path: Pa
             composition.readiness_probe,
         )
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
-    assert len(routes) == 17
+    assert len(routes) == 31
     for route in routes:
         declared = (route.openapi_extra or {}).get("required_scope")
         if route.path in {"/health/live", "/health/ready"}:

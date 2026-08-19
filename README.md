@@ -350,6 +350,44 @@ Either selector may instead name `firecrawl`, `tavily`, or `disabled`. Provider
 keys are resolved by the credential broker at call time and are never exposed
 to the model.
 
+Rendered browser navigation is separately disabled by default. To enable the
+ephemeral read-only Playwright provider, install its Chromium artifact and bind
+an explicit set of exact HTTPS origins:
+
+```bash
+uv run playwright install chromium
+BROWSER_PROVIDER=playwright
+BROWSER_ALLOWED_ORIGINS=https://example.org,https://static.example.org
+```
+
+Origins cannot contain paths, wildcards, nonstandard ports, or private-network
+hosts. The provider creates a non-persistent context and retains no login state
+after shutdown. It exposes `browser.navigate`, `browser.observe`, and
+approval-gated `browser.act`. Actions are bound to the exact observed page
+revision, are never parallelized or blindly retried, and ambiguous dispatches
+are recorded as uncertain.
+
+Authenticated operation uses the separately deployed hosted profile service.
+The public profile/authentication/grant API first creates a dedicated profile
+and completes a five-minute direct user login ceremony. Trusted runtime
+configuration can then bind that profile, and optionally one exact standing
+grant, without exposing either identifier to model tool arguments:
+
+```bash
+BROWSER_PROVIDER=hosted
+BROWSER_ALLOWED_ORIGINS=https://example.org
+BROWSER_PROFILE_SERVICE_URL=https://browser.example.org
+BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=/run/secrets/browser-control-plane
+BROWSER_PROFILE_ID=00000000-0000-0000-0000-000000000000
+BROWSER_GRANT_ID=
+BROWSER_RUN_PURPOSE=
+```
+
+Hosted profile state is encrypted in the isolated service, session leases are
+run-attempt scoped, and every mutation still needs an ordinary approval unless
+an unexpired policy-revalidated grant matches a provider-classified routine
+action. Scheduling those runs belongs to Milestone 11.
+
 ## Workflow availability
 
 Every workflow the engineering plan reserved for Milestones 0 through 9 is

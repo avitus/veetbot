@@ -16,10 +16,24 @@ from typing import Any, Literal, cast
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
+from agent_core.adapters.browser.authentications import (
+    InMemoryBrowserAuthenticationRepository,
+)
+from agent_core.adapters.browser.grants import InMemoryBrowserGrantRepository
+from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
+from agent_core.adapters.browser.hosted_provider import HostedBrowserProvider
+from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
+from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
+from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
+from agent_core.adapters.browser.unavailable import (
+    UnavailableBrowserAuthenticationControlPlane,
+    UnavailableBrowserProfileControlPlane,
+)
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -94,6 +108,9 @@ from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
     PostgresArtifactRepository,
+    PostgresBrowserAuthenticationRepository,
+    PostgresBrowserGrantRepository,
+    PostgresBrowserProfileRepository,
     PostgresCapabilityEvaluationRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
@@ -129,6 +146,12 @@ from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
+from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
+from agent_core.application.browser_management import (
+    BrowserGrantManagementService,
+    BrowserProfileManagementService,
+    BrowserUnitOfWorkFactory,
+)
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -141,6 +164,12 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     ArtifactService as PublicArtifactServiceContract,
+)
+from agent_core.application.services import (
+    BrowserGrantService as PublicBrowserGrantServiceContract,
+)
+from agent_core.application.services import (
+    BrowserProfileService as PublicBrowserProfileServiceContract,
 )
 from agent_core.application.services import (
     RunService as PublicRunServiceContract,
@@ -156,6 +185,7 @@ from agent_core.application.trajectory_service import (
 )
 from agent_core.config import (
     PACKAGE_ROOT,
+    BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
     MemoryProviderExtractionMode,
@@ -174,6 +204,7 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
@@ -224,6 +255,12 @@ from agent_core.model.registry import ProviderRegistry, StaticModelRouter
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.browser import BrowserProvider
+from agent_core.ports.browser_profiles import BrowserProfileControlPlane
+from agent_core.ports.browser_sessions import (
+    BrowserAuthenticationControlPlane,
+    BrowserSessionControlPlane,
+)
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
@@ -242,6 +279,9 @@ from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
+from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_navigate import BrowserNavigateTool
+from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
@@ -276,6 +316,8 @@ class ApplicationServices:
     runs: PublicRunServiceContract
     approvals: PublicApprovalServiceContract
     artifacts: PublicArtifactServiceContract
+    browser_profiles: PublicBrowserProfileServiceContract
+    browser_grants: PublicBrowserGrantServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,6 +482,9 @@ def _memory_uow_repositories(
         agents=agents,
         approvals=approvals,
         policy_profiles=InMemoryPolicyProfileRepository(),
+        browser_profiles=InMemoryBrowserProfileRepository(),
+        browser_grants=InMemoryBrowserGrantRepository(),
+        browser_authentications=InMemoryBrowserAuthenticationRepository(),
         process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
         session_deletions=session_deletions,
@@ -494,6 +539,9 @@ def _postgres_repository_factory(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
             policy_profiles=PostgresPolicyProfileRepository(session),
+            browser_profiles=PostgresBrowserProfileRepository(session),
+            browser_grants=PostgresBrowserGrantRepository(session),
+            browser_authentications=PostgresBrowserAuthenticationRepository(session),
             process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
             session_deletions=PostgresSessionDeletionRepository(session),
@@ -570,6 +618,9 @@ async def _compose(
     web_search_provider: WebProvider | None,
     web_fetch_provider: WebProvider | None,
     memory_provider_evaluation_mode: bool,
+    browser_provider: BrowserProvider | None,
+    browser_profile_lifecycle: BrowserProfileControlPlane,
+    browser_authentications: BrowserAuthenticationControlPlane,
 ) -> tuple[Composition, list[ModelProvider]]:
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
@@ -694,6 +745,10 @@ async def _compose(
         registry.register(WebSearchTool(web_search_provider))
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
+    if browser_provider is not None:
+        registry.register(BrowserNavigateTool(browser_provider))
+        registry.register(BrowserObserveTool(browser_provider))
+        registry.register(BrowserActTool(browser_provider))
 
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
@@ -1049,12 +1104,26 @@ async def _compose(
                     completed += 1
             return completed
 
+        policy_engine = DeterministicPolicyEngine(ruleset)
+        standing_authorizer = None
+        if settings.browser_grant_id is not None:
+            if browser_provider is None or settings.browser_profile_id is None:
+                raise ConfigurationError("standing browser grant composition is incomplete")
+            standing_authorizer = ConfiguredBrowserStandingAuthorizer(
+                grant_id=settings.browser_grant_id,
+                profile_id=settings.browser_profile_id,
+                purpose=settings.browser_run_purpose,
+                provider=browser_provider,
+                uow_factory=uow_factory,
+                policy=policy_engine,
+                now=clock.now,
+            )
         pipeline = ToolPipeline(
             registry,
             uow_factory,
             clock,
             ids,
-            policy=DeterministicPolicyEngine(ruleset),
+            policy=policy_engine,
             workspace_factory=sandbox_manager,
             artifact_writers=artifact_writers,
             current_principal=principal,
@@ -1063,6 +1132,7 @@ async def _compose(
             maximum_loaded_skills=int(skill_bodies_config["max_items"]),
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
+            standing_authorizer=standing_authorizer,
         )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
@@ -1209,6 +1279,22 @@ async def _compose(
         async def sweep_session_deletions() -> int:
             return await public_session_service.purge_pending_artifacts(principal)
 
+        browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
+        browser_profile_service = BrowserProfileManagementService(
+            uow_factory=browser_uow_factory,
+            lifecycle=browser_profile_lifecycle,
+            authentications=browser_authentications,
+            clock=clock,
+            ids=ids,
+        )
+        browser_grant_service = BrowserGrantManagementService(
+            uow_factory=browser_uow_factory,
+            clock=clock,
+            ids=ids,
+            agent_version=agent.version,
+            policy_version=ruleset.policy_version,
+        )
+
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -1236,6 +1322,8 @@ async def _compose(
                 general_artifacts=general_artifact_store,
                 clock=clock,
             ),
+            browser_profiles=browser_profile_service,
+            browser_grants=browser_grant_service,
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
         return (
@@ -1350,6 +1438,43 @@ def _web_provider(
     raise ConfigurationError(f"unsupported web provider {kind.value!r}")
 
 
+def _browser_provider(
+    kind: BrowserProviderKind,
+    *,
+    principal: Principal,
+    allowed_origins: tuple[str, ...],
+    profile_id: UUID | None,
+    profiles: UnitOfWorkFactory,
+    sessions: BrowserSessionControlPlane | None,
+) -> BrowserProvider | None:
+    if kind is BrowserProviderKind.DISABLED:
+        return None
+    if kind is BrowserProviderKind.PLAYWRIGHT:
+        return PlaywrightBrowserProvider(
+            tenant_id=principal.tenant_id,
+            allowed_origins=allowed_origins,
+        )
+    if kind is BrowserProviderKind.HOSTED:
+        if profile_id is None or sessions is None:
+            raise ConfigurationError("hosted browser provider composition is incomplete")
+
+        async def load_profile(
+            owner: Principal,
+            requested_profile_id: UUID,
+        ) -> BrowserProfile:
+            async with profiles() as uow:
+                return await uow.browser_profiles.get(requested_profile_id, owner)
+
+        return HostedBrowserProvider(
+            principal=principal,
+            profile_id=profile_id,
+            allowed_origins=allowed_origins,
+            profiles=load_profile,
+            sessions=sessions,
+        )
+    raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
+
+
 def _effective_model_policy(
     deployment_mode: DeploymentMode,
     requested_policy: str | None,
@@ -1387,6 +1512,7 @@ async def build(
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
+    browser_provider_override: BrowserProvider | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
@@ -1499,6 +1625,10 @@ async def build(
         web_fetch_provider_override is not None
         or effective_settings.web_fetch_provider is not WebProviderKind.DISABLED
     )
+    browser_enabled = (
+        browser_provider_override is not None
+        or effective_settings.browser_provider is not BrowserProviderKind.DISABLED
+    )
     default_enabled_tools = [
         "math.calculate",
         "conversation.ask_user",
@@ -1506,7 +1636,11 @@ async def build(
         "workspace.read_text",
         "workspace.write_text",
         "workspace.list_files",
-        *([] if web_search_enabled or web_fetch_enabled else ["demo.external_write"]),
+        *(
+            []
+            if web_search_enabled or web_fetch_enabled or browser_enabled
+            else ["demo.external_write"]
+        ),
         "sandbox.run_command",
         "artifact.export",
         WORKING_STATE_TOOL_NAME,
@@ -1518,6 +1652,7 @@ async def build(
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
+        *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
     ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
@@ -1546,6 +1681,9 @@ async def build(
     engine = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
+    browser_provider: BrowserProvider | None = None
+    browser_profile_http_client: httpx.AsyncClient | None = None
+    browser_sessions: BrowserSessionControlPlane | None = None
     live_events: LiveEventBroadcaster = (
         InMemoryLiveEventBroadcaster()
         if storage == "memory"
@@ -1617,6 +1755,30 @@ async def build(
                 for name, secret in effective_settings.credentials.items()
             }
         )
+        if effective_settings.browser_profile_service_url is None:
+            browser_profile_lifecycle: BrowserProfileControlPlane = (
+                UnavailableBrowserProfileControlPlane()
+            )
+            browser_authentications: BrowserAuthenticationControlPlane = (
+                UnavailableBrowserAuthenticationControlPlane()
+            )
+        else:
+            browser_profile_http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                follow_redirects=False,
+            )
+            browser_profile_lifecycle = HostedBrowserProfileControlPlane(
+                base_url=effective_settings.browser_profile_service_url,
+                credentials=effective_credential_resolver,
+                client=browser_profile_http_client,
+            )
+            hosted_browser_sessions = HostedBrowserSessionControlPlane(
+                base_url=effective_settings.browser_profile_service_url,
+                credentials=effective_credential_resolver,
+                client=browser_profile_http_client,
+            )
+            browser_authentications = hosted_browser_sessions
+            browser_sessions = hosted_browser_sessions
         web_search_provider = (
             web_search_provider_override
             if web_search_provider_override is not None
@@ -1643,6 +1805,18 @@ async def build(
         )
         if web_fetch_provider is not None and web_fetch_provider is not web_search_provider:
             web_providers.append(web_fetch_provider)
+        browser_provider = (
+            browser_provider_override
+            if browser_provider_override is not None
+            else _browser_provider(
+                effective_settings.browser_provider,
+                principal=effective_principal,
+                allowed_origins=effective_settings.browser_allowed_origins,
+                profile_id=effective_settings.browser_profile_id,
+                profiles=uow_factory,
+                sessions=browser_sessions,
+            )
+        )
         for package, source in skill_packages:
             async with uow_factory() as uow:
                 await uow.skills.install(
@@ -1692,6 +1866,9 @@ async def build(
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
+            browser_provider=browser_provider,
+            browser_profile_lifecycle=browser_profile_lifecycle,
+            browser_authentications=browser_authentications,
         )
         yield composition
     finally:
@@ -1727,6 +1904,25 @@ async def build(
                 logger.warning(
                     "web_provider_close_failed",
                     extra={"provider": web_provider.name, "error_class": type(exc).__name__},
+                )
+        if browser_provider is not None:
+            try:
+                await browser_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "browser_provider_close_failed",
+                    extra={
+                        "provider": browser_provider.name,
+                        "error_class": type(exc).__name__,
+                    },
+                )
+        if browser_profile_http_client is not None:
+            try:
+                await browser_profile_http_client.aclose()
+            except Exception as exc:
+                logger.warning(
+                    "browser_profile_client_close_failed",
+                    extra={"error_class": type(exc).__name__},
                 )
         try:
             await live_events.close()

@@ -42,6 +42,7 @@ STAGE="$RELEASES_DIR/$RELEASE_ID"
 CURRENT="$DEPLOY_ROOT/current"
 RELEASE_IMAGE="agent-core-sandbox:$RELEASE_ID"
 PRODUCTION_IMAGE="agent-core-sandbox:production"
+PROFILE_RELEASE_IMAGE="veetbot-browser-profile-service:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
 HEALTH_HEADERS=""
@@ -97,6 +98,7 @@ for required in \
   alembic.ini \
   docker-compose.yml \
   deploy/docker-compose.production.yml \
+  deploy/browser-profile-service.Dockerfile \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
   deploy/systemd/veetbot-maintenance.service \
@@ -116,17 +118,45 @@ cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
 uv sync --frozen --no-dev
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
+docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 
 set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
 [[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
+[[ "${BROWSER_PROFILE_SERVICE_AUTH_FILE:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE must be an absolute path"
+[[ -f "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]] || fail \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE must name an existing regular file"
+[[ ! -L "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]] || fail \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE must not be a symlink"
+[[ "${BROWSER_PROFILE_SESSION_SECRET_FILE:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE must be an absolute path"
+[[ -f "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]] || fail \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE must name an existing regular file"
+[[ ! -L "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]] || fail \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE must not be a symlink"
+[[ "${BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must be an absolute path"
+[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]] || fail \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must name an existing regular file"
+[[ ! -L "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]] || fail \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must not be a symlink"
+[[ "${BROWSER_PROFILE_CEREMONY_BASE_URL:-}" =~ ^https://[^/?#[:space:]]+/?$ ]] || fail \
+  "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin"
+[[ "${BROWSER_PROFILE_KEY_DIR:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_KEY_DIR must be an absolute path"
+[[ -d "$BROWSER_PROFILE_KEY_DIR" ]] || fail \
+  "BROWSER_PROFILE_KEY_DIR must name an existing directory"
+[[ ! -L "$BROWSER_PROFILE_KEY_DIR" ]] || fail \
+  "BROWSER_PROFILE_KEY_DIR must not be a symlink"
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
+export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
   --project-name "$COMPOSE_PROJECT_NAME" \
   -f docker-compose.yml -f deploy/docker-compose.production.yml \
-  up -d postgres
+  up -d --wait --wait-timeout "$HEALTH_TIMEOUT_SECS" postgres browser-profile-service
 
 export VEETBOT_RELEASE_ID="$RELEASE_ID"
 export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"

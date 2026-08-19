@@ -73,11 +73,11 @@ Read, in this order, before starting an assignment:
 
 - Work only on the **active** milestone or an explicitly authorized one
   (see project state; currently Milestone 10 automatic memory, self-authored
-  skills, and provider-neutral web access).
+  skills, provider-neutral web access, and authenticated browser automation).
 - Do not begin later milestones speculatively.
 - Milestones 0 through 9 are complete. The Milestone 10 tranches above are
-  authorized with their own acceptance contracts; scheduling, routing,
-  general-purpose subagents, and other Milestone 10 extensions remain unauthorized.
+  authorized with their own acceptance contracts; routing, general-purpose
+  subagents, and other Milestone 10 extensions remain unauthorized; scheduling is an unauthorized Milestone 11.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).

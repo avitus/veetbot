@@ -726,7 +726,7 @@ call sites.
 ### Pinning, and the contradiction with availability routing
 
 Section 10 (`engineering-plan.md:1305`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:2932`) wants routing to move work
+provider. Milestone 10 (`engineering-plan.md:2918`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -976,7 +976,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:636` because it answers the
+`policy_version` at `policy-and-approvals.md:638` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1451,7 +1451,7 @@ renames are.
 
 `engineering-plan.md:592` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:831-860` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:833-862` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.

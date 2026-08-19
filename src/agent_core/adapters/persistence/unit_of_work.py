@@ -12,6 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.functions import func
 
+from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
+from agent_core.ports.browser_grants import BrowserGrantRepository
+from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
@@ -60,6 +63,9 @@ class UnitOfWorkRepositories:
     agents: AgentRepository
     approvals: ApprovalRepository
     policy_profiles: PolicyProfileRepository
+    browser_profiles: BrowserProfileRepository
+    browser_grants: BrowserGrantRepository
+    browser_authentications: BrowserAuthenticationRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
     session_deletions: SessionDeletionRepository
@@ -104,6 +110,9 @@ class MemoryUnitOfWork:
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
+        self.browser_profiles = repositories.browser_profiles
+        self.browser_grants = repositories.browser_grants
+        self.browser_authentications = repositories.browser_authentications
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
         self.session_deletions = repositories.session_deletions
@@ -198,6 +207,9 @@ class PostgresUnitOfWork:
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
+        self.browser_profiles = repositories.browser_profiles
+        self.browser_grants = repositories.browser_grants
+        self.browser_authentications = repositories.browser_authentications
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
         self.session_deletions = repositories.session_deletions

@@ -2188,7 +2188,7 @@ budget_exceeded_total
 
 Build evaluations before advanced features.
 
-The detailed design - what a hard gate is, and the registry that makes one hundred and eighty-six gate declarations — one hundred and seventy-seven across fourteen detailed-design specifications, two in this plan, and seven in the milestone map — reconcile as one hundred and eighty-three registry entries after subtracting three cross-spec aliases; the four gate kinds, and why eighty of those registry entries cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
+The detailed design - what a hard gate is, and the registry that makes two hundred and three gate declarations — one hundred and ninety-four across sixteen detailed-design specifications, two in this plan, and seven in the milestone map — reconcile as two hundred registry entries after subtracting three cross-spec aliases; the four gate kinds, and why eighty-three of those registry entries cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
 
 ### 20.1 Evaluation case format
 
@@ -2828,21 +2828,21 @@ Never automatically store:
 - Retrieval respects tenant and scope.
 - Memory improves defined evaluation cases without increasing policy failures.
 
-### Milestone 10: Scheduling, model routing, and subagents
+### Milestone 10: Memory maturation and authorized extensions
 
 These are separately gated extensions. The repository owner authorized Milestone
 10 on 2026-08-17, selected memory maturation as its first workstream, and
 separately authorized the self-authored-skills tranche. That authorization does
 not waive the entry conditions or acceptance gates of the other extensions.
 On 2026-08-18 the owner also authorized the independently deliverable
-public-web-access tranche specified in Section 32; it adds neither scheduling,
-new model routing, nor general-purpose subagents.
+public-web-access tranche specified in Section 32; it adds neither Milestone 11
+scheduling, new model routing, nor general-purpose subagents.
 
 A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill.manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document.
 
 #### Self-authored skills (authorized tranche)
 
-This tranche is independently deliverable and does not authorize scheduling,
+This tranche is independently deliverable and does not authorize Milestone 11 scheduling,
 new routing behavior, or the general-purpose `delegate.run` path.
 
 Implement:
@@ -2905,20 +2905,6 @@ Acceptance criteria for this workstream:
 - An ordinary correction supersedes only the matching subject and belief type;
   unrelated preferences and entities continue to coexist.
 
-#### Scheduling
-
-Implement a scheduler only after durable on-demand runs are reliable.
-
-A scheduled run must still have:
-
-- Principal
-- Agent version
-- Policy profile
-- Tool scopes
-- Budget
-- Deadline
-- Audit record
-
 #### Second model provider
 
 Add a second provider adapter and run the same contract suite against it.
@@ -2964,6 +2950,23 @@ Add subagents only when evaluation evidence shows that a single agent fails beca
 - Independent verification
 
 Do not add role-named agents merely for planning, writing, or criticism without evidence of improvement.
+
+### Milestone 11: Scheduling
+
+Scheduling is a separately authorized future milestone. Implement a scheduler
+only after durable on-demand runs are reliable and a detailed design has
+declared its hard gates. Milestone 10 browser work may define the handoff data a
+future scheduler will need, but it does not authorize scheduler implementation.
+
+A scheduled run must still have:
+
+- Principal
+- Agent version
+- Policy profile
+- Tool scopes
+- Budget
+- Deadline
+- Audit record
 
 ## 22. Security baseline
 
@@ -3375,7 +3378,7 @@ Memory is the obvious shared component, but it is far from the only one. Everyth
 - Model gateway - all model calls go through the core, which holds the keys and enforces routing, budgets, and provider pinning (Section 10).
 - Tool execution and the sandbox - cloud tools and isolated code execution run server-side; a phone cannot host the sandbox (Sections 8, 18, 28).
 - Usage, cost, and budgets - a single ledger, so limits aggregate across devices rather than per-device (Section 6.5).
-- Scheduling - scheduled runs fire in the cloud regardless of which devices are online (Milestone 10).
+- Scheduling - scheduled runs fire in the cloud regardless of which devices are online (Milestone 11).
 - Observability and audit - one trace and audit stream across all devices (Section 19).
 
 ### 29.3 What stays device-local
@@ -3552,3 +3555,51 @@ and general-purpose subagents.
 - Missing credentials, rate limits, transport failures, permanent provider
   rejections, invalid output, and disallowed URLs produce stable failure codes
   without exposing upstream diagnostics.
+
+## 33. Authenticated browser automation
+
+The platform may operate rendered websites through a principal-owned,
+policy-bound browser profile. The detailed mechanism is specified in
+[browser-automation.md](browser-automation.md) and ADR-0056. The repository
+owner authorized this independently deliverable Milestone 10 tranche on
+2026-08-19. It does not authorize general host control, arbitrary JavaScript,
+credential exposure to the model, or weakening external-write approvals.
+
+### 33.1 Capability contract
+
+- `browser.navigate` and `browser.observe` return bounded rendered-page
+  observations through a provider-neutral `BrowserProvider`.
+- `browser.act` performs revision-bound interaction and is conservatively an
+  external write regardless of the apparent UI element.
+- Trusted composition, not model arguments, selects the principal, profile,
+  provider, device, origin policy, and standing grant.
+- Authentication secrets and browser profile material never enter model
+  context, tool arguments, events, results, logs, or sandboxed code.
+
+### 33.2 Security and rollout
+
+- Browser capabilities are disabled by default and every observation is
+  `EXTERNAL_UNTRUSTED`.
+- User-delegated login is an interactive platform surface. CAPTCHA, MFA,
+  reauthentication, and consent return `needs_user`; the model cannot bypass or
+  complete them with a secret.
+- Mutating actions require ordinary approval or an exact, expiring, revocable
+  standing grant. Initial hard exclusions cannot use a standing grant.
+- URL, redirect, frame, popup, download, upload, private-network, and browser
+  escape boundaries fail closed.
+- Possibly sent non-idempotent actions are uncertain and are never blindly
+  retried.
+
+### 33.3 Acceptance criteria
+
+- The shared provider contract supports device-local and hosted adapters
+  without changing agent-visible schemas.
+- Navigation and observation pass validation and policy, persist bounded
+  external-untrusted results, and cannot authorize arbitrary egress.
+- Profiles and grants are tenant/principal scoped, encrypted, revocable,
+  deletable, and never selected through model-authored identifiers.
+- Every mutation has an approval or matching standing grant and revalidates
+  policy, profile, origin, grant, and page revision immediately before dispatch.
+- Secret leakage, prompt injection, stale actions, cross-origin navigation,
+  session expiry, device loss, provider failure, and uncertain writes pass the
+  adversarial acceptance suite before tenant rollout.

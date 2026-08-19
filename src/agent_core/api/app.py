@@ -5,6 +5,7 @@ import logging
 import unicodedata
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
+from datetime import datetime
 from typing import Annotated, Literal, Protocol, cast
 from urllib.parse import quote
 from uuid import UUID
@@ -23,12 +24,20 @@ from agent_core.application.errors import SessionMessageCursorError
 from agent_core.application.services import (
     ApprovalService,
     ArtifactService,
+    BrowserGrantService,
+    BrowserProfileService,
     RunService,
     SessionService,
 )
 from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.browser import (
+    BrowserActionKind,
+    BrowserAuthenticationView,
+    BrowserGrantView,
+    BrowserProfileView,
+)
 from agent_core.domain.errors import AgentCoreError
 from agent_core.domain.views import (
     ApprovalFilters,
@@ -93,6 +102,12 @@ class ApplicationServices(Protocol):
     @property
     def artifacts(self) -> ArtifactService: ...
 
+    @property
+    def browser_profiles(self) -> BrowserProfileService: ...
+
+    @property
+    def browser_grants(self) -> BrowserGrantService: ...
+
 
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -116,6 +131,31 @@ class ResolveApprovalRequest(BaseModel):
 
     decision: ApprovalResolutionType
     reason: str | None = Field(default=None, max_length=APPROVAL_REASON_MAX_LENGTH)
+
+
+class CreateBrowserProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_origins: tuple[str, ...] = Field(min_length=1, max_length=64)
+
+
+class BeginBrowserAuthenticationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login_url: str = Field(min_length=1, max_length=4096)
+
+
+class CreateBrowserGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: UUID
+    allowed_origins: tuple[str, ...] = Field(min_length=1, max_length=64)
+    action_kinds: tuple[BrowserActionKind, ...] = Field(min_length=1, max_length=6)
+    element_roles: tuple[str, ...] = Field(default=(), max_length=64)
+    element_names: tuple[str, ...] = Field(default=(), max_length=64)
+    purpose: str | None = Field(default=None, min_length=1, max_length=255)
+    starts_at: datetime
+    expires_at: datetime
 
 
 def _request_id(request: Request) -> str:
@@ -501,6 +541,219 @@ def create_app(
                 **private_cache_headers,
             },
         )
+
+    @app.post(
+        "/v1/browser-profiles",
+        status_code=201,
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def create_browser_profile(
+        body: CreateBrowserProfileRequest,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserProfileView:
+        return await services.browser_profiles.create(
+            authenticated,
+            body.allowed_origins,
+            idempotency_key,
+        )
+
+    @app.get(
+        "/v1/browser-profiles",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def list_browser_profiles(
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> list[BrowserProfileView]:
+        return await services.browser_profiles.list(authenticated)
+
+    @app.get(
+        "/v1/browser-profiles/{profile_id}",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def get_browser_profile(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> BrowserProfileView:
+        return await services.browser_profiles.get(authenticated, profile_id)
+
+    @app.post(
+        "/v1/browser-profiles/{profile_id}/revoke",
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def revoke_browser_profile(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserProfileView:
+        del idempotency_key
+        return await services.browser_profiles.revoke(authenticated, profile_id)
+
+    @app.delete(
+        "/v1/browser-profiles/{profile_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def delete_browser_profile(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> Response:
+        del idempotency_key
+        await services.browser_profiles.delete(authenticated, profile_id)
+        return Response(status_code=204)
+
+    @app.post(
+        "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
+        status_code=201,
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def begin_browser_authentication(
+        profile_id: UUID,
+        body: BeginBrowserAuthenticationRequest,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserAuthenticationView:
+        return await services.browser_profiles.begin_authentication(
+            authenticated,
+            profile_id,
+            login_url=body.login_url,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get(
+        "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def list_browser_authentications(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> list[BrowserAuthenticationView]:
+        return await services.browser_profiles.list_authentications(
+            authenticated,
+            profile_id,
+        )
+
+    @app.get(
+        "/v1/browser-authentication-ceremonies/{authentication_id}",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def get_browser_authentication(
+        authentication_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> BrowserAuthenticationView:
+        return await services.browser_profiles.authentication_status(
+            authenticated,
+            authentication_id,
+        )
+
+    @app.post(
+        "/v1/browser-authentication-ceremonies/{authentication_id}/cancel",
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def cancel_browser_authentication(
+        authentication_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserAuthenticationView:
+        del idempotency_key
+        return await services.browser_profiles.cancel_authentication(
+            authenticated,
+            authentication_id,
+        )
+
+    @app.post(
+        "/v1/browser-grants",
+        status_code=201,
+        openapi_extra={"required_scope": "browser.grant.write"},
+    )
+    async def create_browser_grant(
+        body: CreateBrowserGrantRequest,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserGrantView:
+        return await services.browser_grants.create(
+            authenticated,
+            profile_id=body.profile_id,
+            allowed_origins=body.allowed_origins,
+            action_kinds=body.action_kinds,
+            element_roles=body.element_roles,
+            element_names=body.element_names,
+            purpose=body.purpose,
+            starts_at=body.starts_at,
+            expires_at=body.expires_at,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get(
+        "/v1/browser-grants",
+        openapi_extra={"required_scope": "browser.grant.read"},
+    )
+    async def list_browser_grants(
+        authenticated: Annotated[Principal, secured("browser.grant.read")],
+        profile_id: UUID | None = None,
+    ) -> list[BrowserGrantView]:
+        return await services.browser_grants.list(authenticated, profile_id=profile_id)
+
+    @app.get(
+        "/v1/browser-grants/{grant_id}",
+        openapi_extra={"required_scope": "browser.grant.read"},
+    )
+    async def get_browser_grant(
+        grant_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.grant.read")],
+    ) -> BrowserGrantView:
+        return await services.browser_grants.get(authenticated, grant_id)
+
+    @app.post(
+        "/v1/browser-grants/{grant_id}/revoke",
+        openapi_extra={"required_scope": "browser.grant.write"},
+    )
+    async def revoke_browser_grant(
+        grant_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserGrantView:
+        del idempotency_key
+        return await services.browser_grants.revoke(authenticated, grant_id)
+
+    @app.delete(
+        "/v1/browser-grants/{grant_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "browser.grant.write"},
+    )
+    async def delete_browser_grant(
+        grant_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> Response:
+        del idempotency_key
+        await services.browser_grants.delete(authenticated, grant_id)
+        return Response(status_code=204)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

@@ -66,3 +66,4 @@ implementation without one.
 - [ADR-0055 — Configurable CLI wait for durable runs](0055-configurable-cli-run-wait.md)
 - [ADR-0056 — Failure-triggered reflection review (Proposed)](0056-failure-reflection-review.md)
 - [ADR-0057 — Evaluation-gated provider-assisted memory extraction (Proposed)](0057-evaluation-gated-provider-memory-extraction.md)
+- [ADR-0058 — Provider-neutral authenticated browser automation (Proposed)](0058-authenticated-browser-automation.md)

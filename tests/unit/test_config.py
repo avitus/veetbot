@@ -1,5 +1,6 @@
 """Deployment configuration validation tests."""
 
+import os
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -21,6 +22,9 @@ from agent_core.config import (
     validate_runtime_identity,
     validate_settings,
 )
+
+PROFILE_ID = "00000000-0000-0000-0000-0000000000e7"
+GRANT_ID = "00000000-0000-0000-0000-0000000000e8"
 
 
 def base_environment() -> dict[str, str]:
@@ -47,6 +51,161 @@ def test_loads_frozen_settings() -> None:
     assert settings.release_id is None
     assert settings.web_search_provider is WebProviderKind.DISABLED
     assert settings.web_fetch_provider is WebProviderKind.DISABLED
+    assert settings.browser_provider.value == "disabled"
+    assert settings.browser_allowed_origins == ()
+
+
+def test_playwright_browser_provider_requires_explicit_origins() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "BROWSER_PROVIDER": "playwright",
+            "BROWSER_ALLOWED_ORIGINS": "https://example.org,https://static.example.org",
+        }
+    )
+    assert settings.browser_provider.value == "playwright"
+    assert settings.browser_allowed_origins == (
+        "https://example.org",
+        "https://static.example.org",
+    )
+
+    with pytest.raises(ConfigurationError, match="BROWSER_ALLOWED_ORIGINS"):
+        load_settings({**base_environment(), "BROWSER_PROVIDER": "playwright"})
+
+
+def test_hosted_browser_provider_requires_trusted_profile_and_service_configuration() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_ALLOWED_ORIGINS": "https://example.org",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_ID": PROFILE_ID,
+            "BROWSER_GRANT_ID": GRANT_ID,
+            "BROWSER_RUN_PURPOSE": "daily-language-practice",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        }
+    )
+
+    assert settings.browser_provider.value == "hosted"
+    assert str(settings.browser_profile_id) == PROFILE_ID
+    assert str(settings.browser_grant_id) == GRANT_ID
+    assert settings.browser_run_purpose == "daily-language-practice"
+    assert settings.browser_profile_service_url == "https://browser.internal.example"
+    assert "browser_profile_control_plane" in settings.credentials
+
+
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        ("BROWSER_PROFILE_SERVICE_URL", "BROWSER_PROFILE_SERVICE_URL"),
+        ("BROWSER_PROFILE_ID", "BROWSER_PROFILE_ID"),
+        ("BROWSER_PROFILE_CONTROL_PLANE_API_KEY", "control-plane credential"),
+    ],
+)
+def test_hosted_browser_provider_refuses_incomplete_trusted_configuration(
+    missing: str,
+    message: str,
+) -> None:
+    values = {
+        **base_environment(),
+        "BROWSER_PROVIDER": "hosted",
+        "BROWSER_ALLOWED_ORIGINS": "https://example.org",
+        "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+        "BROWSER_PROFILE_ID": PROFILE_ID,
+        "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+    }
+    values.pop(missing)
+
+    with pytest.raises(ConfigurationError, match=message):
+        load_settings(values)
+
+
+def test_browser_grant_pin_requires_hosted_provider_and_valid_uuid() -> None:
+    with pytest.raises(ConfigurationError, match="BROWSER_GRANT_ID requires"):
+        load_settings({**base_environment(), "BROWSER_GRANT_ID": GRANT_ID})
+
+    with pytest.raises(ConfigurationError, match="BROWSER_GRANT_ID must be a UUID"):
+        load_settings(
+            {
+                **base_environment(),
+                "BROWSER_PROVIDER": "hosted",
+                "BROWSER_ALLOWED_ORIGINS": "https://example.org",
+                "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+                "BROWSER_PROFILE_ID": PROFILE_ID,
+                "BROWSER_GRANT_ID": "not-a-uuid",
+                "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            }
+        )
+
+
+def test_browser_control_plane_credential_loads_from_one_private_file(tmp_path: Path) -> None:
+    credential = tmp_path / "browser-control-plane"
+    credential.write_text("opaque-control-plane-token-at-least-32-bytes\n", encoding="ascii")
+    os.chmod(credential, 0o600)
+
+    settings = load_settings(
+        {
+            **base_environment(),
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": str(credential),
+        }
+    )
+
+    assert (
+        settings.credentials["browser_profile_control_plane"].get_secret_value()
+        == "opaque-control-plane-token-at-least-32-bytes"
+    )
+
+
+def test_browser_control_plane_refuses_insecure_or_ambiguous_credentials(
+    tmp_path: Path,
+) -> None:
+    credential = tmp_path / "browser-control-plane"
+    credential.write_text("opaque-control-plane-token-at-least-32-bytes\n", encoding="ascii")
+    os.chmod(credential, 0o644)
+    values = {
+        **base_environment(),
+        "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": str(credential),
+    }
+    with pytest.raises(ConfigurationError, match="credential file"):
+        load_settings(values)
+
+    os.chmod(credential, 0o600)
+    values["BROWSER_PROFILE_CONTROL_PLANE_API_KEY"] = "second-token"
+    with pytest.raises(ConfigurationError, match="exactly one"):
+        load_settings(values)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://example.org",
+        "https://example.org/account",
+        "https://127.0.0.1",
+    ],
+)
+def test_browser_origins_must_be_exact_public_https_origins(origin: str) -> None:
+    with pytest.raises(ConfigurationError, match="invalid origin"):
+        load_settings(
+            {
+                **base_environment(),
+                "BROWSER_PROVIDER": "playwright",
+                "BROWSER_ALLOWED_ORIGINS": origin,
+            }
+        )
+
+
+def test_browser_origins_reject_duplicates_after_normalization() -> None:
+    with pytest.raises(ConfigurationError, match="duplicate origins"):
+        load_settings(
+            {
+                **base_environment(),
+                "BROWSER_PROVIDER": "playwright",
+                "BROWSER_ALLOWED_ORIGINS": "https://example.org,https://EXAMPLE.org",
+            }
+        )
 
 
 def test_web_provider_selection_is_per_capability() -> None:

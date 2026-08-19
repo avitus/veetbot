@@ -7,7 +7,7 @@ from enum import IntEnum, StrEnum
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TrustLevel(StrEnum):
@@ -123,6 +123,21 @@ class PolicyDecision(BaseModel):
     explanation: str
     modified_arguments: dict[str, Any] | None = None
     policy_version: str
+
+
+class StandingAuthorization(BaseModel):
+    """Auditable authority that may satisfy an approval-required decision."""
+
+    allowed: bool
+    reason_code: str = Field(min_length=1, max_length=128)
+    authorization_kind: str | None = Field(default=None, min_length=1, max_length=128)
+    authorization_ref: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def allowed_authority_has_auditable_evidence(self) -> StandingAuthorization:
+        if self.allowed and (self.authorization_kind is None or self.authorization_ref is None):
+            raise ValueError("allowed standing authority requires audit evidence")
+        return self
 
 
 class PolicyRule(BaseModel):

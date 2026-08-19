@@ -19,6 +19,7 @@ from agent_core.domain.runs import Run
 from agent_core.policy.hardline import hardline_matches
 
 _WEB_PROVIDER_TOOLS = frozenset({"web.search", "web.fetch"})
+_BROWSER_PROVIDER_TOOLS = frozenset({"browser.navigate", "browser.observe"})
 
 _RANK = {
     PolicyDecisionType.ALLOW: PolicyDecisionRank.ALLOW,
@@ -58,13 +59,22 @@ def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) 
     if condition is PolicyCondition.PATH_INSIDE_WORKSPACE:
         return _path_inside_workspace(action)
     if condition is PolicyCondition.HOST_ON_ALLOWLIST:
-        # The web-provider target is constructed only for builtins whose actual
-        # egress endpoint is fixed by the composition root. Model-authored URL
-        # arguments therefore cannot authorize direct worker egress.
-        return (
+        # Fixed provider targets are constructed only for exact builtin tools.
+        # The web adapter fixes its API endpoint, while the browser binding
+        # independently enforces its trusted origin policy before navigation.
+        # Model-authored URLs therefore cannot authorize worker egress.
+        fixed_provider_target = (
             action.target.kind == "web_provider"
             and action.target.network_enabled
             and action.name in _WEB_PROVIDER_TOOLS
+        ) or (
+            action.target.kind == "browser_provider"
+            and action.target.isolated
+            and action.target.network_enabled
+            and action.name in _BROWSER_PROVIDER_TOOLS
+        )
+        return (
+            fixed_provider_target
             and action.side_effect is SideEffectClass.NETWORK_READ
             and action.idempotency is IdempotencyClass.READ_ONLY
         )

@@ -287,9 +287,11 @@ sandbox.execute
 skill.write
 demo.write
 knowledge.write
+browser.profile.read   browser.profile.write
+browser.grant.read     browser.grant.write
 ```
 
-Fifteen strings. Nine are enumerated by the API document; the five after
+Nineteen strings. Thirteen are enumerated by the API document; the five after
 them are the `required_scopes` the builtin roster declares in
 [builtin-tools.md](builtin-tools.md), and `knowledge.write` is the one
 [knowledge-documents.md](knowledge-documents.md) adds for ingestion.
@@ -301,7 +303,7 @@ one resource.
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
-joined by dots, of which the last is the action. All fifteen have
+joined by dots, of which the last is the action. All nineteen have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
@@ -309,7 +311,7 @@ contributor the list cannot enumerate. `tool-system.md:1216` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the fifteen, or when its first segment is `mcp` and its
+when it is one of the nineteen, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 
@@ -414,7 +416,7 @@ now so that it does not have to be added later, and the resolution step
 arrives with the second principal.
 
 `AUTH_MODE=dev` binds the full scope set, and this section is what "full"
-means: all fifteen, and no `mcp.` scope. Those exist only once a server
+means: all nineteen, and no `mcp.` scope. Those exist only once a server
 is configured, and a development principal that silently held every scope
 an operator could declare would make the misdeclaration above the one
 class of mistake development cannot surface.
@@ -1067,7 +1069,7 @@ one blocks the milestone, not a warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
-11. **Scope grammar.** Every entry in the fifteen-string vocabulary and
+11. **Scope grammar.** Every entry in the nineteen-string vocabulary and
     every `required_scopes` entry on a registered `ToolSpec` matches the
     grammar, and registration rejects an MCP tool declaring a scope that is
     neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**
@@ -1180,7 +1182,7 @@ those routes already says.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
-31. The scope vocabulary is one closed set of fifteen dotted strings,
+31. The scope vocabulary is one closed set of nineteen dotted strings,
     shared by the API's route checks and by this pipeline's tool check.
 32. An MCP tool may require only scopes whose first segment is `mcp` and
     whose second is the server id, so an operator configuring a server

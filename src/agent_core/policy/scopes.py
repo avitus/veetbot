@@ -23,6 +23,10 @@ PLATFORM_SCOPES = frozenset(
         "skill.write",
         "demo.write",
         "knowledge.write",
+        "browser.profile.read",
+        "browser.profile.write",
+        "browser.grant.read",
+        "browser.grant.write",
     }
 )
 _SCOPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")

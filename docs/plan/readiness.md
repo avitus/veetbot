@@ -459,8 +459,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1002-1003` and the resolve at
-`policy-and-approvals.md:1012`, and one reference in
+at `policy-and-approvals.md:1004-1005` and the resolve at
+`policy-and-approvals.md:1014`, and one reference in
 `runtime-loop.md:1180` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -542,7 +542,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3274-3351`
+Section 28 of the plan is not empty — `engineering-plan.md:3277-3354`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -561,7 +561,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1371`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3349` requires a container-escape attempt as
+    `engineering-plan.md:3352` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -919,19 +919,20 @@ closed, so the verdict changes with it.
 
 ## Milestone 10: authorized workstreams in progress
 
-The project authorizes automatic memory formation and the independently
-deliverable self-authored-skills tranche. The six registered `gate.skill.*`
-entries and eleven automatic-memory, inspection, and provider gates form their
-delivery contracts.
-Scheduling, routing, and general-purpose subagents remain deferred directions.
+The project authorizes automatic memory formation, the independently
+deliverable self-authored-skills tranche, provider-neutral public-web access,
+and authenticated browser automation. The six registered `gate.skill.*`
+entries and eleven automatic-memory, inspection, and provider gates form the
+first two delivery contracts. Routing and general-purpose subagents remain
+deferred Milestone 10 directions; scheduling is a separate planned Milestone 11.
 
 The readiness review originally found this milestone structurally unlike every
 other one in the plan. The repository owner explicitly authorized it on
-2026-08-17 and selected memory maturation as the first workstream. Seventeen
-registry entries now belong to Milestone 10: six for skill authoring and eleven
-for automatic memory formation, governed inspection, and provider assistance.
-Authorization permits implementation; it does
-not make the remaining work ready or complete.
+2026-08-17 and selected memory maturation as the first workstream. Thirty-four
+registry entries now belong to Milestone 10: six for skill authoring, eleven for
+automatic memory formation and governed provider assistance, seven for
+public-web access, and ten for authenticated browser automation. Authorization
+permits implementation; it does not make the remaining work ready or complete.
 
 When this review was written, it had no `#### Implement` heading and no
 `#### Acceptance criteria` heading. It opened with *"These are separate optional
@@ -943,7 +944,8 @@ heading but does have acceptance criteria. The 2026-08-17 authorization adds a
 memory-maturation implement subsection and five criteria; the other extensions
 retain the structure assessed here.
 
-All seven scheduling requirements are undesigned. Of six routing
+The seven scheduling requirements moved to planned Milestone 11 and remain
+undesigned pending a detailed specification and formal gates. Of six routing
 considerations, data residency and evaluation performance have no
 design; the other four are at least touched by the model gateway's
 routing section. Of nine subagent requirements, five had none when
@@ -973,7 +975,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:553` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3258` and `engineering-plan.md:2952` and picked
+`engineering-plan.md:3261` and `engineering-plan.md:2938` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -993,15 +995,26 @@ authorizes none.
 The historical verdict was that this was a direction rather than a milestone.
 The authorization and new memory-maturation acceptance criteria change that
 operational verdict: Milestone 10 is now active, but its verified gate ceiling
-remains Milestone 9 until all seventeen Milestone 10 gates pass. The scheduling,
-routing, subagent, and skill-authoring work described below remains incomplete.
+remains Milestone 9 until all thirty-four Milestone 10 gates pass. Routing,
+subagent, and skill-authoring rollout work described below remains incomplete;
+scheduling is outside this milestone.
 
 The owner separately authorized provider-neutral public-web access on
 2026-08-18. [web-access.md](web-access.md) now covers its port, two tools,
 capability-level provider selection, fixed egress targets, credential handling,
-trust labels, bounds, failure vocabulary, and acceptance criteria. The tranche
-declares no formal hard gate, so it changes neither the 183-entry registry nor
-the Milestone 9 verified gate ceiling.
+trust labels, bounds, failure vocabulary, and acceptance criteria. Seven formal
+`gate.web.*` checks now cover that contract, taking the registry to 190 entries
+without changing the Milestone 9 verified gate ceiling.
+
+The owner separately authorized provider-neutral authenticated browser
+automation on 2026-08-19. [browser-automation.md](browser-automation.md) covers
+its threat model, provider port, read/write tool split, profile and login
+lifecycle, isolation, origin confinement, standing grants, uncertainty rules,
+scheduler handoff, delivery slices, and acceptance criteria. Ten formal
+`gate.browser.*` checks now cover that contract, taking the registry to 200
+entries without changing the Milestone 9 verified ceiling. All ten resolve to
+executable profile-lifecycle, authentication, grant, provider, policy, trust,
+revision, origin, and uncertainty checks.
 
 Open question 4 below closes the remaining half of this, which was
 whether the missing criteria are an omission or a choice. They are a
@@ -1018,7 +1031,7 @@ about work that must not start until evidence arrives. What Milestone
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3353-3506` for links to other documents returned
+`engineering-plan.md:3356-3514` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1239,7 +1252,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2501` against
-    `model-gateway.md:1795` and `milestone-map.md:925`. The map
+    `model-gateway.md:1795` and `milestone-map.md:986`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1248,7 +1261,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3349` requires a test the harness's case set
+    `engineering-plan.md:3352` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

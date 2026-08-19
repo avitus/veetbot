@@ -42,9 +42,12 @@ gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 gained two more on a later pass, all four at Milestone 3.
 [knowledge-documents.md](knowledge-documents.md) was written last
 and declares twelve more, in a new fourteenth area, all of them at
-Milestone 9. The counts throughout this document are the corpus as
-it now stands: one hundred and seventy-seven declared across fourteen
-specs, one hundred and eighty-three registry entries.
+Milestone 9. [web-access.md](web-access.md) now declares seven more in
+a fifteenth area, all at Milestone 10.
+[browser-automation.md](browser-automation.md) adds ten more in a
+sixteenth area, also at Milestone 10. The counts throughout this document
+are the corpus as it now stands: one hundred and ninety-four declared
+across sixteen specs, two hundred registry entries.
 
 ## What this document is responsible for
 
@@ -162,7 +165,7 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge
+      knowledge, web, browser
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -198,6 +201,11 @@ different unit of retrieval. The alternative considered was splitting
 its gates across `memory`, `context`, and `tool`, and it was rejected
 for the reason `skill` rejected the same split: `visibility` and
 `no_belief_write` are two halves of one governance story.
+
+`web` is the fifteenth. It owns the provider contract, routing,
+default-off registration, context advertisement, invocation trust, failure
+normalization, and fetch confinement as one public-web governance story rather
+than distributing those invariants across `tool`, `policy`, and `context`.
 
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
@@ -257,10 +265,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and seventy-one gates declared across fourteen specs, two
+One hundred and seventy-eight gates declared across fifteen specs, two
 more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and eighty declarations, one hundred
-and seventy-seven registry entries once the three aliases are
+over the corpus: one hundred and eighty-seven declarations, one hundred
+and eighty-four registry entries once the three aliases are
 subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
@@ -812,6 +820,57 @@ labelled question set. The remaining eight need a running session and
 are cases. None is structural: every one of them is a statement about
 what a run retrieves rather than about the shape of the repository.
 
+### Web access, seven gates
+
+Seven gates in the fifteenth area, all at Milestone 10. They turn the
+public-web acceptance contract into blocking checks over the two shared
+provider operations, capability routing, default-off composition, context
+advertisement, durable trust, failure normalization, and fetch confinement.
+
+```text
+#   id                              kind         M
+--  ------------------------------  -----------  --
+1   gate.web.provider_contract      case        10
+2   gate.web.capability_routing     case        10
+3   gate.web.default_off            case        10
+4   gate.web.context_advertisement  case        10
+5   gate.web.invocation_trust       case        10
+6   gate.web.failure_boundary       case        10
+7   gate.web.fetch_confinement      property    10
+```
+
+The first gate executes the complete shared search-and-fetch contract against
+both adapters. Gate 7 is a property gate because it covers a family of hostile
+destinations and response/output sizes; the other five require concrete
+composition or run outcomes.
+
+### Authenticated browser automation, ten gates
+
+Ten gates in the sixteenth area, all at Milestone 10. The first seven make the
+implemented provider seam, isolation boundary, read path, approval path,
+revision binding, and uncertain-write behavior blocking. The final three keep
+profiles, authentication, and standing grants visibly incomplete until their
+security contracts execute.
+
+```text
+#   id                                kind         M
+--  --------------------------------  -----------  --
+1   gate.browser.provider_contract    case        10
+2   gate.browser.default_off          case        10
+3   gate.browser.origin_isolation     property    10
+4   gate.browser.observation_trust    case        10
+5   gate.browser.action_authority     case        10
+6   gate.browser.revision_binding     case        10
+7   gate.browser.uncertain_write      case        10
+8   gate.browser.profile_lifecycle    case        10
+9   gate.browser.authentication       property    10
+10  gate.browser.standing_grant       case        10
+```
+
+Origin isolation is a property over allowed and hostile URL/resource families;
+authentication is a property over secret classes and user-intervention states.
+The remaining eight require concrete provider, run, profile, or grant outcomes.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -869,9 +928,9 @@ milestone  new gates  cumulative  the earliest of them
                                   boundary, package validation
 9                 26         166  formation, retrieval, ingestion,
                                   and the corpus
-10                17         183  the authoring loop, background
-                                  review, governed inspection, and
-                                  memory maturation
+10                34         200  the authoring loop, background review,
+                                  governed memory maturation, public-web
+                                  access, and browser automation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -892,17 +951,19 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and eighty-three gates are green before
-    Milestone 2.** Nearly a quarter of the plan's stated invariants are
+2.  **Forty-one of two hundred gates are green before Milestone 2.** About one
+    fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and eighty-three, which is
+The cumulative column reaches two hundred, which is
 every registry entry, at Milestone 10, and the plan defines no
-milestone after it. Six of Milestone 10's gates are `gate.skill.*` and
-eleven are `gate.memory.*`. Its routing and subagent half adds none,
+implemented milestone after it. Six of Milestone 10's gates are
+`gate.skill.*`, eleven are `gate.memory.*`, seven are `gate.web.*`, and
+ten are `gate.browser.*`.
+Its routing and subagent half adds none,
 because routing and subagents are covered by gates registered against
 the runtime loop and the policy engine, and the question this document
 used to raise about Milestone 8 now applies only to that half.
@@ -1068,7 +1129,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the fourteen. **M0.**
+    of the sixteen. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**
