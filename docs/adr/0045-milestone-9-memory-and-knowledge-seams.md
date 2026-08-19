@@ -31,9 +31,10 @@ milestone was implemented unattended.
    designs a remote management API.
 2. **Formation begins with a deterministic structured extractor.** Explicit
    `memory.remember` requests and a deliberately narrow consolidation grammar
-   recognize durable preferences and “remember that” facts. Model-assisted
-   extraction remains behind the formation port and requires evaluation evidence
-   before activation.
+   recognize durable preferences and “remember that” facts. Milestone 10 later
+   activates the hybrid model-assisted implementation recorded by ADR-0051 for
+   routed policies; the deterministic extractor remains its non-routed fallback
+   and cannot be bypassed as the service's safety boundary.
 3. **A principal has one live belief per normalized subject and belief type.** An
    exact duplicate reinforces the existing belief; a different statement for the
    same pair supersedes it and links both records. Rejected or deleted beliefs

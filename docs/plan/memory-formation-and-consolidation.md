@@ -468,11 +468,24 @@ the deterministic fallback while preserving the model-assisted design above:
    rolls back its just-inserted replacement even when the caller catches the
    conflict and continues the outer consolidation transaction.
 
-The schema-constrained consolidation model remains the normative rich extractor.
-ADR-0045 still requires evaluation evidence before it is activated, and the model
-call must run as the restricted, budgeted, audited background job specified above.
-The deterministic v2 extractor is the production fallback and the safety oracle
-for those model proposals; it does not claim open-ended natural-language recall.
+The schema-constrained consolidation model is the normative rich extractor and is
+active for routed model policies as `formation@3`. It receives only trusted
+principal-authored events plus a compact view of at most one hundred existing
+beliefs (with injection-shaped statements replaced by `[BLOCKED]`), makes one
+strict-schema call during idle or
+session-close maintenance, and has independent input, output, cost, deadline, and
+candidate ceilings. A content-free `memory.extraction.completed` process event
+records provider, model policy, usage, fallback state, and error class. Named and
+numeric claims must be lexically grounded in their cited source text before they
+reach the formation service, which independently repeats the source, scope,
+portability, salience, rejection, and conflict checks. Malformed output, missing
+credentials, routing failure, timeout, or budget exhaustion returns the
+deterministic v2 candidates instead of failing consolidation. Non-routed fake and
+deterministic policies use that fallback directly. The focused rich-extraction
+suite plus the existing no-fabrication, source-integrity, injection, bounded-
+formation, and no-policy-regression gates are the activation evidence; credentialed
+formation precision and rejection rate remain tracked rollout metrics rather than
+permission to bypass the deterministic gates.
 
 ## Hard gates
 

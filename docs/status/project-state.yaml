@@ -588,7 +588,7 @@ verification:
           source, and context-snapshot choices are recorded for owner review.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-18T01:45:58Z
+    recorded_at: 2026-08-19T01:37:29Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -611,8 +611,20 @@ verification:
           duplicate possessive proposal; its red audit-reconciliation regression
           now passes. A later PostgreSQL red regression proved that one malformed
           deadline could poison a sweep; malformed and timezone-naive deadlines
-          are now rejected consistently. All 27 Milestone 10 memory gate tests
+          are now rejected consistently. All 28 Milestone 10 memory gate tests
           pass.
+      - check: routed rich memory extraction activation
+        outcome: passed_locally
+        detail: >-
+          Five focused model-extraction tests prove that a strict-schema routed
+          policy forms a relationship the deterministic grammar misses, records
+          normalized usage in a content-free process event, rejects an
+          unsupported named entity, falls back on malformed output, and rejects
+          output beyond its dedicated budget. The existing memory formation,
+          source-integrity, injection, candidate-cap, and no-policy-regression
+          gates remain unchanged and pass with the hybrid extractor composed for
+          every routed policy. No provider credential was available for a live
+          smoke test in this worktree.
       - check: Milestone 10A skill-authoring gates
         outcome: passed_locally
         detail: >-
@@ -624,8 +636,8 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 371 source and test
-          files, 489 static tests, 186 contracts, deployment-script checks,
+          Ruff formatting and linting, strict mypy over 373 source and test
+          files, 503 static tests, 191 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass on the
           integrated head. The gate registry contains 177 entries and retains
           166 as the verified ceiling through Milestone 9.
@@ -660,15 +672,16 @@ verification:
       - check: real-Docker sandbox security partition
         outcome: passed
         detail: All 10 sandbox security tests passed against a freshly built image.
-      - check: proposed ADR-0051
-        outcome: owner_review_requested
+      - check: accepted ADR-0051
+        outcome: approved_and_implemented
         detail: >-
           The durable post-run flag, 30-second idle boundary, structured
           extractor port, source and scope rechecks, semantic conflict subjects,
           independently audited extractor and service caps, inferred-confidence
           ceiling, temporal-hint preservation, transactional replacement,
-          formation-scan index, and formation@2 policy boundary are recorded for
-          owner review.
+          formation-scan index, routed hybrid extractor, content-free model-usage
+          audit, deterministic fallback, and formation@3 policy boundary are
+          approved and implemented.
       - check: proposed ADR-0052
         outcome: owner_review_requested
         detail: >-
@@ -677,7 +690,9 @@ verification:
           disabled-candidate activation, no-review-archive rule, and quantitative
           rollout threshold are recorded for owner review.
     remaining:
-      - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
+      - Run a credentialed provider smoke test and collect formation precision,
+        consequential-fact recall, rejection-rate, and cost samples from the
+        routed extractor; no provider credential was available in this worktree.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
