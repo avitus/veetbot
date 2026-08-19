@@ -50,7 +50,12 @@ class MemoryStore(Protocol):
     ) -> tuple[MemoryRecord, MemoryRecord]: ...
 
     async def list_memories(
-        self, principal: Principal, *, include_inactive: bool = False, limit: int = 200
+        self,
+        principal: Principal,
+        *,
+        include_inactive: bool = False,
+        session_id: UUID | None = None,
+        limit: int = 200,
     ) -> list[MemoryRecord]: ...
 
     async def edit(
@@ -68,6 +73,14 @@ class MemoryStore(Protocol):
     ) -> list[BeliefRejection]: ...
 
     async def record_consolidation(self, run: ConsolidationRun) -> ConsolidationRun: ...
+
+    async def list_consolidations(
+        self,
+        principal: Principal,
+        *,
+        session_id: UUID | None = None,
+        limit: int = 100,
+    ) -> list[ConsolidationRun]: ...
 
     async def consolidation_watermark(self, session_id: UUID, principal: Principal) -> int: ...
 

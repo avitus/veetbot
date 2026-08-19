@@ -807,7 +807,7 @@ async def test_artifact_content_is_always_an_attachment(tmp_path: Path) -> None:
             name="../résumé\uff02.svg",
             media_type="image/svg+xml",
             storage_uri="pending",
-            sha256=__import__("hashlib").sha256(svg).hexdigest(),
+            sha256=hashlib.sha256(svg).hexdigest(),
             size_bytes=len(svg),
             trust=TrustLevel.EXTERNAL_UNTRUSTED,
             expires_at=now + timedelta(hours=1),

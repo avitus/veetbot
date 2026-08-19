@@ -587,6 +587,14 @@ async def test_memory_events_are_not_reprocessed_as_user_sources() -> None:
             {("wife", "User's wife is Morgan.", BeliefType.RELATIONSHIP)},
         ),
         (
+            "My 16 year old daughter, Riv, is starting an astronomy club at her high "
+            "school. She will soon be applying for college and wanted to do a related "
+            "passion project that involved building an astronomy app for the club. "
+            "Search the web for relevant open source projects and libraries and propose "
+            "4-5 ideas.",
+            {("daughter", "User's daughter is Riv.", BeliefType.RELATIONSHIP)},
+        ),
+        (
             "I work at Acme Labs.",
             {("employment", "User works at Acme Labs.", BeliefType.USER_MODEL_ATTR)},
         ),

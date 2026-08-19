@@ -1,6 +1,6 @@
 # ADR-0046: Host-native DigitalOcean production topology
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-08-07
 
 ## Context

@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "extractor_version": "provider-assisted-v1",
+  "formation_policy_version": "formation@3",
+  "model_policy": "replace-with-evaluated-model-policy",
+  "provider": "replace-with-resolved-provider",
+  "model": "replace-with-resolved-model",
+  "policy_profile": "replace-with-evaluated-policy-profile",
+  "policy_version": "replace-with-compiled-policy-version",
+  "build_ref": "replace-with-evaluated-build-ref",
+  "corpus_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "sample_count": 24,
+  "deterministic_supported_candidates": 10,
+  "provider_supported_candidates": 11,
+  "fabricated_candidates": 0,
+  "deterministic_policy_failures": 0,
+  "provider_policy_failures": 0,
+  "evaluated_at": "2026-08-18T00:00:00Z"
+}

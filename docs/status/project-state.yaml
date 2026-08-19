@@ -442,8 +442,8 @@ verification:
           constraints from the log, completed tasks dropped, and next_action
           reset. Compaction left original events replayable and retained source
           event identifiers on every summary.
-      - check: proposed ADR-0043
-        outcome: owner_review_requested
+      - check: accepted ADR-0043
+        outcome: approved_and_implemented
         detail: >-
           The forced implementation decisions are recorded explicitly, including
           first-request plan pinning, conservative plan-time prefix measurement,
@@ -512,8 +512,8 @@ verification:
           resolved. Three incremental summary findings were also fixed. The final
           hosted review of commit 0db9cff completed without new findings, and no
           review threads remain unresolved.
-      - check: proposed ADR-0044
-        outcome: owner_review_requested
+      - check: accepted ADR-0044
+        outcome: approved_and_implemented
         detail: >-
           The forced implementation choices are recorded explicitly, including
           deterministic tar.zst archives, event-reconstructed pins, ephemeral MCP
@@ -580,15 +580,15 @@ verification:
           lanes plus GitGuardian passed on final review-remediation commit
           e5c2140. Every CodeRabbit review thread was answered and resolved, and
           the final incremental review completed without a new finding.
-      - check: proposed ADR-0045
-        outcome: owner_review_requested
+      - check: accepted ADR-0045
+        outcome: approved_and_implemented
         detail: >-
           The reversible CLI, deterministic extraction, conflict, audit,
           PostgreSQL FTS, evaluation carry, tool classification, retained
-          source, and context-snapshot choices are recorded for owner review.
+          source, and context-snapshot choices are approved and implemented.
     remaining: []
   milestone_10:
-    recorded_at: 2026-08-18T01:45:58Z
+    recorded_at: 2026-08-19T16:36:17Z
     status: in_progress
     evidence:
       - check: test-driven memory maturation gates
@@ -611,8 +611,23 @@ verification:
           duplicate possessive proposal; its red audit-reconciliation regression
           now passes. A later PostgreSQL red regression proved that one malformed
           deadline could poison a sweep; malformed and timezone-naive deadlines
-          are now rejected consistently. All 27 Milestone 10 memory gate tests
+          are now rejected consistently. All 28 Milestone 10 memory gate tests
           pass.
+      - check: routed rich memory extraction reference contract
+        outcome: passed_locally
+        detail: >-
+          Five focused model-extraction tests prove that a strict-schema routed
+          policy forms a relationship the deterministic grammar misses, records
+          normalized usage in a content-free process event, rejects an
+          unsupported named entity, falls back on malformed output, and rejects
+          output beyond its dedicated budget. The existing memory formation,
+          source-integrity, injection, candidate-cap, and no-policy-regression
+          gates remain unchanged. Pending owner acceptance, the implementation
+          provisionally applies ADR-0057's stricter composition boundary without
+          claiming architectural acceptance: the reference extractor remains
+          covered directly, while normal composition requires exact activation
+          evidence. No provider credential was available for a live smoke test in
+          this worktree.
       - check: Milestone 10A skill-authoring gates
         outcome: passed_locally
         detail: >-
@@ -621,21 +636,57 @@ verification:
           construction, confined child reviews, non-fatal review failure,
           durable provenance and replay, optimistic conflicts, and the
           self-authored case 27 outcome change.
+      - check: governed memory inspection surface
+        outcome: passed_locally
+        detail: >-
+          Red tests first failed because consolidation audits, belief get, and
+          trace inspection were unreachable. The implemented agent memory CLI
+          now lists and gets full belief records, filters by source session,
+          edits and deletes through the governed service, lists formation audits,
+          and reads principal-scoped retrieval traces. All 55 focused unit and
+          contract tests passed, and the PostgreSQL idle-formation integration
+          proves session-filtered beliefs and audit counts survive the durable
+          adapter.
+      - check: evaluation-gated provider-assisted memory extraction
+        outcome: passed_locally
+        detail: >-
+          Red tests first showed that activation accepted no evidence boundary,
+          provider extraction had no implementation, composition could not select
+          it, and an evidence-gathering build mode did not exist. The restricted
+          maintenance extractor now makes one tool-free schema-constrained call,
+          records content-free identity, policy, budget, deadline, usage, cost,
+          source, and outcome audit data, falls back deterministically, and sends
+          every proposal through the existing source and safety gates. Automatic
+          startup selection activates matching operator or release-bundled
+          evidence and otherwise retains deterministic formation; off and
+          required modes preserve explicit no-resolution and fail-closed choices.
+          The 24-case paired CLI evaluator derives the corpus and model tuple and
+          creates no artifact unless lift, fabrication, and policy gates pass.
+          Focused provider, evaluator, CLI, configuration, and
+          review-remediation tests pass, including distinct candidate polarity,
+          belief types, statements, and sources; dotted-number grounding; export
+          consent handling; JSON export; and memory-list boundary validation.
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 371 source and test
-          files, 489 static tests, 186 contracts, deployment-script checks,
-          123 citation checks, and strict documentation builds pass on the
-          integrated head. The gate registry contains 177 entries and retains
-          166 as the verified ceiling through Milestone 9.
+          Ruff formatting and linting, strict mypy over 380 source and test
+          files, 630 static tests, 219 contracts, deployment-script checks,
+          121 citation checks, and strict documentation builds pass on the
+          integrated head. The static count includes the 25-case evaluation
+          front end relocated from the DB-gated integration directory. The
+          gate registry contains 177 entries and retains 166 as the verified
+          ceiling through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
           An isolated Compose PostgreSQL 16 database upgraded from empty through
-          revision a4c8e2f6b913 and all 105 integration and resilience tests
-          passed, including memory formation, skill authoring, capability
-          persistence, transcript restoration, migrations, and re-composition.
+          revision a4c8e2f6b913 and all 83 integration and resilience tests
+          passed, including memory formation, durable skill-authoring approval
+          and provenance, capability persistence, persisted web invocations and
+          web-enabled recomposition, transcript restoration, migrations, and
+          re-composition. The count fell from 105 when the 25 declarative
+          evaluation cases moved to the static partition and rose with three
+          new durable web and authoring journeys.
       - check: default-off rollout boundary
         outcome: passed_locally
         detail: >-
@@ -645,30 +696,39 @@ verification:
       - check: provider-neutral web access contract
         outcome: passed_locally
         detail: >-
-          The focused 57-test partition covers shared Tavily and Firecrawl
-          search/fetch contracts, capability-level composition, stable auth and
-          retry failures, public-HTTPS fetch validation, fixed-target policy,
-          default-off registration, and an end-to-end persisted
-          external-untrusted tool result.
+          The focused 112-test web partition covers shared Tavily and Firecrawl
+          search/fetch contracts, domain and URL validation, capability-level
+          composition, stable auth and retry failures, public-HTTPS fetch
+          validation, fixed-target policy, default-off registration, bounded
+          search output, the untrusted envelope reaching the next model step,
+          same-turn trust escalation blocking memory writes, and persisted
+          external-untrusted invocations with web-enabled recomposition on
+          PostgreSQL.
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 81 Swift Testing cases passed, including complete historical
-          transcript restoration, forward-compatible message-role decoding,
-          system composer sizing, connection-settings layout, and the
-          missing-keychain-entitlement regression.
+          All 82 Swift Testing cases passed, including complete historical
+          transcript restoration, sidebar conversation navigation,
+          forward-compatible message-role decoding, system composer sizing,
+          connection-settings layout, and the missing-keychain-entitlement
+          regression.
       - check: real-Docker sandbox security partition
         outcome: passed
         detail: All 10 sandbox security tests passed against a freshly built image.
-      - check: proposed ADR-0051
-        outcome: owner_review_requested
+      - check: accepted ADR-0051
+        outcome: approved_and_implemented
         detail: >-
           The durable post-run flag, 30-second idle boundary, structured
           extractor port, source and scope rechecks, semantic conflict subjects,
           independently audited extractor and service caps, inferred-confidence
           ceiling, temporal-hint preservation, transactional replacement,
-          formation-scan index, and formation@2 policy boundary are recorded for
-          owner review.
+          formation-scan index, hybrid extractor reference implementation,
+          content-free model-usage audit, deterministic fallback, and formation@3
+          policy boundary are approved and implemented. ADR-0051 remains the
+          accepted architecture. The implementation enforces proposed ADR-0057's
+          stricter evidence gate while owner review is pending; ADR-0057 would
+          supersede ADR-0051's unconditional routed-policy activation and provider
+          budget only if accepted.
       - check: proposed ADR-0052
         outcome: owner_review_requested
         detail: >-
@@ -676,8 +736,27 @@ verification:
           provenance across session erasure, dedicated child-session placement,
           disabled-candidate activation, no-review-archive rule, and quantitative
           rollout threshold are recorded for owner review.
+      - check: proposed ADR-0054
+        outcome: owner_review_requested
+        detail: >-
+          The provider-neutral web port, capability-level provider selection,
+          fixed HTTPS endpoints, external-untrusted labeling, and default-off
+          registration are recorded for owner review.
+      - check: accepted ADR-0055
+        outcome: approved_and_implemented
+        detail: >-
+          The configurable CLI run wait with its positive-value boundary and
+          300-second default is approved and implemented.
+      - check: proposed ADR-0057
+        outcome: owner_review_requested
+        detail: >-
+          The dedicated maintenance placement, exact evidence binding, fixed
+          provider budget, user-episode selection, deterministic safety authority,
+          content-free call audit, non-production evaluation mode, fallback, and
+          formation@3 version boundary are recorded for owner review.
     remaining:
-      - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
+      - Run a labeled live-provider formation evaluation and activate the
+        restricted extractor only when its version-bound evidence passes ADR-0057.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
@@ -976,5 +1055,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-18T01:45:58Z
-last_reviewed_commit: c7fd4a2
+last_updated: 2026-08-19T16:36:17Z
+last_reviewed_commit: a7aa3cb

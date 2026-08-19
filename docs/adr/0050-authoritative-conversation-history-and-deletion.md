@@ -1,6 +1,6 @@
 # ADR-0050: Authoritative conversation history and deletion
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-14
 - Related: Section 16 (HTTP API), Section 29 (multi-device shared core),
   ADR-0003 (event log and projections), ADR-0009 (run, turn, and session

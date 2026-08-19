@@ -1,6 +1,6 @@
 # ADR-0019: Memory retrieval and ranking
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-24
 - Related: Milestone 9 (long-term memory and knowledge retrieval), ADR-0018 (memory
   formation and consolidation), ADR-0014 (memory surface, frozen snapshot, injection

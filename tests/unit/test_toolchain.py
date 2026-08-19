@@ -2,10 +2,12 @@
 
 import asyncio
 import importlib
+import json
 import socket
 import subprocess
 import tomllib
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,15 +20,20 @@ from typer.testing import CliRunner
 
 import agent_core.cli.main as cli_main
 import scripts.check_production_deployment as production_check
+from agent_core.bootstrap import build
 from agent_core.cli.main import app
 from agent_core.config import load_settings
+from agent_core.domain.errors import ExportConsentError
 from agent_core.domain.events import EventEnvelope
+from agent_core.domain.memory import ConsolidationRun, MemoryEdit
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import PersistedStreamFrame
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from tests.conftest import NETWORK_MODE, _integration_endpoints
-from tests.contract.support import run
+from tests.contract.memory_fixtures import memory, trace
+from tests.contract.support import NOW, SESSION_ID, principal, run
+from tests.integration.m2_support import memory_settings
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -97,6 +104,25 @@ def test_required_make_targets_exist() -> None:
 
     assert "docker inspect --format '{{.State.Health.Status}}'" in text
     assert "docker compose ps --status healthy" not in text
+
+
+def test_apple_target_declares_phone_and_tablet_orientations() -> None:
+    project = (ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj").read_text(
+        encoding="utf-8"
+    )
+    phone = (
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "
+        '"UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft '
+        'UIInterfaceOrientationLandscapeRight";'
+    )
+    tablet = (
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "
+        '"UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown '
+        'UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";'
+    )
+
+    assert project.count(phone) == 2
+    assert project.count(tablet) == 2
 
 
 def test_production_deployment_assets_preserve_process_boundaries() -> None:
@@ -482,6 +508,172 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
     )
     assert conflicting_policy.exit_code == 2
     assert "--model-policy can only be used for a new session" in conflicting_policy.stderr
+
+
+def test_run_export_prints_json_and_reports_consent_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_id = UUID("00000000-0000-0000-0000-000000000041")
+    exported_run_id = UUID("00000000-0000-0000-0000-000000000042")
+
+    async def fake_export(run_id: UUID) -> object:
+        assert run_id == exported_run_id
+        return SimpleNamespace(
+            id=artifact_id,
+            model_dump_json=lambda: json.dumps({"id": str(artifact_id)}),
+        )
+
+    monkeypatch.setattr(cli_main, "_export_run", fake_export)
+    runner = CliRunner()
+
+    exported = runner.invoke(
+        app,
+        ["run", "export", str(exported_run_id), "--json"],
+    )
+
+    assert exported.exit_code == 0
+    assert json.loads(exported.stdout) == {"id": str(artifact_id)}
+
+    async def deny_export(_run_id: UUID) -> object:
+        raise ExportConsentError("trajectory export requires active consent")
+
+    monkeypatch.setattr(cli_main, "_export_run", deny_export)
+    denied = runner.invoke(app, ["run", "export", str(exported_run_id)])
+
+    assert denied.exit_code == 1
+    assert "requires active consent" in denied.stderr
+
+
+@pytest.mark.parametrize(
+    ("command", "limit"),
+    [
+        ("list", "0"),
+        ("list", "201"),
+        ("formations", "0"),
+        ("formations", "201"),
+    ],
+)
+def test_memory_cli_rejects_limits_outside_the_governed_bounds(
+    command: str,
+    limit: str,
+) -> None:
+    result = CliRunner().invoke(app, ["memory", command, "--limit", limit])
+
+    assert result.exit_code == 2
+    assert "Invalid value" in result.stderr
+
+
+def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    belief = memory()
+    recall_trace = trace()
+    formation = ConsolidationRun(
+        id=belief.formation_run_id,
+        tenant_id=belief.tenant_id,
+        principal_id=belief.principal_id,
+        trigger="session_idle",
+        scope=belief.scope,
+        session_id=belief.source_session_id,
+        watermark_before=0,
+        watermark_after=1,
+        model="deterministic-formation-v2",
+        policy_version="formation@2",
+        candidates_proposed=1,
+        committed=1,
+        reinforced=0,
+        superseded=0,
+        rejected=0,
+        started_at=NOW,
+        finished_at=NOW,
+    )
+    seen: list[tuple[str, object]] = []
+
+    async def fake_list(
+        include_inactive: bool, session_id: UUID | None, limit: int
+    ) -> list[object]:
+        seen.append(("list", (include_inactive, session_id, limit)))
+        return [belief]
+
+    async def fake_get(belief_id: UUID) -> object:
+        seen.append(("get", belief_id))
+        return belief
+
+    async def fake_edit(belief_id: UUID, edit: MemoryEdit) -> object:
+        seen.append(("edit", (belief_id, edit.statement)))
+        return belief.model_copy(update={"statement": edit.statement})
+
+    async def fake_delete(belief_id: UUID) -> None:
+        seen.append(("delete", belief_id))
+
+    async def fake_formations(session_id: UUID | None, limit: int) -> list[object]:
+        seen.append(("formations", (session_id, limit)))
+        return [formation]
+
+    async def fake_trace(trace_id: UUID) -> object:
+        seen.append(("trace", trace_id))
+        return recall_trace
+
+    monkeypatch.setattr(cli_main, "_memory_list", fake_list)
+    monkeypatch.setattr(cli_main, "_memory_get", fake_get)
+    monkeypatch.setattr(cli_main, "_memory_edit", fake_edit)
+    monkeypatch.setattr(cli_main, "_memory_delete", fake_delete)
+    monkeypatch.setattr(cli_main, "_memory_formations", fake_formations)
+    monkeypatch.setattr(cli_main, "_memory_trace", fake_trace)
+    runner = CliRunner()
+
+    listed = runner.invoke(
+        app,
+        [
+            "memory",
+            "list",
+            "--include-inactive",
+            "--session",
+            str(SESSION_ID),
+            "--limit",
+            "7",
+        ],
+    )
+    fetched = runner.invoke(app, ["memory", "get", str(belief.id)])
+    edited = runner.invoke(
+        app,
+        ["memory", "edit", str(belief.id), "--statement", "User prefers direct answers"],
+    )
+    formations = runner.invoke(
+        app,
+        ["memory", "formations", "--session", str(SESSION_ID), "--limit", "9"],
+    )
+    traced = runner.invoke(app, ["memory", "trace", str(recall_trace.id)])
+    deleted = runner.invoke(app, ["memory", "delete", str(belief.id)])
+
+    assert all(
+        result.exit_code == 0 for result in (listed, fetched, edited, formations, traced, deleted)
+    )
+    assert json.loads(listed.stdout)[0]["formation_run_id"] == str(formation.id)
+    assert json.loads(fetched.stdout)["source_session_id"] == str(SESSION_ID)
+    assert json.loads(edited.stdout)["statement"] == "User prefers direct answers"
+    assert json.loads(formations.stdout)[0]["committed"] == 1
+    assert json.loads(traced.stdout)["query"]["text"] == "concise answers"
+    assert json.loads(deleted.stdout) == {"id": str(belief.id)}
+    assert seen == [
+        ("list", (True, SESSION_ID, 7)),
+        ("get", belief.id),
+        ("edit", (belief.id, "User prefers direct answers")),
+        ("formations", (SESSION_ID, 9)),
+        ("trace", recall_trace.id),
+        ("delete", belief.id),
+    ]
+
+
+async def test_in_memory_composition_round_trips_a_recall_trace_through_the_public_service(
+    tmp_path: Path,
+) -> None:
+    value = trace()
+    settings = replace(memory_settings(), artifact_root=tmp_path / "artifacts")
+
+    async with build(settings=settings, storage="memory", principal=principal()) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.traces.record(value)
+
+        assert await composition.memory.get_recall_trace(value.id) == value
 
 
 def test_run_reports_durable_id_when_wait_times_out(monkeypatch: pytest.MonkeyPatch) -> None:

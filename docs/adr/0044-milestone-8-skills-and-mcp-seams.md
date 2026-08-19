@@ -1,6 +1,6 @@
 # ADR-0044: Milestone 8 skill and MCP seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Related: Milestone 8, ADR-0003, ADR-0021, ADR-0024, ADR-0029,
   ADR-0030
@@ -17,11 +17,11 @@ how ephemeral MCP prompts appear beside durable skills, how the official MCP SDK
 receives an exact subprocess environment, and where trusted-worker HTTP traffic
 meets the existing egress enforcement core.
 
-These choices preserve the engineering plan's requirements. They are recorded as
-Proposed because the repository owner asked to review decisions made while the
-milestone was implemented unattended.
+These choices preserve the engineering plan's requirements. They were accepted
+after repository-owner review of decisions made while the milestone was
+implemented unattended.
 
-## Proposed decisions
+## Decisions
 
 1. **Skill archives are deterministic, content-addressed `tar.zst` values.**
    Validation rejects links, traversal, duplicate members, oversized files, and

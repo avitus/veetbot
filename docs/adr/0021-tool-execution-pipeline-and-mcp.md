@@ -1,6 +1,6 @@
 # ADR-0021: Tool execution pipeline, effect watermarking, and MCP integration
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-25
 - Related: Milestones 1, 4, 6, 8, Sections 7 (`Tool` port), 8 (tool contract,
   registry, execution pipeline, idempotency), 9.2 (unknown-tool denial),

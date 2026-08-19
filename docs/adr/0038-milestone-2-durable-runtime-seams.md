@@ -1,6 +1,6 @@
 # ADR-0038: Milestone 2 durable-runtime seam decisions
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Related: Milestone 2, ADR-0003, ADR-0004, ADR-0021, ADR-0023, ADR-0024, ADR-0031
 - Detailed design: `docs/plan/event-log-and-persistence.md`

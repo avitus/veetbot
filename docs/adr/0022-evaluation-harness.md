@@ -1,6 +1,6 @@
 # ADR-0022: The gate registry, evaluation identity, and the capability track
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-07-25
 - Related: Milestones 0, 1, 2, 3, 4, 5, 6, Sections 3 (definition of done,
   item 18), 4 (repository layout, `evals/`, `tests/`), 10.3 (the fake

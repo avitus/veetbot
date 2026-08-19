@@ -13,6 +13,7 @@ from agent_core.config import (
     AuthMode,
     ConfigurationError,
     DeploymentMode,
+    MemoryProviderExtractionMode,
     SandboxMechanism,
     WebProviderKind,
     load_config_document,
@@ -98,6 +99,103 @@ def test_trajectory_export_enablement_is_strictly_boolean() -> None:
     values = {**base_environment(), "AGENT_TRAJECTORY_EXPORT_ENABLED": "true"}
     with pytest.raises(ConfigurationError, match="must be 0 or 1"):
         load_settings(values)
+
+
+def test_provider_memory_extraction_defaults_to_automatic_selection() -> None:
+    settings = load_settings(base_environment())
+
+    assert settings.memory_provider_extraction_mode.value == "auto"
+
+
+def test_provider_memory_extraction_refuses_required_mode_without_evaluation_evidence() -> None:
+    values = {
+        **base_environment(),
+        "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+    }
+
+    with pytest.raises(ConfigurationError, match="evaluation evidence"):
+        load_settings(values)
+
+
+def test_provider_memory_extraction_refuses_failed_evaluation_evidence(tmp_path: Path) -> None:
+    evidence = tmp_path / "provider-memory-evidence.json"
+    evidence.write_text(
+        '{"schema_version":1,"formation_recall_lift":0,"fabricated_candidates":1}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigurationError, match="evaluation evidence did not pass"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(evidence),
+            }
+        )
+
+
+def test_provider_memory_extraction_normalizes_non_utf8_evidence_failure(tmp_path: Path) -> None:
+    evidence = tmp_path / "provider-memory-evidence.json"
+    evidence.write_bytes(b"\xff\xfe")
+
+    with pytest.raises(ConfigurationError, match="evaluation evidence did not pass"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(evidence),
+            }
+        )
+
+
+def test_legacy_provider_memory_enablement_remains_fail_closed() -> None:
+    with pytest.raises(ConfigurationError, match="evaluation evidence"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "1",
+            }
+        )
+
+
+def test_blank_legacy_provider_memory_enablement_is_unset() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "off",
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "   ",
+        }
+    )
+
+    assert settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.OFF
+
+
+def test_auto_provider_memory_mode_tolerates_unusable_operator_evidence(
+    tmp_path: Path,
+) -> None:
+    evidence = tmp_path / "provider-memory-evidence.json"
+    evidence.write_text("not-json", encoding="utf-8")
+
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "auto",
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE": str(evidence),
+        }
+    )
+
+    assert settings.memory_provider_extraction_mode.value == "auto"
+
+
+def test_provider_memory_mode_and_legacy_flag_are_mutually_exclusive() -> None:
+    with pytest.raises(ConfigurationError, match="mutually exclusive"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "auto",
+                "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED": "1",
+            }
+        )
 
 
 def test_required_database_url_fails_before_construction() -> None:

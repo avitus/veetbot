@@ -27,6 +27,7 @@ from agent_core.domain.memory import (
     MemoryStatus,
     Polarity,
     Portability,
+    RecallTrace,
     RejectionKind,
     Sensitivity,
 )
@@ -67,6 +68,21 @@ _POSSESSIVE_ENTITY = re.compile(
     r"\bmy\s+((?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)"
     r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
 )
+_GROUNDING_TOKEN = re.compile(r"\d+(?:\.\d+)+|[a-z0-9]+(?:['-][a-z0-9]+)*")
+
+
+def contains_memory_injection(value: str) -> bool:
+    """Return whether memory-shaped text contains a prompt-injection marker."""
+
+    return _INJECTION.search(value) is not None
+
+
+def grounding_tokens(value: str) -> set[str]:
+    """Normalize words and dotted numbers for memory-source grounding checks."""
+
+    tokens = set(_GROUNDING_TOKEN.findall(value.casefold()))
+    tokens.update(token[:-2] for token in tuple(tokens) if token.endswith("'s"))
+    return tokens
 
 
 def _event_text(event: EventEnvelope) -> str:
@@ -289,6 +305,14 @@ class DeterministicCandidateExtractor:
                 clause,
                 re.I,
             )
+            if relationship is None:
+                relationship = re.match(
+                    r"my\s+(?:(?:\d{1,3})(?:\s+|-)years?(?:\s+|-)old(?:\s+|-))?"
+                    r"(spouse|wife|husband|partner|mother|father|son|daughter)"
+                    r"\s*,\s*([^,.;!?]+?)\s*,",
+                    clause,
+                    re.I,
+                )
             if relationship is not None:
                 relation = relationship.group(1).casefold()
                 value = relationship.group(2).strip(" ,.:;!?")
@@ -345,7 +369,7 @@ class DeterministicCandidateExtractor:
 class DeterministicSalience:
     def eligible(self, statement: str, *, explicit: bool) -> bool:
         value = statement.strip()
-        if not value or _SECRET.search(value) is not None or _INJECTION.search(value) is not None:
+        if not value or _SECRET.search(value) is not None or contains_memory_injection(value):
             return False
         if not explicit and _TRANSIENT.search(value) is not None:
             return False
@@ -395,7 +419,10 @@ class GovernedMemoryService:
         salience: DeterministicSalience | None = None,
         resolver: DeterministicConflictResolver | None = None,
         extractor: MemoryCandidateExtractor | None = None,
+        policy_version: str = FORMATION_POLICY_VERSION,
     ) -> None:
+        if not policy_version:
+            raise ValueError("memory formation policy version must not be empty")
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
@@ -403,6 +430,7 @@ class GovernedMemoryService:
         self._salience = salience or DeterministicSalience()
         self._resolver = resolver or DeterministicConflictResolver()
         self._extractor = extractor or DeterministicCandidateExtractor()
+        self._policy_version = policy_version
 
     async def remember(
         self,
@@ -500,7 +528,7 @@ class GovernedMemoryService:
                 watermark_before=min(sources) - 1,
                 watermark_after=max(sources),
                 model=self._extractor.name,
-                policy_version=FORMATION_POLICY_VERSION,
+                policy_version=self._policy_version,
                 candidates_proposed=1,
                 committed=0,
                 reinforced=0,
@@ -653,7 +681,7 @@ class GovernedMemoryService:
                 watermark_before=0,
                 watermark_after=0,
                 model=self._extractor.name,
-                policy_version=FORMATION_POLICY_VERSION,
+                policy_version=self._policy_version,
                 candidates_proposed=0,
                 committed=0,
                 reinforced=0,
@@ -700,7 +728,7 @@ class GovernedMemoryService:
                     watermark_before=at_watermark,
                     watermark_after=at_watermark,
                     model=self._extractor.name,
-                    policy_version=FORMATION_POLICY_VERSION,
+                    policy_version=self._policy_version,
                     candidates_proposed=0,
                     committed=0,
                     reinforced=0,
@@ -782,7 +810,7 @@ class GovernedMemoryService:
                     watermark_before=watermark,
                     watermark_after=after,
                     model=self._extractor.name,
-                    policy_version=FORMATION_POLICY_VERSION,
+                    policy_version=self._policy_version,
                     candidates_proposed=len(extracted),
                     committed=committed,
                     reinforced=reinforced,
@@ -797,12 +825,37 @@ class GovernedMemoryService:
         return ConsolidationResult(run=audit, beliefs=beliefs)
 
     async def list_memories(
-        self, *, include_inactive: bool = False, limit: int = 200
+        self,
+        *,
+        include_inactive: bool = False,
+        session_id: UUID | None = None,
+        limit: int = 200,
     ) -> list[MemoryRecord]:
         async with self._uow_factory() as uow:
             return await uow.memories.list_memories(
-                self._principal, include_inactive=include_inactive, limit=limit
+                self._principal,
+                include_inactive=include_inactive,
+                session_id=session_id,
+                limit=limit,
             )
+
+    async def get_memory(self, belief_id: UUID) -> MemoryRecord:
+        async with self._uow_factory() as uow:
+            return await uow.memories.get(belief_id, self._principal)
+
+    async def list_consolidations(
+        self, *, session_id: UUID | None = None, limit: int = 100
+    ) -> list[ConsolidationRun]:
+        async with self._uow_factory() as uow:
+            return await uow.memories.list_consolidations(
+                self._principal,
+                session_id=session_id,
+                limit=limit,
+            )
+
+    async def get_recall_trace(self, trace_id: UUID) -> RecallTrace:
+        async with self._uow_factory() as uow:
+            return await uow.traces.get(trace_id, self._principal)
 
     async def edit(self, belief_id: UUID, edit: MemoryEdit) -> MemoryRecord:
         async with self._uow_factory() as uow:
@@ -965,7 +1018,7 @@ class GovernedMemoryService:
                 not explicit and sensitivity in {Sensitivity.SENSITIVE, Sensitivity.RESTRICTED}
             ),
             formation_run_id=formation_run_id,
-            consolidation_policy_version=FORMATION_POLICY_VERSION,
+            consolidation_policy_version=self._policy_version,
             authority=authority,
             store_position=await uow.memories.next_position(),
             created_at=now,

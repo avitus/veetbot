@@ -1358,7 +1358,7 @@ thing it gates, and both are worth stopping for. If a property gate flakes, its
 generator found a real failure at a rare seed, which is the generator working.
 ## Running it
 
-Section 17's CLI already lists `agent eval run`. Four subcommands complete it,
+Section 17's CLI already lists `agent eval run`. Five subcommands complete it,
 and the constraint from Section 17 applies unchanged: the CLI calls the same
 application services, and there is no second runtime loop inside the harness.
 
@@ -1368,6 +1368,7 @@ agent eval run --tag policy     a selection
 agent eval run --case NAME      one case, verbose
 agent eval gates                gate status by milestone
 agent eval capability --suite research    the live track
+agent eval memory-formation     paired provider-memory activation evidence
 agent eval record --provider anthropic    a recorded fixture
 agent eval promote <run-id>     trajectory to case
 ```

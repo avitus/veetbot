@@ -1,6 +1,6 @@
 # ADR-0047: A dependency-free zipapp for the first downloadable client
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-10
 - Related: Section 16 (HTTP API), Section 17 (CLI), Section 29 (multi-device
   shared core), ADR-0010 (live event transport), ADR-0011 (multi-device shared
@@ -22,7 +22,7 @@ The first client needs to be easy to download, work on common development and
 operator machines, preserve the API's SSE replay rules, and avoid creating the
 Device, presence, pairing, or notification mechanisms that Section 29.8 defers.
 
-## Proposed decision
+## Decision
 
 1. **Distribute a separate terminal client as one Python zipapp.** Its source
    lives under `client/`, uses only the Python 3.12 standard library, and builds

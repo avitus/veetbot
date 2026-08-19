@@ -176,12 +176,20 @@ one. Whoever builds a tool on that list supplies its classification
 with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
-roster.** Its subject is the checked-in builtin specs, which at freeze
-is all twenty. Step 3, domain membership, already passes for every
-one of them: [tool-system.md](tool-system.md)'s partition table lists
-`delegate`, `conversation`, `context`, `skill`, and `memory` as
-builtin domains registered at build time, with `knowledge` and `web` beside
-them. It is step 6 that has nothing to read for eight of the twenty.
+roster.** Its subject is the nineteen checked-in, complete builtin tool
+identities (plus historical versions of `memory.remember` and `skill.load`):
+`math.calculate`, `conversation.ask_user`, `system.current_time`, the three
+`workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
+`artifact.export`, `context.update_working_state`, the three `memory.*` tools,
+`skill.load`, `skill.manage`, the two `knowledge.*` tools, and the two `web.*`
+tools. Step 6 validates every registered version of those nineteen identities.
+`delegate.run` is the
+twentieth model-callable tool declared by the corpus, but
+[tool-system.md](tool-system.md) defers its implementation with the
+general-purpose-subagent extension; it has no checked-in spec, is not
+registered, and therefore is not input to step 6. Step 3, domain membership,
+already passes for all nineteen registered tools because the partition table in
+[tool-system.md](tool-system.md) lists their builtin domains.
 
 ### Why `artifact.export` is Milestone 6
 
@@ -1492,7 +1500,10 @@ The order is fixed and each step refuses rather than warns.
     partition table's builtin rows. A builtin in an unlisted domain is
     a startup error rather than a new domain, because domains are how
     the reserved set is defined and an implicit one defeats it.
-4.  **Uniqueness.** No two registered specs share a name.
+4.  **Uniqueness.** No two registered specs share the same `(name, version)`
+    pair. Historical versions are active registrations: an unversioned lookup
+    resolves the registry's latest active version, while a lookup that requests
+    a version resolves that exact pinned registration.
 5.  **Schema validity.** Both schemas compile under the declared JSON
     Schema dialect, contain no remote `$ref`, and set
     `additionalProperties: false` at every object level.

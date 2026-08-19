@@ -7,10 +7,14 @@ from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.persistence.memory import (
+    InMemoryAgentRepository,
     InMemoryEventRepository,
     InMemoryRunRepository,
     InMemorySessionRepository,
+    InMemoryToolInvocationRepository,
 )
+from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.bootstrap import _memory_uow_repositories
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.policies import ExecutionTarget, TrustLevel
 from agent_core.domain.runs import Run, RunLimits, RunStatus
@@ -87,6 +91,25 @@ async def memory_stack() -> tuple[
     events = InMemoryEventRepository(sessions, clock)
     await sessions.create(session())
     return clock, sessions, runs, events
+
+
+async def memory_uow_factory() -> tuple[FixedClock, MemoryUnitOfWorkFactory]:
+    """Build the shared in-memory unit of work used by contract suites."""
+
+    clock, sessions, runs, events = await memory_stack()
+    return (
+        clock,
+        MemoryUnitOfWorkFactory(
+            _memory_uow_repositories(
+                agents=InMemoryAgentRepository(),
+                sessions=sessions,
+                runs=runs,
+                events=events,
+                invocations=InMemoryToolInvocationRepository(runs),
+                clock=clock,
+            )
+        ),
+    )
 
 
 class NeverCancelled:

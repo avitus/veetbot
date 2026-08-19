@@ -351,7 +351,7 @@ only at `engineering-plan.md:459`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:561` named `ApprovalService` as one of
+`bootstrap-and-composition.md:564` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -459,8 +459,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1001-1002` and the resolve at
-`policy-and-approvals.md:1011`, and one reference in
+at `policy-and-approvals.md:1002-1003` and the resolve at
+`policy-and-approvals.md:1012`, and one reference in
 `runtime-loop.md:1180` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -565,7 +565,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1465`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1473`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -839,34 +839,24 @@ with its two consumers.
 [knowledge-documents.md](knowledge-documents.md) covers the other half
 of the milestone's name.
 
-Several items are partial.
+Several items remain partial.
 
-The partials are: session history and artifacts as retrieval sources
-(named as sources, not designed as such); expiration (a policy with no
-sweep job); the human-editable surface (no UI contract, no edit
-semantics, no statement of what happens to a belief a human edits);
-the external memory provider port (named, no contract); and the
-persona and identity surface over `AgentSpec.instructions` (no
-statement of how a formed belief reaches the instruction text, or
-whether it may).
+The remaining partials are: session history and artifacts as retrieval sources
+(named as sources, not designed as such); expiration (a policy with no sweep
+job in the corpus reviewed here); the external memory provider port (named, no
+contract); and the persona and identity surface over
+`AgentSpec.instructions` (no statement of how a formed belief reaches the
+instruction text, or whether it may).
 
-One of the five is sharper than this review recorded, and the
-sharpening belongs here. The human-editable surface is not merely
-uncontracted: the `MemoryStore` port declares `list`, `edit`, and
-`delete` at `memory-formation-and-consolidation.md:377`, and no tool,
-route, or command in the corpus calls any of them. The agent-facing
-surface is three tools: `memory.search` and `memory.recall_episodes`
-read, and `memory.remember` creates. None of the three lists, edits,
-or deletes. The twelve CLI commands include no memory command, and
-[http-api-and-streaming.md](http-api-and-streaming.md) registers no
-memory route. So *"A user can inspect and delete stored memories"* at
-`engineering-plan.md:2824` is the one Milestone 9 acceptance criterion
-with nothing behind it to test, and the three port methods are the
-shape of an answer rather than the answer. Whether the surface is a
-management tool on the `skill.manage` precedent, a route set, a CLI
-command, or all three is a Milestone 9 decision this review does not
-make, and it is recorded in
-[questions-for-review.md](../status/questions-for-review.md).
+The human-editable surface gap identified by the readiness review is now
+closed through the CLI decision in ADR-0045. `agent memory list`, `get`, `edit`,
+and `delete` call the governed service and expose full provenance and lifecycle
+metadata; listing can include inactive beliefs and filter by source session.
+`agent memory formations` exposes consolidation policy, watermark, and outcome
+counts, while `agent memory trace` exposes the authenticated principal's
+persisted retrieval diagnostics. Boundary and repository tests cover the
+commands, tenant/principal isolation, ordering, and session filters. The HTTP
+route set remains unchanged.
 
 One item was absent, and it was the larger one. **Knowledge documents
 had no design.** The milestone's own heading is *"Long-term memory and
@@ -964,7 +954,7 @@ review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
 Section 15 column at `engineering-plan.md:1674`, and the sibling join
 at `runtime-loop.md:1140` reads it. Restricted context is
-`context-engine.md:278`, where `runs.seed_event_sequence` is nullable
+`context-engine.md:282`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:87`, which
@@ -1244,7 +1234,7 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1465` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2501` against
     `model-gateway.md:1795` and `milestone-map.md:917`. The map

@@ -141,3 +141,34 @@ class SkillLoadTool:
             },
             output_trust=body.trust,
         )
+
+
+class LegacySkillLoadTool(SkillLoadTool):
+    """Compatibility registration for sessions pinned before the 1.1.0 revision."""
+
+    spec = ToolSpec(
+        name=SKILL_LOAD_TOOL_NAME,
+        version="1.0.0",
+        description="Load or unload content from the session-pinned skill catalog.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "minLength": 1, "maxLength": 64},
+                "path": {"type": "string", "minLength": 1, "maxLength": 512},
+                "unload": {"type": "boolean"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        output_schema=None,
+        side_effect=SideEffectClass.NONE,
+        risk=RiskLevel.LOW,
+        idempotency=IdempotencyClass.IDEMPOTENT,
+        required_scopes=set(),
+        timeout_seconds=10,
+        maximum_output_bytes=1_048_576,
+        allow_parallel=False,
+        kind=ToolKind.CONTROL,
+        target_kind="in_process",
+        output_trust=TrustLevel.PLATFORM,
+    )

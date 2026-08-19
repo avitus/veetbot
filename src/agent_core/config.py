@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Mapping
@@ -14,8 +15,9 @@ from typing import Any
 
 import yaml
 from dotenv import dotenv_values
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
+from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
 
@@ -46,6 +48,12 @@ class WebProviderKind(StrEnum):
     FIRECRAWL = "firecrawl"
 
 
+class MemoryProviderExtractionMode(StrEnum):
+    AUTO = "auto"
+    OFF = "off"
+    REQUIRED = "required"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Environment-layer settings; tuning values remain in versioned YAML."""
@@ -61,6 +69,10 @@ class Settings:
     trajectory_export_enabled: bool = False
     skill_authoring_enabled: bool = False
     skill_background_review_enabled: bool = False
+    memory_provider_extraction_mode: MemoryProviderExtractionMode = (
+        MemoryProviderExtractionMode.AUTO
+    )
+    memory_provider_extraction_evidence: Path | None = None
     artifact_root: Path = Path(".agent/artifacts")
     auth_tenant_id: str = ""
     auth_principal_id: str = ""
@@ -74,6 +86,7 @@ class Settings:
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
+PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT = PACKAGE_ROOT / "memory" / "release_evidence"
 SHIPPED_CONFIGS = (
     "policy/hardline.yaml",
     "policy/default.yaml",
@@ -448,10 +461,58 @@ def _validate_release_id(release_id: str | None) -> None:
         )
 
 
+def load_provider_extraction_evidence(
+    path: Path,
+) -> ProviderExtractionEvaluationEvidence:
+    """Load a reviewable activation artifact and reject incomplete or failed evidence."""
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        return ProviderExtractionEvaluationEvidence.model_validate(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        raise ConfigurationError(
+            "provider-backed memory extraction evaluation evidence did not pass"
+        ) from exc
+
+
+def provider_extraction_evidence_paths(settings: Settings) -> tuple[Path, ...]:
+    """Return operator evidence first, followed by immutable release-bundled evidence."""
+
+    paths: list[Path] = []
+    if settings.memory_provider_extraction_evidence is not None:
+        paths.append(settings.memory_provider_extraction_evidence)
+    if PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT.is_dir():
+        paths.extend(sorted(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT.glob("*.json")))
+    return tuple(dict.fromkeys(paths))
+
+
+def _provider_extraction_evidence_is_valid(path: Path) -> bool:
+    try:
+        load_provider_extraction_evidence(path)
+    except ConfigurationError:
+        return False
+    return True
+
+
 def validate_settings(settings: Settings) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
     _validate_release_id(settings.release_id)
+    if settings.memory_provider_extraction_mode is MemoryProviderExtractionMode.REQUIRED:
+        evidence_paths = provider_extraction_evidence_paths(settings)
+        if not evidence_paths:
+            raise ConfigurationError(
+                "provider-backed memory extraction requires evaluation evidence"
+            )
+        required_paths = (
+            (settings.memory_provider_extraction_evidence,)
+            if settings.memory_provider_extraction_evidence is not None
+            else evidence_paths
+        )
+        if not any(_provider_extraction_evidence_is_valid(path) for path in required_paths):
+            raise ConfigurationError(
+                "provider-backed memory extraction evaluation evidence did not pass"
+            )
     if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
     if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
@@ -534,6 +595,29 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     trajectory_export_enabled = _parse_flag(values, "AGENT_TRAJECTORY_EXPORT_ENABLED")
     skill_authoring_enabled = _parse_flag(values, "AGENT_SKILL_AUTHORING_ENABLED")
     skill_background_review_enabled = _parse_flag(values, "AGENT_SKILL_BACKGROUND_REVIEW_ENABLED")
+    raw_memory_mode = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_MODE", "").strip()
+    legacy_memory_enablement = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED", "").strip()
+    if raw_memory_mode and legacy_memory_enablement:
+        raise ConfigurationError(
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE and the legacy enablement flag "
+            "are mutually exclusive"
+        )
+    if legacy_memory_enablement:
+        memory_provider_extraction_mode = (
+            MemoryProviderExtractionMode.REQUIRED
+            if _parse_flag(values, "AGENT_MEMORY_PROVIDER_EXTRACTION_ENABLED")
+            else MemoryProviderExtractionMode.OFF
+        )
+    else:
+        memory_provider_extraction_mode = _parse_enum(
+            MemoryProviderExtractionMode,
+            raw_memory_mode or MemoryProviderExtractionMode.AUTO.value,
+            "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE",
+        )
+    raw_memory_evidence = values.get("AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE", "").strip()
+    memory_provider_extraction_evidence = (
+        Path(raw_memory_evidence).expanduser().resolve() if raw_memory_evidence else None
+    )
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
@@ -585,6 +669,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         trajectory_export_enabled=trajectory_export_enabled,
         skill_authoring_enabled=skill_authoring_enabled,
         skill_background_review_enabled=skill_background_review_enabled,
+        memory_provider_extraction_mode=memory_provider_extraction_mode,
+        memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         artifact_root=artifact_root,
         auth_tenant_id=auth_tenant_id,
         auth_principal_id=auth_principal_id,

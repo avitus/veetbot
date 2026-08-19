@@ -21,12 +21,22 @@ final class LocalSessionRecord {
         lastRunID = entry.lastRunID?.uuidString
     }
 
-    func update(from entry: SessionHistoryEntry) {
+    @discardableResult
+    func update(from entry: SessionHistoryEntry) -> Bool {
+        let nextLastRunID = entry.lastRunID?.uuidString
+        guard title != entry.title
+            || agentID != entry.agentID
+            || createdAt != entry.createdAt
+            || updatedAt != entry.updatedAt
+            || lastRunID != nextLastRunID
+        else { return false }
+
         title = entry.title
         agentID = entry.agentID
         createdAt = entry.createdAt
         updatedAt = entry.updatedAt
-        lastRunID = entry.lastRunID?.uuidString
+        lastRunID = nextLastRunID
+        return true
     }
 
     var entry: SessionHistoryEntry? {
@@ -67,12 +77,14 @@ public actor SwiftDataSessionHistoryStore: SessionHistoryStore {
         let descriptor = FetchDescriptor<LocalSessionRecord>(
             predicate: #Predicate { $0.sessionID == identifier }
         )
+        let changed: Bool
         if let existing = try context.fetch(descriptor).first {
-            existing.update(from: entry)
+            changed = existing.update(from: entry)
         } else {
             context.insert(LocalSessionRecord(entry: entry))
+            changed = true
         }
-        try context.save()
+        if changed { try context.save() }
     }
 
     public func delete(sessionID: UUID) throws {

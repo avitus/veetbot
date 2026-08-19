@@ -1,6 +1,6 @@
 # ADR-0039: Milestone 3 provider and trajectory-export seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Related: Milestone 3, ADR-0002, ADR-0006, ADR-0007, ADR-0012,
   ADR-0016, ADR-0024, ADR-0029, ADR-0032
@@ -17,11 +17,10 @@ the corpus: the bootstrap design freezes `Settings` at eight fields, while the
 trajectory-export design requires operator-controlled tenant enablement and
 does not define another tenant-configuration store.
 
-These choices are recorded as proposed because they are reversible and should
-be reviewed by the repository owner before becoming permanent architecture.
-They do not weaken a security requirement or an acceptance criterion.
+These reversible choices were accepted after repository-owner review. They do
+not weaken a security requirement or an acceptance criterion.
 
-## Proposed decisions
+## Decisions
 
 1. **Provider profiles are strict, hashed startup configuration.** OpenAI,
    Anthropic, and Ollama ship as separate profile documents. Unknown fields,
@@ -64,7 +63,7 @@ They do not weaken a security requirement or an acceptance criterion.
    `AGENT_TRAJECTORY_EXPORT_ENABLED` and `AGENT_ARTIFACT_ROOT`. The enablement
    parser accepts only `0` or `1`; no grant can override a disabled tenant. This
    is the one deliberate extension of the eight-field settings design and is
-   proposed for owner review rather than treated as an implicit amendment.
+   was accepted as an explicit amendment rather than left implicit.
 8. **Consent receives a narrow CLI surface.** `agent session export-consent
    grant|withdraw` manages the per-principal grant required by the export
    design. Grants are prospective, run creation stamps the combined operator

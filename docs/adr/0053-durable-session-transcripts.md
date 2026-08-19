@@ -1,6 +1,6 @@
 # ADR-0053: Durable session transcripts for historical clients
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-17
 - Related: Section 16 (HTTP API), Section 27 (run, turn, and session identity),
   Section 29 (multi-device shared core), ADR-0006 (no private reasoning

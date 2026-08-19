@@ -1,6 +1,6 @@
 # ADR-0040: Milestone 4 policy, approval, and workspace seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-03
 - Related: Milestone 4, ADR-0005, ADR-0017, ADR-0021, ADR-0023,
   ADR-0026, ADR-0028, ADR-0029
@@ -19,11 +19,11 @@ event log belongs to sessions even though a profile-load event is process-wide,
 and the HTTP transport is Milestone 5 even though the Milestone 4 implement
 list names an approval API.
 
-These choices are proposed for owner review. They do not weaken a hardline
+These choices were accepted after owner review. They do not weaken a hardline
 policy rule, scope check, approval revalidation check, or workspace containment
 rule.
 
-## Proposed decisions
+## Decisions
 
 1. **Policy profiles and hardline rules are strict, content-addressed startup
    files.** The loader rejects unknown fields and incomplete effect matrices,

@@ -5103,6 +5103,11 @@ Milestone 9 design and this documentation pass authorizes none.
 Reversal cost of deciding later is **cheap**; the cost of deciding
 now and deciding wrong is a migration.
 
+**Resolved 2026-08-18:** the repository owner authorized closing the gap
+immediately. ADR-0045's CLI choice is implemented without expanding the closed
+HTTP route set: belief list/get/edit/delete, source-session filters,
+consolidation-run inspection, and principal-scoped retrieval-trace inspection.
+
 ### Five smaller corrections, and what the citation check cannot see
 
 **Decided:** fixed in place.

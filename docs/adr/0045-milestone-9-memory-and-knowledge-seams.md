@@ -1,6 +1,6 @@
 # ADR-0045: Milestone 9 memory and knowledge seams
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-04
 - Related: Milestone 9, ADR-0003, ADR-0006, ADR-0014, ADR-0018,
   ADR-0019, ADR-0020, ADR-0021, ADR-0033
@@ -19,21 +19,29 @@ the initial extraction mechanism, conflict granularity, audit-event ownership,
 the first retrieval backend, evaluation carry semantics, and builtin tool
 classification.
 
-These choices preserve the engineering plan's requirements. They are recorded as
-Proposed because the repository owner asked to review decisions made while the
-milestone was implemented unattended.
+These choices preserve the engineering plan's requirements. They were accepted
+after repository-owner review of decisions made while the milestone was
+implemented unattended.
 
-## Proposed decisions
+## Decisions
 
 1. **Human memory management initially uses the existing CLI.** `agent memory
-   list`, `edit`, and `delete` provide the required inspect-and-correct surface.
-   The closed HTTP route set is unchanged until a later milestone explicitly
-   designs a remote management API.
+   list`, `get`, `edit`, and `delete` provide the required inspect-and-correct
+   surface. `list` can include inactive records and filter by source session.
+   The same command family exposes `formations` for consolidation audits and
+   `trace` for principal-scoped retrieval diagnostics. The closed HTTP route set
+   is unchanged until a later milestone explicitly designs a remote management
+   API. The repository owner explicitly authorized closing this inspection gap
+   on 2026-08-18.
 2. **Formation begins with a deterministic structured extractor.** Explicit
    `memory.remember` requests and a deliberately narrow consolidation grammar
-   recognize durable preferences and “remember that” facts. Model-assisted
-   extraction remains behind the formation port and requires evaluation evidence
-   before activation.
+   recognize durable preferences and “remember that” facts. Milestone 10 later
+   added model-assisted implementations. Pending owner acceptance of ADR-0057,
+   production composition already applies its stricter exact-evidence gate as a
+   safe rollout constraint while this ADR remains governing. If accepted,
+   ADR-0057 would supersede unconditional routed-policy activation. The
+   deterministic extractor remains the fallback and cannot be bypassed as the
+   service's safety boundary.
 3. **A principal has one live belief per normalized subject and belief type.** An
    exact duplicate reinforces the existing belief; a different statement for the
    same pair supersedes it and links both records. Rejected or deleted beliefs

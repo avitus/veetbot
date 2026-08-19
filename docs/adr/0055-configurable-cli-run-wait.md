@@ -1,6 +1,6 @@
 # ADR-0055: Configurable CLI wait for durable runs
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-18
 - Related: Section 17 (CLI contract), ADR-0024 (composition and CLI),
   ADR-0054 (provider-neutral web access)

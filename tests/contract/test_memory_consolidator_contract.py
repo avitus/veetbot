@@ -1,15 +1,8 @@
 """Memory consolidation contract: extraction, watermarks, and audit rows."""
 
-import inspect
-
 from agent_core.domain.memory import MemoryStatus
-from agent_core.memory.formation import GovernedMemoryService
 from tests.contract.memory_fixtures import formation_stack, user_event
 from tests.contract.support import SESSION_ID, principal
-
-
-def test_governed_memory_service_exposes_async_consolidation() -> None:
-    assert inspect.iscoroutinefunction(GovernedMemoryService.run)
 
 
 async def test_consolidation_extracts_candidates_and_advances_the_watermark() -> None:

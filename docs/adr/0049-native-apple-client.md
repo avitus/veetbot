@@ -1,6 +1,6 @@
 # ADR-0049: Native Apple client as a secure transport-only surface
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-12
 - Related: Section 16 (HTTP API), Section 29 (multi-device shared core),
   ADR-0006 (no private reasoning storage), ADR-0009 (run and turn identity),
@@ -30,7 +30,7 @@ The requested iOS 15 and macOS 12 deployment floors support incremental
 macOS 14. The client must preserve the lower deployment targets without
 pretending SwiftData is available there.
 
-## Proposed decision
+## Decision
 
 1. **Add a native SwiftUI client under `clients/apple/`.** One Xcode application
    target supports iOS 15+ and macOS 12+ with no third-party dependency.

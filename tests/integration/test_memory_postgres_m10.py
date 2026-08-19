@@ -100,9 +100,17 @@ async def test_postgres_terminal_flag_drives_idle_memory_consolidation(tmp_path:
         maintenance = cast(MaintenanceWorker, app.maintenance_factory())
         await maintenance.run_once()
         memories = await app.memory.list_memories()
+        session_memories = await app.memory.list_memories(session_id=run.session_id)
+        unrelated_memories = await app.memory.list_memories(session_id=uuid4())
+        formations = await app.memory.list_consolidations(session_id=run.session_id)
 
     assert {memory.subject for memory in memories} == {"Apple Watch", "BMW X3"}
+    assert session_memories == memories
+    assert unrelated_memories == []
     assert all(memory.source_session_id == run.session_id for memory in memories)
+    assert len(formations) == 1
+    assert formations[0].session_id == run.session_id
+    assert formations[0].committed == 2
 
 
 async def test_postgres_formation_deadlines_reject_invalid_values_without_poisoning_scan(

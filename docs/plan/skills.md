@@ -747,7 +747,12 @@ Four rules, and each of them exists because of a specific failure:
    a control tool with no valid argument must not invite guessed names.
    The background-review child retains its exact restricted tool
    allowlist because its confinement contract names `skill.load` even
-   when the source agent currently pins no skills.
+   when the source agent currently pins no skills. Because a session
+   keeps the exact tool version it was shown, the registry retains
+   each superseded `skill.load` version as a compatibility
+   registration — the same rule `memory.remember` already follows —
+   so a process upgrade cannot turn an advertised control tool into
+   an unknown capability for an existing session.
 2. **A load is sticky for the session.** Once loaded, the content
    stays in Region B for every subsequent request until the run ends
    or it is unloaded. This is `context-engine.md`'s answer and its

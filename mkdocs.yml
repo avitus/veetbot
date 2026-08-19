@@ -148,4 +148,6 @@ nav:
       - ADR-0053 Durable session transcripts: adr/0053-durable-session-transcripts.md
       - ADR-0054 Provider-neutral web access: adr/0054-provider-neutral-web-access.md
       - ADR-0055 Configurable CLI run wait: adr/0055-configurable-cli-run-wait.md
+      - ADR-0056 Failure-triggered reflection review: adr/0056-failure-reflection-review.md
+      - ADR-0057 Evaluation-gated provider memory extraction: adr/0057-evaluation-gated-provider-memory-extraction.md
   - Changelog: changelog.md

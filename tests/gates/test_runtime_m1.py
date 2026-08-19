@@ -6,6 +6,7 @@ import ast
 import json
 from collections.abc import AsyncIterator
 from decimal import Decimal
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -84,6 +85,14 @@ def test_one_terminal_writer() -> None:
     assert transition_modules == {"runtime/executor.py"}
 
 
+def test_runtime_has_no_provider_adapter_dependency() -> None:
+    assert not [
+        error
+        for error in architecture_errors(ROOT)
+        if "provider SDK" in error or "runtime/application reaches" in error
+    ]
+
+
 def test_no_ambient_time() -> None:
     assert not [error for error in architecture_errors(ROOT) if "ambient nondeterminism" in error]
 
@@ -96,6 +105,28 @@ def test_no_ambient_id() -> None:
 
 @pytest.mark.asyncio
 async def test_step_identity() -> None:
+    transition_types = {
+        "run.queued",
+        "run.started",
+        "run.waiting_for_approval",
+        "run.waiting_for_user",
+        "run.completed",
+        "run.failed",
+        "run.cancelled",
+    }
+    allowed_transitions = {
+        ("run.queued", "run.started"),
+        ("run.queued", "run.cancelled"),
+        ("run.started", "run.waiting_for_approval"),
+        ("run.started", "run.waiting_for_user"),
+        ("run.started", "run.completed"),
+        ("run.started", "run.failed"),
+        ("run.started", "run.cancelled"),
+        ("run.waiting_for_approval", "run.started"),
+        ("run.waiting_for_approval", "run.cancelled"),
+        ("run.waiting_for_user", "run.started"),
+        ("run.waiting_for_user", "run.cancelled"),
+    }
     for case in load_cases(ROOT / "tests" / "eval_cases"):
         result = await run_case(case, FIXTURE_ROOT)
         step_numbers = {
@@ -104,6 +135,18 @@ async def test_step_identity() -> None:
             if event.event_type == "model.request.started"
         }
         assert result.run.step_count == len(step_numbers), case.name
+        for observed_run in result.runs:
+            transitions = [
+                event.event_type
+                for event in result.events
+                if event.run_id == observed_run.id and event.event_type in transition_types
+            ]
+            assert transitions[0] == "run.queued", case.name
+            assert transitions[-1] == f"run.{observed_run.status.value.lower()}", case.name
+            assert all(pair in allowed_transitions for pair in pairwise(transitions)), (
+                case.name,
+                transitions,
+            )
 
 
 @pytest.mark.asyncio
@@ -155,15 +198,6 @@ async def test_budget_stops() -> None:
     assert run.failure.reason is FailureReason.BUDGET_EXCEEDED
     assert run.model_call_count == 1
     assert [event.event_type for event in events].count("model.request.started") == 1
-
-
-@pytest.mark.asyncio
-async def test_every_run_transition_has_an_event() -> None:
-    for case in load_cases(ROOT / "tests" / "eval_cases"):
-        result = await run_case(case, FIXTURE_ROOT)
-        event_types = [event.event_type for event in result.events]
-        assert "run.started" in event_types
-        assert f"run.{result.run.status.value.lower()}" in event_types
 
 
 @pytest.mark.asyncio
@@ -385,11 +419,3 @@ async def test_versioned_attempt_and_identical_call_limits_are_wired(tmp_path: P
     assert circuit_broken.failure is not None
     assert circuit_broken.failure.reason is FailureReason.TOOL_LOOP_DETECTED
     assert circuit_broken.model_call_count == 2
-
-
-def test_runtime_has_no_provider_adapter_dependency() -> None:
-    assert not [
-        error
-        for error in architecture_errors(ROOT)
-        if "provider SDK" in error or "runtime/application reaches" in error
-    ]
