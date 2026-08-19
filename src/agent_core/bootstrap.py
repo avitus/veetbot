@@ -179,6 +179,7 @@ from agent_core.domain.execution import (
     ResourceLimits,
 )
 from agent_core.domain.mcp import MCPServerConfig, MCPTransport, ScriptedMCPServer
+from agent_core.domain.memory import MemoryRecord
 from agent_core.domain.messages import (
     FakeModelScript,
     ModelEvent,
@@ -200,6 +201,10 @@ from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import validate_mcp_config
 from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.formation import SESSION_IDLE_SECONDS, GovernedMemoryService
+from agent_core.memory.model_extraction import (
+    MemoryExtractionAudit,
+    ModelAssistedCandidateExtractor,
+)
 from agent_core.memory.retrieval import (
     DeterministicQueryFormer,
     EventEpisodeSearch,
@@ -659,7 +664,54 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
-    memory_service = GovernedMemoryService(uow_factory, clock, ids, principal)
+    model_provider = FakeModelProvider(script or default_fake_script(), clock)
+    effective_providers = {"fake": model_provider, **model_providers}
+
+    async def record_memory_extraction(audit: MemoryExtractionAudit) -> None:
+        async with uow_factory() as uow:
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=audit.attempt_id,
+                    event_type="memory.extraction.completed",
+                    actor_type="maintenance",
+                    payload={
+                        "provider": audit.provider,
+                        "model": audit.model,
+                        "model_policy": audit.model_policy,
+                        "usage": audit.usage.model_dump(mode="json"),
+                        "candidates_returned": audit.candidates_returned,
+                        "fallback_used": audit.fallback_used,
+                        "error_class": audit.error_class,
+                    },
+                    derivation_key=f"memory.extraction.completed:{audit.attempt_id}",
+                    created_at=clock.now(),
+                )
+            )
+
+    async def existing_memories_for_extraction() -> list[MemoryRecord]:
+        async with uow_factory() as uow:
+            return await uow.memories.list_memories(
+                principal,
+                include_inactive=True,
+                limit=100,
+            )
+
+    memory_extractor = ModelAssistedCandidateExtractor(
+        router=model_router,
+        providers=effective_providers,
+        clock=clock,
+        ids=ids,
+        model_policy=agent.model_policy,
+        audit=record_memory_extraction,
+        existing_memories=existing_memories_for_extraction,
+    )
+    memory_service = GovernedMemoryService(
+        uow_factory,
+        clock,
+        ids,
+        principal,
+        extractor=memory_extractor,
+    )
     memory_retriever = HybridMemoryRetriever(uow_factory, clock, ids, principal)
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
@@ -727,8 +779,6 @@ async def _compose(
                 created_at=clock.now(),
             )
         )
-    model_provider = FakeModelProvider(script or default_fake_script(), clock)
-    effective_providers = {"fake": model_provider, **model_providers}
     mcp_runtime: MCPRuntime | None = None
     try:
         if mcp_clients is None:

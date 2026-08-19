@@ -59,7 +59,7 @@ implementation without one.
 - [ADR-0048 — Atomic CircleCI production delivery](0048-atomic-circleci-production-delivery.md)
 - [ADR-0049 — Native Apple client as a secure transport-only surface](0049-native-apple-client.md)
 - [ADR-0050 — Authoritative conversation history and deletion](0050-authoritative-conversation-history-and-deletion.md)
-- [ADR-0051 — Milestone 10 automatic memory formation (Proposed)](0051-milestone-10-automatic-memory-formation.md)
+- [ADR-0051 — Milestone 10 automatic memory formation](0051-milestone-10-automatic-memory-formation.md)
 - [ADR-0052 — Milestone 10A governed skill-authoring seams (Proposed)](0052-milestone-10a-skill-authoring-seams.md)
 - [ADR-0053 — Durable session transcripts for historical clients](0053-durable-session-transcripts.md)
 - [ADR-0054 — Provider-neutral web access with capability-level routing (Proposed)](0054-provider-neutral-web-access.md)

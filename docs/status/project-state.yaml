@@ -611,8 +611,20 @@ verification:
           duplicate possessive proposal; its red audit-reconciliation regression
           now passes. A later PostgreSQL red regression proved that one malformed
           deadline could poison a sweep; malformed and timezone-naive deadlines
-          are now rejected consistently. All 27 Milestone 10 memory gate tests
+          are now rejected consistently. All 28 Milestone 10 memory gate tests
           pass.
+      - check: routed rich memory extraction activation
+        outcome: passed_locally
+        detail: >-
+          Five focused model-extraction tests prove that a strict-schema routed
+          policy forms a relationship the deterministic grammar misses, records
+          normalized usage in a content-free process event, rejects an
+          unsupported named entity, falls back on malformed output, and rejects
+          output beyond its dedicated budget. The existing memory formation,
+          source-integrity, injection, candidate-cap, and no-policy-regression
+          gates remain unchanged and pass with the hybrid extractor composed for
+          every routed policy. No provider credential was available for a live
+          smoke test in this worktree.
       - check: Milestone 10A skill-authoring gates
         outcome: passed_locally
         detail: >-
@@ -624,8 +636,8 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 374 source and test
-          files, 570 static tests, 218 contracts, deployment-script checks,
+          Ruff formatting and linting, strict mypy over 376 source and test
+          files, 576 static tests, 218 contracts, deployment-script checks,
           123 citation checks, and strict documentation builds pass on the
           integrated head. The static count includes the 25-case evaluation
           front end relocated from the DB-gated integration directory. The
@@ -662,22 +674,24 @@ verification:
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 81 Swift Testing cases passed, including complete historical
-          transcript restoration, forward-compatible message-role decoding,
-          system composer sizing, connection-settings layout, and the
-          missing-keychain-entitlement regression.
+          All 82 Swift Testing cases passed, including complete historical
+          transcript restoration, sidebar conversation navigation,
+          forward-compatible message-role decoding, system composer sizing,
+          connection-settings layout, and the missing-keychain-entitlement
+          regression.
       - check: real-Docker sandbox security partition
         outcome: passed
         detail: All 10 sandbox security tests passed against a freshly built image.
-      - check: proposed ADR-0051
-        outcome: owner_review_requested
+      - check: accepted ADR-0051
+        outcome: approved_and_implemented
         detail: >-
           The durable post-run flag, 30-second idle boundary, structured
           extractor port, source and scope rechecks, semantic conflict subjects,
           independently audited extractor and service caps, inferred-confidence
           ceiling, temporal-hint preservation, transactional replacement,
-          formation-scan index, and formation@2 policy boundary are recorded for
-          owner review.
+          formation-scan index, routed hybrid extractor, content-free model-usage
+          audit, deterministic fallback, and formation@3 policy boundary are
+          approved and implemented.
       - check: proposed ADR-0052
         outcome: owner_review_requested
         detail: >-
@@ -691,13 +705,15 @@ verification:
           The provider-neutral web port, capability-level provider selection,
           fixed HTTPS endpoints, external-untrusted labeling, and default-off
           registration are recorded for owner review.
-      - check: proposed ADR-0055
-        outcome: owner_review_requested
+      - check: accepted ADR-0055
+        outcome: approved_and_implemented
         detail: >-
           The configurable CLI run wait with its positive-value boundary and
-          300-second default is recorded for owner review.
+          300-second default is approved and implemented.
     remaining:
-      - Evaluate and activate the restricted provider-backed extractor from ADR-0045.
+      - Run a credentialed provider smoke test and collect formation precision,
+        consequential-fact recall, rejection-rate, and cost samples from the
+        routed extractor; no provider credential was available in this worktree.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
@@ -997,4 +1013,4 @@ readiness:
   documents_required_before_coding_reaches_them: []
 
 last_updated: 2026-08-19T05:51:46Z
-last_reviewed_commit: 69b9122
+last_reviewed_commit: d498a12

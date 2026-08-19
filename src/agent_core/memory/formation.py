@@ -36,7 +36,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@2"
+FORMATION_POLICY_VERSION = "formation@3"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
@@ -289,6 +289,14 @@ class DeterministicCandidateExtractor:
                 clause,
                 re.I,
             )
+            if relationship is None:
+                relationship = re.match(
+                    r"my\s+(?:(?:\d{1,3})(?:\s+|-)years?(?:\s+|-)old(?:\s+|-))?"
+                    r"(spouse|wife|husband|partner|mother|father|son|daughter)"
+                    r"\s*,\s*([^,.;!?]+?)\s*,",
+                    clause,
+                    re.I,
+                )
             if relationship is not None:
                 relation = relationship.group(1).casefold()
                 value = relationship.group(2).strip(" ,.:;!?")
