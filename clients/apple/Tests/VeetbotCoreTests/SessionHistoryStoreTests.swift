@@ -4,6 +4,29 @@ import Testing
 @testable import VeetbotCore
 
 @Suite struct SessionHistoryStoreTests {
+    #if XCODE_BUILD
+    @available(macOS 14.0, iOS 17.0, *)
+    @Test
+    func testSwiftDataRecordSkipsUnchangedUpdates() {
+        let entry = SessionHistoryEntry(
+            sessionID: UUID(),
+            title: "Stable",
+            agentID: "general",
+            createdAt: Date(timeIntervalSince1970: 1),
+            updatedAt: Date(timeIntervalSince1970: 2),
+            lastRunID: UUID()
+        )
+        let record = LocalSessionRecord(entry: entry)
+
+        #expect(record.update(from: entry) == false)
+
+        var changed = entry
+        changed.title = "Changed"
+        #expect(record.update(from: changed) == true)
+        #expect(record.title == "Changed")
+    }
+    #endif
+
     @Test(arguments: HistoryBackend.allCases)
     func testEqualTimestampsUseTheSameDeterministicOrder(
         backend: HistoryBackend

@@ -99,6 +99,25 @@ def test_required_make_targets_exist() -> None:
     assert "docker compose ps --status healthy" not in text
 
 
+def test_apple_target_declares_phone_and_tablet_orientations() -> None:
+    project = (ROOT / "clients" / "apple" / "Veetbot.xcodeproj" / "project.pbxproj").read_text(
+        encoding="utf-8"
+    )
+    phone = (
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "
+        '"UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft '
+        'UIInterfaceOrientationLandscapeRight";'
+    )
+    tablet = (
+        "INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "
+        '"UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown '
+        'UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";'
+    )
+
+    assert project.count(phone) == 2
+    assert project.count(tablet) == 2
+
+
 def test_production_deployment_assets_preserve_process_boundaries() -> None:
     deploy = ROOT / "deploy"
     environment = (deploy / "veetbot.env.example").read_text(encoding="utf-8")
