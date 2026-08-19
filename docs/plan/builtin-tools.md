@@ -1500,7 +1500,10 @@ The order is fixed and each step refuses rather than warns.
     partition table's builtin rows. A builtin in an unlisted domain is
     a startup error rather than a new domain, because domains are how
     the reserved set is defined and an implicit one defeats it.
-4.  **Uniqueness.** No two registered specs share a name.
+4.  **Uniqueness.** No two registered specs share the same `(name, version)`
+    pair. Historical versions are active registrations: an unversioned lookup
+    resolves the registry's latest active version, while a lookup that requests
+    a version resolves that exact pinned registration.
 5.  **Schema validity.** Both schemas compile under the declared JSON
     Schema dialect, contain no remote `$ref`, and set
     `additionalProperties: false` at every object level.

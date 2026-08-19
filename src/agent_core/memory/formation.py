@@ -68,12 +68,21 @@ _POSSESSIVE_ENTITY = re.compile(
     r"\bmy\s+((?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)"
     r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
 )
+_GROUNDING_TOKEN = re.compile(r"\d+(?:\.\d+)+|[a-z0-9]+(?:['-][a-z0-9]+)*")
 
 
 def contains_memory_injection(value: str) -> bool:
     """Return whether memory-shaped text contains a prompt-injection marker."""
 
     return _INJECTION.search(value) is not None
+
+
+def grounding_tokens(value: str) -> set[str]:
+    """Normalize words and dotted numbers for memory-source grounding checks."""
+
+    tokens = set(_GROUNDING_TOKEN.findall(value.casefold()))
+    tokens.update(token[:-2] for token in tuple(tokens) if token.endswith("'s"))
+    return tokens
 
 
 def _event_text(event: EventEnvelope) -> str:

@@ -23,6 +23,7 @@ import scripts.check_production_deployment as production_check
 from agent_core.bootstrap import build
 from agent_core.cli.main import app
 from agent_core.config import load_settings
+from agent_core.domain.errors import ExportConsentError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import ConsolidationRun, MemoryEdit
 from agent_core.domain.messages import AssistantMessage, TextPart
@@ -507,6 +508,59 @@ def test_run_reserved_words_and_implicit_submission_parse(monkeypatch: pytest.Mo
     )
     assert conflicting_policy.exit_code == 2
     assert "--model-policy can only be used for a new session" in conflicting_policy.stderr
+
+
+def test_run_export_prints_json_and_reports_consent_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_id = UUID("00000000-0000-0000-0000-000000000041")
+    exported_run_id = UUID("00000000-0000-0000-0000-000000000042")
+
+    async def fake_export(run_id: UUID) -> object:
+        assert run_id == exported_run_id
+        return SimpleNamespace(
+            id=artifact_id,
+            model_dump_json=lambda: json.dumps({"id": str(artifact_id)}),
+        )
+
+    monkeypatch.setattr(cli_main, "_export_run", fake_export)
+    runner = CliRunner()
+
+    exported = runner.invoke(
+        app,
+        ["run", "export", str(exported_run_id), "--json"],
+    )
+
+    assert exported.exit_code == 0
+    assert json.loads(exported.stdout) == {"id": str(artifact_id)}
+
+    async def deny_export(_run_id: UUID) -> object:
+        raise ExportConsentError("trajectory export requires active consent")
+
+    monkeypatch.setattr(cli_main, "_export_run", deny_export)
+    denied = runner.invoke(app, ["run", "export", str(exported_run_id)])
+
+    assert denied.exit_code == 1
+    assert "requires active consent" in denied.stderr
+
+
+@pytest.mark.parametrize(
+    ("command", "limit"),
+    [
+        ("list", "0"),
+        ("list", "201"),
+        ("formations", "0"),
+        ("formations", "201"),
+    ],
+)
+def test_memory_cli_rejects_limits_outside_the_governed_bounds(
+    command: str,
+    limit: str,
+) -> None:
+    result = CliRunner().invoke(app, ["memory", command, "--limit", limit])
+
+    assert result.exit_code == 2
+    assert "Invalid value" in result.stderr
 
 
 def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) -> None:

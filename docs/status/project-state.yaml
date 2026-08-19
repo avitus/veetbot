@@ -622,10 +622,12 @@ verification:
           unsupported named entity, falls back on malformed output, and rejects
           output beyond its dedicated budget. The existing memory formation,
           source-integrity, injection, candidate-cap, and no-policy-regression
-          gates remain unchanged. ADR-0057 supersedes composition for every routed
-          policy: the reference extractor remains covered directly, while normal
-          composition requires exact activation evidence. No provider credential
-          was available for a live smoke test in this worktree.
+          gates remain unchanged. Pending owner acceptance, the implementation
+          provisionally applies ADR-0057's stricter composition boundary without
+          claiming architectural acceptance: the reference extractor remains
+          covered directly, while normal composition requires exact activation
+          evidence. No provider credential was available for a live smoke test in
+          this worktree.
       - check: Milestone 10A skill-authoring gates
         outcome: passed_locally
         detail: >-
@@ -660,13 +662,15 @@ verification:
           required modes preserve explicit no-resolution and fail-closed choices.
           The 24-case paired CLI evaluator derives the corpus and model tuple and
           creates no artifact unless lift, fabrication, and policy gates pass.
-          All 94 focused provider, evaluator, CLI, configuration, and
-          review-remediation tests pass.
+          Focused provider, evaluator, CLI, configuration, and
+          review-remediation tests pass, including distinct candidate polarity
+          and belief types, dotted-number grounding, export consent handling,
+          JSON export, and memory-list boundary validation.
       - check: make check
         outcome: passed
         detail: >-
           Ruff formatting and linting, strict mypy over 380 source and test
-          files, 622 static tests, 219 contracts, deployment-script checks,
+          files, 629 static tests, 219 contracts, deployment-script checks,
           121 citation checks, and strict documentation builds pass on the
           integrated head. The static count includes the 25-case evaluation
           front end relocated from the DB-gated integration directory. The
@@ -720,8 +724,11 @@ verification:
           ceiling, temporal-hint preservation, transactional replacement,
           formation-scan index, hybrid extractor reference implementation,
           content-free model-usage audit, deterministic fallback, and formation@3
-          policy boundary are approved and implemented. ADR-0057 supersedes its
-          unconditional routed-policy activation and provider budget.
+          policy boundary are approved and implemented. ADR-0051 remains the
+          accepted architecture. The implementation enforces proposed ADR-0057's
+          stricter evidence gate while owner review is pending; ADR-0057 would
+          supersede ADR-0051's unconditional routed-policy activation and provider
+          budget only if accepted.
       - check: proposed ADR-0052
         outcome: owner_review_requested
         detail: >-

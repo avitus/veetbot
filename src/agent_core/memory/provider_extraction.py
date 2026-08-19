@@ -38,7 +38,7 @@ from agent_core.domain.messages import (
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.formation import contains_memory_injection
+from agent_core.memory.formation import contains_memory_injection, grounding_tokens
 from agent_core.model.cost import price_usage
 from agent_core.model.streaming import collect_turn
 from agent_core.ports.determinism import Clock, IdFactory
@@ -51,7 +51,6 @@ PROVIDER_FORMATION_POLICY_VERSION = "formation@3"
 
 logger = logging.getLogger(__name__)
 _NAMED_OR_NUMERIC_TOKEN = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*|\d[\d.-]*)\b")
-_GROUNDING_TOKEN = re.compile(r"\d+(?:\.\d+)+|[a-z0-9]+(?:['-][a-z0-9]+)*")
 _IGNORED_GROUNDING_TOKENS = frozenset({"User", "User's", "The"})
 
 
@@ -494,9 +493,8 @@ class ProviderAssistedCandidateExtractor:
         if any(sequence not in by_sequence for sequence in candidate.source_event_ids):
             return False
         source = " ".join(by_sequence[sequence] for sequence in candidate.source_event_ids)
-        source_tokens = set(_GROUNDING_TOKEN.findall(source.casefold()))
-        source_tokens.update(token[:-2] for token in tuple(source_tokens) if token.endswith("'s"))
-        subject_tokens = _GROUNDING_TOKEN.findall(candidate.subject.casefold())
+        source_tokens = grounding_tokens(source)
+        subject_tokens = grounding_tokens(candidate.subject)
         if subject_tokens and not any(token in source_tokens for token in subject_tokens):
             return False
         named = {

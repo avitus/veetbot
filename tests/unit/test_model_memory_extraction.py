@@ -11,7 +11,13 @@ from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.domain.events import EventEnvelope, NewEvent
-from agent_core.domain.memory import BeliefType, Portability, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryCandidate,
+    Polarity,
+    Portability,
+    Sensitivity,
+)
 from agent_core.domain.messages import (
     CapabilitySet,
     FakeModelScript,
@@ -180,6 +186,48 @@ async def test_model_assisted_extractor_rejects_an_ungrounded_named_entity() -> 
     assert candidates == []
     assert audits[0].candidates_returned == 0
     assert audits[0].fallback_used is False
+
+
+def test_model_assisted_extractor_accepts_a_grounded_decimal() -> None:
+    candidate = MemoryCandidate(
+        belief_type=BeliefType.FACT,
+        subject="telescopes",
+        statement="User has 3.5 telescopes.",
+        source_event_ids=[7],
+        model_confidence=0.96,
+        proposed_scope="general",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+
+    assert ModelAssistedCandidateExtractor._is_grounded(
+        candidate,
+        [_event("I have 3.5 telescopes.")],
+        principal=principal(),
+        scope="general",
+    )
+
+
+def test_model_assisted_extractor_preserves_distinct_polarity_and_belief_type() -> None:
+    asserted = MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP,
+        subject="daughter",
+        statement="User has at least one daughter.",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[7],
+        model_confidence=0.96,
+        proposed_scope="general",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+    retracted = asserted.model_copy(update={"polarity": Polarity.RETRACT})
+    factual = asserted.model_copy(update={"belief_type": BeliefType.FACT})
+
+    assert ModelAssistedCandidateExtractor._deduplicate([asserted, retracted, factual]) == [
+        asserted,
+        retracted,
+        factual,
+    ]
 
 
 async def test_model_assisted_extractor_rejects_output_over_its_dedicated_budget() -> None:

@@ -37,6 +37,7 @@ from agent_core.memory.formation import (
     DeterministicCandidateExtractor,
     _event_text,
     contains_memory_injection,
+    grounding_tokens,
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.streaming import collect_turn
@@ -329,9 +330,8 @@ class ModelAssistedCandidateExtractor:
         if any(sequence not in by_sequence for sequence in candidate.source_event_ids):
             return False
         source = " ".join(by_sequence[sequence] for sequence in candidate.source_event_ids)
-        source_folded = source.casefold()
-        source_tokens = set(re.findall(r"[a-z0-9'-]+", source_folded))
-        subject_tokens = re.findall(r"[A-Za-z0-9'-]+", candidate.subject.casefold())
+        source_tokens = grounding_tokens(source)
+        subject_tokens = grounding_tokens(candidate.subject)
         if subject_tokens and not any(token in source_tokens for token in subject_tokens):
             return False
         named = {
@@ -344,11 +344,13 @@ class ModelAssistedCandidateExtractor:
     @staticmethod
     def _deduplicate(candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
         result: list[MemoryCandidate] = []
-        seen: set[tuple[str, str, tuple[int, ...]]] = set()
+        seen: set[tuple[str, str, str, Polarity, tuple[int, ...]]] = set()
         for candidate in candidates:
             key = (
+                candidate.belief_type.value,
                 candidate.subject.casefold(),
                 candidate.statement.casefold(),
+                candidate.polarity,
                 tuple(candidate.source_event_ids),
             )
             if key in seen:
