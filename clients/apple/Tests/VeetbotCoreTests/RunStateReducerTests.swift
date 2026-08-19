@@ -295,6 +295,54 @@ import Testing
     }
 
     @Test
+    func testCompletedToolsDoNotNeedDotQualifiedNamesToBundle() {
+        let reducer = RunStateReducer()
+        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "search"))
+        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "search"))
+
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected undotted same-name tools to render as a bundle")
+            return
+        }
+        #expect(bundle.activities.map(\.callID) == ["search-1", "search-2"])
+        #expect(bundle.summary == "2 Searches Completed")
+    }
+
+    @Test
+    func testUnknownToolNamesRemainStandalone() {
+        let reducer = RunStateReducer()
+        for index in 1...2 {
+            reducer.reduce(
+                SSEFrame(
+                    id: index,
+                    event: "tool.call.completed",
+                    data: ["call_id": .string("unknown-\(index)")]
+                )
+            )
+        }
+
+        #expect(reducer.activityTimeline.map(\.id) == ["tool:unknown-1", "tool:unknown-2"])
+        #expect(reducer.tools.map(\.name) == ["tool", "tool"])
+    }
+
+    @Test
+    func testBundleReportsHighestRiskAcrossItsActivities() {
+        let reducer = RunStateReducer()
+        reducer.reduce(
+            toolFrame(id: 1, callID: "search-1", name: "web.search", risk: .low)
+        )
+        reducer.reduce(
+            toolFrame(id: 2, callID: "search-2", name: "web.search", risk: .critical)
+        )
+
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected completed searches to render as a bundle")
+            return
+        }
+        #expect(bundle.highestRisk == .critical)
+    }
+
+    @Test
     func testMessagesAndFailuresBreakCompletedToolBundles() {
         let reducer = RunStateReducer()
         reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
@@ -329,6 +377,132 @@ import Testing
         #expect(failedTools.map(\.callID) == ["search-failed"])
     }
 
+    @Test
+    func testDeniedAndUncertainToolsBreakCompletedToolBundles() {
+        for (event, expectedStatus) in [
+            ("tool.call.denied", ToolActivityStatus.denied),
+            ("tool.call.uncertain", ToolActivityStatus.uncertain),
+        ] {
+            let reducer = RunStateReducer()
+            reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
+            reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
+            reducer.reduce(
+                toolFrame(id: 3, event: event, callID: "search-boundary", name: "web.search")
+            )
+            reducer.reduce(toolFrame(id: 4, callID: "search-3", name: "web.search"))
+            reducer.reduce(toolFrame(id: 5, callID: "search-4", name: "web.search"))
+
+            #expect(
+                reducer.activityTimeline.map(\.id) == [
+                    "tool:search-1",
+                    "tool:search-boundary",
+                    "tool:search-3",
+                ]
+            )
+            guard case .tool(let boundary) = reducer.activityTimeline[1] else {
+                Issue.record("expected \(event) to remain a standalone activity")
+                continue
+            }
+            #expect(boundary.status == expectedStatus)
+        }
+    }
+
+    @Test
+    func testApprovalBoundCompletedToolBreaksCompletedToolBundles() {
+        let reducer = RunStateReducer()
+        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
+        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
+        reducer.reduce(
+            toolFrame(
+                id: 3,
+                event: "tool.call.proposed",
+                callID: "search-approved",
+                name: "web.search"
+            )
+        )
+        let approval = ApprovalView(
+            id: UUID(),
+            runID: UUID(),
+            sessionID: UUID(),
+            status: .approved,
+            toolName: "web.search",
+            actionSummary: "Search the web",
+            arguments: ["query": .string("approved query")],
+            risk: "high",
+            policyReason: "explicit approval required",
+            expiresAt: nil,
+            createdAt: Date(),
+            resolvedAt: Date(),
+            resolvedBy: "test",
+            decision: .approveOnce
+        )
+        reducer.mergeApproval(approval)
+        reducer.reduce(toolFrame(id: 4, callID: "search-approved", name: "web.search"))
+        reducer.reduce(toolFrame(id: 5, callID: "search-3", name: "web.search"))
+        reducer.reduce(toolFrame(id: 6, callID: "search-4", name: "web.search"))
+
+        #expect(
+            reducer.activityTimeline.map(\.id) == [
+                "tool:search-1",
+                "tool:search-approved",
+                "tool:search-3",
+            ]
+        )
+        guard case .tool(let approved) = reducer.activityTimeline[1] else {
+            Issue.record("expected approved completed tool to remain standalone")
+            return
+        }
+        #expect(approved.status == .completed)
+        #expect(approved.approvalID == approval.id)
+    }
+
+    @Test
+    func testErrorResultBreaksCompletedToolBundles() {
+        let reducer = RunStateReducer()
+        reducer.reduce(toolFrame(id: 1, callID: "search-1", name: "web.search"))
+        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
+        reducer.reduce(
+            toolFrame(
+                id: 3,
+                callID: "search-error",
+                name: "web.search",
+                resultIsError: true
+            )
+        )
+        reducer.reduce(toolFrame(id: 4, callID: "search-3", name: "web.search"))
+        reducer.reduce(toolFrame(id: 5, callID: "search-4", name: "web.search"))
+
+        #expect(
+            reducer.activityTimeline.map(\.id) == [
+                "tool:search-1",
+                "tool:search-error",
+                "tool:search-3",
+            ]
+        )
+        guard case .tool(let error) = reducer.activityTimeline[1] else {
+            Issue.record("expected error result to remain standalone")
+            return
+        }
+        #expect(error.status == .completed)
+        #expect(error.result?.isError == true)
+    }
+
+    @Test
+    func testDuplicateCompletedToolReplayDoesNotDuplicateBundleEntries() {
+        let reducer = RunStateReducer()
+        let first = toolFrame(id: 1, callID: "search-1", name: "web.search")
+        reducer.reduce(first)
+        reducer.reduce(first)
+        reducer.reduce(toolFrame(id: 2, callID: "search-2", name: "web.search"))
+
+        #expect(reducer.tools.map(\.callID) == ["search-1", "search-2"])
+        guard case .toolBundle(let bundle) = reducer.activityTimeline.first else {
+            Issue.record("expected replayed completed event to preserve the adjacent bundle")
+            return
+        }
+        #expect(bundle.activities.map(\.callID) == ["search-1", "search-2"])
+    }
+
     private func assistantMessageFrame(id: Int, text: String) -> SSEFrame {
         SSEFrame(
             id: id,
@@ -348,15 +522,28 @@ import Testing
         id: Int,
         event: String = "tool.call.completed",
         callID: String,
-        name: String
+        name: String,
+        resultIsError: Bool? = nil,
+        risk: RiskLevel? = nil
     ) -> SSEFrame {
-        SSEFrame(
+        var data: [String: JSONValue] = [
+            "call_id": .string(callID),
+            "name": .string(name),
+        ]
+        if let resultIsError {
+            data["result_item"] = .object([
+                "content": .array([]),
+                "is_error": .bool(resultIsError),
+                "trust": .string("external_untrusted"),
+            ])
+        }
+        if let risk {
+            data["risk"] = .string(risk.rawValue)
+        }
+        return SSEFrame(
             id: id,
             event: event,
-            data: [
-                "call_id": .string(callID),
-                "name": .string(name),
-            ]
+            data: data
         )
     }
 }

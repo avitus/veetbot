@@ -61,8 +61,9 @@ pretending SwiftData is available there.
    stream does not provide stored invocation details. As a presentation-only
    compaction, adjacent successful completions of the same tool render as one
    count-labelled activity bundle. Every invocation, argument, and result stays
-   available inside the expanded bundle; messages, different tools, approvals,
-   and non-success outcomes break the bundle.
+   available inside the expanded bundle, along with its individual risk; the
+   collapsed bundle presents the highest risk among its calls. Messages,
+   different tools, approvals, and non-success outcomes break the bundle.
 9. **Execute native tests under full Xcode in hosted CI.** Command Line Tools may
    compile a Swift Testing bundle without running its tests. The repository's
    `make test-apple` target therefore refuses that environment, selects full

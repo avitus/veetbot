@@ -46,8 +46,9 @@ from duplicating messages already restored from the transcript.
 
 Adjacent successful completions of the same tool are displayed as one counted
 activity bundle. Expanding the bundle retains access to every call's arguments
-and result. Messages, different tools, approvals, failures, denials, and
-uncertain outcomes remain separate activity items.
+and result, including its individual risk. The collapsed bundle uses the
+highest risk among its calls. Messages, different tools, approvals, failures,
+denials, uncertain outcomes, and error results remain separate activity items.
 
 The Command Line Tools-only Swift installation can compile the package but may
 not include a functioning Apple test-bundle runner. Use full Xcode to execute

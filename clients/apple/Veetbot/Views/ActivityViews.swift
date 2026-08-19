@@ -32,12 +32,7 @@ struct ToolActivityCard: View {
                     }
                     Spacer()
                     if let risk = activity.risk {
-                        Text(risk.rawValue.uppercased())
-                            .appFont(.caption, weight: .semibold)
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
-                            .background(taxonomy.color.opacity(0.14))
-                            .clipShape(Capsule())
+                        RiskBadge(risk: risk, color: taxonomy.color)
                     }
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 }
@@ -90,6 +85,9 @@ struct ToolActivityBundleCard: View {
                         .foregroundColor(taxonomy.color)
                     Text(bundle.summary).appFont(.headline)
                     Spacer()
+                    if let risk = bundle.highestRisk {
+                        RiskBadge(risk: risk, color: taxonomy.color)
+                    }
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 }
             }
@@ -116,7 +114,7 @@ struct ToolActivityBundleCard: View {
 
     private var taxonomy: TaxonomyStyle {
         let first = bundle.activities[0]
-        return TaxonomyStyle(sideEffect: first.sideEffect, risk: first.risk)
+        return TaxonomyStyle(sideEffect: first.sideEffect, risk: bundle.highestRisk)
     }
 }
 
@@ -145,8 +143,18 @@ private struct BundledToolActivityRow: View {
             }
             .padding(.top, 6)
         } label: {
-            Text(rowLabel)
-                .lineLimit(1)
+            HStack {
+                Text(rowLabel)
+                    .lineLimit(1)
+                Spacer()
+                if let risk = activity.risk {
+                    let taxonomy = TaxonomyStyle(
+                        sideEffect: activity.sideEffect,
+                        risk: risk
+                    )
+                    RiskBadge(risk: risk, color: taxonomy.color)
+                }
+            }
         }
     }
 
@@ -155,6 +163,20 @@ private struct BundledToolActivityRow: View {
             return "\(index). \(query)"
         }
         return "Call \(index)"
+    }
+}
+
+private struct RiskBadge: View {
+    let risk: RiskLevel
+    let color: Color
+
+    var body: some View {
+        Text(risk.rawValue.uppercased())
+            .appFont(.caption, weight: .semibold)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.14))
+            .clipShape(Capsule())
     }
 }
 

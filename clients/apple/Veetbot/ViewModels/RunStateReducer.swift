@@ -40,10 +40,11 @@ public struct ToolActivity: Identifiable, Sendable {
     public var sideEffect: SideEffectClass?
     public var risk: RiskLevel?
     public var approvalID: UUID?
+    fileprivate var hasKnownName: Bool
 
     public var id: String { callID }
     fileprivate var isBundleCandidate: Bool {
-        name.contains(".") && status == .completed && approvalID == nil && result?.isError != true
+        hasKnownName && status == .completed && approvalID == nil && result?.isError != true
     }
 }
 
@@ -63,8 +64,22 @@ public struct ToolActivityBundle: Identifiable, Sendable {
     public var id: String { activities[0].callID }
     public var name: String { activities[0].name }
     public var count: Int { activities.count }
+    public var highestRisk: RiskLevel? {
+        activities.compactMap(\.risk).max {
+            Self.riskRank($0) < Self.riskRank($1)
+        }
+    }
     public var summary: String {
         "\(count) \(Self.pluralizedDisplayName(name)) Completed"
+    }
+
+    private static func riskRank(_ risk: RiskLevel) -> Int {
+        switch risk {
+        case .low: 0
+        case .medium: 1
+        case .high: 2
+        case .critical: 3
+        }
     }
 
     private static func pluralizedDisplayName(_ name: String) -> String {
@@ -357,26 +372,47 @@ public final class RunStateReducer: ObservableObject {
                 continue
             }
             let callID = object["call_id"]?.stringValue ?? "tool-\(tools.count)"
-            let name = object["name"]?.stringValue ?? "tool"
+            let suppliedName = object["name"]?.stringValue
+            let name = suppliedName ?? "tool"
             let arguments = object["arguments"]?.objectValue ?? [:]
-            ensureTool(callID: callID, name: name, status: .queued)
-            updateTool(callID: callID) { $0.arguments = arguments }
+            ensureTool(
+                callID: callID,
+                name: name,
+                hasKnownName: suppliedName != nil,
+                status: .queued
+            )
+            updateTool(callID: callID) { tool in
+                tool.arguments = arguments
+                if let suppliedName {
+                    tool.name = suppliedName
+                    tool.hasKnownName = true
+                }
+            }
         }
     }
 
     private func updateTool(from frame: SSEFrame, status: ToolActivityStatus) {
-        let name =
+        let suppliedName =
             frame.data["name"]?.stringValue
             ?? frame.data["tool_name"]?.stringValue
-            ?? "tool"
+        let name = suppliedName ?? "tool"
         let runID =
             frame.data["run_id"]?.stringValue
             ?? activeRunID?.uuidString
             ?? "unknown-run"
         let callID = frame.data["call_id"]?.stringValue ?? "tool-\(runID)-\(name)"
-        ensureTool(callID: callID, name: name, status: status)
+        ensureTool(
+            callID: callID,
+            name: name,
+            hasKnownName: suppliedName != nil,
+            status: status
+        )
         updateTool(callID: callID) { tool in
             tool.status = status
+            if let suppliedName {
+                tool.name = suppliedName
+                tool.hasKnownName = true
+            }
             if let arguments = frame.data["arguments"]?.objectValue {
                 tool.arguments = arguments
             }
@@ -400,7 +436,12 @@ public final class RunStateReducer: ObservableObject {
         }
     }
 
-    private func ensureTool(callID: String, name: String, status: ToolActivityStatus) {
+    private func ensureTool(
+        callID: String,
+        name: String,
+        hasKnownName: Bool,
+        status: ToolActivityStatus
+    ) {
         guard toolIndex[callID] == nil else { return }
         toolIndex[callID] = tools.count
         activityOrder.append(.tool(callID))
@@ -413,7 +454,8 @@ public final class RunStateReducer: ObservableObject {
                 result: nil,
                 sideEffect: nil,
                 risk: nil,
-                approvalID: nil
+                approvalID: nil,
+                hasKnownName: hasKnownName
             )
         )
     }
