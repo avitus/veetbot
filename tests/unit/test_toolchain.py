@@ -205,16 +205,26 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     units = deploy / "systemd"
     api = (units / "veetbot-api.service").read_text(encoding="utf-8")
     worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
+    async_worker = (units / "veetbot-async-worker.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
+    scheduler = (units / "veetbot-schedule.service").read_text(encoding="utf-8")
     assert "agent api" in api
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
-    assert "agent worker --role worker" in worker
+    assert "agent worker --role interactive" in worker
     assert "SupplementaryGroups=docker" in worker
+    assert "agent worker --role async" in async_worker
+    assert "SupplementaryGroups=docker" in async_worker
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
+    assert "agent worker --role schedule" in scheduler
+    assert "SupplementaryGroups=docker" not in scheduler
+    assert "ReadWritePaths=" not in scheduler
+    assert "UnsetEnvironment=AUTH_TOKEN" in scheduler
+    assert "VEETBOT_OPENAI_KEY" in scheduler
     assert all(
-        "EnvironmentFile=/etc/veetbot/veetbot.env" in unit for unit in (api, worker, maintenance)
+        "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
+        for unit in (api, worker, async_worker, maintenance, scheduler)
     )
     assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
 
@@ -233,6 +243,9 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert '[[ -d "$BROWSER_PROFILE_KEY_DIR" ]]' in release
     assert '[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]]' in release
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
+    assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
+    assert "veetbot-async-worker" in release
+    assert "veetbot-schedule" in release
 
     nginx = (ROOT / "nginx" / "veetbot.conf").read_text(encoding="utf-8")
     assert "server_name api.veetbot.com" in nginx

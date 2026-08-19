@@ -2,7 +2,7 @@
 
 from typing import cast
 
-from sqlalchemy import Table
+from sqlalchemy import CheckConstraint, Table, UniqueConstraint
 
 from agent_core.adapters.persistence.sqlalchemy_models import Base, EvalScenarioAttemptCostRow
 
@@ -100,3 +100,69 @@ def test_browser_authentications_schema_is_secret_free() -> None:
         "ck_browser_authentications_status_closed",
         "ck_browser_authentications_time_window",
     }
+
+
+def test_schedule_tables_encode_identity_erasure_and_query_constraints() -> None:
+    tables = Base.metadata.tables
+    assert {
+        "schedules",
+        "schedule_revisions",
+        "schedule_occurrences",
+        "schedule_idempotency_keys",
+    } <= tables.keys()
+
+    schedules = tables["schedules"]
+    assert {tuple(column.name for column in index.columns) for index in schedules.indexes} >= {
+        ("state", "next_fire_at"),
+        ("tenant_id", "principal_id", "updated_at", "id"),
+    }
+
+    revisions = tables["schedule_revisions"]
+    assert tuple(column.name for column in revisions.primary_key.columns) == (
+        "schedule_id",
+        "revision",
+    )
+
+    occurrences = tables["schedule_occurrences"]
+    assert "links_erased_at" in occurrences.columns
+    assert {tuple(column.name for column in index.columns) for index in occurrences.indexes} >= {
+        ("schedule_id", "nominal_fire_at"),
+        ("run_id",),
+    }
+    run_indexes = [
+        index
+        for index in occurrences.indexes
+        if tuple(column.name for column in index.columns) == ("run_id",)
+    ]
+    assert len(run_indexes) == 1
+    assert run_indexes[0].unique is True
+    assert str(run_indexes[0].dialect_options["postgresql"]["where"]) == "run_id IS NOT NULL"
+    unique_columns = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in occurrences.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("schedule_id", "nominal_fire_at") in unique_columns
+    foreign_keys = {
+        foreign_key.parent.name: foreign_key.ondelete for foreign_key in occurrences.foreign_keys
+    }
+    assert foreign_keys["session_id"] == "SET NULL"
+    assert foreign_keys["run_id"] == "SET NULL"
+    assert all(
+        foreign_key.deferrable and foreign_key.initially == "DEFERRED"
+        for foreign_key in occurrences.foreign_keys
+        if foreign_key.parent.name in {"session_id", "run_id"}
+    )
+    check_sql = " ".join(
+        str(constraint.sqltext)
+        for constraint in occurrences.constraints
+        if isinstance(constraint, CheckConstraint)
+    )
+    assert "links_erased_at" in check_sql
+
+    idempotency = tables["schedule_idempotency_keys"]
+    assert tuple(column.name for column in idempotency.primary_key.columns) == (
+        "tenant_id",
+        "principal_id",
+        "key",
+    )

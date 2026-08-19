@@ -13,7 +13,7 @@ HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
-UNITS=(veetbot-maintenance veetbot-worker veetbot-api)
+UNITS=(veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api)
 
 fail() {
   printf 'release failed: %s\n' "$*" >&2
@@ -101,7 +101,9 @@ for required in \
   deploy/browser-profile-service.Dockerfile \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
+  deploy/systemd/veetbot-async-worker.service \
   deploy/systemd/veetbot-maintenance.service \
+  deploy/systemd/veetbot-schedule.service \
   execution/sandbox.Dockerfile \
   scripts/check_production_deployment.py; do
   [[ -f "$STAGE/$required" ]] || fail "staged release is missing $required"
@@ -151,6 +153,15 @@ set +a
   "BROWSER_PROFILE_KEY_DIR must name an existing directory"
 [[ ! -L "$BROWSER_PROFILE_KEY_DIR" ]] || fail \
   "BROWSER_PROFILE_KEY_DIR must not be a symlink"
+[[ "${AGENT_SCHEDULE_API_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SCHEDULE_API_ENABLED must be 0 or 1"
+[[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SCHEDULE_WORKER_ENABLED must be 0 or 1"
+[[ "${AGENT_SCHEDULE_API_ENABLED:-0}" == "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" ]] || fail \
+  "schedule API and worker flags must be enabled or disabled together"
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  UNITS=(veetbot-schedule "${UNITS[@]}")
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
@@ -166,6 +177,9 @@ export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
 sudo install -d -m 0755 "$SYSTEMD_DIR"
 sudo install -m 0644 "$STAGE/deploy/systemd/"*.service "$SYSTEMD_DIR/"
 sudo systemctl daemon-reload
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "0" ]]; then
+  sudo systemctl disable --now veetbot-schedule >/dev/null 2>&1 || true
+fi
 
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"
 rm -f -- "$NEXT_CURRENT"
@@ -239,5 +253,5 @@ trap - EXIT
 printf 'Released %s successfully.\n' "$RELEASE_ID"
 if [[ -n "$PREVIOUS_RELEASE" && "$PREVIOUS_RELEASE" != "$STAGE" ]]; then
   printf 'Manual rollback target: %s\n' "$PREVIOUS_RELEASE"
-  printf 'Rollback requires repointing current, retagging that release image, and restarting all three units.\n'
+  printf 'Rollback requires repointing current, retagging that release image, and restarting all enabled units.\n'
 fi

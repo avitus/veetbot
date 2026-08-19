@@ -578,6 +578,11 @@ class InMemoryProcessEventRepository:
             self._events[event.derivation_key] = event.model_copy(deep=True)
             return event.model_copy(deep=True)
 
+    async def get_by_derivation(self, derivation_key: str) -> ProcessEvent | None:
+        async with self._lock:
+            event = self._events.get(derivation_key)
+            return None if event is None else event.model_copy(deep=True)
+
     async def list(self, event_type: str | None = None) -> list[ProcessEvent]:
         async with self._lock:
             rows = [

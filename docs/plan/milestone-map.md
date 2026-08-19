@@ -40,14 +40,14 @@ more, in a new thirteenth area, and is the first spec to declare
 gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
 gained two more on a later pass, all four at Milestone 3.
-[knowledge-documents.md](knowledge-documents.md) was written last
-and declares twelve more, in a new fourteenth area, all of them at
-Milestone 9. [web-access.md](web-access.md) now declares seven more in
-a fifteenth area, all at Milestone 10.
+[knowledge-documents.md](knowledge-documents.md) declares twelve more, in a new
+fourteenth area, all of them at Milestone 9. [web-access.md](web-access.md)
+declares seven more in a fifteenth area, all at Milestone 10.
 [browser-automation.md](browser-automation.md) adds ten more in a
-sixteenth area, also at Milestone 10. The counts throughout this document
-are the corpus as it now stands: one hundred and ninety-four declared
-across sixteen specs, two hundred registry entries.
+sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) declares
+twenty-three Milestone 11 gates in a seventeenth area. The counts throughout
+this document are the corpus as it now stands: two hundred and seventeen
+declared across seventeen specs, two hundred and twenty-three registry entries.
 
 ## What this document is responsible for
 
@@ -165,7 +165,7 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge, web, browser
+      knowledge, web, browser, schedule
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -206,6 +206,15 @@ for the reason `skill` rejected the same split: `visibility` and
 default-off registration, context advertisement, invocation trust, failure
 normalization, and fetch confinement as one public-web governance story rather
 than distributing those invariants across `tool`, `policy`, and `context`.
+
+`browser` is the sixteenth. It owns authenticated browser navigation, observation,
+action authority, profile lifecycle, authentication, and standing grants as one
+origin-confined governance story.
+
+`schedule` is the seventeenth area. It is not folded into `event`, `runtime`, or
+`api` because occurrence identity, civil-time behavior, authority refresh, and
+lifecycle are one control-plane subject whose gates cross all three. The
+ordinary run remains owned by those existing areas after materialization.
 
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
@@ -265,11 +274,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and seventy-eight gates declared across fifteen specs, two
-more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and eighty-seven declarations, one hundred
-and eighty-four registry entries once the three aliases are
-subtracted.
+Two hundred and seventeen gates declared across seventeen specs, two more
+declared in the engineering plan, and seven this document declares over the
+corpus: two hundred and twenty-six declarations, two hundred and twenty-three
+registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -871,6 +879,49 @@ Origin isolation is a property over allowed and hostile URL/resource families;
 authentication is a property over secret classes and user-intervention states.
 The remaining eight require concrete provider, run, profile, or grant outcomes.
 
+### Scheduled runs, twenty-three gates
+
+Twenty-three gates, all new, in the seventeenth area and all at Milestone 11. They
+cover the time, authority, atomicity, lifecycle, fairness, offline-result,
+contract, schema, migration, erasure, and isolation boundaries introduced by a
+scheduler rather than resting those guarantees on generic milestone checks.
+
+```text
+#   id                                kind         M
+--  --------------------------------  -----------  --
+1   gate.schedule.not_early           property     11
+2   gate.schedule.materialize_once    case         11
+3   gate.schedule.materialize_atomic  case         11
+4   gate.schedule.civil_time          property     11
+5   gate.schedule.misfire_bounded     case         11
+6   gate.schedule.no_overlap          case         11
+7   gate.schedule.authority_fresh     case         11
+8   gate.schedule.scope_isolated      case         11
+9   gate.schedule.revision_pinned     case         11
+10  gate.schedule.lifecycle_linear    property     11
+11  gate.schedule.cancel_separate     case         11
+12  gate.schedule.run_bounded         case         11
+13  gate.schedule.priority_fair       case         11
+14  gate.schedule.offline_results     case         11
+15  gate.schedule.no_credentials      corpus       11
+16  gate.schedule.domain_invariants   property     11
+17  gate.schedule.repository_contract structural   11
+18  gate.schedule.persistence_schema  structural   11
+19  gate.schedule.migration_clean     case         11
+20  gate.schedule.migration_stepwise  case         11
+21  gate.schedule.uow_atomic          case         11
+22  gate.schedule.erasure_audited     case         11
+23  gate.schedule.persistence_isolated case        11
+```
+
+Gates 1, 4, and 10 are properties because early firing, civil-time resolution,
+state-transition linearizability are claims over generated clocks, zones, and
+interleavings; gate 16 applies the same standard to domain construction. Gate
+15 is a corpus because credential-shaped input is a family rather than one
+example. Gates 17 and 18 are structural because they inspect contract coverage
+and declared schema. The remaining sixteen are boundary cases over the
+application, PostgreSQL, queue, and API seams.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -931,6 +982,9 @@ milestone  new gates  cumulative  the earliest of them
 10                34         200  the authoring loop, background review,
                                   governed memory maturation, public-web
                                   access, and browser automation
+11                23         223  recurrence, occurrence atomicity,
+                                  authority refresh, offline results,
+                                  contracts, migration, erasure, isolation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -951,22 +1005,18 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred gates are green before Milestone 2.** About one
-    fifth of the plan's stated invariants are
+2.  **Forty-one of two hundred and twenty-three gates are green before
+    Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred, which is
-every registry entry, at Milestone 10, and the plan defines no
-implemented milestone after it. Six of Milestone 10's gates are
-`gate.skill.*`, eleven are `gate.memory.*`, seven are `gate.web.*`, and
-ten are `gate.browser.*`.
-Its routing and subagent half adds none,
-because routing and subagents are covered by gates registered against
-the runtime loop and the policy engine, and the question this document
-used to raise about Milestone 8 now applies only to that half.
+The cumulative column reaches two hundred and twenty-three, which is every
+registry entry, at Milestone 11. Six of Milestone 10's gates are
+`gate.skill.*`, eleven are `gate.memory.*`, seven are `gate.web.*`, ten are
+`gate.browser.*`, and all twenty-three Milestone 11 gates are
+`gate.schedule.*`. Routing and subagents remain deferred and add none.
 
 ## Build-sequence milestones
 

@@ -20,6 +20,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     MemoryRow,
     RecallTraceRow,
     RunRow,
+    ScheduleOccurrenceRow,
     SessionDeletionArtifactRow,
     SessionDeletionRow,
     SessionRow,
@@ -89,6 +90,16 @@ class PostgresSessionDeletionRepository:
             (MemoryRow.source_session_id == session_id) | (MemoryRow.formation_run_id.in_(run_ids))
         )
         artifact_ids = [row.id for row in artifacts]
+
+        await self._session.execute(
+            update(ScheduleOccurrenceRow)
+            .where(
+                ScheduleOccurrenceRow.session_id == session_id,
+                ScheduleOccurrenceRow.disposition == "MATERIALIZED",
+                ScheduleOccurrenceRow.links_erased_at.is_(None),
+            )
+            .values(session_id=None, run_id=None, links_erased_at=deleted_at)
+        )
 
         await self._session.execute(
             delete(MemoryRejectionRow).where(

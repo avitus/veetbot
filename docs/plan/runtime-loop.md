@@ -53,13 +53,13 @@ Three of them are worth stating up front, because they are not disagreements
 about detail. They are places where the loop as written cannot do what
 another document requires of it.
 
-**The loop cannot resolve its own agent.** `engineering-plan.md:1424` reads
+**The loop cannot resolve its own agent.** `engineering-plan.md:1430` reads
 `agents.get_version(run.agent_id, run.agent_version)`. Neither field exists
 on `Run`. Section 6.3 puts `agent_id` and `agent_version` on `Session`. The
 first four lines of the runtime do not compile against the domain model in
 Section 6.
 
-**The loop cannot suspend.** `engineering-plan.md:1453` handles a paused
+**The loop cannot suspend.** `engineering-plan.md:1459` handles a paused
 disposition with `return`. Section 27.2 requires that entering either
 `WAITING_*` state release the worker lease, checkpoint the run, and emit an
 event. A bare `return` performs none of the three, and there is no
@@ -196,7 +196,7 @@ class Run(BaseModel):
     lease_epoch: int          # asserted in every fenced write
     attempts: int             # queue-level attempt counter, cap 3
     priority: int             # 0 interactive, 10 async, 20 maintenance
-    scheduled_for: datetime   # retry backoff and Milestone 10
+    scheduled_for: datetime   # retry backoff and Milestone 11
     deadline_at: datetime | None
     failure: RunFailure | None
 ```

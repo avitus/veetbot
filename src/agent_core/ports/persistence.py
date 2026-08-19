@@ -36,6 +36,12 @@ from agent_core.ports.repositories import (
     TrajectoryProjectionRepository,
     UsageRepository,
 )
+from agent_core.ports.schedules import (
+    ScheduleAdmissionController,
+    ScheduleIdempotencyRepository,
+    ScheduleOccurrenceRepository,
+    ScheduleRepository,
+)
 from agent_core.ports.skills import SkillRepository
 
 
@@ -67,6 +73,10 @@ class RepositoryUnitOfWork(Protocol):
     traces: TraceStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
+    schedules: ScheduleRepository
+    schedule_occurrences: ScheduleOccurrenceRepository
+    schedule_idempotency: ScheduleIdempotencyRepository
+    schedule_admission: ScheduleAdmissionController
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None:

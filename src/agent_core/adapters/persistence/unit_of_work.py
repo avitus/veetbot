@@ -40,6 +40,12 @@ from agent_core.ports.repositories import (
     TrajectoryProjectionRepository,
     UsageRepository,
 )
+from agent_core.ports.schedules import (
+    ScheduleAdmissionController,
+    ScheduleIdempotencyRepository,
+    ScheduleOccurrenceRepository,
+    ScheduleRepository,
+)
 from agent_core.ports.skills import SkillRepository
 
 _UNIT_OF_WORK_DEPTH: ContextVar[int] = ContextVar("unit_of_work_depth", default=0)
@@ -87,6 +93,10 @@ class UnitOfWorkRepositories:
     traces: TraceStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
+    schedules: ScheduleRepository
+    schedule_occurrences: ScheduleOccurrenceRepository
+    schedule_idempotency: ScheduleIdempotencyRepository
+    schedule_admission: ScheduleAdmissionController
     queue: RunQueue | None
 
 
@@ -134,6 +144,10 @@ class MemoryUnitOfWork:
         self.traces = repositories.traces
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
+        self.schedules = repositories.schedules
+        self.schedule_occurrences = repositories.schedule_occurrences
+        self.schedule_idempotency = repositories.schedule_idempotency
+        self.schedule_admission = repositories.schedule_admission
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -231,6 +245,10 @@ class PostgresUnitOfWork:
         self.traces = repositories.traces
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
+        self.schedules = repositories.schedules
+        self.schedule_occurrences = repositories.schedule_occurrences
+        self.schedule_idempotency = repositories.schedule_idempotency
+        self.schedule_admission = repositories.schedule_admission
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self

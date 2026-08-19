@@ -1860,6 +1860,14 @@ class PostgresProcessEventRepository:
             raise ConflictError("process event derivation identifies different content")
         return stored
 
+    async def get_by_derivation(self, derivation_key: str) -> ProcessEvent | None:
+        row = (
+            await self._session.scalars(
+                select(ProcessEventRow).where(ProcessEventRow.derivation_key == derivation_key)
+            )
+        ).one_or_none()
+        return None if row is None else self._to_domain(row)
+
     async def list(self, event_type: str | None = None) -> list[ProcessEvent]:
         statement = select(ProcessEventRow)
         if event_type is not None:

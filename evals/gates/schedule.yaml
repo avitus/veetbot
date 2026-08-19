@@ -1,0 +1,141 @@
+# Canonical gate registry entries for Milestone 11 scheduling.
+- id: gate.schedule.not_early
+  milestone: 11
+  kind: property
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**A future occurrence never fires early.** Generated one-time, daily, and weekly definitions over many zones produce no occurrence whose materialized time precedes its nominal UTC instant."
+  check: tests/gates/test_schedule_m11.py::test_future_occurrences_are_never_early
+- id: gate.schedule.materialize_once
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Concurrent schedulers materialize once.** Two schedule workers racing on one due definition commit exactly one occurrence, session, run, checkpoint, and creation-event sequence."
+  check: tests/integration/test_schedule_materializer_m11.py::test_concurrent_schedulers_materialize_once
+- id: gate.schedule.materialize_atomic
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Occurrence creation is atomic across a crash.** No injected pre-commit crash leaves partial state, and a post-commit retry returns the one complete linked occurrence and run."
+  check: tests/integration/test_schedule_materializer_m11.py::test_materialization_rolls_back_at_every_write_boundary_and_retries
+- id: gate.schedule.civil_time
+  milestone: 11
+  kind: property
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Civil-time recurrence is deterministic.** Generated IANA-zone cases obey the declared gap and fold rules and reconstruct the same next firing."
+  check: tests/gates/test_schedule_m11.py::test_civil_time_recurrence_is_deterministic
+- id: gate.schedule.misfire_bounded
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Downtime catch-up is bounded.** A scan across thousands of missed instants creates at most one occurrence and one bounded coalescing event."
+  check: tests/gates/test_schedule_materialization_m11.py::test_downtime_coalesces_thousands_of_misfires_without_backlog_iteration
+- id: gate.schedule.no_overlap
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Occurrences from one schedule never overlap.** A due instant behind a non-terminal linked run is skipped once without blocking a different schedule."
+  check: tests/integration/test_schedule_materializer_m11.py::test_nonterminal_occurrence_skips_overlap_without_blocking_other_schedule
+- id: gate.schedule.authority_fresh
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Firing revalidates current authority.** Revoked scopes and disabled principals fail closed before any session or run is created."
+  check: tests/gates/test_schedule_materialization_m11.py::test_firing_revalidates_current_authority
+- id: gate.schedule.scope_isolated
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Scheduled execution uses exactly its requested scopes.** Runs receive only the requested subset, undeclared tools are denied, and schedule reads are principal isolated."
+  check: tests/gates/test_schedule_materialization_m11.py::test_due_schedule_materializes_one_complete_ordinary_run
+- id: gate.schedule.revision_pinned
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**A revision pins reproducible execution inputs.** Past occurrences retain their exact agent, policy, instruction, scope, cadence, and limit revision after an update."
+  check: tests/gates/test_schedule_lifecycle_m11.py::test_revision_updates_only_future_occurrences_and_cancel_leaves_run_unchanged
+- id: gate.schedule.lifecycle_linear
+  milestone: 11
+  kind: property
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Lifecycle races are linearized.** Generated mutation and due-scan interleavings reduce to an allowed serial history with no terminal reopen or paused-time backfill."
+  check: tests/gates/test_schedule_lifecycle_m11.py::test_generated_lifecycle_histories_never_reopen_or_backfill
+- id: gate.schedule.cancel_separate
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Schedule cancellation and run cancellation are separate.** Cancelling a schedule stops future occurrences and leaves a materialized run unchanged."
+  check: tests/gates/test_schedule_lifecycle_m11.py::test_revision_updates_only_future_occurrences_and_cancel_leaves_run_unchanged
+- id: gate.schedule.run_bounded
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Every scheduled run is bounded.** Required finite limits and a derived deadline are stamped on each run and enforced by the ordinary runtime."
+  check: tests/gates/test_schedule_materialization_m11.py::test_due_schedule_materializes_one_complete_ordinary_run
+- id: gate.schedule.priority_fair
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Scheduled load cannot starve interactive work.** Reserved worker capacity bounds interactive claim latency while retaining async progress."
+  check: tests/integration/test_schedule_worker_postgres_m11.py::test_reserved_worker_classes_preserve_interactive_and_async_progress
+- id: gate.schedule.offline_results
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**A client can recover every result while offline.** Occurrence history returns every disposition and exact durable run link without transient notifications."
+  check: tests/gates/test_schedule_api_m11.py::test_offline_occurrence_history_paginates_every_disposition_and_run_link
+- id: gate.schedule.no_credentials
+  milestone: 11
+  kind: corpus
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**No credential becomes schedule state.** Domain and persistence models have no credential fields, and credential-shaped instructions are rejected without storing or logging the match."
+  check: tests/gates/test_schedule_credentials_m11.py::test_credential_shaped_instructions_are_rejected_without_storage_or_logging
+  corpus: tests/corpora/schedule_credentials
+  minimum_members: 12
+- id: gate.schedule.domain_invariants
+  milestone: 11
+  kind: property
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Schedule values preserve their invariants.** Generated definitions, revisions, and occurrences either validate into a complete legal value or fail with a stable validation error."
+  check: tests/gates/test_schedule_m11.py::test_schedule_domain_validation_is_total
+- id: gate.schedule.repository_contract
+  milestone: 11
+  kind: structural
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Every scheduling port has executable adapter contracts.** Definition, occurrence, and request-idempotency protocols each have a named shared contract exercised by every registered adapter."
+  check: tests/gates/test_contract_coverage.py::test_contract_coverage
+- id: gate.schedule.persistence_schema
+  milestone: 11
+  kind: structural
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**The scheduling schema encodes its trust boundaries.** Keys, uniqueness, immutable revisions, nullable-link rules, indexes, foreign keys, erasure evidence, and row-level security are present in metadata."
+  check: tests/unit/test_persistence_schema.py::test_schedule_tables_encode_identity_erasure_and_query_constraints
+- id: gate.schedule.migration_clean
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Scheduling migrates cleanly from an empty database.** The full migration chain reaches head and exactly matches declared metadata."
+  check: tests/integration/test_migrations.py::test_migrations_upgrade_cleanly_and_match_metadata
+- id: gate.schedule.migration_stepwise
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**The scheduling migration is reversible at its boundary.** Upgrade, downgrade, and re-upgrade from the immediate predecessor preserve a valid schema."
+  check: tests/integration/test_migrations.py::test_migrations_round_trip_each_step_from_its_predecessor
+- id: gate.schedule.uow_atomic
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Scheduling repositories share the application transaction.** Definition, revision, occurrence, and idempotency writes commit or roll back together through the ordinary unit of work."
+  check: tests/integration/test_schedule_persistence_m11.py::test_schedule_repositories_commit_and_roll_back_as_one_unit
+- id: gate.schedule.erasure_audited
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Session erasure preserves an explicit occurrence audit state.** Deletion atomically marks the materialized link erased and clears nullable session and run links before deleting their graph, without retaining erased content."
+  check: tests/integration/test_schedule_persistence_m11.py::test_session_erasure_marks_and_unlinks_schedule_occurrence
+- id: gate.schedule.persistence_isolated
+  milestone: 11
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Scheduling persistence is principal isolated.** PostgreSQL row-level security and repository predicates prevent cross-tenant and cross-principal reads and mutations."
+  check: tests/integration/test_schedule_persistence_m11.py::test_schedule_rows_are_principal_isolated

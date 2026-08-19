@@ -1,0 +1,24 @@
+[Unit]
+Description=Veetbot schedule materializer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=veetbot
+Group=veetbot
+WorkingDirectory=/opt/veetbot/current
+EnvironmentFile=/etc/veetbot/veetbot.env
+UnsetEnvironment=AUTH_TOKEN VEETBOT_OPENAI_KEY ANTHROPIC_API_KEY TAVILY_API_KEY FIRECRAWL_API_KEY
+ExecStart=/opt/veetbot/current/.venv/bin/agent worker --role schedule
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -174,7 +174,7 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-Fifteen specs, the milestone map, and one engineering-plan section declare
+Seventeen specs, the milestone map, and one engineering-plan section declare
 gates, and they declare them in prose. Sorting them by kind is what tells an
 implementer which harness facility each one needs, and it is the first
 concrete deliverable of this document.
@@ -203,14 +203,15 @@ restates a gate another spec owns.
 | Knowledge documents | 8 | 3 | 1 | 0 | 12 |
 | Web access | 6 | 1 | 0 | 0 | 7 |
 | Authenticated browser automation | 8 | 2 | 0 | 0 | 10 |
+| Scheduled runs | 16 | 4 | 1 | 2 | 23 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **117** | **27** | **9** | **47** | **200** |
+| **Total** | **133** | **31** | **10** | **49** | **223** |
 
 The counts are the useful output, not the individual assignments:
-**eighty-three of the two hundred owned registry entries are not case
+**ninety of the two hundred and twenty-three owned registry entries are not case
 gates**, and a harness that only runs cases would report a green build with
-those eighty-three of the plan's stated invariants unchecked. Two of the
+those ninety of the plan's stated invariants unchecked. Two of the
 four kinds — property and structural — need no runtime at all and can be
 built in Milestone 0, before there is an agent to evaluate.
 

@@ -1025,3 +1025,124 @@ class KnowledgeChunkRow(Base):
     tokens: Mapped[int] = mapped_column(Integer)
     contains_instruction_like_text: Mapped[bool] = mapped_column(Boolean)
     content_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class ScheduleRow(Base):
+    __tablename__ = "schedules"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('ACTIVE','PAUSED','COMPLETED','CANCELLED')",
+            name="schedule_state_values",
+        ),
+        CheckConstraint(
+            "(state = 'PAUSED' AND pause_reason IN ('user','failure_limit')) OR "
+            "(state <> 'PAUSED' AND pause_reason IS NULL)",
+            name="schedule_pause_reason_consistency",
+        ),
+        CheckConstraint("current_revision > 0", name="schedule_revision_positive"),
+        CheckConstraint("consecutive_failures >= 0", name="schedule_failures_nonnegative"),
+        CheckConstraint(
+            "state NOT IN ('COMPLETED','CANCELLED') OR next_fire_at IS NULL",
+            name="schedule_terminal_not_due",
+        ),
+        Index("ix_schedules_due", "state", "next_fire_at"),
+        Index(
+            "ix_schedules_tenant_principal_updated",
+            "tenant_id",
+            "principal_id",
+            "updated_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(32))
+    pause_reason: Mapped[str | None] = mapped_column(Text)
+    current_revision: Mapped[int] = mapped_column(Integer)
+    next_fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_failures: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleRevisionRow(Base):
+    __tablename__ = "schedule_revisions"
+
+    schedule_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="RESTRICT"), primary_key=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_by_principal_id: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleOccurrenceRow(Base):
+    __tablename__ = "schedule_occurrences"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["schedule_id", "schedule_revision"],
+            ["schedule_revisions.schedule_id", "schedule_revisions.revision"],
+            name="fk_schedule_occurrences_revision",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("schedule_id", "nominal_fire_at", name="uq_schedule_occurrence_nominal"),
+        CheckConstraint(
+            "disposition IN ('MATERIALIZED','MISSED','SKIPPED_OVERLAP',"
+            "'AUTHORIZATION_FAILED','CONFIGURATION_FAILED')",
+            name="schedule_occurrence_disposition_values",
+        ),
+        CheckConstraint(
+            "(disposition = 'MATERIALIZED' AND authority_version IS NOT NULL "
+            "AND materialized_at IS NOT NULL AND reason_code IS NULL "
+            "AND materialized_at >= nominal_fire_at AND ((links_erased_at IS NULL "
+            "AND session_id IS NOT NULL AND run_id IS NOT NULL) OR "
+            "(links_erased_at IS NOT NULL AND session_id IS NULL AND run_id IS NULL "
+            "AND links_erased_at >= materialized_at))) OR "
+            "(disposition <> 'MATERIALIZED' AND session_id IS NULL AND run_id IS NULL "
+            "AND materialized_at IS NULL AND links_erased_at IS NULL "
+            "AND reason_code IS NOT NULL)",
+            name="schedule_occurrence_links_consistent",
+        ),
+        Index("ix_schedule_occurrences_history", "schedule_id", "nominal_fire_at"),
+        Index(
+            "uq_schedule_occurrences_run_id",
+            "run_id",
+            unique=True,
+            postgresql_where=text("run_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    schedule_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    schedule_revision: Mapped[int] = mapped_column(Integer)
+    nominal_fire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    disposition: Mapped[str] = mapped_column(String(32))
+    session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+    )
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    authority_version: Mapped[str | None] = mapped_column(Text)
+    materialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    links_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleIdempotencyKeyRow(Base):
+    __tablename__ = "schedule_idempotency_keys"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    schedule_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

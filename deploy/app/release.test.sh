@@ -130,7 +130,12 @@ make_stage() {
     "$stage/deploy/browser-profile-service.Dockerfile" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_production_deployment.py"
-  for unit in veetbot-api veetbot-worker veetbot-maintenance; do
+  for unit in \
+    veetbot-api \
+    veetbot-worker \
+    veetbot-async-worker \
+    veetbot-maintenance \
+    veetbot-schedule; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
       >"$stage/deploy/systemd/$unit.service"
   done
@@ -189,7 +194,10 @@ grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
-grep -Fq 'systemctl restart veetbot-maintenance veetbot-worker veetbot-api' "$LOG_FILE"
+grep -Fq \
+  'systemctl restart veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  "$LOG_FILE"
+grep -Fq 'systemctl disable --now veetbot-schedule' "$LOG_FILE"
 grep -Fq 'curl session-index' "$LOG_FILE"
 grep -Fq 'curl session-index http://127.0.0.1:8000/v1/sessions?limit=1' "$LOG_FILE"
 auth_scheme='Bearer'
@@ -284,5 +292,19 @@ ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
 run_release "$equal_timestamp_id"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
+
+schedule_env="$TEST_ROOT/schedule.env"
+cp "$ENV_FILE" "$schedule_env"
+printf '%s\n' \
+  'AGENT_SCHEDULE_API_ENABLED=1' \
+  'AGENT_SCHEDULE_WORKER_ENABLED=1' >>"$schedule_env"
+schedule_id="20260810-152256-0000001"
+make_stage "$schedule_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$schedule_id" "$PROCESS_ROOT/4242/cwd"
+VEETBOT_TEST_ENV_FILE="$schedule_env" run_release "$schedule_id"
+grep -Fq \
+  'systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  "$LOG_FILE"
 
 printf 'release script tests passed\n'

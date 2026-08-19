@@ -10,7 +10,7 @@ from typing import Annotated, Literal, Protocol, cast
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
@@ -27,6 +27,7 @@ from agent_core.application.services import (
     BrowserGrantService,
     BrowserProfileService,
     RunService,
+    ScheduleService,
     SessionService,
 )
 from agent_core.config import Settings
@@ -39,6 +40,7 @@ from agent_core.domain.browser import (
     BrowserProfileView,
 )
 from agent_core.domain.errors import AgentCoreError
+from agent_core.domain.schedules import ScheduleDefinition, ScheduleRecord, ScheduleState
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -108,6 +110,9 @@ class ApplicationServices(Protocol):
     @property
     def browser_grants(self) -> BrowserGrantService: ...
 
+    @property
+    def schedules(self) -> ScheduleService: ...
+
 
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -156,6 +161,51 @@ class CreateBrowserGrantRequest(BaseModel):
     purpose: str | None = Field(default=None, min_length=1, max_length=255)
     starts_at: datetime
     expires_at: datetime
+
+
+class UpdateScheduleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    definition: ScheduleDefinition
+
+
+class ExpectedScheduleRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+
+
+class ScheduleListItem(BaseModel):
+    id: UUID
+    state: ScheduleState
+    pause_reason: str | None
+    current_revision: int
+    next_fire_at: object | None
+    title: str
+    instruction_preview: str
+    cadence: dict[str, object]
+    created_at: object
+    updated_at: object
+
+
+def _schedule_summary(record: ScheduleRecord) -> ScheduleListItem:
+    instruction = record.revision.instruction
+    preview = instruction if len(instruction) <= 200 else f"{instruction[:199]}…"
+    return ScheduleListItem(
+        id=record.schedule.id,
+        state=record.schedule.state,
+        pause_reason=(
+            None if record.schedule.pause_reason is None else record.schedule.pause_reason.value
+        ),
+        current_revision=record.schedule.current_revision,
+        next_fire_at=record.schedule.next_fire_at,
+        title=record.revision.title,
+        instruction_preview=preview,
+        cadence=record.revision.cadence.model_dump(mode="json"),
+        created_at=record.schedule.created_at,
+        updated_at=record.schedule.updated_at,
+    )
 
 
 def _request_id(request: Request) -> str:
@@ -754,6 +804,126 @@ def create_app(
         del idempotency_key
         await services.browser_grants.delete(authenticated, grant_id)
         return Response(status_code=204)
+
+    schedule_router = APIRouter()
+
+    @schedule_router.post(
+        "/v1/schedules",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def create_schedule(
+        body: ScheduleDefinition,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", max_length=256),
+        ],
+    ) -> Response:
+        result = await services.schedules.create(authenticated, body, idempotency_key)
+        return JSONResponse(
+            status_code=200 if result.replayed else 201,
+            content=result.model_dump(mode="json", exclude={"replayed"}),
+        )
+
+    @schedule_router.get(
+        "/v1/schedules",
+        openapi_extra={"required_scope": "schedule.read"},
+    )
+    async def list_schedules(
+        authenticated: Annotated[Principal, secured("schedule.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> dict[str, object]:
+        try:
+            page = await services.schedules.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("schedule cursor is malformed") from exc
+        return {
+            "items": [_schedule_summary(record).model_dump(mode="json") for record in page.items],
+            "next_cursor": page.next_cursor,
+        }
+
+    @schedule_router.get(
+        "/v1/schedules/{schedule_id}",
+        openapi_extra={"required_scope": "schedule.read"},
+    )
+    async def get_schedule(
+        schedule_id: UUID,
+        authenticated: Annotated[Principal, secured("schedule.read")],
+    ) -> ScheduleRecord:
+        return await services.schedules.get(authenticated, schedule_id)
+
+    @schedule_router.patch(
+        "/v1/schedules/{schedule_id}",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def update_schedule(
+        schedule_id: UUID,
+        body: UpdateScheduleRequest,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleRecord:
+        return await services.schedules.update(
+            authenticated,
+            schedule_id,
+            body.expected_revision,
+            body.definition,
+        )
+
+    @schedule_router.post(
+        "/v1/schedules/{schedule_id}/pause",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def pause_schedule(
+        schedule_id: UUID,
+        body: ExpectedScheduleRevisionRequest,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleRecord:
+        return await services.schedules.pause(authenticated, schedule_id, body.expected_revision)
+
+    @schedule_router.post(
+        "/v1/schedules/{schedule_id}/resume",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def resume_schedule(
+        schedule_id: UUID,
+        body: ExpectedScheduleRevisionRequest,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleRecord:
+        return await services.schedules.resume(authenticated, schedule_id, body.expected_revision)
+
+    @schedule_router.delete(
+        "/v1/schedules/{schedule_id}",
+        openapi_extra={"required_scope": "schedule.cancel"},
+    )
+    async def cancel_schedule(
+        schedule_id: UUID,
+        expected_revision: Annotated[int, Query(ge=1)],
+        authenticated: Annotated[Principal, secured("schedule.cancel")],
+    ) -> ScheduleRecord:
+        return await services.schedules.cancel(authenticated, schedule_id, expected_revision)
+
+    @schedule_router.get(
+        "/v1/schedules/{schedule_id}/occurrences",
+        openapi_extra={"required_scope": "schedule.read"},
+    )
+    async def list_schedule_occurrences(
+        schedule_id: UUID,
+        authenticated: Annotated[Principal, secured("schedule.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> object:
+        try:
+            return await services.schedules.list_occurrences(
+                authenticated,
+                schedule_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise MalformedRequestError("schedule occurrence cursor is malformed") from exc
+
+    if settings.schedule_api_enabled:
+        app.router.routes.extend(schedule_router.routes)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

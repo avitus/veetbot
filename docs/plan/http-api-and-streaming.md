@@ -396,6 +396,29 @@ is not an authorization input.
 | `GET /health/live` | none |
 | `GET /health/ready` | none |
 
+### The Milestone 11 schedule extension
+
+[scheduling.md](scheduling.md) adds eight routes after the completed Milestone
+5 surface. They use the same authentication middleware, principal-first
+application signatures, request-id header, error envelope, cross-principal
+not-found rule, opaque pagination, and OpenAPI scope assertion as every route
+above:
+
+```text
+POST   /v1/schedules                              schedule.write
+GET    /v1/schedules                              schedule.read
+GET    /v1/schedules/{schedule_id}                schedule.read
+PATCH  /v1/schedules/{schedule_id}                schedule.write
+POST   /v1/schedules/{schedule_id}/pause          schedule.write
+POST   /v1/schedules/{schedule_id}/resume         schedule.write
+DELETE /v1/schedules/{schedule_id}                schedule.cancel
+GET    /v1/schedules/{schedule_id}/occurrences    schedule.read
+```
+
+The schedule specification owns their request and response schemas,
+idempotency, revision preconditions, and fifteen gates. This document's
+Milestone 5 route census remains historical and is not rewritten.
+
 Submitting a message requires `run.write` rather than `session.write`
 because submitting is what creates a run; `session.write` gates creating
 the session itself. `run.cancel` is separate from `run.write` because a

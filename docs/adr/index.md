@@ -67,3 +67,4 @@ implementation without one.
 - [ADR-0056 — Failure-triggered reflection review (Proposed)](0056-failure-reflection-review.md)
 - [ADR-0057 — Evaluation-gated provider-assisted memory extraction (Proposed)](0057-evaluation-gated-provider-memory-extraction.md)
 - [ADR-0058 — Provider-neutral authenticated browser automation (Proposed)](0058-authenticated-browser-automation.md)
+- [ADR-0059 — Milestone 11 scheduled runs (Proposed)](0059-milestone-11-scheduled-runs.md)

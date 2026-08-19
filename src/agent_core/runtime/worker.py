@@ -6,6 +6,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime, timedelta
+from time import perf_counter
 from uuid import UUID
 
 from agent_core.domain.errors import ArtifactSweepError
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 type LeaseLiveCheck = Callable[[UUID, int], Awaitable[bool]]
 type SandboxSweep = Callable[[frozenset[tuple[UUID, int]], LeaseLiveCheck], Awaitable[int]]
+type RecordClaimMetric = Callable[[str, float], None]
 
 
 class DurableWorker:
@@ -35,6 +37,7 @@ class DurableWorker:
         lease_seconds: float = 30,
         heartbeat_divisor: int = 3,
         poll_interval_seconds: float = 0.25,
+        record_claim_metric: RecordClaimMetric | None = None,
     ) -> None:
         if heartbeat_divisor < 2:
             raise ValueError("heartbeat_divisor must be at least two")
@@ -45,16 +48,27 @@ class DurableWorker:
         self._eligible_classes = tuple(eligible_classes)
         self._heartbeat_interval = lease_seconds / heartbeat_divisor
         self._poll_interval = poll_interval_seconds
+        self._record_claim_metric = record_claim_metric
         self._stopping = False
 
     def stop(self) -> None:
         self._stopping = True
 
     async def claim(self) -> ClaimedRun | None:
+        started = perf_counter()
         async with self._uow_factory() as uow:
             if uow.queue is None:
                 raise RuntimeError("durable worker requires a queue repository")
             claimed = await uow.queue.claim(self._worker_id, self._eligible_classes)
+            worker_class = (
+                "interactive"
+                if self._eligible_classes == (0,)
+                else "async"
+                if self._eligible_classes == (10,)
+                else "other"
+            )
+            if self._record_claim_metric is not None:
+                self._record_claim_metric(worker_class, perf_counter() - started)
             if claimed is None:
                 return None
             await uow.events.append(

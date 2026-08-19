@@ -300,6 +300,21 @@ namespace rather than two that happen to collide: the first gates a read
 route, the second gates `artifact.export`, and they are two actions on
 one resource.
 
+Milestone 11 extends this closed vocabulary rather than creating a second one:
+
+```text
+schedule.read      schedule.write      schedule.cancel
+```
+
+The fifteen-string list remains the completed Milestone 4 baseline and the
+subject of its historical gate. When Milestone 11 activates, the executable
+platform vocabulary has eighteen strings. The three additions authorize the
+application-level schedule routes in [scheduling.md](scheduling.md), not model
+tools: read covers schedule and occurrence reads, write covers create, update,
+pause, and resume, and cancel covers the terminal schedule transition. Exact
+matching, MCP namespace isolation, and every other rule in this section are
+unchanged.
+
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
@@ -1182,8 +1197,10 @@ those routes already says.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
-31. The scope vocabulary is one closed set of nineteen dotted strings,
-    shared by the API's route checks and by this pipeline's tool check.
+31. The scope vocabulary is one closed set of twenty-two dotted strings through
+    Milestone 11, shared by the API's route checks and by this pipeline's tool
+    check. Milestone 11 adds three exact `schedule.*` application scopes without
+    changing the Milestone 4 baseline gate.
 32. An MCP tool may require only scopes whose first segment is `mcp` and
     whose second is the server id, so an operator configuring a server
     cannot borrow a platform scope for a remote capability.
