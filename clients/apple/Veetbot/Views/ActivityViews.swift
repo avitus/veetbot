@@ -173,6 +173,7 @@ private struct RiskBadge: View {
     var body: some View {
         Text(risk.rawValue.uppercased())
             .appFont(.caption, weight: .semibold)
+            .foregroundColor(color)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(color.opacity(0.14))
