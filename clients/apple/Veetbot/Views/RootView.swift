@@ -6,6 +6,7 @@ import AppKit
 
 public struct RootView: View {
     @ObservedObject var model: ChatViewModel
+    @State private var sidebarSelection: SessionSidebarDestination?
     #if !os(macOS)
     @State private var showingSettings = false
     #endif
@@ -71,13 +72,21 @@ public struct RootView: View {
     private var configuredContent: some View {
         if #available(iOS 16.0, macOS 13.0, *) {
             NavigationSplitView {
-                SessionSidebar(model: model, openSettings: presentSettings)
+                SessionSidebar(
+                    model: model,
+                    selection: $sidebarSelection,
+                    openSettings: presentSettings
+                )
             } detail: {
                 ChatView(model: model)
             }
         } else {
             NavigationView {
-                SessionSidebar(model: model, openSettings: presentSettings)
+                SessionSidebar(
+                    model: model,
+                    selection: $sidebarSelection,
+                    openSettings: presentSettings
+                )
                 ChatView(model: model)
             }
         }
@@ -92,60 +101,29 @@ public struct RootView: View {
     }
 }
 
+enum SessionSidebarDestination: Hashable, Sendable {
+    case newConversation(UUID)
+    case session(UUID)
+
+    static func freshConversation() -> Self {
+        .newConversation(UUID())
+    }
+}
+
 private struct SessionSidebar: View {
     @ObservedObject var model: ChatViewModel
+    @Binding var selection: SessionSidebarDestination?
     let openSettings: () -> Void
     @State private var deletionCandidate: SessionHistoryEntry?
+    @State private var newConversationDestination =
+        SessionSidebarDestination.freshConversation()
 
     var body: some View {
-        List {
-            Button {
-                model.newSession()
-            } label: {
-                HStack(spacing: 10) {
-                    Image(systemName: "square.and.pencil")
-                        .foregroundColor(AppTheme.orange)
-                    Text("New conversation")
-                        .appFont(.headline)
-                    Spacer()
-                }
-                .padding(.vertical, 4)
-            }
-            .listRowBackground(AppTheme.brandGradient)
-
-            Section("History") {
-                ForEach(model.history) { entry in
-                    HStack(spacing: 8) {
-                        Button {
-                            Task { await model.selectSession(entry) }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(entry.title)
-                                    .lineLimit(2)
-                                    .foregroundColor(.primary)
-                                ConversationAgeText(updatedAt: entry.updatedAt)
-                                    .appFont(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .buttonStyle(.plain)
-
-                        Button(role: .destructive) {
-                            deletionCandidate = entry
-                        } label: {
-                            Image(systemName: "trash")
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Delete \(entry.title) everywhere")
-                    }
-                    .listRowBackground(
-                        entry.sessionID == model.selectedSessionID
-                            ? AppTheme.turquoise.opacity(0.15)
-                            : Color.clear
-                    )
-                }
+        Group {
+            if #available(iOS 16.0, macOS 13.0, *) {
+                modernList
+            } else {
+                legacyList
             }
         }
         .listStyle(.sidebar)
@@ -180,6 +158,137 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Settings")
             }
         }
+    }
+
+    @available(iOS 16.0, macOS 13.0, *)
+    private var modernList: some View {
+        List(selection: $selection) {
+            NavigationLink(value: newConversationDestination) {
+                newConversationLabel
+            }
+            .listRowBackground(AppTheme.brandGradient)
+
+            Section("History") {
+                ForEach(model.history) { entry in
+                    HStack(spacing: 8) {
+                        NavigationLink(
+                            value: SessionSidebarDestination.session(entry.sessionID)
+                        ) {
+                            historyLabel(entry)
+                        }
+                        .buttonStyle(.plain)
+
+                        deleteButton(for: entry)
+                    }
+                    .listRowBackground(
+                        entry.sessionID == model.selectedSessionID
+                            ? AppTheme.turquoise.opacity(0.15)
+                            : Color.clear
+                    )
+                }
+            }
+        }
+        .onChange(of: selection) { destination in
+            guard let destination else { return }
+            activate(destination)
+        }
+    }
+
+    private var legacyList: some View {
+        List {
+            NavigationLink {
+                LegacyChatDestination(model: model, entry: nil)
+            } label: {
+                newConversationLabel
+            }
+            .listRowBackground(AppTheme.brandGradient)
+
+            Section("History") {
+                ForEach(model.history) { entry in
+                    HStack(spacing: 8) {
+                        NavigationLink {
+                            LegacyChatDestination(model: model, entry: entry)
+                        } label: {
+                            historyLabel(entry)
+                        }
+                        .buttonStyle(.plain)
+
+                        deleteButton(for: entry)
+                    }
+                    .listRowBackground(
+                        entry.sessionID == model.selectedSessionID
+                            ? AppTheme.turquoise.opacity(0.15)
+                            : Color.clear
+                    )
+                }
+            }
+        }
+    }
+
+    private var newConversationLabel: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "square.and.pencil")
+                .foregroundColor(AppTheme.orange)
+            Text("New conversation")
+                .appFont(.headline)
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private func historyLabel(_ entry: SessionHistoryEntry) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(entry.title)
+                .lineLimit(2)
+                .foregroundColor(.primary)
+            ConversationAgeText(updatedAt: entry.updatedAt)
+                .appFont(.caption)
+                .foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func deleteButton(for entry: SessionHistoryEntry) -> some View {
+        Button(role: .destructive) {
+            deletionCandidate = entry
+        } label: {
+            Image(systemName: "trash")
+                .foregroundColor(.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Delete \(entry.title) everywhere")
+    }
+
+    private func activate(_ destination: SessionSidebarDestination) {
+        switch destination {
+        case .newConversation:
+            model.newSession()
+            newConversationDestination = .freshConversation()
+        case .session(let sessionID):
+            guard let entry = model.history.first(where: { $0.sessionID == sessionID }) else {
+                return
+            }
+            Task { await model.selectSession(entry) }
+        }
+    }
+}
+
+private struct LegacyChatDestination: View {
+    @ObservedObject var model: ChatViewModel
+    let entry: SessionHistoryEntry?
+    @State private var hasActivated = false
+
+    var body: some View {
+        ChatView(model: model)
+            .task {
+                guard !hasActivated else { return }
+                hasActivated = true
+                if let entry {
+                    await model.selectSession(entry)
+                } else {
+                    model.newSession()
+                }
+            }
     }
 }
 
