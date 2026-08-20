@@ -959,13 +959,33 @@ def test_required_files_include_the_status_split_surfaces(
 
 
 _SUDOERS_RULE = re.compile(r"^(\S+) (\S+)=\((\S+)\) NOPASSWD: (/\S+)( .+)?$")
+_SUDOERS_INCLUDE = re.compile(r"^[#@]include(dir)?\b")
 
 
-def _sudoers_rule_violations(rules: list[str]) -> list[str]:
-    """Reject any sudoers rule wider than the deploy contract permits."""
+def _sudoers_rules(lines: list[str]) -> list[str]:
+    """The non-comment, non-blank lines of a sudoers file, unfiltered of directives."""
+
+    return [
+        line.strip()
+        for line in lines
+        if line.strip()
+        and (_SUDOERS_INCLUDE.match(line.strip()) or not line.strip().startswith("#"))
+    ]
+
+
+def _sudoers_rule_violations(lines: list[str]) -> list[str]:
+    """Reject any sudoers line wider than the deploy contract permits.
+
+    Operates on raw file lines: true comments are skipped, but #include and
+    #includedir (and their modern @ forms) are active sudoers directives that
+    pull in additional grants, so they are rejected rather than filtered.
+    """
 
     violations = []
-    for rule in rules:
+    for rule in _sudoers_rules(lines):
+        if _SUDOERS_INCLUDE.match(rule):
+            violations.append(f"include directives are forbidden in the contract: {rule}")
+            continue
         match = _SUDOERS_RULE.match(rule)
         if match is None:
             violations.append(f"not a NOPASSWD rule with an absolute command path: {rule}")
@@ -982,6 +1002,19 @@ def _sudoers_rule_violations(rules: list[str]) -> list[str]:
         if "," in rule:
             violations.append(f"one rule per command specification: {rule}")
     return violations
+
+
+def test_sudoers_contract_rejects_include_directives() -> None:
+    # In sudoers, #include and #includedir are active directives, not
+    # comments; an included file could grant extra root commands invisibly.
+    for directive in (
+        "#include /etc/sudoers.local",
+        "#includedir /etc/sudoers.d",
+        "@include /etc/sudoers.local",
+        "@includedir /etc/sudoers.d",
+    ):
+        assert _sudoers_rule_violations(["# an ordinary comment", directive]), directive
+    assert _sudoers_rule_violations(["# an ordinary comment", ""]) == []
 
 
 def test_sudoers_contract_rejects_widened_rules() -> None:
@@ -1002,13 +1035,10 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     contract = ROOT / "deploy" / "sudoers" / "veetbot-deploy"
     assert contract.is_file(), "deploy/sudoers/veetbot-deploy is the deploy account's sudo contract"
 
-    rules = [
-        line.strip()
-        for line in contract.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
+    raw_lines = contract.read_text(encoding="utf-8").splitlines()
+    assert _sudoers_rule_violations(raw_lines) == []
+    rules = _sudoers_rules(raw_lines)
     assert rules
-    assert _sudoers_rule_violations(rules) == []
     specs = set()
     for rule in rules:
         match = _SUDOERS_RULE.match(rule)
