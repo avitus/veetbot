@@ -190,7 +190,7 @@ def _check_generated_civil_time_recurrence(
 
     first = RecurrenceCalculator.next_after(cadence, reference)
     reconstructed = RecurrenceCalculator.next_after(
-        type(cadence).model_validate(cadence.model_dump()), reference
+        type(cadence).model_validate(cadence.model_dump(mode="json")), reference
     )
 
     assert first == reconstructed

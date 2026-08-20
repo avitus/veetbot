@@ -297,6 +297,42 @@ async def test_profile_creation_preserves_original_and_compensation_failures() -
     }
 
 
+async def test_authentication_creation_preserves_persistence_and_cancel_failures() -> None:
+    class FailingAuthenticationRepository(InMemoryBrowserAuthenticationRepository):
+        async def create(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            del args, kwargs
+            raise RuntimeError("authentication persistence failed")
+
+    class FailingAuthenticationControlPlane(FakeAuthenticationControlPlane):
+        async def cancel_authentication(self, *args: object, **kwargs: object):  # type: ignore[no-untyped-def]
+            del args, kwargs
+            raise RuntimeError("authentication cancel failed")
+
+    uow = FakeUnitOfWorkFactory()
+    uow.uow.browser_authentications = FailingAuthenticationRepository()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=FailingAuthenticationControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+
+    with pytest.raises(ExceptionGroup) as raised:
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )
+
+    assert {str(error) for error in raised.value.exceptions} == {
+        "authentication persistence failed",
+        "authentication cancel failed",
+    }
+
+
 async def test_revoked_profile_ignores_late_ready_authentication_status() -> None:
     uow = FakeUnitOfWorkFactory()
     authentication = FakeAuthenticationControlPlane()

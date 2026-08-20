@@ -26,6 +26,7 @@ from agent_core.domain.schedules import (
 )
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.scheduling.materializer import ScheduleMaterializer
+from tests.contract.test_schedule_repository_contract import revision, schedule
 from tests.integration.m2_support import memory_settings
 
 NOW = datetime(2026, 8, 20, 16, tzinfo=UTC)
@@ -164,6 +165,20 @@ def _limits() -> ScheduleDefinitionLimits:
         max_tool_calls_per_run=4,
         max_cost_per_run=Decimal("1"),
     )
+
+
+def test_failure_limit_pause_clears_next_fire_at() -> None:
+    current = schedule().model_copy(update={"consecutive_failures": 2})
+    advanced = ScheduleMaterializer._advanced_schedule(
+        current,
+        revision(),
+        NOW + timedelta(days=1),
+        NOW,
+        failed=True,
+    )
+
+    assert advanced.state is ScheduleState.PAUSED
+    assert advanced.next_fire_at is None
 
 
 async def test_lifecycle_is_revisioned_linear_and_never_backfills_paused_time() -> None:

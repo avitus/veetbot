@@ -1484,6 +1484,8 @@ class PostgresBrowserProfileRepository:
         after_created_at: datetime | None = None,
         after_id: UUID | None = None,
     ) -> list[BrowserProfile]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
         statement = select(BrowserProfileRow).where(
             BrowserProfileRow.tenant_id == principal.tenant_id,
             BrowserProfileRow.principal_id == principal.principal_id,
@@ -1701,6 +1703,8 @@ class PostgresBrowserGrantRepository:
         after_created_at: datetime | None = None,
         after_id: UUID | None = None,
     ) -> list[BrowserGrant]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
         statement = select(BrowserGrantRow).where(
             BrowserGrantRow.tenant_id == principal.tenant_id,
             BrowserGrantRow.principal_id == principal.principal_id,

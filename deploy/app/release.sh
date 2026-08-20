@@ -162,8 +162,8 @@ set +a
 [[ "${AGENT_SCHEDULE_API_ENABLED:-0}" == "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" ]] || fail \
   "schedule API and worker flags must be enabled or disabled together"
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
-  [[ "$SCHEDULE_ENV_FILE" = /* ]] || fail \
-    "VEETBOT_SCHEDULE_ENV_FILE must be an absolute path"
+  [[ "$SCHEDULE_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \
+    "VEETBOT_SCHEDULE_ENV_FILE must be an absolute path without whitespace"
   [[ -f "$SCHEDULE_ENV_FILE" ]] || fail \
     "schedule worker environment does not exist: $SCHEDULE_ENV_FILE"
   [[ ! -L "$SCHEDULE_ENV_FILE" ]] || fail \
@@ -184,6 +184,15 @@ export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
 
 sudo install -d -m 0755 "$SYSTEMD_DIR"
 sudo install -m 0644 "$STAGE/deploy/systemd/"*.service "$SYSTEMD_DIR/"
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  awk -v environment_file="$SCHEDULE_ENV_FILE" '
+    /^EnvironmentFile=/ { print "EnvironmentFile=" environment_file; next }
+    { print }
+  ' "$STAGE/deploy/systemd/veetbot-schedule.service" \
+    >"$STAGE/.veetbot-schedule.service"
+  sudo install -m 0644 "$STAGE/.veetbot-schedule.service" \
+    "$SYSTEMD_DIR/veetbot-schedule.service"
+fi
 sudo systemctl daemon-reload
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-schedule >/dev/null 2>&1 || true

@@ -87,8 +87,35 @@ async def assert_grant_repository_contract(repository: BrowserGrantRepository) -
     await repository.delete(GRANT_ID, principal())
 
 
+async def assert_grant_repository_paginates_by_created_at_and_id(
+    repository: BrowserGrantRepository,
+) -> None:
+    values = [grant(grant_id=UUID(int=GRANT_ID.int + index)) for index in range(2)]
+    for value in values:
+        await repository.create(value)
+
+    first = await repository.list(principal(), profile_id=PROFILE_ID, limit=1)
+    second = await repository.list(
+        principal(),
+        profile_id=PROFILE_ID,
+        limit=1,
+        after_created_at=first[-1].created_at,
+        after_id=first[-1].id,
+    )
+
+    assert [item.id for item in first + second] == [item.id for item in values]
+    with pytest.raises(ValueError):
+        await repository.list(principal(), after_created_at=NOW)
+    with pytest.raises(ValueError):
+        await repository.list(principal(), after_id=values[0].id)
+
+
 async def test_in_memory_browser_grant_repository_contract() -> None:
     await assert_grant_repository_contract(InMemoryBrowserGrantRepository())
+
+
+async def test_browser_grant_repository_paginates_by_created_at_and_id() -> None:
+    await assert_grant_repository_paginates_by_created_at_and_id(InMemoryBrowserGrantRepository())
 
 
 def test_browser_grant_refuses_ambient_or_unbounded_authority() -> None:

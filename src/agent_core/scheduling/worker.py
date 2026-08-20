@@ -55,19 +55,22 @@ class ScheduleWorker:
     async def _wait_or_stop(self, awaitable: Awaitable[None]) -> bool:
         waiting: asyncio.Future[None] = asyncio.ensure_future(awaitable)
         stopping = asyncio.create_task(self._wait_for_stop())
-        done, pending = await asyncio.wait(
-            {waiting, stopping},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in pending:
-            task.cancel()
-        await asyncio.gather(*pending, return_exceptions=True)
-        if stopping in done:
-            if waiting in done:
-                await waiting
-            return True
-        await waiting
-        return False
+        try:
+            done, _pending = await asyncio.wait(
+                {waiting, stopping},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if stopping in done:
+                if waiting in done:
+                    await waiting
+                return True
+            await waiting
+            return False
+        finally:
+            for task in (waiting, stopping):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(waiting, stopping, return_exceptions=True)
 
     async def _wait_for_stop(self) -> None:
         await self._stop_event.wait()

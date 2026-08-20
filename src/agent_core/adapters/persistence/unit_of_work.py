@@ -284,6 +284,7 @@ class PostgresUnitOfWork:
             try:
                 await self._session.close()
             finally:
+                self._session = None
                 if self._depth_token is not None:
                     _exit_unit_of_work(self._depth_token)
                     self._depth_token = None

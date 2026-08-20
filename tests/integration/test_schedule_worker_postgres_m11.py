@@ -13,6 +13,9 @@ from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.runtime.worker import DurableWorker
 from agent_core.scheduling.worker import ScheduleWorker
 from tests.contract.support import agent
+from tests.contract.test_schedule_unit_of_work_contract import (
+    assert_schedule_unit_of_work_contract,
+)
 from tests.integration.m2_support import database_settings
 from tests.integration.test_schedule_materializer_m11 import (
     NOW,
@@ -27,7 +30,9 @@ async def test_postgres_schedule_wakeup_crosses_process_connections() -> None:
     publisher = PostgresScheduleWakeup(settings.database_url)
     try:
         waiting = asyncio.create_task(listener.wait(5))
-        while not waiting.done():
+        for _attempt in range(25):
+            if waiting.done():
+                break
             await publisher.notify()
             done, _pending = await asyncio.wait({waiting}, timeout=0.2)
             if done:
@@ -54,6 +59,7 @@ async def test_lean_production_schedule_role_constructs_without_execution_creden
     )
     async with build_schedule_worker(settings=settings) as worker:
         assert isinstance(worker, ScheduleWorker)
+        await assert_schedule_unit_of_work_contract(worker._uow_factory)
 
 
 async def test_reserved_worker_classes_preserve_interactive_and_async_progress() -> None:

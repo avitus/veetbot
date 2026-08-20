@@ -347,11 +347,12 @@ class ScheduleMaterializer:
         )
         await self._append_occurrence_event(uow, occurrence, schedule, advanced.state, now)
         self._write_probe("process_event")
-        if (
+        auto_paused = (
             schedule.state is ScheduleState.ACTIVE
             and advanced.state is ScheduleState.PAUSED
             and advanced.pause_reason is SchedulePauseReason.FAILURE_LIMIT
-        ):
+        )
+        if auto_paused:
             await uow.process_events.append(
                 ProcessEvent(
                     id=self._ids.new_id(),
@@ -373,8 +374,9 @@ class ScheduleMaterializer:
                     created_at=now,
                 )
             )
-            self._metrics.record_auto_pause()
         await uow.schedules.advance(schedule, advanced)
+        if auto_paused:
+            self._metrics.record_auto_pause()
         self._write_probe("schedule")
         return occurrence
 
@@ -495,7 +497,7 @@ class ScheduleMaterializer:
                 update={
                     "state": ScheduleState.PAUSED,
                     "pause_reason": SchedulePauseReason.FAILURE_LIMIT,
-                    "next_fire_at": next_fire_at,
+                    "next_fire_at": None,
                     "consecutive_failures": failures,
                     "updated_at": now,
                 }

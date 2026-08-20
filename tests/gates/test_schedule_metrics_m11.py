@@ -2,12 +2,22 @@
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
+from uuid import UUID
 
+import pytest
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.domain.errors import ConflictError
 from agent_core.domain.schedules import OccurrenceDisposition
 from agent_core.observability.schedules import ScheduleMetrics
+from agent_core.scheduling.materializer import ScheduleMaterializer
+from tests.contract.support import NOW
+from tests.contract.test_schedule_repository_contract import revision, schedule
 
 
 def test_schedule_metrics_cover_operations_without_instruction_attributes() -> None:
@@ -74,3 +84,45 @@ def test_schedule_metrics_cover_operations_without_instruction_attributes() -> N
     ]
     assert all("instruction" not in item for item in attributes)
     assert all("tenant-private" not in str(value) for item in attributes for value in item.values())
+
+
+async def test_auto_pause_metric_requires_successful_state_persistence() -> None:
+    class MetricProbe:
+        def __init__(self) -> None:
+            self.auto_pauses = 0
+
+        def record_auto_pause(self) -> None:
+            self.auto_pauses += 1
+
+        def record_occurrence(self, **_kwargs: object) -> None:
+            pass
+
+    metrics = MetricProbe()
+    uow = SimpleNamespace(
+        schedule_occurrences=SimpleNamespace(insert=AsyncMock()),
+        process_events=SimpleNamespace(append=AsyncMock()),
+        schedules=SimpleNamespace(advance=AsyncMock(side_effect=ConflictError("schedule changed"))),
+    )
+    materializer = ScheduleMaterializer(
+        uow_factory=cast(Any, object()),
+        principals=cast(Any, object()),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([UUID(int=1), UUID(int=2), UUID(int=3)]),
+        seed_checkpoint=cast(Any, AsyncMock()),
+        metrics=cast(Any, metrics),
+    )
+    current = schedule().model_copy(update={"consecutive_failures": 2})
+
+    with pytest.raises(ConflictError):
+        await materializer._record_failure(
+            cast(Any, uow),
+            current,
+            revision(),
+            NOW,
+            NOW + timedelta(days=1),
+            NOW,
+            OccurrenceDisposition.MISSED,
+            "schedule.misfire_grace_expired",
+        )
+
+    assert metrics.auto_pauses == 0

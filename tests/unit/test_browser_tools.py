@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field, replace
 
+import pytest
+
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserElement,
@@ -195,6 +197,26 @@ async def test_navigate_bounds_page_controlled_url_and_keeps_views_consistent() 
     )
 
     assert structured["text"] == ""
+    assert json.loads(serialized) == structured
+
+
+@pytest.mark.parametrize("element_count", (256, 257))
+def test_observation_payload_enforces_element_schema_ceiling(element_count: int) -> None:
+    provider = FakeBrowserProvider()
+    structured, serialized = bounded_observation_payload(
+        provider,
+        BrowserObservation.model_construct(
+            url="https://example.org/account",
+            revision="revision-elements",
+            elements=tuple(
+                BrowserElement(ref=f"element-{index}", role="button", name="Continue")
+                for index in range(element_count)
+            ),
+        ),
+        1_000_000,
+    )
+
+    assert len(structured["elements"]) == 256
     assert json.loads(serialized) == structured
 
 

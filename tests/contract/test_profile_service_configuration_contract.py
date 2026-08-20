@@ -13,6 +13,7 @@ import uvicorn
 import agent_core.browser_control_plane.main as service_main
 from agent_core.browser_control_plane.configuration import load_profile_service_settings
 from agent_core.browser_control_plane.models import ProfileStoreIntegrityError
+from agent_core.domain.browser import require_service_origin
 
 OPAQUE_AUTH_VALUE = "synthetic-profile-service-auth-value"
 
@@ -82,6 +83,35 @@ def test_profile_service_rejects_insecure_or_symlinked_secret_files(tmp_path: Pa
     values = environment(tmp_path)
     auth_file = Path(values["BROWSER_PROFILE_SERVICE_AUTH_FILE"])
     os.chmod(auth_file, 0o644)
+    with pytest.raises(ProfileStoreIntegrityError):
+        load_profile_service_settings(values)
+
+
+def test_profile_service_fails_closed_without_atomic_no_follow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = environment(tmp_path)
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+
+    with pytest.raises(ProfileStoreIntegrityError):
+        load_profile_service_settings(values)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "https://login.example.test:not-a-port",
+        "https://login.example.test:0",
+        "https://login.example.test:65536",
+    ),
+)
+def test_service_origins_reject_invalid_ports(tmp_path: Path, origin: str) -> None:
+    with pytest.raises(ValueError):
+        require_service_origin(origin, message="invalid service origin")
+
+    values = environment(tmp_path)
+    values["BROWSER_PROFILE_CEREMONY_BASE_URL"] = origin
     with pytest.raises(ProfileStoreIntegrityError):
         load_profile_service_settings(values)
 

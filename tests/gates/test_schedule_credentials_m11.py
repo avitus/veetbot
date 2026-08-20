@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import UTC, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -88,9 +87,8 @@ def _limits() -> ScheduleDefinitionLimits:
 
 
 async def test_credential_shaped_instructions_are_rejected_without_storage_or_logging(
-    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    caplog.set_level(logging.DEBUG)
     members = sorted(CORPUS.glob("*.json"))
     assert len(members) >= 12
     principal = _principal()
@@ -125,8 +123,9 @@ async def test_credential_shaped_instructions_are_rejected_without_storage_or_lo
                 for event in await uow.process_events.list()
                 if event.event_type.startswith("schedule.")
             ]
-        log_text = caplog.text
-        assert all(value not in log_text for value in rejected)
+        captured = capsys.readouterr()
+        emitted = captured.out + captured.err
+        assert all(value not in emitted for value in rejected)
 
 
 async def test_credential_shaped_title_is_rejected_before_persistence() -> None:

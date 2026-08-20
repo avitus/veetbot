@@ -160,19 +160,18 @@ async def assert_schedule_repository_mutates_state_and_revisions_with_cas(
 async def assert_schedule_repository_batches_owned_revisions(
     repository: ScheduleRepository,
 ) -> None:
-    second_id = UUID(int=SCHEDULE_ID.int + 1)
-    await repository.create(schedule(), revision())
-    await repository.create(schedule(schedule_id=second_id), revision(second_id))
+    identities = tuple((UUID(int=SCHEDULE_ID.int + index), 1) for index in range(200))
+    for schedule_id, _revision_number in identities:
+        await repository.create(schedule(schedule_id=schedule_id), revision(schedule_id))
 
-    revisions = await repository.get_revisions(
-        ((SCHEDULE_ID, 1), (second_id, 1)),
-        principal(),
-    )
+    revisions = await repository.get_revisions(identities, principal())
 
-    assert revisions == {
-        (SCHEDULE_ID, 1): revision(),
-        (second_id, 1): revision(second_id),
-    }
+    assert revisions == {identity: revision(identity[0]) for identity in identities}
+    with pytest.raises(NotFoundError):
+        await repository.get_revisions(((SCHEDULE_ID, 99),), principal())
+    stranger = principal().model_copy(update={"principal_id": "principal-b"})
+    with pytest.raises(NotFoundError):
+        await repository.get_revisions(((SCHEDULE_ID, 1),), stranger)
 
 
 async def test_schedule_repository_is_principal_isolated_and_revisioned() -> None:

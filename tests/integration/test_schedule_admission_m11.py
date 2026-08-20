@@ -5,9 +5,11 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Any, cast
 from uuid import uuid4
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.adapters.schedule_admission import PostgresScheduleAdmissionController
@@ -156,14 +158,18 @@ async def test_rate_limit_counts_recent_materialization_after_run_link_erasure()
 
         async with composition.uow_factory() as uow:
             assert isinstance(uow, PostgresUnitOfWork)
-            await uow.session.execute(
-                text(
-                    "UPDATE schedule_occurrences "
-                    "SET run_id = NULL, session_id = NULL, links_erased_at = :erased_at "
-                    "WHERE id = :occurrence_id"
+            erased = cast(
+                CursorResult[Any],
+                await uow.session.execute(
+                    text(
+                        "UPDATE schedule_occurrences "
+                        "SET run_id = NULL, session_id = NULL, links_erased_at = :erased_at "
+                        "WHERE id = :occurrence_id"
+                    ),
+                    {"erased_at": NOW, "occurrence_id": occurrence.id},
                 ),
-                {"erased_at": NOW, "occurrence_id": occurrence.id},
             )
+            assert erased.rowcount == 1
             decision = await PostgresScheduleAdmissionController(
                 uow.session,
                 ScheduleAdmissionLimits(

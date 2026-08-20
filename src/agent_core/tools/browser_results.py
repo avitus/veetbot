@@ -100,7 +100,7 @@ def bounded_observation_payload(
     observation: BrowserObservation,
     maximum_bytes: int,
 ) -> tuple[dict[str, Any], str]:
-    elements = [element.model_dump(mode="json") for element in observation.elements]
+    elements = [element.model_dump(mode="json") for element in observation.elements[:256]]
     base: dict[str, Any] = {
         "provider": _bounded_utf8(provider.name, MAX_PROVIDER_BYTES),
         "url": _bounded_utf8(observation.url, MAX_URL_BYTES),

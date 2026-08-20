@@ -63,6 +63,10 @@ def load_profile_service_settings(
         raise ProfileStoreIntegrityError("profile service bind port is invalid")
     ceremony_base_url = values.get("BROWSER_PROFILE_CEREMONY_BASE_URL", "")
     parsed_ceremony = urlsplit(ceremony_base_url)
+    try:
+        ceremony_port = parsed_ceremony.port
+    except ValueError as exc:
+        raise ProfileStoreIntegrityError("authentication ceremony origin is invalid") from exc
     if (
         parsed_ceremony.scheme != "https"
         or parsed_ceremony.hostname is None
@@ -71,6 +75,7 @@ def load_profile_service_settings(
         or parsed_ceremony.path not in {"", "/"}
         or parsed_ceremony.query
         or parsed_ceremony.fragment
+        or ceremony_port == 0
     ):
         raise ProfileStoreIntegrityError("authentication ceremony origin is invalid")
     return ProfileServiceSettings(
@@ -110,8 +115,8 @@ def _assert_owned_private(path: Path, *, directory: bool) -> os.stat_result:
 def _read_private_text(path: Path, label: str) -> str:
     flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
     no_follow = getattr(os, "O_NOFOLLOW", 0)
-    if no_follow == 0 and path.is_symlink():
-        raise ProfileStoreIntegrityError("profile service mount is invalid")
+    if no_follow == 0:
+        raise ProfileStoreIntegrityError(f"{label} cannot be opened without O_NOFOLLOW")
     try:
         descriptor = os.open(path, flags | no_follow)
     except OSError as exc:

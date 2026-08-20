@@ -134,7 +134,7 @@ def upgrade() -> None:
             ["sessions.id"],
             deferrable=True,
             initially="DEFERRED",
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name=op.f("fk_schedule_occurrences_session_id_sessions"),
         ),
         sa.ForeignKeyConstraint(
@@ -142,7 +142,7 @@ def upgrade() -> None:
             ["runs.id"],
             deferrable=True,
             initially="DEFERRED",
-            ondelete="SET NULL",
+            ondelete="RESTRICT",
             name=op.f("fk_schedule_occurrences_run_id_runs"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_schedule_occurrences")),

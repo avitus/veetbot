@@ -26,7 +26,12 @@ class BrowserProfileRepository(Protocol):
         limit: int | None = None,
         after_created_at: datetime | None = None,
         after_id: UUID | None = None,
-    ) -> list[BrowserProfile]: ...
+    ) -> list[BrowserProfile]:
+        """Return ascending ``(created_at, id)`` rows after one strict composite cursor.
+
+        Both cursor components must be supplied together.
+        """
+        ...
 
     async def bind(
         self,
@@ -36,7 +41,9 @@ class BrowserProfileRepository(Protocol):
         expected_generation: int,
         provisioning: BrowserProfileProvisioning,
         updated_at: datetime,
-    ) -> BrowserProfile: ...
+    ) -> BrowserProfile:
+        """Bind a reservation to a tenant-unique opaque provider reference."""
+        ...
 
     async def transition(
         self,

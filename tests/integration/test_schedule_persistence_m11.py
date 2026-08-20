@@ -28,6 +28,7 @@ from tests.contract.test_schedule_occurrence_repository_contract import (
     assert_occurrence_insert_is_idempotent_by_schedule_and_nominal_instant,
 )
 from tests.contract.test_schedule_repository_contract import (
+    assert_schedule_repository_batches_owned_revisions,
     assert_schedule_repository_is_principal_isolated_and_revisioned,
     assert_schedule_repository_lists_and_finds_due_definitions_deterministically,
     assert_schedule_repository_mutates_state_and_revisions_with_cas,
@@ -62,6 +63,7 @@ async def test_postgres_schedule_adapters_satisfy_shared_contracts() -> None:
             assert_schedule_repository_is_principal_isolated_and_revisioned,
             assert_schedule_repository_lists_and_finds_due_definitions_deterministically,
             assert_schedule_repository_mutates_state_and_revisions_with_cas,
+            assert_schedule_repository_batches_owned_revisions,
         ):
             with pytest.raises(_RollbackContractError):
                 async with composition.uow_factory() as uow:
@@ -91,6 +93,16 @@ async def test_postgres_schedule_adapters_satisfy_shared_contracts() -> None:
                     uow.schedule_idempotency
                 )
                 raise _RollbackContractError
+
+
+async def test_postgres_unit_of_work_does_not_expose_a_closed_session() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        async with composition.uow_factory() as uow:
+            assert isinstance(uow, PostgresUnitOfWork)
+            postgres_uow = uow
+
+        with pytest.raises(RuntimeError, match="not active"):
+            _ = postgres_uow.session
 
 
 async def test_schedule_repositories_commit_and_roll_back_as_one_unit() -> None:

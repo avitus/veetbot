@@ -78,6 +78,7 @@ class _TerminalCeremonyState:
     tenant_id: str
     principal_id: str
     expires_at: datetime
+    retained_until: datetime
     status: BrowserAuthenticationStatus
 
 
@@ -163,8 +164,8 @@ class HostedProfileSessionService:
             expires_at=expires_at,
         )
         lease_ref = self._lease_ref(scope)
+        await self._expire()
         async with self._lock:
-            await self._expire_locked()
             existing = self._lease_for_profile(profile_id)
             if existing is not None:
                 if existing.scope != scope:
@@ -188,18 +189,16 @@ class HostedProfileSessionService:
         return BrowserLease(lease_ref=lease_ref, expires_at=expires_at)
 
     async def navigate(self, lease_ref: str, url: str) -> BrowserObservation:
-        async with self._lock:
-            state = await self._require_lease_locked(lease_ref)
-            if browser_origin(url) not in state.identity.allowed_origins:
-                raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+        state = await self._require_lease(lease_ref)
+        if browser_origin(url) not in state.identity.allowed_origins:
+            raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
         async with state.lock:
             if state.closed:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
             return await state.runtime.navigate(url)
 
     async def observe(self, lease_ref: str) -> BrowserObservation:
-        async with self._lock:
-            state = await self._require_lease_locked(lease_ref)
+        state = await self._require_lease(lease_ref)
         async with state.lock:
             if state.closed:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
@@ -212,8 +211,7 @@ class HostedProfileSessionService:
         *,
         sequence: int,
     ) -> BrowserObservation:
-        async with self._lock:
-            state = await self._require_lease_locked(lease_ref)
+        state = await self._require_lease(lease_ref)
         async with state.lock:
             if state.closed:
                 raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
@@ -281,8 +279,8 @@ class HostedProfileSessionService:
             raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
         if browser_origin(login_url) not in metadata.allowed_origins:
             raise BrowserProviderError("tool.browser.url_disallowed", retryable=False)
+        await self._expire()
         async with self._lock:
-            await self._expire_locked()
             if self._lease_for_profile(profile_id) is not None:
                 raise ConflictError("browser profile already has an active lease")
             if self._active_ceremony_for_profile(profile_id) is not None:
@@ -330,8 +328,8 @@ class HostedProfileSessionService:
         ceremony_id: UUID,
         principal: Principal,
     ) -> BrowserAuthenticationView:
+        await self._expire()
         async with self._lock:
-            await self._expire_locked()
             terminal = self._owned_terminal_ceremony(ceremony_id, principal)
             if terminal is not None:
                 return _terminal_ceremony_view(terminal)
@@ -343,8 +341,8 @@ class HostedProfileSessionService:
         ceremony_id: UUID,
         principal: Principal,
     ) -> BrowserAuthenticationView:
+        await self._expire()
         async with self._lock:
-            await self._expire_locked()
             terminal = self._owned_terminal_ceremony(ceremony_id, principal)
             if terminal is not None:
                 return _terminal_ceremony_view(terminal)
@@ -370,8 +368,8 @@ class HostedProfileSessionService:
         ceremony_id: UUID,
         principal: Principal,
     ) -> BrowserAuthenticationView:
+        await self._expire()
         async with self._lock:
-            await self._expire_locked()
             terminal = self._owned_terminal_ceremony(ceremony_id, principal)
             if terminal is not None:
                 return _terminal_ceremony_view(terminal)
@@ -386,8 +384,8 @@ class HostedProfileSessionService:
     async def authenticate_surface(self, ceremony_id: UUID, capability: str) -> bool:
         if not 32 <= len(capability) <= 128:
             return False
+        await self._expire()
         async with self._lock:
-            await self._expire_locked()
             state = self._ceremonies.get(ceremony_id)
             return bool(
                 state is not None
@@ -403,6 +401,7 @@ class HostedProfileSessionService:
         ceremony_id: UUID,
         capability: str,
     ) -> bytes:
+        await self._expire()
         async with self._lock:
             state = await self._surface_ceremony_locked(ceremony_id, capability)
             return await state.runtime.interactive_frame()
@@ -413,6 +412,7 @@ class HostedProfileSessionService:
         capability: str,
         event: BrowserInteractiveEvent,
     ) -> None:
+        await self._expire()
         async with self._lock:
             state = await self._surface_ceremony_locked(ceremony_id, capability)
             await state.runtime.interactive_event(event)
@@ -452,42 +452,49 @@ class HostedProfileSessionService:
                 return key, state
         return None, None
 
-    async def _require_lease_locked(self, lease_ref: str) -> _LeaseState:
-        key, state = self._find_lease(lease_ref)
-        if state is None or key is None:
-            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-        if state.scope.expires_at <= self._now():
-            self._leases.pop(key)
-            with suppress(Exception):
-                await state.runtime.close()
-            state.closed = True
-            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-        metadata = await self._store.find_by_profile(state.scope.profile_id)
-        if metadata is None or metadata.revoked:
-            self._leases.pop(key)
-            with suppress(Exception):
-                await state.runtime.close()
-            state.closed = True
-            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
-        return state
-
-    async def _expire_locked(self) -> None:
-        now = self._now()
-        for key, lease_state in tuple(self._leases.items()):
-            if lease_state.scope.expires_at <= now:
+    async def _require_lease(self, lease_ref: str) -> _LeaseState:
+        await self._expire()
+        invalid: _LeaseState | None = None
+        async with self._lock:
+            key, state = self._find_lease(lease_ref)
+            if state is None or key is None:
+                raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+            metadata = await self._store.find_by_profile(state.scope.profile_id)
+            if state.scope.expires_at <= self._now() or metadata is None or metadata.revoked:
                 self._leases.pop(key)
-                with suppress(Exception):
-                    await lease_state.runtime.close()
-                lease_state.closed = True
-        for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
-            if ceremony_state.expires_at <= now:
-                ceremony_state.status = BrowserAuthenticationStatus.EXPIRED
-                with suppress(Exception):
-                    await ceremony_state.runtime.close()
-                await self._finish_ceremony_locked(ceremony_state)
-        for ceremony_id, terminal_state in tuple(self._terminal_ceremonies.items()):
-            if terminal_state.expires_at <= now:
-                self._terminal_ceremonies.pop(ceremony_id, None)
+                invalid = state
+            else:
+                return state
+        assert invalid is not None
+        await self._close_lease_state(invalid)
+        raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+
+    async def _expire(self) -> None:
+        expired_leases: list[_LeaseState] = []
+        async with self._lock:
+            now = self._now()
+            for key, lease_state in tuple(self._leases.items()):
+                if lease_state.scope.expires_at <= now:
+                    self._leases.pop(key)
+                    expired_leases.append(lease_state)
+            for _ceremony_id, ceremony_state in tuple(self._ceremonies.items()):
+                if ceremony_state.expires_at <= now:
+                    ceremony_state.status = BrowserAuthenticationStatus.EXPIRED
+                    with suppress(Exception):
+                        await ceremony_state.runtime.close()
+                    await self._finish_ceremony_locked(ceremony_state)
+            for ceremony_id, terminal_state in tuple(self._terminal_ceremonies.items()):
+                if terminal_state.retained_until <= now:
+                    self._terminal_ceremonies.pop(ceremony_id, None)
+        for lease_state in expired_leases:
+            await self._close_lease_state(lease_state)
+
+    @staticmethod
+    async def _close_lease_state(state: _LeaseState) -> None:
+        async with state.lock:
+            state.closed = True
+            with suppress(Exception):
+                await state.runtime.close()
 
     def _lease_for_profile(self, profile_id: UUID) -> _LeaseState | None:
         return next(
@@ -538,6 +545,7 @@ class HostedProfileSessionService:
             tenant_id=state.tenant_id,
             principal_id=state.principal_id,
             expires_at=state.expires_at,
+            retained_until=self._now() + timedelta(seconds=AUTHENTICATION_CEREMONY_SECONDS),
             status=state.status,
         )
         self._terminal_ceremonies[state.id] = terminal
@@ -548,7 +556,6 @@ class HostedProfileSessionService:
         ceremony_id: UUID,
         capability: str,
     ) -> _CeremonyState:
-        await self._expire_locked()
         state = self._ceremonies.get(ceremony_id)
         if (
             state is None

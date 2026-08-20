@@ -140,6 +140,11 @@ make_stage() {
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
       >"$stage/deploy/systemd/$unit.service"
   done
+  printf '%s\n' \
+    '[Service]' \
+    'WorkingDirectory=/opt/veetbot/current' \
+    'EnvironmentFile=/etc/veetbot/veetbot-schedule.env' \
+    >"$stage/deploy/systemd/veetbot-schedule.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
   printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
@@ -317,6 +322,8 @@ ln -s "$DEPLOY_ROOT/releases/$schedule_id" "$PROCESS_ROOT/4242/cwd"
 VEETBOT_TEST_ENV_FILE="$schedule_env" \
   VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_worker_env" \
   run_release "$schedule_id"
+grep -Fxq "EnvironmentFile=$schedule_worker_env" \
+  "$SYSTEMD_DIR/veetbot-schedule.service"
 grep -Fq \
   'systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"

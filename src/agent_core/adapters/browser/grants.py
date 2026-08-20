@@ -35,6 +35,8 @@ class InMemoryBrowserGrantRepository:
         after_created_at: datetime | None = None,
         after_id: UUID | None = None,
     ) -> list[BrowserGrant]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
         grants = [
             grant.model_copy(deep=True)
             for grant in self._grants.values()

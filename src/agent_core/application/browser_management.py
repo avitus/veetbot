@@ -320,8 +320,14 @@ class BrowserProfileManagementService:
         try:
             async with self._uow_factory() as uow:
                 await uow.browser_authentications.create(record)
-        except Exception:
-            await self._authentications.cancel_authentication(launched.id, principal)
+        except Exception as original:
+            try:
+                await self._authentications.cancel_authentication(launched.id, principal)
+            except Exception as compensation:
+                raise ExceptionGroup(
+                    "browser authentication persistence and compensation failed",
+                    [original, compensation],
+                ) from original
             raise
         return launched
 

@@ -50,6 +50,8 @@ class InMemoryBrowserProfileRepository:
         after_created_at: datetime | None = None,
         after_id: UUID | None = None,
     ) -> list[BrowserProfile]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
         profiles = [
             _copy(profile) for profile in self._profiles.values() if _owned(profile, principal)
         ]

@@ -47,6 +47,10 @@ def require_service_origin(value: str, *, message: str) -> str:
     """Return one HTTPS service origin with no credentials or URL components."""
 
     parsed = urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(message) from exc
     if (
         parsed.scheme != "https"
         or parsed.hostname is None
@@ -55,6 +59,7 @@ def require_service_origin(value: str, *, message: str) -> str:
         or parsed.path not in {"", "/"}
         or parsed.query
         or parsed.fragment
+        or port == 0
     ):
         raise ValueError(message)
     return value.rstrip("/")

@@ -146,8 +146,8 @@ def test_schedule_tables_encode_identity_erasure_and_query_constraints() -> None
     foreign_keys = {
         foreign_key.parent.name: foreign_key.ondelete for foreign_key in occurrences.foreign_keys
     }
-    assert foreign_keys["session_id"] == "SET NULL"
-    assert foreign_keys["run_id"] == "SET NULL"
+    assert foreign_keys["session_id"] == "RESTRICT"
+    assert foreign_keys["run_id"] == "RESTRICT"
     assert all(
         foreign_key.deferrable and foreign_key.initially == "DEFERRED"
         for foreign_key in occurrences.foreign_keys

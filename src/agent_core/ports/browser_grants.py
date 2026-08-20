@@ -23,7 +23,12 @@ class BrowserGrantRepository(Protocol):
         limit: int | None = None,
         after_created_at: datetime | None = None,
         after_id: UUID | None = None,
-    ) -> list[BrowserGrant]: ...
+    ) -> list[BrowserGrant]:
+        """Return ascending ``(created_at, id)`` rows after one strict composite cursor.
+
+        Both cursor components must be supplied together.
+        """
+        ...
 
     async def revoke(
         self,

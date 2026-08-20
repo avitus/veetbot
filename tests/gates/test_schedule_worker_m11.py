@@ -100,6 +100,34 @@ async def test_schedule_worker_waits_for_next_fire_with_bounded_fallback_and_bac
         assert await worker.wait_seconds() == 5
 
 
+async def test_schedule_worker_cancellation_cleans_up_child_waits() -> None:
+    child_finished = asyncio.Event()
+    never = asyncio.Event()
+
+    async def wait_forever() -> None:
+        try:
+            await never.wait()
+        finally:
+            child_finished.set()
+
+    async with build(settings=memory_settings(), storage="memory") as composition:
+        worker = ScheduleWorker(
+            uow_factory=composition.uow_factory,
+            materialize=lambda _schedule_id: _no_occurrence(),
+            clock=composition.clock,
+            scan_batch=1,
+            fallback_poll_seconds=30,
+            admission_backoff_seconds=5,
+        )
+        waiting = asyncio.create_task(worker._wait_or_stop(wait_forever()))
+        await asyncio.sleep(0)
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+
+    assert child_finished.is_set()
+
+
 async def _no_occurrence() -> ScheduleOccurrence | None:
     return None
 

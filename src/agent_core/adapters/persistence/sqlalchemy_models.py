@@ -1123,11 +1123,11 @@ class ScheduleOccurrenceRow(Base):
     disposition: Mapped[str] = mapped_column(String(32))
     session_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("sessions.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+        ForeignKey("sessions.id", ondelete="RESTRICT", deferrable=True, initially="DEFERRED"),
     )
     run_id: Mapped[UUID | None] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("runs.id", ondelete="SET NULL", deferrable=True, initially="DEFERRED"),
+        ForeignKey("runs.id", ondelete="RESTRICT", deferrable=True, initially="DEFERRED"),
     )
     reason_code: Mapped[str | None] = mapped_column(Text)
     authority_version: Mapped[str | None] = mapped_column(Text)
