@@ -99,11 +99,15 @@ sudo chmod 0700 /var/lib/veetbot/artifacts
 
 The deploy key must log in as this account, so the account needs an executable
 shell. Restrict that key in `authorized_keys` to the CircleCI source and disable
-port, agent, and X11 forwarding. Give the account a reviewed, non-interactive
-sudo policy for the exact install, systemd, Nginx validation, backup, symlink,
-and reload commands used by `deploy/app/release.sh` and
-`deploy/nginx/deploy.sh`. That authority is effectively host administration;
-do not reuse the key for application clients or interactive users.
+port, agent, and X11 forwarding. Install the committed sudo contract
+`deploy/sudoers/veetbot-deploy` as `/etc/sudoers.d/veetbot-deploy` with mode
+0440, replacing its placeholder user `deploy` with this account, and validate
+with `visudo -c -f /etc/sudoers.d/veetbot-deploy`. The contract is the exact
+union of the sudo commands `deploy/app/release.sh` and `deploy/nginx/deploy.sh`
+invoke, and a repository test reconciles the scripts against it, so a script
+gaining a sudo command without a rule fails CI rather than the production
+release. That authority is effectively host administration; do not reuse the
+key for application clients or interactive users.
 
 Install stable `runsc` if it is not already registered. Preserve the existing
 Docker configuration before the required daemon restart and verify all previous
@@ -171,10 +175,55 @@ sudo chmod 0640 /etc/veetbot/veetbot-schedule.env
 Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
 it to `/opt/veetbot/current/.release.env`, which only the API systemd unit loads.
 
-The committed Nginx virtual host expects the existing Let's Encrypt certificate
-at `/etc/letsencrypt/live/api.veetbot.com/`. Issue or renew that certificate
-before its first deployment. The Nginx installer changes only Veetbot's
-`sites-available` and `sites-enabled` entries; it preserves other virtual hosts.
+### Browser profile service host prerequisites
+
+The release script refuses to run until the browser-profile secrets exist,
+even while `BROWSER_PROVIDER=disabled`, because the production compose file
+always starts the hardened profile service and bind-mounts these paths
+read-only. Provision them once:
+
+```bash
+umask 077
+sudo install -d -m 0711 /etc/veetbot/secrets
+
+# One token, two files: the container refuses secrets it does not own
+# (uid 65532), and the agent units read their copy as the veetbot user.
+credential="$(openssl rand -hex 32)"
+printf '%s\n' "$credential" | sudo tee /etc/veetbot/secrets/browser-profile-service-auth >/dev/null
+printf '%s\n' "$credential" | sudo tee /etc/veetbot/secrets/browser-control-plane-credential >/dev/null
+unset credential
+openssl rand -hex 32 | sudo tee /etc/veetbot/secrets/browser-profile-session-secret >/dev/null
+
+# Keyring: the service does not generate keys; its mount is read-only.
+sudo install -d -m 0700 /etc/veetbot/secrets/browser-profile-keys
+openssl rand -base64 32 | sudo tee /etc/veetbot/secrets/browser-profile-keys/v1.key >/dev/null
+printf 'v1\n' | sudo tee /etc/veetbot/secrets/browser-profile-keys/current >/dev/null
+
+sudo chown 65532:65532 /etc/veetbot/secrets/browser-profile-service-auth \
+  /etc/veetbot/secrets/browser-profile-session-secret
+sudo chown -R 65532:65532 /etc/veetbot/secrets/browser-profile-keys
+sudo chown veetbot:veetbot /etc/veetbot/secrets/browser-control-plane-credential
+sudo chmod 0600 /etc/veetbot/secrets/browser-profile-service-auth \
+  /etc/veetbot/secrets/browser-profile-session-secret \
+  /etc/veetbot/secrets/browser-control-plane-credential \
+  /etc/veetbot/secrets/browser-profile-keys/v1.key \
+  /etc/veetbot/secrets/browser-profile-keys/current
+```
+
+The service's fail-closed loader rejects any secret file with group or other
+permission bits, a wrong owner, a symlink, or multi-line content; key files
+must be base64 of exactly 32 bytes named `<version>.key`, with `current`
+naming an existing version. The environment variables that point at these
+paths are in `deploy/veetbot.env.example`; add them to
+`/etc/veetbot/veetbot.env` alongside the other values.
+
+The committed Nginx virtual host expects existing Let's Encrypt certificates
+at `/etc/letsencrypt/live/api.veetbot.com/` **and**
+`/etc/letsencrypt/live/browser.veetbot.com/`; the browser origin needs its DNS
+record and certificate before the first Nginx deployment or `nginx -t` fails.
+Issue or renew both certificates before deploying. The Nginx installer changes
+only Veetbot's `sites-available` and `sites-enabled` entries; it preserves
+other virtual hosts.
 
 ## CircleCI setup
 

@@ -2,7 +2,7 @@ PYTHON ?= python
 
 .PHONY: install format lint typecheck test check db-up migrate client-build \
 	test-static test-contract test-fast test-integration test-live \
-	test-sandbox test-apple test-deploy sandbox-image \
+	test-sandbox test-apple test-apple-ui test-deploy sandbox-image \
 	production-check \
 	docs docs-serve docs-check citations-fix
 
@@ -60,6 +60,28 @@ test-apple:
 		exit 1; \
 	fi; \
 	DEVELOPER_DIR="$$apple_developer_dir" swift test --package-path clients/apple
+
+test-apple-ui:
+	@apple_developer_dir="$${DEVELOPER_DIR:-$$(xcode-select --print-path)}"; \
+	if ! printf '%s' "$$apple_developer_dir" | grep -q '\.app/Contents/Developer$$' \
+		&& test -d /Applications/Xcode.app/Contents/Developer; then \
+		apple_developer_dir=/Applications/Xcode.app/Contents/Developer; \
+	fi; \
+	if ! printf '%s' "$$apple_developer_dir" | grep -q '\.app/Contents/Developer$$'; then \
+		echo 'test-apple-ui requires a full Xcode installation.' >&2; \
+		exit 1; \
+	fi; \
+	device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
+		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone")]; print(max(candidates)[1] if candidates else "")'); \
+	if test -z "$$device_id"; then \
+		echo 'test-apple-ui requires an available iPhone simulator runtime.' >&2; \
+		exit 1; \
+	fi; \
+	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test -quiet \
+		-project clients/apple/Veetbot.xcodeproj \
+		-scheme Veetbot \
+		-destination "platform=iOS Simulator,id=$$device_id" \
+		-only-testing:VeetbotUITests
 
 test-deploy:
 	deploy/app/release.test.sh

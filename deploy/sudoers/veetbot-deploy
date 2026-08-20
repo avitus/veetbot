@@ -1,0 +1,60 @@
+# Non-interactive sudo contract for the CI deploy account.
+#
+# Install on the production host as /etc/sudoers.d/veetbot-deploy with mode
+# 0440, replacing every occurrence of the placeholder user `deploy` with the
+# account CircleCI logs in as (on a provisioned host:
+# stat -c '%U' /opt/veetbot/shared/deploy.lock). Validate before logging out:
+#
+#   visudo -c -f /etc/sudoers.d/veetbot-deploy
+#
+# These rules are the exact union of the sudo commands invoked by
+# deploy/app/release.sh and deploy/nginx/deploy.sh. A repository test parses
+# every rule (subject, host, run-as, tag, command, arguments), derives the
+# systemctl unit lists from release.sh itself, and fails the static partition
+# when a script and this contract disagree — so drift breaks CI, not the
+# production release.
+#
+# systemctl rules are exact because their argv is deterministic; the two
+# enable/restart forms cover the schedule-disabled and schedule-enabled unit
+# lists. The only wildcards are values the scripts generate per release:
+# release-id staging directories, the commit-stamped Nginx temp config, and
+# timestamped backups. Each such wildcard is bounded by a fixed, trusted
+# destination. sudoers wildcards match across argument boundaries, which is
+# why no rule uses one to name units or arguments.
+# Adjust the nginx path if `command -v nginx` differs on the host.
+
+# deploy/app/release.sh — systemd phase
+deploy ALL=(root) NOPASSWD: /usr/bin/install -d -m 0755 /etc/systemd/system
+deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/deploy/systemd/*.service /etc/systemd/system/
+deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/.veetbot-schedule.service /etc/systemd/system/veetbot-schedule.service
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now veetbot-schedule
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-maintenance
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-worker
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-async-worker
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-schedule
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-maintenance
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-worker
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-async-worker
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-schedule
+
+# deploy/nginx/deploy.sh — validate-and-reload phase
+deploy ALL=(root) NOPASSWD: /usr/bin/install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/veetbot-backups
+deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /tmp/veetbot-nginx-*.conf /etc/nginx/sites-available/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/test -f /etc/nginx/sites-available/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/test -L /etc/nginx/sites-enabled/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/test -e /etc/nginx/sites-enabled/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/readlink /etc/nginx/sites-enabled/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/cp -a /etc/nginx/sites-available/veetbot /etc/nginx/veetbot-backups/*
+deploy ALL=(root) NOPASSWD: /usr/bin/cp -a /etc/nginx/veetbot-backups/* /etc/nginx/sites-available/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/rm -f -- /etc/nginx/sites-available/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/rm -f -- /etc/nginx/sites-enabled/veetbot
+deploy ALL=(root) NOPASSWD: /usr/bin/ln -sfn /etc/nginx/* /etc/nginx/sites-enabled/veetbot
+deploy ALL=(root) NOPASSWD: /usr/sbin/nginx -t
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl reload nginx

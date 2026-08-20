@@ -25,10 +25,15 @@ wire, transport, reducer, SSE, and local-history tests:
 ```bash
 swift build --package-path clients/apple
 make test-apple
+make test-apple-ui
 ```
 
-Run the test target from the repository root. It requires full Xcode so a
+Run the test targets from the repository root. Both require full Xcode so a
 Command Line Tools build cannot be mistaken for an executed Swift Testing run.
+`make test-apple-ui` selects an available iPhone simulator and exercises opening
+a durable historical transcript and starting a new conversation. Its launch
+fixture is debug-only and uses an isolated in-process transport, so it needs no
+server or credential.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the

@@ -84,6 +84,7 @@ let package = Package(
             path: "Veetbot",
             exclude: [
                 "Resources",
+                "ConversationNavigationUITestFixture.swift",
                 "VeetbotApp.swift",
                 "Veetbot.entitlements",
             ],
