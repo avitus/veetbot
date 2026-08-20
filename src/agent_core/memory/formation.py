@@ -77,6 +77,16 @@ def contains_memory_injection(value: str) -> bool:
     return _INJECTION.search(value) is not None
 
 
+def contains_automatic_memory_hazard(value: str) -> bool:
+    """Return whether authoritative source text is unsafe for automatic formation."""
+
+    return (
+        _SECRET.search(value) is not None
+        or contains_memory_injection(value)
+        or _TRANSIENT.search(value) is not None
+    )
+
+
 def grounding_tokens(value: str) -> set[str]:
     """Normalize words and dotted numbers for memory-source grounding checks."""
 
@@ -316,6 +326,23 @@ class DeterministicCandidateExtractor:
             if relationship is not None:
                 relation = relationship.group(1).casefold()
                 value = relationship.group(2).strip(" ,.:;!?")
+                if not re.match(
+                    r"(?:[A-Z][A-Za-z0-9'-]*|\d{1,3}(?:\s+|-)years?\s+old)\b",
+                    value,
+                ):
+                    statement = (
+                        f"User has at least one {relation}."
+                        if relation in {"daughter", "son"}
+                        else f"User has a {relation}."
+                    )
+                    add(
+                        subject=relation,
+                        statement=statement,
+                        belief_type=BeliefType.RELATIONSHIP,
+                        sensitivity=Sensitivity.SENSITIVE,
+                        confidence=0.8,
+                    )
+                    continue
                 add(
                     subject=relation,
                     statement=f"User's {relation} is {value}.",
@@ -348,6 +375,42 @@ class DeterministicCandidateExtractor:
                     belief_type=BeliefType.FACT,
                     portability=Portability.LOCAL,
                 )
+
+        plural_children = re.compile(r"\bboth\s+of\s+my\s+(daughters|sons)\b", re.I)
+        for match in plural_children.finditer(stripped):
+            plural = match.group(1).casefold()
+            singular = plural[:-1]
+            if singular in proposed_subjects or plural in proposed_subjects:
+                continue
+            add(
+                subject=plural,
+                statement=f"User has at least two {plural}.",
+                belief_type=BeliefType.RELATIONSHIP,
+                sensitivity=Sensitivity.SENSITIVE,
+                confidence=0.8,
+            )
+
+        relation_mentions = re.compile(
+            r"\bmy\s+(spouse|wife|husband|partner|mother|father|son|daughter)"
+            r"(?:['\u2019]s)?\b",
+            re.I,
+        )
+        for match in relation_mentions.finditer(stripped):
+            relation = match.group(1).casefold()
+            if relation in proposed_subjects:
+                continue
+            statement = (
+                f"User has at least one {relation}."
+                if relation in {"daughter", "son"}
+                else f"User has a {relation}."
+            )
+            add(
+                subject=relation,
+                statement=statement,
+                belief_type=BeliefType.RELATIONSHIP,
+                sensitivity=Sensitivity.SENSITIVE,
+                confidence=0.8,
+            )
 
         for match in _POSSESSIVE_ENTITY.finditer(stripped):
             cleaned = _clean_object(match.group(1))
@@ -760,6 +823,13 @@ class GovernedMemoryService:
                         candidate.proposed_scope != scope
                         or not set(candidate.source_event_ids) <= trusted_user_sources
                     ):
+                        rejected += 1
+                        continue
+                    source_text = "\n".join(
+                        _event_text(by_sequence[sequence])
+                        for sequence in candidate.source_event_ids
+                    )
+                    if contains_automatic_memory_hazard(source_text):
                         rejected += 1
                         continue
                     source_event = by_sequence[candidate.source_event_ids[0]]

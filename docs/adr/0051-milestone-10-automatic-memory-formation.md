@@ -103,7 +103,9 @@ gate, add unbudgeted model usage, and contradict the session-idle cadence.
    ADR-0057 defines the tighter production provider budget and its expanded
    `memory.provider_extraction.*` audit contract.
 9. **Version the richer policy separately.** Evaluated provider-assisted consolidations
-   record `formation@3`. `formation@1` and deterministic `formation@2` records remain
+   record `formation@4` after ADR-0057's semantic-claim and source-safety amendment.
+   `formation@1`, provider-assisted `formation@3`, and deterministic `formation@2`
+   records remain
    valid history, and the explicit boundary keeps replay and later re-derivation
    comparable.
 10. **Serialize each committed prefix.** Extraction stays outside a database

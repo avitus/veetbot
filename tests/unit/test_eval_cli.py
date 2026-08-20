@@ -180,7 +180,11 @@ def test_eval_memory_formation_generates_evidence_artifact(
         output: object,
     ) -> SimpleNamespace:
         observed.append((model_policy, policy_profile, build_ref))
-        return SimpleNamespace(model_dump_json=lambda **_kwargs: '{"schema_version":1}')
+        return SimpleNamespace(
+            passed=True,
+            failure_summary=None,
+            model_dump_json=lambda **_kwargs: '{"passed":true}',
+        )
 
     monkeypatch.setitem(
         sys.modules,
@@ -207,7 +211,7 @@ def test_eval_memory_formation_generates_evidence_artifact(
 
     assert result.exit_code == 0
     assert observed == [("balanced", "default", "abc123")]
-    assert '"schema_version":1' in result.stdout
+    assert '"passed":true' in result.stdout
 
 
 def test_eval_memory_formation_reports_live_opt_in_skip(
@@ -241,6 +245,47 @@ def test_eval_memory_formation_reports_live_opt_in_skip(
 
     assert result.exit_code == 0
     assert "skipped: set RUN_LIVE_MODEL_TESTS=1" in result.stdout
+
+
+def test_eval_memory_formation_returns_structured_failed_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    async def run_live_evaluation(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            passed=False,
+            failure_summary="positive coverage 0/20; policy regression in secret-001",
+            model_dump_json=lambda **_kwargs: (
+                '{"passed":false,"cases":[{"case_id":"secret-001",'
+                '"provider":{"candidate_count":1,"grounded_candidate_count":1}}]}'
+            ),
+        )
+
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_formation",
+        SimpleNamespace(run_live_evaluation=run_live_evaluation),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-formation",
+            "--model-policy",
+            "balanced",
+            "--policy-profile",
+            "default",
+            "--build-ref",
+            "abc123",
+            "--output",
+            str(tmp_path / "evidence.json"),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert '"passed":false' in result.stdout
+    assert "positive coverage 0/20" in result.stderr
 
 
 def test_eval_memory_formation_normalizes_failed_gate(

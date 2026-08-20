@@ -308,16 +308,42 @@ verification:
         detail: >-
           The configurable CLI run wait with its positive-value boundary and
           300-second default is approved and implemented.
+      - check: intended-production-model memory evaluation
+        outcome: failed_gate
+        detail: >-
+          The checked-in 24-case corpus ran against the balanced policy resolved
+          to OpenAI gpt-5.6-sol. Both arms supported zero labeled candidates. The
+          provider arm committed two unsupported beliefs, including one protected
+          secret case, and therefore published no activation artifact. Diagnosis
+          identified an under-specified free-form candidate schema, statement-only
+          safety checks that lost source hazards after paraphrasing, asymmetric
+          evaluator diagnostics, and an aggregate lift threshold without a
+          positive-case coverage floor.
+      - check: formation@4 evaluation-pipeline regression suite
+        outcome: passed
+        detail: >-
+          Regression coverage now proves canonical local rendering from closed
+          semantic provider claims, exact evidence-quote grounding, authoritative
+          source hazard rechecks, symmetric arm scoring and fabrication reporting,
+          inspectable failed-run diagnostics, non-zero failed CLI status, and a
+          sixteen-of-twenty positive-case publication floor. The final repository
+          check passed formatting, lint, type checking, 833 static tests, 324
+          contract tests, deployment-script tests, and strict documentation and
+          227-entry gate-registry reconciliation. After Docker became available,
+          all 10 real-container sandbox security tests passed and the unrestricted
+          repository suite completed with 1,182 passed and 94 explicitly skipped.
       - check: proposed ADR-0057
         outcome: owner_review_requested
         detail: >-
           The dedicated maintenance placement, exact evidence binding, fixed
           provider budget, user-episode selection, deterministic safety authority,
           content-free call audit, non-production evaluation mode, fallback, and
-          formation@3 version boundary are recorded for owner review.
+          formation@4 semantic-claim, source-safety, diagnostic, and positive-case
+          coverage boundaries are recorded for owner review.
     remaining:
-      - Run a labeled live-provider formation evaluation and activate the
-        restricted extractor only when its version-bound evidence passes ADR-0057.
+      - Rerun the labeled live-provider formation evaluation against the intended
+        production model after the formation@4 repair and activate the restricted
+        extractor only when its version-bound evidence passes ADR-0057.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
@@ -536,7 +562,7 @@ readiness:
     Milestones 0 through 9 are complete and implementable from the corpus.
     Milestone 10 is in progress for the four authorized tranches: automatic
     memory formation, self-authored skills, provider-neutral public-web
-    access, and authenticated browser automation, with 34 registered gates
+    access, and authenticated browser automation, with 38 registered gates
     across the four workstreams. The owner separately authorized Milestone
     11 scheduled runs, whose detailed design and 23 registered gates are
     locally implemented. Model routing and general-purpose subagents remain

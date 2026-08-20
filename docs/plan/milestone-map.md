@@ -46,8 +46,8 @@ declares seven more in a fifteenth area, all at Milestone 10.
 [browser-automation.md](browser-automation.md) adds ten more in a
 sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) declares
 twenty-three Milestone 11 gates in a seventeenth area. The counts throughout
-this document are the corpus as it now stands: two hundred and seventeen
-declared across seventeen specs, two hundred and twenty-three registry entries.
+this document are the corpus as it now stands: two hundred and twenty-one
+declared across seventeen specs, two hundred and twenty-seven registry entries.
 
 ## What this document is responsible for
 
@@ -274,9 +274,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 17 subject specifications declare 217 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 226
-declarations, 223 registry entries once the 3 aliases are subtracted.
+The 17 subject specifications declare 221 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 230
+declarations, 227 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -588,13 +588,13 @@ about a chosen one.
 The build sequence's seven steps are Milestone 7 except step 1, which
 is Milestone 1 by the same decision.
 
-### Memory formation, sixteen gates and four metrics
+### Memory formation, twenty gates and four metrics
 
 The original list of eight bullets separates into four Milestone 9 gates and
 four metrics by what the spec calls them. The trailing sentence *"Gate: memory
 improves target eval cases without increasing policy failures"* is a fifth
-gate, not a closing remark. Milestone 10 memory maturation adds eleven explicit
-gates: five for ordinary-conversation formation and lifecycle, then six for the
+gate, not a closing remark. Milestone 10 memory maturation adds fifteen explicit
+gates: five for ordinary-conversation formation and lifecycle, then ten for the
 governed inspection surface and evaluation-gated provider-assisted extractor.
 
 ```text
@@ -616,6 +616,10 @@ governed inspection surface and evaluation-gated provider-assisted extractor.
 14  gate.memory.provider_boundary   case        10
 15  gate.memory.provider_audit_fallback case     10
 16  gate.memory.provider_evidence_publish case   10
+17  gate.memory.provider_claim_rendering structural 10
+18  gate.memory.provider_failure_diagnostics case 10
+19  gate.memory.provider_positive_coverage case  10
+20  gate.memory.provider_source_safety case      10
 ```
 
 Moved to `## Tracked metrics`: formation precision, recall of
@@ -979,10 +983,10 @@ milestone  new gates  cumulative  the earliest of them
                                   boundary, package validation
 9                 26         166  formation, retrieval, ingestion,
                                   and the corpus
-10                34         200  the authoring loop, background review,
+10                38         204  the authoring loop, background review,
                                   governed memory maturation, public-web
                                   access, and browser automation
-11                23         223  recurrence, occurrence atomicity,
+11                23         227  recurrence, occurrence atomicity,
                                   authority refresh, offline results,
                                   contracts, migration, erasure, isolation
 ```
@@ -996,7 +1000,7 @@ leaving for someone to notice.
     [sandbox-isolation.md](sandbox-isolation.md) gave Milestone 6
     eleven, and [skills.md](skills.md) gave Milestone 8 ten and
     Milestone 10 six. The memory-formation specification later gave
-    Milestone 10 eleven more, for seventeen total. That is what milestones
+    Milestone 10 fifteen more, for twenty-one total. That is what milestones
     that add a new trust boundary, a new context class, and new write paths
     should carry. Milestone 8's MCP half was the last to be covered: it
     contributed corpus members to gates 2 and 5 of the tool system and
@@ -1005,16 +1009,16 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred and twenty-three gates are green before
+2.  **Forty-one of two hundred and twenty-seven gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred and twenty-three, which is every
+The cumulative column reaches two hundred and twenty-seven, which is every
 registry entry, at Milestone 11. Six of Milestone 10's gates are
-`gate.skill.*`, eleven are `gate.memory.*`, seven are `gate.web.*`, ten are
+`gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, and all twenty-three Milestone 11 gates are
 `gate.schedule.*`. Routing and subagents remain deferred and add none.
 
@@ -1318,10 +1322,10 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     The old harness table said seven, but the formation specification
     classifies four of its original bullets as tracked metrics and declares
     four hard gates plus the trailing no-policy-regression gate. Milestone 10
-    memory maturation later added eleven more: five for ordinary-conversation
-    formation and six for governed inspection and provider assistance. The
-    current formation census is therefore sixteen owned gates — five at
-    Milestone 9 and eleven at Milestone 10 — with no unstated threshold turning
+    memory maturation later added fifteen more: five for ordinary-conversation
+    formation and ten for governed inspection and provider assistance. The
+    current formation census is therefore twenty owned gates — five at
+    Milestone 9 and fifteen at Milestone 10 — with no unstated threshold turning
     formation precision or rejection rate into a gate.
 3.  **Whether Milestone 8 should acquire gates of its own** —
     answered yes, by [skills.md](skills.md), which gave it ten and

@@ -18,6 +18,13 @@ the formation service's provenance and safety gates. Requiring evidence only in
 documentation would still leave startup able to enable a model-policy combination
 that had never passed the required no-fabrication and no-policy-regression tests.
 
+The first live run against the intended production policy exposed three defects
+that focused fake-provider tests could not: the free-form candidate schema did not
+reliably express normalized corpus concepts, provider paraphrasing could remove a
+source-text safety marker before statement-only eligibility checks, and a failed
+evaluation discarded the per-arm data needed to diagnose either problem. Aggregate
+lift alone also permitted unacceptably sparse positive coverage.
+
 The general-purpose subagent path remains outside the authorized tranche. The
 memory design separately permits a dedicated maintenance job, so provider
 assistance does not require introducing `delegate.run` or changing routing
@@ -37,18 +44,24 @@ behavior.
    fail-closed deployment semantics and refuses startup without a matching
    artifact. A legacy explicit enable flag maps to `required` so an operator's
    demand is never silently weakened. Every artifact must cover at least twenty
-   labeled samples and demonstrate strictly more supported candidates than the
-   deterministic baseline, zero fabricated candidates, and no increase in policy
-   failures. It must match the exact extractor version, formation policy, model
+   labeled samples, fully support at least eighty percent of positive cases, and
+   demonstrate strictly more supported candidates than the deterministic baseline,
+   zero fabricated candidates in either arm, and no increase in policy failures.
+   The artifact schema derives the coverage minimum from the positive-case count;
+   an artifact cannot select a weaker floor. It must match the exact extractor
+   version, formation policy, model
    policy, provider, model, policy profile, and compiled policy version resolved
    by the composition.
-3. **Give the maintenance call its own fixed budget.** `formation@3` permits one
+3. **Give the maintenance call its own fixed budget.** `formation@4` permits one
    structured-output model call, at most 16,000 input tokens, 4,096 output tokens,
    USD 0.05, and 30 seconds. Catalog pricing and a conservative input estimate
    cap requested output tokens before the call so the cost limit is preventive,
    not only retrospective. The request advertises no tools and requires the
-   schema of a bounded `MemoryCandidate` batch. Crossing a recorded ceiling
-   rejects the provider result and uses the deterministic fallback.
+   schema of a bounded semantic-claim batch. The provider selects a closed claim
+   kind, source-grounded values, and an exact evidence quote. Deterministic local
+   code owns the authorized scope and renders the final canonical
+   `MemoryCandidate`; the provider cannot author either. Crossing a recorded
+   ceiling rejects the provider result and uses the deterministic fallback.
 4. **Treat episodes as data.** The provider sees only selected
    `user.message.created` events authored by the owning principal, labeled with
    their exact event sequences, plus a compact view of at most fifty existing
@@ -56,7 +69,9 @@ behavior.
    instructions and prohibit assistant or tool content as evidence.
 5. **Keep the deterministic service authoritative.** A valid provider batch is
    merged with deterministic proposals and still passes the service-owned source,
-   scope, portability, salience, secret, injection, rejection, and conflict gates.
+   scope, portability, salience, rejection, and conflict gates. Automatic
+   formation rechecks the complete authoritative cited source text for secret,
+   injection, and transient markers so normalization cannot erase the hazard.
    The twelve-candidate service ceiling remains unchanged. A failed, timed-out,
    malformed, or over-budget provider call is non-fatal and falls back to the
    deterministic extractor. Cancellation is audited and propagated rather than
@@ -73,8 +88,8 @@ behavior.
    through an explicit code-level evaluation flag that is mutually exclusive with
    activation and refused in production. Normal deployment composition constructs
    the provider extractor only after the evidence check passes.
-8. **Version provider assistance as `formation@3`.** The deterministic default
-   remains `formation@2`. Activating provider assistance records `formation@3` on
+8. **Version provider assistance as `formation@4`.** The deterministic default
+   remains `formation@2`. Activating provider assistance records `formation@4` on
    consolidation audits and beliefs so the two policies remain distinguishable
    during replay, comparison, and later re-derivation.
 9. **Generate evidence instead of asking users to author it.** `agent eval
@@ -83,10 +98,13 @@ behavior.
    and rejected-policy counts and atomically writes an artifact only when the
    activation schema passes. The checked-in corpus contains twenty positive and
    four protected no-memory cases, scored against explicit normalized labels
-   without another model judge. A failure names aggregate counts and case ids but
-   writes no artifact. Real provider execution retains the capability track's
-   explicit live opt-in. The corpus hash and active model tuple are derived by
-   the command rather than entered by hand.
+   without another model judge. Both arms use identical scoring and fabrication
+   accounting. Every result retains normalized beliefs, consolidation counts,
+   content-free provider audit counts, and shared-versus-provider-added belief
+   attribution per case. A failure returns those diagnostics, exits non-zero, and
+   writes no activation artifact. Real provider execution retains the capability
+   track's explicit live opt-in. The corpus hash and active model tuple are derived
+   by the command rather than entered by hand.
 10. **Use the installed release as the bundle trust boundary.** Evidence under
     the package's release-evidence directory is reviewed and shipped with the
     extractor code. The repository has no release-signing trust root; a detached
@@ -98,8 +116,9 @@ behavior.
 
 ## Consequences
 
-- Open-ended phrasing can propose memories such as “User has at least one
-  daughter” while the existing service remains the only writer.
+- Open-ended phrasing can select a relationship claim that local code renders as
+  “User has at least one daughter” while the existing service remains the only
+  writer.
 - Provider outages cannot suppress deterministic automatic formation and cannot
   change the completed interactive run.
 - A deployment cannot activate a different model, policy profile, or compiled
@@ -112,6 +131,8 @@ behavior.
   deterministic formation.
 - Model call details are durable without storing episode text, model output, or
   private reasoning in process events.
+- Failed live runs are inspectable without turning their output into activation
+  evidence, and a weak aggregate lift cannot conceal broad positive-case misses.
 
 ## Alternatives considered
 

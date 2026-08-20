@@ -39,7 +39,7 @@ def test_no_stale_active_gate() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
     active = [entry for entry in entries if entry.milestone <= 11]
-    assert len(active) == 223
+    assert len(active) == 227
     assert all(entry.check != "tests/gates/pending.py::pending_gate" for entry in active)
     assert all(not entry.optional for entry in active)
 
@@ -91,7 +91,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 223
+    assert len(entries) == 227
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -105,6 +105,10 @@ def test_new_memory_guarantees_are_formal_registry_entries() -> None:
         "gate.memory.provider_boundary": "case",
         "gate.memory.provider_audit_fallback": "case",
         "gate.memory.provider_evidence_publish": "case",
+        "gate.memory.provider_claim_rendering": "structural",
+        "gate.memory.provider_failure_diagnostics": "case",
+        "gate.memory.provider_positive_coverage": "case",
+        "gate.memory.provider_source_safety": "case",
     }
     by_id = {entry.id: entry for entry in entries}
     assert expected_kinds.keys() <= by_id.keys()
@@ -126,7 +130,7 @@ def test_census_is_derived() -> None:
         7: 7,
         8: 17,
         9: 26,
-        10: 34,
+        10: 38,
         11: 23,
     }
 

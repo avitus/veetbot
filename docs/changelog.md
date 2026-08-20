@@ -4,6 +4,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-20 — Inspectable formation evaluation and semantic provider claims
+
+- Replaced free-form provider-authored memory statements with a closed semantic
+  claim schema, exact evidence quotes, and deterministic local rendering under
+  the new `formation@4` and `provider-assisted-v2` activation boundary.
+- Rechecked secret, injection, and transient markers against authoritative cited
+  source text so provider paraphrasing cannot remove a formation safety signal.
+- Made paired evaluation failures return per-case arm beliefs, consolidation and
+  provider-audit counts, and fallback-versus-provider attribution while retaining
+  the rule that only a passing run publishes activation evidence.
+- Added symmetric fabrication reporting and a sixteen-of-twenty positive-case
+  coverage floor, with a non-zero CLI exit for failed gates.
+
 ## 2026-08-19 — Reading lanes, state-file split, and census reconciliation
 
 - Added three reading lanes to the `AGENTS.md` operating contract: the full

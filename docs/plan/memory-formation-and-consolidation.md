@@ -491,20 +491,26 @@ the ADR as accepted. Normal composition does not select a provider extractor
 until a version-bound artifact for the exact runtime tuple passes startup
 validation.
 
-### Evaluation-gated provider assistance (`formation@3`)
+### Evaluation-gated provider assistance (`formation@4`)
 
 The first provider-assisted implementation is a dedicated maintenance extractor,
 not an interactive call or a general-purpose subagent. It implements the same
 `MemoryCandidateExtractor` port, receives only the owning principal's selected
 user events plus a compact view of at most fifty existing beliefs, advertises no
-tools, and requests one schema-constrained candidate batch. The fixed policy
-budget is one model call, 16,000 input tokens, 4,096 output tokens, USD 0.05, and
+tools, and requests one schema-constrained semantic-claim batch. The provider
+selects from a closed claim-kind vocabulary, cites an exact evidence substring,
+and supplies source-grounded values; it does not author final belief prose or
+scope. Governed local code renders each accepted claim into a canonical
+`MemoryCandidate`. The fixed policy budget is one model call, 16,000 input
+tokens, 4,096 output tokens, USD 0.05, and
 30 seconds. Before the call, catalog pricing and a conservative input estimate
 reduce the requested output-token maximum as needed to fit the cost ceiling; a
 tuple that cannot afford one output token falls back without calling. Provider
 output is still a proposal: the service rechecks provenance, scope, portability,
-salience, secrets, injection, corrections, conflicts, and its twelve-candidate
-commit ceiling.
+salience, corrections, conflicts, and its twelve-candidate commit ceiling. For
+automatic formation it also scans the authoritative cited source text for secret,
+injection, and transient markers, so provider paraphrasing cannot erase a safety
+signal before the write gate.
 
 Activation uses `auto`, `off`, and `required` rollout modes. `auto` is the default:
 it searches an explicit operator artifact and then evidence bundled with the
@@ -514,8 +520,10 @@ provider. `required` refuses startup without matching evidence. The JSON schema
 binds the result to the extractor version, formation policy, model policy,
 provider, model, policy profile, and compiled policy version. It must report
 strictly more supported candidates than the deterministic baseline across at
-least twenty labeled samples, zero fabricated candidates, and no additional
-policy failures. A
+least twenty labeled samples, complete support for at least eighty percent of
+positive cases, zero fabricated candidates in either arm, and no additional
+policy failures. The schema derives that eighty-percent minimum from the positive
+case count and rejects an artifact that attempts to lower it. A
 non-activating evaluation constructor exists to gather that evidence without
 creating the circular requirement that an unevaluated extractor already be
 active. It is reachable only through an explicit code-level evaluation build
@@ -524,11 +532,14 @@ flag, is mutually exclusive with `required`, and is refused in production.
 `agent eval memory-formation` removes manual artifact authorship. With the live
 evaluation opt-in, it runs a checked-in labeled corpus through isolated paired
 deterministic and provider-assisted arms, derives the active model tuple and
-corpus hash, and atomically writes evidence only when the schema's lift,
+corpus hash, and atomically writes evidence only when the schema's lift, coverage,
 fabrication, and policy conditions pass. The corpus has twenty positive examples
 and four protected no-memory examples; scoring uses checked-in normalized labels,
-not a second model judge. A failed run reports aggregate counts and the failing
-case identifiers and leaves no artifact. Release engineers may place reviewed
+not a second model judge. Every result reports per-case normalized beliefs,
+consolidation counts, shared fallback beliefs, provider-added beliefs, and
+content-free extraction-audit counts for both arms. A failed run exits non-zero,
+reports aggregate counts and the failing case identifiers, and leaves no
+activation artifact. Release engineers may place reviewed
 artifacts in the package evidence directory; those files share the installed
 code's distribution trust boundary. The repository defines no independent
 release-signing root, so it does not pretend that a detached file signature would
@@ -544,7 +555,7 @@ A cancelled call records the cancellation and propagates it rather than disguisi
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through
 the same service gates. Provider-assisted consolidations and beliefs record
-`formation@3`; the default deterministic path continues to record `formation@2`.
+`formation@4`; the default deterministic path continues to record `formation@2`.
 The reversible seam and activation decision are recorded in ADR-0057.
 
 ## Hard gates
@@ -594,16 +605,32 @@ first formation layer (Section 20).
     the evaluation artifact exactly matches extractor version, formation policy,
     model policy, provider, model, policy profile, and compiled policy version;
     a mismatch in any field does not activate it. **M10.**
-14. **Provider safety boundary** — provider proposals remain proposals: invented
-    source ids and secret-shaped statements cannot pass the governed service's
-    provenance and eligibility checks. **M10.**
+14. **Provider provenance boundary** — provider proposals remain proposals:
+    invented source ids cannot pass the governed service's provenance check.
+    **M10.**
 15. **Audited deterministic fallback** — a failed provider attempt records a
     content-free failed audit and returns the independently derived deterministic
     proposals rather than suppressing memory formation. **M10.**
 16. **Evidence publication** — the checked-in paired evaluation derives the
     active provider tuple and corpus hash and atomically publishes activation
-    evidence only after formation lift, zero fabrication, and no policy
-    regression pass; a failed evaluation leaves no artifact. **M10.**
+    evidence only after formation lift, at least eighty percent positive-case
+    coverage, zero fabrication in either arm, and no policy regression pass; a
+    failed evaluation leaves no artifact. **M10.**
+17. **Canonical provider claims** — the provider returns a closed semantic claim
+    with an exact cited evidence substring; deterministic local rendering owns
+    the final belief type, canonical subject, statement, and authorized scope.
+    **M10.**
+18. **Inspectable evaluation failure** — paired evaluation results retain each
+    arm's normalized beliefs, consolidation counts, provider audit outcome and
+    candidate counts, and shared-versus-provider-added attribution; a failed gate
+    returns those diagnostics and the CLI exits non-zero without publishing an
+    activation artifact. **M10.**
+19. **Positive formation coverage** — aggregate lift alone is insufficient:
+    provider assistance must fully support at least sixteen of the twenty labeled
+    positive cases before evidence can be published. **M10.**
+20. **Authoritative source safety** — secret, injection, or transient markers in
+    authoritative cited source text cannot be erased by provider normalization
+    before the automatic eligibility check. **M10.**
 
 ## Tracked metrics
 
