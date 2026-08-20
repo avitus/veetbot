@@ -110,9 +110,7 @@ class _SemanticClaim(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    claim_kind: MemoryClaimKind = Field(
-        description="The supported semantic category; do not invent new categories."
-    )
+    claim_kind: MemoryClaimKind
     subject: str = Field(
         min_length=1,
         max_length=512,
@@ -132,7 +130,7 @@ class _SemanticClaim(BaseModel):
         max_length=2048,
         description="An exact verbatim substring from one cited user episode.",
     )
-    polarity: Polarity = Field(description="Whether the user asserts or retracts the claim.")
+    polarity: Polarity
     source_event_ids: list[PositiveInt] = Field(
         min_length=1,
         description="Only exact source_event_id values from the episode input.",
@@ -142,12 +140,8 @@ class _SemanticClaim(BaseModel):
         le=1,
         description="Confidence that the semantic claim is directly entailed by the source.",
     )
-    proposed_portability: Portability = Field(
-        description="portable for user traits, contextual for relations, local for project facts."
-    )
-    sensitivity_guess: Sensitivity = Field(
-        description="A conservative sensitivity classification for the normalized claim."
-    )
+    proposed_portability: Portability
+    sensitivity_guess: Sensitivity
     valid_from: datetime | None = Field(
         description="A source-supported validity start, otherwise null."
     )

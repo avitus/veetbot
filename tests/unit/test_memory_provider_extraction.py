@@ -493,6 +493,20 @@ async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage(
     assert schema is not None
     candidate_schema = schema["$defs"]["_SemanticClaim"]
     assert set(candidate_schema["required"]) == set(candidate_schema["properties"])
+    ref_siblings: list[set[str]] = []
+
+    def collect_ref_siblings(value: object) -> None:
+        if isinstance(value, dict):
+            if "$ref" in value and set(value) != {"$ref"}:
+                ref_siblings.append(set(value))
+            for nested in value.values():
+                collect_ref_siblings(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_ref_siblings(nested)
+
+    collect_ref_siblings(schema)
+    assert ref_siblings == []
     assert provider.requests[0].maximum_output_tokens == 4096
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.completed")

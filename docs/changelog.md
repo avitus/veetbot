@@ -16,6 +16,9 @@ title: Changelog
   the rule that only a passing run publishes activation evidence.
 - Added symmetric fabrication reporting and a sixteen-of-twenty positive-case
   coverage floor, with a non-zero CLI exit for failed gates.
+- Removed annotation siblings from JSON Schema references so OpenAI strict
+  structured output accepts the semantic-claim schema, with recursive regression
+  coverage for the provider request boundary.
 
 ## 2026-08-20 — Deployment provisioning contract hardening
 
