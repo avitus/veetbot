@@ -162,6 +162,35 @@ def _check_resolves(root: Path, reference: str) -> bool:
     )
 
 
+_GATE_TABLE_FIGURES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("subject_specs", re.compile(r"(\d+)\s+subject\s+specifications\s+declare")),
+    ("subject_gates", re.compile(r"declare\s+(\d+)\s+gates")),
+    ("declarations", re.compile(r"(\d+)\s+declarations")),
+    ("entries", re.compile(r"(\d+)\s+registry\s+entries")),
+    ("aliases", re.compile(r"the\s+(\d+)\s+aliases")),
+)
+
+
+def gate_table_arithmetic_errors(map_text: str, derived: dict[str, int]) -> list[str]:
+    """Reconcile the gate-table intro paragraph's digits against the registry."""
+
+    heading = re.search(r"^## The gate table\s*$", map_text, re.MULTILINE)
+    if heading is None:
+        return ["gate table section is missing from the milestone map"]
+    intro = map_text[heading.end() :].partition("```")[0]
+    errors: list[str] = []
+    for name, pattern in _GATE_TABLE_FIGURES:
+        label = name.replace("_", " ")
+        match = pattern.search(intro)
+        if match is None:
+            errors.append(f"gate table intro does not state its {label} figure")
+        elif int(match.group(1)) != derived[name]:
+            errors.append(
+                f"gate table intro says {match.group(1)} {label}; registry derives {derived[name]}"
+            )
+    return errors
+
+
 def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
     """Validate the registry and all six Milestone 0 map invariants."""
 
@@ -276,4 +305,26 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
         errors.append(
             f"milestone census disagrees with registry: written={written}, derived={derived}"
         )
+
+    subject_declared = {
+        filename: declared
+        for filename, (declared, _aliases) in DECLARING_SPECS.items()
+        if filename != "milestone-map.md"
+    }
+    plan_declared = sum(
+        1 for entry in entries if entry.spec.startswith("docs/plan/engineering-plan.md")
+    )
+    errors.extend(
+        gate_table_arithmetic_errors(
+            map_text,
+            {
+                "subject_specs": len(subject_declared),
+                "subject_gates": sum(subject_declared.values()),
+                "declarations": sum(declared for declared, _ in DECLARING_SPECS.values())
+                + plan_declared,
+                "entries": len(entries),
+                "aliases": sum(aliases for _, aliases in DECLARING_SPECS.values()),
+            },
+        )
+    )
     return errors

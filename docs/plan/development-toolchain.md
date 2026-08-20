@@ -307,6 +307,17 @@ Job 6 is an additional native-client gate outside `make check`; it runs under
 full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it. Release packaging depends on both additional gates.
 
+Job 1 also runs the reading-lane floor first:
+`python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git
+trailer in the pushed range and fails when the declared lane sits below the
+minimum that `reading_lane_errors` derives from the changed paths. The base
+of the range is CircleCI's `pipeline.git.base_revision` when the pipeline
+supplies one, then `origin/dev`, then `origin/main`, then the parent commit.
+No trailer means lane A, the full reading order, so the check constrains only
+work that claims a narrower lane. It is not a `make` target because it reads
+git range state that `make check` does not assume; run the same module
+locally to preview the verdict before pushing.
+
 Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
 than the compose file, because the compose file publishes a port on the
 developer's host and a secondary container does not need to. The database

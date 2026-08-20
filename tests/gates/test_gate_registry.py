@@ -8,6 +8,7 @@ import yaml
 
 from scripts.gate_registry import (
     GATE_ID,
+    gate_table_arithmetic_errors,
     hard_gate_items,
     load_registry,
     map_entries,
@@ -139,6 +140,51 @@ def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
     assert all(
         entry.check.startswith("tests/gates/test_browser_m10.py::") for entry in browser_entries
     )
+
+
+_GATE_TABLE_DERIVED = {
+    "subject_specs": 16,
+    "subject_gates": 194,
+    "declarations": 203,
+    "entries": 200,
+    "aliases": 3,
+}
+
+
+def test_gate_table_arithmetic_reports_stale_digits() -> None:
+    stale = (
+        "## The gate table\n\n"
+        "The 15 subject specifications declare 178 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 187\n"
+        "declarations, 184 registry entries once the 3 aliases are subtracted.\n\n"
+        "```text\n"
+    )
+    findings = gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED)
+    assert any("187" in finding and "203" in finding for finding in findings)
+    assert any("184" in finding and "200" in finding for finding in findings)
+    assert any("15" in finding and "16" in finding for finding in findings)
+    assert any("178" in finding and "194" in finding for finding in findings)
+
+
+def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
+    reconciled = (
+        "## The gate table\n\n"
+        "The 16 subject specifications declare 194 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 203\n"
+        "declarations, 200 registry entries once the 3 aliases are subtracted.\n\n"
+        "```text\n"
+    )
+    assert gate_table_arithmetic_errors(reconciled, _GATE_TABLE_DERIVED) == []
+
+
+def test_gate_table_arithmetic_requires_stated_figures() -> None:
+    silent = "## The gate table\n\nProse that states no figures.\n\n```text\n"
+    assert gate_table_arithmetic_errors(silent, _GATE_TABLE_DERIVED)
+
+
+def test_gate_table_prose_matches_registry() -> None:
+    errors = registry_errors(ROOT, current_milestone=10)
+    assert [error for error in errors if "gate table" in error] == []
 
 
 def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> None:

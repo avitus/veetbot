@@ -265,11 +265,11 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and seventy-eight gates declared across fifteen specs, two
-more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and eighty-seven declarations, one hundred
-and eighty-four registry entries once the three aliases are
-subtracted.
+The 16 subject specifications declare 194 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 203
+declarations, 200 registry entries once the 3 aliases are subtracted.
+`make docs-check` reconciles this paragraph's digits against the
+registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -305,9 +305,8 @@ is the only heading in that file either one could resolve to. Hard
 gate 4 below is titled *"Every `spec` field resolves"*, and that is
 what it checks: the anchor an entry names exists in the built site,
 which is how [evaluation-harness.md](evaluation-harness.md) states it
-too. The `#hard-gates` form in that gate's body is the shape the
-other one hundred and seventy entries take, not a further condition
-on these two.
+too. The `#hard-gates` form in that gate's body is the shape every
+other entry takes, not a further condition on these two.
 
 ### Runtime loop, fourteen gates
 

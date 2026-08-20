@@ -67,3 +67,4 @@ implementation without one.
 - [ADR-0056 — Failure-triggered reflection review (Proposed)](0056-failure-reflection-review.md)
 - [ADR-0057 — Evaluation-gated provider-assisted memory extraction (Proposed)](0057-evaluation-gated-provider-memory-extraction.md)
 - [ADR-0058 — Provider-neutral authenticated browser automation (Proposed)](0058-authenticated-browser-automation.md)
+- [ADR-0059 — Reading lanes and the state-file split](0059-reading-lanes-and-state-file-split.md)

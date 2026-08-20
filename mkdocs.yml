@@ -92,6 +92,7 @@ nav:
   - Project State:
       - Overview: status/index.md
       - Questions for Review: status/questions-for-review.md
+      - Corpus Audit Log: status/corpus-audit-log.md
   - Architecture Decisions:
       - Overview: adr/index.md
       - ADR-0001 The modular monolith: adr/0001-modular-monolith.md
@@ -152,4 +153,5 @@ nav:
       - ADR-0056 Failure-triggered reflection review: adr/0056-failure-reflection-review.md
       - ADR-0057 Evaluation-gated provider memory extraction: adr/0057-evaluation-gated-provider-memory-extraction.md
       - ADR-0058 Authenticated browser automation: adr/0058-authenticated-browser-automation.md
+      - ADR-0059 Reading lanes and the state-file split: adr/0059-reading-lanes-and-state-file-split.md
   - Changelog: changelog.md

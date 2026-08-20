@@ -163,9 +163,10 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and eighty-three gates are green before
+**Forty-one gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
-agent in it.
+agent in it. The current registry total is derived in the
+[milestone map](milestone-map.md), not restated here.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test
 doubles: the invariants that hold for the slice hold for the durable
@@ -1252,7 +1253,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2501` against
-    `model-gateway.md:1795` and `milestone-map.md:986`. The map
+    `model-gateway.md:1795` and `milestone-map.md:985`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

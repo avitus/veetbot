@@ -371,6 +371,10 @@ def test_ci_has_the_required_partitions() -> None:
         ]
     assert "make lint typecheck test-static test-deploy docs-check" in commands["static"]
     assert "make client-build" in commands["static"]
+    assert any(
+        "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command
+        for command in commands["static"]
+    )
     assert "make test-contract" in commands["contract"]
     assert "make migrate test-integration" in commands["integration"]
     assert "make test-sandbox" in commands["sandbox"]
