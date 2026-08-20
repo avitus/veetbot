@@ -293,6 +293,7 @@ job           target invoked         needs     runs on
 4 live        make test-live         secrets   schedule, manual
 5 sandbox     make test-sandbox      machine   every push, PR
 6 apple       make test-apple        Xcode     every push, PR
+              make test-apple-ui
 ```
 
 Jobs 1 and 2 partition `make check`, split so the cheap one fails
@@ -303,9 +304,12 @@ outside that equality, because it reads git range state `make check`
 does not assume. No check appears in both jobs, and a developer who
 runs `make check` locally has run both jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
-Job 6 is an additional native-client gate outside `make check`; it runs under
-full Xcode because Command Line Tools can compile a Swift Testing bundle
-without executing it. Release packaging depends on both additional gates.
+Job 6 is an additional native-client gate outside `make check`; it runs
+`make test-apple` under full Xcode because Command Line Tools can compile a
+Swift Testing bundle without executing it, then runs `make test-apple-ui` on an
+available iPhone simulator. The UI target uses a debug-only in-process fixture
+to exercise historical-transcript and new-conversation navigation without a
+live server or credential. Release packaging depends on both additional gates.
 
 Job 1 also runs the reading-lane floor first:
 `python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git

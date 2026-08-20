@@ -66,10 +66,12 @@ pretending SwiftData is available there.
    different tools, approvals, and non-success outcomes break the bundle.
 9. **Execute native tests under full Xcode in hosted CI.** Command Line Tools may
    compile a Swift Testing bundle without running its tests. The repository's
-   `make test-apple` target therefore refuses that environment, selects full
-   Xcode when it is installed at the standard path, and CircleCI runs the target
-   on a pinned Xcode macOS executor. Server release packaging depends on that
-   job, so native-client regressions block delivery.
+   `make test-apple` target therefore refuses that environment and selects full
+   Xcode when it is installed at the standard path. `make test-apple-ui` selects
+   an available iPhone simulator and runs a debug-only in-process fixture that
+   exercises conversation navigation without external credentials. CircleCI
+   runs both targets on a pinned Xcode macOS executor. Server release packaging
+   depends on that job, so native-client regressions block delivery.
 
 ## Consequences
 

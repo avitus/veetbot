@@ -33,7 +33,19 @@
 		100000000000000000000019 /* ComposerTextEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* ComposerTextEditor.swift */; };
 		10000000000000000000001A /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001A /* AppTheme.swift */; };
 		10000000000000000000001B /* MarkdownContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001B /* MarkdownContentView.swift */; };
+		10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001C /* ConversationNavigationUITestFixture.swift */; };
+		10000000000000000000001D /* ConversationNavigationUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000001D /* ConversationNavigationUITests.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A00000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 700000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 600000000000000000000001;
+			remoteInfo = Veetbot;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		200000000000000000000001 /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
@@ -63,11 +75,21 @@
 		200000000000000000000019 /* ComposerTextEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerTextEditor.swift; sourceTree = "<group>"; };
 		20000000000000000000001A /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
 		20000000000000000000001B /* MarkdownContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownContentView.swift; sourceTree = "<group>"; };
+		20000000000000000000001C /* ConversationNavigationUITestFixture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationNavigationUITestFixture.swift; sourceTree = "<group>"; };
+		20000000000000000000001D /* ConversationNavigationUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationNavigationUITests.swift; sourceTree = "<group>"; };
+		20000000000000000000001E /* VeetbotUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VeetbotUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		500000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		500000000000000000000004 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -81,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				400000000000000000000002 /* Veetbot */,
+				40000000000000000000000B /* VeetbotUITests */,
 				40000000000000000000000A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -96,6 +119,7 @@
 				400000000000000000000007 /* ViewModels */,
 				400000000000000000000008 /* Views */,
 				400000000000000000000009 /* Resources */,
+				20000000000000000000001C /* ConversationNavigationUITestFixture.swift */,
 				200000000000000000000016 /* VeetbotApp.swift */,
 			);
 			path = Veetbot;
@@ -179,8 +203,17 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000018 /* Veetbot.app */,
+				20000000000000000000001E /* VeetbotUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		40000000000000000000000B /* VeetbotUITests */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000001D /* ConversationNavigationUITests.swift */,
+			);
+			path = VeetbotUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -203,6 +236,24 @@
 			productReference = 200000000000000000000018 /* Veetbot.app */;
 			productType = "com.apple.product-type.application";
 		};
+		600000000000000000000002 /* VeetbotUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000003 /* Build configuration list for PBXNativeTarget "VeetbotUITests" */;
+			buildPhases = (
+				500000000000000000000005 /* Sources */,
+				500000000000000000000004 /* Frameworks */,
+				500000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A00000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = VeetbotUITests;
+			productName = VeetbotUITests;
+			productReference = 20000000000000000000001E /* VeetbotUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -215,6 +266,10 @@
 				TargetAttributes = {
 					600000000000000000000001 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					600000000000000000000002 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 600000000000000000000001;
 					};
 				};
 			};
@@ -232,6 +287,7 @@
 			projectRoot = "";
 			targets = (
 				600000000000000000000001 /* Veetbot */,
+				600000000000000000000002 /* VeetbotUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -242,6 +298,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000017 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		500000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -276,11 +339,28 @@
 				100000000000000000000014 /* ConnectionSettingsView.swift in Sources */,
 				10000000000000000000001B /* MarkdownContentView.swift in Sources */,
 				100000000000000000000015 /* RootView.swift in Sources */,
+				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000016 /* VeetbotApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		500000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				10000000000000000000001D /* ConversationNavigationUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A00000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 600000000000000000000001 /* Veetbot */;
+			targetProxy = A00000000000000000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		900000000000000000000001 /* Debug */ = {
@@ -455,6 +535,56 @@
 			};
 			name = Release;
 		};
+		900000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9UW358LB5Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Veetbot;
+			};
+			name = Debug;
+		};
+		900000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 9UW358LB5Z;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Veetbot;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -472,6 +602,15 @@
 			buildConfigurations = (
 				900000000000000000000003 /* Debug */,
 				900000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000003 /* Build configuration list for PBXNativeTarget "VeetbotUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				900000000000000000000005 /* Debug */,
+				900000000000000000000006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

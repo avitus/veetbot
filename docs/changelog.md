@@ -17,6 +17,22 @@ title: Changelog
 - Added symmetric fabrication reporting and a sixteen-of-twenty positive-case
   coverage floor, with a non-zero CLI exit for failed gates.
 
+## 2026-08-20 — Deployment provisioning contract hardening
+
+- Split the browser control-plane credential to its own example path: the
+  containerized profile service refuses secrets it does not own (uid 65532)
+  while the agent units read the credential as the veetbot user, so the two
+  variables can never share one 0600 file. A static test now rejects the
+  shared-path configuration.
+- Documented the browser-profile host prerequisites in the deployment guide —
+  secrets, the read-only keyring, ownership and mode contracts, and the
+  browser-origin TLS certificate — all discovered as undocumented hard
+  requirements during the first production deploy of the browser tranche.
+- Added `deploy/sudoers/veetbot-deploy`, the committed non-interactive sudo
+  contract for the CI deploy account, reconciled against the sudo commands in
+  both deploy scripts by a static test so grant drift fails CI rather than the
+  production release.
+
 ## 2026-08-19 — Reading lanes, state-file split, and census reconciliation
 
 - Added three reading lanes to the `AGENTS.md` operating contract: the full
