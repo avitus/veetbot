@@ -26,7 +26,8 @@ preserved verbatim in the [corpus audit log](corpus-audit-log.md). Milestones
 0 through 9 are implementable from the corpus as it stands, no document named
 there is still missing, and Milestone 10 is in progress only for the
 workstreams authorized in the project state; model routing and general-purpose
-subagents remain deferred, and scheduling is a planned Milestone 11.
+subagents remain deferred, and Milestone 11 scheduled runs are in progress
+within their authorized scope.
 
 Autonomous decisions taken while the plan was being written, and the questions
 they raise, are recorded in [questions for review](questions-for-review.md).

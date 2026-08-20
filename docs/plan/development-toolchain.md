@@ -296,12 +296,12 @@ job           target invoked         needs     runs on
 ```
 
 Jobs 1 and 2 partition `make check`, split so the cheap one fails
-first. This is the only place where CI's shape differs from the
-Makefile's, and it differs in scheduling rather than in content: the
-union of the two jobs is exactly `make check`, including `test-deploy`
-in both the static lane and the local aggregate. No check appears in
-both jobs, and a developer who runs `make check` locally has run both
-jobs' contents. Job 5 is an additional real-runtime sandbox gate; it
+first. The union of the two jobs' `make` targets is exactly
+`make check`, including `test-deploy` in both the static lane and the
+local aggregate; job 1's reading-lane step below is the one check
+outside that equality, because it reads git range state `make check`
+does not assume. No check appears in both jobs, and a developer who
+runs `make check` locally has run both jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
 Job 6 is an additional native-client gate outside `make check`; it runs under
 full Xcode because Command Line Tools can compile a Swift Testing bundle

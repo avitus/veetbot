@@ -180,6 +180,8 @@ def _check_resolves(root: Path, reference: str) -> bool:
 _GATE_TABLE_FIGURES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("subject_specs", re.compile(r"(\d+)\s+subject\s+specifications\s+declare")),
     ("subject_gates", re.compile(r"declare\s+(\d+)\s+gates")),
+    ("plan_gates", re.compile(r"engineering\s+plan\s+declares\s+(\d+)\s+more")),
+    ("map_gates", re.compile(r"this\s+document\s+declares\s+(\d+)\s+over")),
     ("declarations", re.compile(r"(\d+)\s+declarations")),
     ("entries", re.compile(r"(\d+)\s+registry\s+entries")),
     ("aliases", re.compile(r"the\s+(\d+)\s+aliases")),
@@ -335,6 +337,8 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
             {
                 "subject_specs": len(subject_declared),
                 "subject_gates": sum(subject_declared.values()),
+                "plan_gates": plan_declared,
+                "map_gates": DECLARING_SPECS["milestone-map.md"][0],
                 "declarations": sum(declared for declared, _ in DECLARING_SPECS.values())
                 + plan_declared,
                 "entries": len(entries),

@@ -80,12 +80,23 @@ def check(root: Path, base: str | None) -> tuple[str, str, list[str]]:
 
     resolved = resolve_base(root, base)
     if resolved is None:
-        paths: list[str] = []
-        messages = [_git(root, "log", "-1", "--format=%B")]
-    else:
+        # A repository whose only commit is HEAD: classify that commit's tree.
         paths = [
             line
-            for line in _git(root, "diff", "--name-only", f"{resolved}...HEAD").splitlines()
+            for line in _git(
+                root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root", "HEAD"
+            ).splitlines()
+            if line
+        ]
+        messages = [_git(root, "log", "-1", "--format=%B")]
+    else:
+        # --no-renames keeps both sides of a rename, so a renamed-away
+        # authority file still sets the floor.
+        paths = [
+            line
+            for line in _git(
+                root, "diff", "--name-only", "--no-renames", f"{resolved}...HEAD"
+            ).splitlines()
             if line
         ]
         messages = [

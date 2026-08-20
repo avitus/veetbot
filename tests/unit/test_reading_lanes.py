@@ -133,6 +133,41 @@ def test_check_accepts_a_true_local_lane(tmp_path: Path) -> None:
     assert check(repo, base) == ("C", "C", [])
 
 
+def test_single_commit_repository_classifies_its_own_tree(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    target = repo / "src" / "agent_core" / "policy" / "engine.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("x\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "root\n\nReading-Lane: C")
+
+    declared, minimum, errors = check(repo, None)
+
+    assert (declared, minimum) == ("C", "A")
+    assert errors == [
+        "declared reading lane C is below the minimum A set by src/agent_core/policy/engine.py"
+    ]
+
+
+def test_rename_away_from_an_authority_file_keeps_the_floor(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "AGENTS.md").write_text("contract\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "mv", "AGENTS.md", "README.md")
+    _git(repo, "commit", "-qm", "rename\n\nReading-Lane: C")
+
+    declared, minimum, errors = check(repo, base)
+
+    assert (declared, minimum) == ("C", "A")
+    assert errors == ["declared reading lane C is below the minimum A set by AGENTS.md"]
+
+
 def test_resolve_base_prefers_remote_then_previous_commit(tmp_path: Path) -> None:
     repo, base = _repo_with_lane_commit(tmp_path, "docs/notes.md", "docs")
     assert resolve_base(repo, "explicit-rev") == "explicit-rev"
