@@ -32,6 +32,7 @@ from agent_core.domain.browser import (
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
     BrowserProfileStatus,
+    BrowserProviderError,
 )
 from agent_core.domain.errors import AuthorizationError, ConflictError
 from tests.contract.support import NOW, principal
@@ -454,3 +455,99 @@ async def test_concurrent_authentication_requests_admit_only_one_ceremony() -> N
     assert authentication.begin_calls == 1
     assert sum(isinstance(result, BrowserAuthenticationView) for result in results) == 1
     assert sum(isinstance(result, ConflictError) for result in results) == 1
+
+
+async def test_authentication_provider_launch_has_total_deadline() -> None:
+    class StalledAuthenticationControlPlane(FakeAuthenticationControlPlane):
+        async def begin_authentication(
+            self,
+            profile_id: UUID,
+            owner: Principal,
+            provider_ref: str,
+            *,
+            login_url: str,
+        ) -> BrowserAuthenticationView:
+            del profile_id, owner, provider_ref, login_url
+            await asyncio.Event().wait()
+            raise AssertionError("unreachable")
+
+    uow = FakeUnitOfWorkFactory()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=StalledAuthenticationControlPlane(),
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+        authentication_timeout_seconds=0.01,
+    )
+    subject = owner("browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+
+    with pytest.raises(BrowserProviderError) as raised:
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )
+
+    assert raised.value.reason_code == "tool.browser.provider_unavailable"
+    assert raised.value.retryable is True
+
+
+async def test_authentication_admission_lock_wait_is_bounded() -> None:
+    class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
+        def __init__(self) -> None:
+            super().__init__()
+            self.begin_calls = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def begin_authentication(
+            self,
+            profile_id: UUID,
+            owner: Principal,
+            provider_ref: str,
+            *,
+            login_url: str,
+        ) -> BrowserAuthenticationView:
+            self.begin_calls += 1
+            self.started.set()
+            await self.release.wait()
+            return await super().begin_authentication(
+                profile_id,
+                owner,
+                provider_ref,
+                login_url=login_url,
+            )
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = BlockingAuthenticationControlPlane()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+        authentication_lock_timeout_seconds=0.01,
+    )
+    subject = owner("browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+    first = asyncio.create_task(
+        service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )
+    )
+    await authentication.started.wait()
+
+    with pytest.raises(ConflictError):
+        await service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )
+
+    authentication.release.set()
+    await asyncio.wait_for(first, timeout=1)
+    assert authentication.begin_calls == 1

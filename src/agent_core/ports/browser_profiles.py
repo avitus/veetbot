@@ -24,6 +24,8 @@ class BrowserProfileRepository(Protocol):
         self,
         profile_id: UUID,
         principal: Principal,
+        *,
+        timeout_seconds: float,
     ) -> AbstractAsyncContextManager[BrowserProfile]:
         """Lock one owned profile until authentication admission finishes."""
         ...

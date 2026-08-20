@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import builtins
 import json
+import math
 from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self
@@ -23,6 +25,7 @@ from agent_core.domain.browser import (
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProfileView,
+    BrowserProviderError,
     normalize_browser_origin,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
@@ -90,12 +93,23 @@ class BrowserProfileManagementService:
         authentications: BrowserAuthenticationControlPlane,
         clock: Clock,
         ids: IdFactory,
+        authentication_timeout_seconds: float = 30.0,
+        authentication_lock_timeout_seconds: float = 5.0,
     ) -> None:
+        if not math.isfinite(authentication_timeout_seconds) or authentication_timeout_seconds <= 0:
+            raise ValueError("authentication timeout must be positive and finite")
+        if (
+            not math.isfinite(authentication_lock_timeout_seconds)
+            or authentication_lock_timeout_seconds <= 0
+        ):
+            raise ValueError("authentication lock timeout must be positive and finite")
         self._uow_factory = uow_factory
         self._lifecycle = lifecycle
         self._authentications = authentications
         self._clock = clock
         self._ids = ids
+        self._authentication_timeout_seconds = authentication_timeout_seconds
+        self._authentication_lock_timeout_seconds = authentication_lock_timeout_seconds
 
     async def create(
         self,
@@ -280,6 +294,7 @@ class BrowserProfileManagementService:
                 uow.browser_profiles.authentication_admission(
                     profile_id,
                     principal,
+                    timeout_seconds=self._authentication_lock_timeout_seconds,
                 ) as profile,
             ):
                 if (
@@ -308,12 +323,19 @@ class BrowserProfileManagementService:
                 )
                 if active is not None:
                     raise ConflictError("browser profile already has an active authentication")
-                launched = await self._authentications.begin_authentication(
-                    profile_id,
-                    principal,
-                    profile.provider_ref,
-                    login_url=login_url,
-                )
+                try:
+                    async with asyncio.timeout(self._authentication_timeout_seconds):
+                        launched = await self._authentications.begin_authentication(
+                            profile_id,
+                            principal,
+                            profile.provider_ref,
+                            login_url=login_url,
+                        )
+                except TimeoutError as exc:
+                    raise BrowserProviderError(
+                        "tool.browser.provider_unavailable",
+                        retryable=True,
+                    ) from exc
                 now = self._clock.now()
                 record = BrowserAuthenticationRecord(
                     id=launched.id,

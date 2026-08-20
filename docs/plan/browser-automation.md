@@ -399,7 +399,10 @@ profile. The application acquires a profile-scoped repository lock before the
 active-record check and holds it through isolated-service launch and durable
 record creation. PostgreSQL implements that lock with `SELECT ... FOR UPDATE`
 inside the same unit of work; a concurrent begin waits, observes the winner's
-record, and returns `409 conflict` without launching another ceremony.
+record, and returns `409 conflict` without launching another ceremony. The lock
+wait is capped at five seconds, while the isolated-service launch has a separate
+thirty-second total application deadline; neither can hold the transaction
+indefinitely.
 
 The launch channel terminates at the isolated browser service, not the public
 API or worker. A same-site, no-store browser surface binds its unguessable

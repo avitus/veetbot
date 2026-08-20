@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -54,14 +55,25 @@ class InMemoryBrowserProfileRepository:
         self,
         profile_id: UUID,
         principal: Principal,
+        *,
+        timeout_seconds: float,
     ) -> AsyncIterator[BrowserProfile]:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("authentication lock timeout must be positive and finite")
         key = (principal.tenant_id, principal.principal_id, profile_id)
         lock = self._authentication_locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
             self._authentication_locks[key] = lock
-        async with lock:
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                await lock.acquire()
+        except TimeoutError as exc:
+            raise ConflictError("browser authentication admission is busy") from exc
+        try:
             yield await self.get(profile_id, principal)
+        finally:
+            lock.release()
 
     async def list(
         self,

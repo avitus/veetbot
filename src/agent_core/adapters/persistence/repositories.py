@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -11,7 +12,7 @@ from uuid import UUID
 
 from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import cast as sql_cast
 
@@ -148,6 +149,17 @@ def _constraint_name(exc: IntegrityError) -> str | None:
         name = getattr(diagnostic, "constraint_name", None)
         if isinstance(name, str):
             return name
+    return None
+
+
+def _sqlstate(exc: DBAPIError) -> str | None:
+    candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        value = getattr(candidate, "sqlstate", None)
+        if isinstance(value, str):
+            return value
     return None
 
 
@@ -1482,18 +1494,37 @@ class PostgresBrowserProfileRepository:
         self,
         profile_id: UUID,
         principal: Principal,
+        *,
+        timeout_seconds: float,
     ) -> AsyncIterator[BrowserProfile]:
-        row = (
-            await self._session.scalars(
-                select(BrowserProfileRow)
-                .where(
-                    BrowserProfileRow.id == profile_id,
-                    BrowserProfileRow.tenant_id == principal.tenant_id,
-                    BrowserProfileRow.principal_id == principal.principal_id,
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("authentication lock timeout must be positive and finite")
+        timeout_milliseconds = max(1, math.ceil(timeout_seconds * 1000))
+        await self._session.execute(
+            select(
+                func.set_config(
+                    "lock_timeout",
+                    f"{timeout_milliseconds}ms",
+                    True,
                 )
-                .with_for_update()
             )
-        ).one_or_none()
+        )
+        try:
+            row = (
+                await self._session.scalars(
+                    select(BrowserProfileRow)
+                    .where(
+                        BrowserProfileRow.id == profile_id,
+                        BrowserProfileRow.tenant_id == principal.tenant_id,
+                        BrowserProfileRow.principal_id == principal.principal_id,
+                    )
+                    .with_for_update()
+                )
+            ).one_or_none()
+        except DBAPIError as exc:
+            if _sqlstate(exc) == "55P03":
+                raise ConflictError("browser authentication admission is busy") from exc
+            raise
         if row is None:
             raise NotFoundError("browser profile not found")
         yield _browser_profile_to_domain(row)

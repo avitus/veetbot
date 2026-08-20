@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 from uuid import UUID
 
+import pytest
+
 from agent_core.bootstrap import build
+from agent_core.domain.errors import ConflictError
 from tests.contract.test_browser_authentication_repository_contract import (
     PROFILE_ID as AUTHENTICATION_PROFILE_ID,
 )
@@ -87,7 +90,7 @@ async def test_postgres_browser_authentication_repository_satisfies_shared_contr
         await assert_authentication_repository_contract(uow.browser_authentications)
 
 
-async def test_postgres_browser_authentication_admission_is_profile_serialized() -> None:
+async def test_postgres_browser_authentication_admission_lock_timeout_is_conflict() -> None:
     profile_id = UUID(int=0xE7)
     async with build(settings=database_settings(), storage="postgres") as composition:
         async with composition.uow_factory() as uow:
@@ -99,6 +102,7 @@ async def test_postgres_browser_authentication_admission_is_profile_serialized()
         release_first = asyncio.Event()
         second_attempted = asyncio.Event()
         second_acquired = asyncio.Event()
+        second_rejected = asyncio.Event()
 
         async def hold_first_admission() -> None:
             async with (
@@ -106,6 +110,7 @@ async def test_postgres_browser_authentication_admission_is_profile_serialized()
                 uow.browser_profiles.authentication_admission(
                     profile_id,
                     composition.principal,
+                    timeout_seconds=1,
                 ),
             ):
                 first_acquired.set()
@@ -115,11 +120,14 @@ async def test_postgres_browser_authentication_admission_is_profile_serialized()
             await first_acquired.wait()
             async with composition.uow_factory() as uow:
                 second_attempted.set()
-                async with uow.browser_profiles.authentication_admission(
-                    profile_id,
-                    composition.principal,
-                ):
-                    second_acquired.set()
+                with pytest.raises(ConflictError):
+                    async with uow.browser_profiles.authentication_admission(
+                        profile_id,
+                        composition.principal,
+                        timeout_seconds=0.05,
+                    ):
+                        second_acquired.set()
+                second_rejected.set()
 
         first = asyncio.create_task(hold_first_admission())
         done, _pending = await asyncio.wait({first}, timeout=0.1)
@@ -129,10 +137,11 @@ async def test_postgres_browser_authentication_admission_is_profile_serialized()
         second = asyncio.create_task(wait_for_second_admission())
         try:
             await asyncio.wait_for(second_attempted.wait(), timeout=1)
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(second_rejected.wait(), timeout=1)
             assert not second_acquired.is_set()
         finally:
             release_first.set()
-            await asyncio.gather(first, second)
+            await asyncio.wait_for(asyncio.gather(first, second), timeout=5)
 
-        assert second_acquired.is_set()
+        assert second_rejected.is_set()
+        assert not second_acquired.is_set()
