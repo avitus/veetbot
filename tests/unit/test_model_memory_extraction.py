@@ -7,6 +7,9 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
+import agent_core.config as config_module
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
@@ -143,7 +146,8 @@ async def test_model_assisted_extractor_adds_a_grounded_relationship_candidate()
     )
 
     assert [(item.subject, item.statement) for item in candidates] == [
-        ("daughter", "User's daughter is Riv.")
+        ("daughter", "User has at least one daughter."),
+        ("daughter", "User's daughter is Riv."),
     ]
     assert len(provider.requests) == 1
     schema = provider.requests[0].response_schema
@@ -183,8 +187,10 @@ async def test_model_assisted_extractor_rejects_an_ungrounded_named_entity() -> 
         scope="general",
     )
 
-    assert candidates == []
-    assert audits[0].candidates_returned == 0
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
+    assert audits[0].candidates_returned == 1
     assert audits[0].fallback_used is False
 
 
@@ -255,8 +261,16 @@ async def test_model_assisted_extractor_rejects_output_over_its_dedicated_budget
 
 
 async def test_routed_composition_does_not_activate_rich_extraction_without_evidence(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
     provider = FakeModelProvider(
         FakeModelScript(
             turns=[
@@ -303,7 +317,9 @@ async def test_routed_composition_does_not_activate_rich_extraction_without_evid
             audits = await uow.process_events.list("memory.extraction.completed")
             selections = await uow.process_events.list("memory.provider_extraction.selection")
 
-    assert result.beliefs == []
+    assert [(item.subject, item.statement) for item in result.beliefs] == [
+        ("daughter", "User has at least one daughter.")
+    ]
     assert result.run.policy_version == "formation@2"
     assert provider.requests == []
     assert audits == []

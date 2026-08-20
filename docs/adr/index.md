@@ -65,7 +65,7 @@ implementation without one.
 - [ADR-0054 — Provider-neutral web access with capability-level routing (Proposed)](0054-provider-neutral-web-access.md)
 - [ADR-0055 — Configurable CLI wait for durable runs](0055-configurable-cli-run-wait.md)
 - [ADR-0056 — Failure-triggered reflection review (Proposed)](0056-failure-reflection-review.md)
-- [ADR-0057 — Evaluation-gated provider-assisted memory extraction (Proposed)](0057-evaluation-gated-provider-memory-extraction.md)
+- [ADR-0057 — Evaluation-gated provider-assisted memory extraction](0057-evaluation-gated-provider-memory-extraction.md)
 - [ADR-0058 — Provider-neutral authenticated browser automation (Proposed)](0058-authenticated-browser-automation.md)
 - [ADR-0059 — Milestone 11 scheduled runs (Proposed)](0059-milestone-11-scheduled-runs.md)
 - [ADR-0060 — Reading lanes and the state-file split](0060-reading-lanes-and-state-file-split.md)

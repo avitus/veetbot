@@ -910,3 +910,6 @@ def eval_memory_formation(
         typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to evaluate memory formation")
         return
     typer.echo(result.model_dump_json())
+    if not result.passed:
+        typer.echo(f"memory-formation evaluation failed: {result.failure_summary}", err=True)
+        raise typer.Exit(1)

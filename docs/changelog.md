@@ -4,6 +4,33 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-20 — Inspectable formation evaluation and semantic provider claims
+
+- Replaced free-form provider-authored memory statements with a closed semantic
+  claim schema, exact evidence quotes, and deterministic local rendering under
+  the new `formation@4` and `provider-assisted-v2` activation boundary.
+- Rechecked secret, injection, and transient markers against authoritative cited
+  source text so provider paraphrasing cannot remove a formation safety signal.
+- Made paired evaluation failures return per-case arm beliefs, consolidation and
+  provider-audit counts, and fallback-versus-provider attribution while retaining
+  the rule that only a passing run publishes activation evidence.
+- Added symmetric fabrication reporting and a sixteen-of-twenty positive-case
+  coverage floor, with a non-zero CLI exit for failed gates.
+- Removed annotation siblings from JSON Schema references so OpenAI strict
+  structured output accepts the semantic-claim schema, with recursive regression
+  coverage for the provider request boundary.
+- Normalized source-grounded specialized values from either semantic slot,
+  rejected cue-only explanation styles, and retained deterministic metadata when
+  an otherwise identical provider claim would weaken the fallback candidate.
+- Labeled the explicit hiking hobby in the wife relationship evaluation case and
+  canonicalized irregular base verbs so `go hiking` renders as `goes hiking`.
+- Rejected duration-only language-study values such as `three years` instead of
+  allowing a grounded time phrase to become a fabricated language memory.
+- Accepted ADR-0057 after the version-bound OpenAI `gpt-5.6-sol` evaluation
+  supported 18 of 20 positive cases and 19 candidates versus 9 deterministic
+  candidates, with zero fabrication and zero policy failures in both arms, and
+  bundled the passing schema-v2 evidence for exact-tuple startup activation.
+
 ## 2026-08-20 — Deployment provisioning contract hardening
 
 - Split the browser control-plane credential to its own example path: the

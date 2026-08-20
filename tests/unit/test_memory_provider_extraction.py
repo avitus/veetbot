@@ -77,8 +77,8 @@ class _BlockingProvider:
 
 def _evidence() -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
-        extractor_version="provider-assisted-v1",
-        formation_policy_version="formation@3",
+        extractor_version="provider-assisted-v2",
+        formation_policy_version="formation@4",
         model_policy="fake",
         provider="fake",
         model="scripted",
@@ -87,9 +87,14 @@ def _evidence() -> ProviderExtractionEvaluationEvidence:
         build_ref="test-build",
         corpus_sha256="a" * 64,
         sample_count=20,
+        positive_case_count=20,
+        minimum_supported_case_count=16,
+        deterministic_supported_case_count=10,
+        provider_supported_case_count=16,
         deterministic_supported_candidates=10,
-        provider_supported_candidates=15,
-        fabricated_candidates=0,
+        provider_supported_candidates=16,
+        deterministic_fabricated_candidates=0,
+        provider_fabricated_candidates=0,
         deterministic_policy_failures=0,
         provider_policy_failures=0,
         evaluated_at=NOW,
@@ -124,6 +129,493 @@ def test_evaluation_evidence_round_trips_and_must_match_the_compiled_policy_vers
     )
 
 
+def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> None:
+    payload = _evidence().model_dump()
+    payload["minimum_supported_case_count"] = 1
+    payload["provider_supported_case_count"] = 1
+
+    with pytest.raises(ValueError, match="eighty percent"):
+        ProviderExtractionEvaluationEvidence.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("episode", "claim", "expected"),
+    [
+        (
+            "My daughter is starting an astronomy club at her high school.",
+            {
+                "claim_kind": "relationship",
+                "subject": "daughter",
+                "value": None,
+                "context": None,
+                "quantity": 1,
+                "evidence_quote": "My daughter",
+                "proposed_portability": "contextual",
+                "sensitivity_guess": "sensitive",
+            },
+            ("relationship", "daughter", "User has at least one daughter."),
+        ),
+        (
+            "My son's robotics team qualified for the state tournament.",
+            {
+                "claim_kind": "relationship",
+                "subject": "son",
+                "value": None,
+                "context": None,
+                "quantity": 1,
+                "evidence_quote": "My son",
+                "proposed_portability": "contextual",
+                "sensitivity_guess": "sensitive",
+            },
+            ("relationship", "son", "User has at least one son."),
+        ),
+        (
+            "My wife and I go hiking most weekends.",
+            {
+                "claim_kind": "relationship",
+                "subject": "wife",
+                "value": None,
+                "context": None,
+                "quantity": 1,
+                "evidence_quote": "My wife",
+                "proposed_portability": "contextual",
+                "sensitivity_guess": "sensitive",
+            },
+            ("relationship", "wife", "User has a wife."),
+        ),
+        (
+            "Both of my daughters want to identify constellations.",
+            {
+                "claim_kind": "relationship",
+                "subject": "daughters",
+                "value": None,
+                "context": None,
+                "quantity": 2,
+                "evidence_quote": "Both of my daughters",
+                "proposed_portability": "contextual",
+                "sensitivity_guess": "sensitive",
+            },
+            ("relationship", "daughters", "User has at least two daughters."),
+        ),
+        (
+            "As a marine biologist, I spend a lot of time analyzing field samples.",
+            {
+                "claim_kind": "occupation",
+                "subject": "occupation",
+                "value": "marine biologist",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "marine biologist",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "occupation", "User is a marine biologist."),
+        ),
+        (
+            "As a marine biologist, I spend a lot of time analyzing field samples.",
+            {
+                "claim_kind": "occupation",
+                "subject": "marine biologist",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "marine biologist",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "occupation", "User is a marine biologist."),
+        ),
+        (
+            "Most weekends I restore old shortwave radios.",
+            {
+                "claim_kind": "hobby",
+                "subject": "hobby",
+                "value": "restore old shortwave radios",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "restore old shortwave radios",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "hobby", "User restores old shortwave radios."),
+        ),
+        (
+            "Most weekends I restore old shortwave radios.",
+            {
+                "claim_kind": "hobby",
+                "subject": "restore old shortwave radios",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "restore old shortwave radios",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "hobby", "User restores old shortwave radios."),
+        ),
+        (
+            "Portland is home for me, although I travel often for work.",
+            {
+                "claim_kind": "home_location",
+                "subject": "home location",
+                "value": "Portland",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "Portland is home for me",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "home location", "User lives in Portland."),
+        ),
+        (
+            "Portland is home for me, although I travel often for work.",
+            {
+                "claim_kind": "home_location",
+                "subject": "Portland",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "Portland is home for me",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "home location", "User lives in Portland."),
+        ),
+        (
+            "I rely on a screen reader when I use desktop applications.",
+            {
+                "claim_kind": "accessibility_tool",
+                "subject": "accessibility",
+                "value": "screen reader",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "rely on a screen reader",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "accessibility", "User relies on a screen reader."),
+        ),
+        (
+            "I rely on a screen reader when I use desktop applications.",
+            {
+                "claim_kind": "accessibility_tool",
+                "subject": "screen reader",
+                "value": None,
+                "context": "desktop applications",
+                "quantity": None,
+                "evidence_quote": "I rely on a screen reader",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "accessibility", "User relies on a screen reader."),
+        ),
+        (
+            "I've been studying Japanese for three years.",
+            {
+                "claim_kind": "language_study",
+                "subject": "language study",
+                "value": "Japanese",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "studying Japanese",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "language study", "User studies Japanese."),
+        ),
+        (
+            "I've been studying Japanese for three years.",
+            {
+                "claim_kind": "language_study",
+                "subject": "Japanese",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "studying Japanese",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "language study", "User studies Japanese."),
+        ),
+        (
+            "I'm in Pacific time, which matters when we schedule calls.",
+            {
+                "claim_kind": "time_zone",
+                "subject": "time zone",
+                "value": "Pacific time",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "in Pacific time",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "time zone", "User is in Pacific time."),
+        ),
+        (
+            "I'm in Pacific time, which matters when we schedule calls.",
+            {
+                "claim_kind": "time_zone",
+                "subject": "Pacific time",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "in Pacific time",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "time zone", "User is in Pacific time."),
+        ),
+        (
+            "Our two cats always sit beside the telescope case.",
+            {
+                "claim_kind": "pet_ownership",
+                "subject": "cats",
+                "value": "cats",
+                "context": None,
+                "quantity": 2,
+                "evidence_quote": "two cats",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "cats", "User has two cats."),
+        ),
+        (
+            "Our two cats always sit beside the telescope case.",
+            {
+                "claim_kind": "pet_ownership",
+                "subject": "cats",
+                "value": None,
+                "context": None,
+                "quantity": 2,
+                "evidence_quote": "two cats",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "cats", "User has two cats."),
+        ),
+        (
+            "Please keep recipe suggestions vegan; that is how I eat.",
+            {
+                "claim_kind": "diet",
+                "subject": "diet",
+                "value": "vegan",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "vegan",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("preference", "diet", "User follows a vegan diet."),
+        ),
+        (
+            "Please keep recipe suggestions vegan; that is how I eat.",
+            {
+                "claim_kind": "diet",
+                "subject": "vegan",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "vegan",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("preference", "diet", "User follows a vegan diet."),
+        ),
+        (
+            "For technical explanations, short paragraphs and examples work best for me.",
+            {
+                "claim_kind": "explanation_style",
+                "subject": "answer style",
+                "value": "short paragraphs and examples",
+                "context": "technical explanations",
+                "quantity": None,
+                "evidence_quote": "short paragraphs and examples",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            (
+                "preference",
+                "answer style",
+                "User prefers short paragraphs and examples for technical explanations.",
+            ),
+        ),
+        (
+            "Friday will be the astronomy club's regular meeting night.",
+            {
+                "claim_kind": "project_schedule",
+                "subject": "meeting schedule",
+                "value": "Friday",
+                "context": "astronomy club",
+                "quantity": None,
+                "evidence_quote": "astronomy club's regular meeting night",
+                "proposed_portability": "local",
+                "sensitivity_guess": "internal",
+            },
+            (
+                "fact",
+                "astronomy club meeting",
+                "The astronomy club's regular meeting night is Friday.",
+            ),
+        ),
+        (
+            "I'm hoping to learn astrophotography this year.",
+            {
+                "claim_kind": "goal",
+                "subject": "goal",
+                "value": "learn astrophotography",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "learn astrophotography",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "goal", "User wants to learn astrophotography."),
+        ),
+        (
+            "I'm hoping to learn astrophotography this year.",
+            {
+                "claim_kind": "goal",
+                "subject": "learn astrophotography",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "learn astrophotography",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "goal", "User wants to learn astrophotography."),
+        ),
+        (
+            "My telescope aperture is 3.5 inches.",
+            {
+                "claim_kind": "user_attribute",
+                "subject": "telescope aperture",
+                "value": "3.5 inches",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "telescope aperture is 3.5 inches",
+                "proposed_portability": "contextual",
+                "sensitivity_guess": "internal",
+            },
+            (
+                "user_model_attr",
+                "telescope aperture",
+                "User's telescope aperture is 3.5 inches.",
+            ),
+        ),
+    ],
+)
+async def test_provider_semantic_claims_render_canonical_memories(
+    episode: str,
+    claim: dict[str, object],
+    expected: tuple[str, str, str],
+) -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, episode)
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    **claim,
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.9,
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(7_000, 7_100)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert [
+        (candidate.belief_type.value, candidate.subject, candidate.statement)
+        for candidate in candidates
+    ] == [expected]
+
+
+async def test_provider_canonicalizes_go_hiking_without_losing_the_wife_fallback() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "My wife and I go hiking most weekends.")
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "hobby",
+                    "subject": "go hiking",
+                    "value": None,
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": "go hiking most weekends",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.99,
+                    "proposed_portability": "portable",
+                    "sensitivity_guess": "public",
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(7_100, 7_200)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert [(candidate.subject, candidate.statement) for candidate in candidates] == [
+        ("hobby", "User goes hiking."),
+        ("wife", "User has a wife."),
+    ]
+
+
 async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     source = await user_event(factory, "The astronomy club was my daughter's idea.")
@@ -131,13 +623,15 @@ async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage(
         {
             "candidates": [
                 {
-                    "belief_type": "relationship",
+                    "claim_kind": "relationship",
                     "subject": "daughter",
-                    "statement": "User has at least one daughter.",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "my daughter",
                     "polarity": "assert",
                     "source_event_ids": [source],
                     "model_confidence": 0.92,
-                    "proposed_scope": "project-a",
                     "proposed_portability": "contextual",
                     "sensitivity_guess": "sensitive",
                     "valid_from": None,
@@ -180,8 +674,22 @@ async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage(
     assert provider.requests[0].tools == []
     schema = provider.requests[0].response_schema
     assert schema is not None
-    candidate_schema = schema["$defs"]["_ModelCandidate"]
+    candidate_schema = schema["$defs"]["_SemanticClaim"]
     assert set(candidate_schema["required"]) == set(candidate_schema["properties"])
+    ref_siblings: list[set[str]] = []
+
+    def collect_ref_siblings(value: object) -> None:
+        if isinstance(value, dict):
+            if "$ref" in value and set(value) != {"$ref"}:
+                ref_siblings.append(set(value))
+            for nested in value.values():
+                collect_ref_siblings(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                collect_ref_siblings(nested)
+
+    collect_ref_siblings(schema)
+    assert ref_siblings == []
     assert provider.requests[0].maximum_output_tokens == 4096
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.completed")
@@ -209,13 +717,15 @@ async def test_provider_extractor_rejects_ungrounded_named_claim_with_valid_sour
         {
             "candidates": [
                 {
-                    "belief_type": "fact",
-                    "subject": "astronomy club",
-                    "statement": "User's astronomy club is in Paris.",
+                    "claim_kind": "home_location",
+                    "subject": "home location",
+                    "value": "Paris",
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": "astronomy club",
                     "polarity": "assert",
                     "source_event_ids": [source],
                     "model_confidence": 0.95,
-                    "proposed_scope": "project-a",
                     "proposed_portability": "local",
                     "sensitivity_guess": "internal",
                     "valid_from": None,
@@ -251,10 +761,179 @@ async def test_provider_extractor_rejects_ungrounded_named_claim_with_valid_sour
         scope="project-a",
     )
 
-    assert candidates == []
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.completed")
     assert audits[0].payload["candidate_count"] == 1
+    assert audits[0].payload["grounded_candidate_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("episode", "claim"),
+    [
+        (
+            "As a marine biologist, I spend a lot of time analyzing field samples.",
+            {
+                "claim_kind": "occupation",
+                "subject": "astronaut",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "marine biologist",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+        ),
+        (
+            "For technical explanations, short paragraphs and examples work best for me.",
+            {
+                "claim_kind": "explanation_style",
+                "subject": "explanation style",
+                "value": "work best",
+                "context": "technical explanations",
+                "quantity": None,
+                "evidence_quote": (
+                    "For technical explanations, short paragraphs and examples work best for me."
+                ),
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+        ),
+        (
+            "I've been studying Japanese for three years.",
+            {
+                "claim_kind": "language_study",
+                "subject": "three years",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "studying Japanese for three years",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+        ),
+    ],
+)
+async def test_provider_rejects_ungrounded_subject_values_and_cue_only_styles(
+    episode: str,
+    claim: dict[str, object],
+) -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, episode)
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    **claim,
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.99,
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(8_150, 8_250)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert candidates == []
+    async with factory() as uow:
+        audits = await uow.process_events.list("memory.provider_extraction.completed")
+    assert len(audits) == 1
+    assert audits[0].payload["candidate_count"] == 1
+    assert audits[0].payload["grounded_candidate_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("claim_subject", "evidence_quote"),
+    [("wife", "my daughter"), ("daughter", "MY DAUGHTER")],
+)
+async def test_provider_relationship_claim_requires_exact_grounding(
+    claim_subject: str,
+    evidence_quote: str,
+) -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "The astronomy club was my daughter's idea.")
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "relationship",
+                    "subject": claim_subject,
+                    "value": None,
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": evidence_quote,
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.95,
+                    "proposed_portability": "contextual",
+                    "sensitivity_guess": "sensitive",
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(8_200, 8_300)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
+    async with factory() as uow:
+        audits = await uow.process_events.list("memory.provider_extraction.completed")
     assert audits[0].payload["grounded_candidate_count"] == 0
 
 
@@ -323,6 +1002,28 @@ def test_provider_merge_preserves_distinct_statements_and_sources() -> None:
         different_statement,
         different_source,
     ]
+
+
+def test_provider_merge_retains_deterministic_metadata_for_an_exact_duplicate() -> None:
+    deterministic = MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP,
+        subject="daughter",
+        statement="User has at least one daughter.",
+        source_event_ids=[1],
+        model_confidence=0.8,
+        proposed_scope="project-a",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+    provider = deterministic.model_copy(
+        update={
+            "model_confidence": 0.99,
+            "proposed_portability": Portability.PORTABLE,
+            "sensitivity_guess": Sensitivity.PUBLIC,
+        }
+    )
+
+    assert _merge_candidates([provider], [deterministic]) == [deterministic]
 
 
 async def test_provider_extractor_caps_output_before_call_to_stay_inside_cost_budget() -> None:
@@ -399,14 +1100,14 @@ async def test_provider_extractor_refuses_unaffordable_input_before_provider_io(
         fallback=DeterministicCandidateExtractor(),
     )
 
-    assert (
-        await extractor.extract(
-            await session_events(factory),
-            principal=principal(),
-            scope="project-a",
-        )
-        == []
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
     )
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
     assert provider.requests == []
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.failed")
@@ -495,13 +1196,15 @@ async def test_evaluated_provider_extractor_is_activated_by_composition(
         {
             "candidates": [
                 {
-                    "belief_type": "relationship",
+                    "claim_kind": "relationship",
                     "subject": "daughter",
-                    "statement": "User has at least one daughter.",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "my daughter",
                     "polarity": "assert",
                     "source_event_ids": [2],
                     "model_confidence": 0.9,
-                    "proposed_scope": "general",
                     "proposed_portability": "contextual",
                     "sensitivity_guess": "sensitive",
                     "valid_from": None,
@@ -541,8 +1244,8 @@ async def test_evaluated_provider_extractor_is_activated_by_composition(
     assert [(item.subject, item.statement) for item in result.beliefs] == [
         ("daughter", "User has at least one daughter.")
     ]
-    assert result.run.model.startswith("provider-assisted-v1:fake:scripted")
-    assert result.run.policy_version == "formation@3"
+    assert result.run.model.startswith("provider-assisted-v2:fake:scripted")
+    assert result.run.policy_version == "formation@4"
 
 
 async def test_provider_extractor_has_a_non_activating_evaluation_mode() -> None:
@@ -572,14 +1275,14 @@ async def test_provider_extractor_has_a_non_activating_evaluation_mode() -> None
         fallback=DeterministicCandidateExtractor(),
     )
 
-    assert (
-        await extractor.extract(
-            await session_events(factory),
-            principal=principal(),
-            scope="project-a",
-        )
-        == []
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
     )
+    assert [(item.subject, item.statement) for item in candidates] == [
+        ("daughter", "User has at least one daughter.")
+    ]
     async with factory() as uow:
         audits = await uow.process_events.list("memory.provider_extraction.completed")
     assert audits[0].payload["evaluation_mode"] is True
@@ -816,26 +1519,30 @@ async def test_provider_proposals_still_pass_source_and_secret_gates(tmp_path: P
         {
             "candidates": [
                 {
-                    "belief_type": "fact",
-                    "subject": "fabricated",
-                    "statement": "User owns a private island.",
+                    "claim_kind": "relationship",
+                    "subject": "daughter",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "my daughter",
                     "polarity": "assert",
                     "source_event_ids": [999],
                     "model_confidence": 0.99,
-                    "proposed_scope": "general",
                     "proposed_portability": "contextual",
                     "sensitivity_guess": "internal",
                     "valid_from": None,
                     "expires_hint": None,
                 },
                 {
-                    "belief_type": "fact",
-                    "subject": "credential",
-                    "statement": "User API key: secret=do-not-store.",
+                    "claim_kind": "hobby",
+                    "subject": "hobby",
+                    "value": "club service login",
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": "club service login",
                     "polarity": "assert",
                     "source_event_ids": [2],
                     "model_confidence": 0.99,
-                    "proposed_scope": "general",
                     "proposed_portability": "contextual",
                     "sensitivity_guess": "restricted",
                     "valid_from": None,
@@ -861,7 +1568,7 @@ async def test_provider_proposals_still_pass_source_and_secret_gates(tmp_path: P
                     event_type="user.message.created",
                     actor_type="principal",
                     actor_id=app.principal.principal_id,
-                    payload={"content": "The words API credential appear in this discussion."},
+                    payload={"content": "The club service login is api_token=placeholder."},
                 )
             )
         result = await app.memory.run(
@@ -882,13 +1589,15 @@ async def test_composition_can_gather_evidence_without_activating_provider_extra
         {
             "candidates": [
                 {
-                    "belief_type": "relationship",
+                    "claim_kind": "relationship",
                     "subject": "daughter",
-                    "statement": "User has at least one daughter.",
+                    "value": None,
+                    "context": None,
+                    "quantity": 1,
+                    "evidence_quote": "my daughter",
                     "polarity": "assert",
                     "source_event_ids": [2],
                     "model_confidence": 0.9,
-                    "proposed_scope": "general",
                     "proposed_portability": "contextual",
                     "sensitivity_guess": "sensitive",
                     "valid_from": None,

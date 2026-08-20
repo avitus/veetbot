@@ -8,6 +8,7 @@ from typing import cast
 import pytest
 import yaml
 
+import agent_core.config as config_module
 from agent_core.config import (
     PACKAGE_ROOT,
     SHIPPED_KNOB_PATHS,
@@ -285,7 +286,17 @@ def test_provider_memory_extraction_defaults_to_automatic_selection() -> None:
     assert settings.memory_provider_extraction_mode.value == "auto"
 
 
-def test_provider_memory_extraction_refuses_required_mode_without_evaluation_evidence() -> None:
+def test_provider_memory_extraction_refuses_required_mode_without_evaluation_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
     values = {
         **base_environment(),
         "AGENT_MEMORY_PROVIDER_EXTRACTION_MODE": "required",
@@ -326,7 +337,17 @@ def test_provider_memory_extraction_normalizes_non_utf8_evidence_failure(tmp_pat
         )
 
 
-def test_legacy_provider_memory_enablement_remains_fail_closed() -> None:
+def test_legacy_provider_memory_enablement_remains_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
     with pytest.raises(ConfigurationError, match="evaluation evidence"):
         load_settings(
             {

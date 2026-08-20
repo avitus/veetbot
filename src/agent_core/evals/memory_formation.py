@@ -88,6 +88,61 @@ class FormationScore(BaseModel):
     policy_failures: int = Field(ge=0)
 
 
+class ProviderExtractionDiagnostics(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: str = Field(min_length=1)
+    error_class: str | None = None
+    candidate_count: int = Field(ge=0)
+    grounded_candidate_count: int = Field(ge=0)
+
+
+class FormationArmResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    score: FormationScore
+    beliefs: list[EvaluationBelief]
+    candidates_proposed: int = Field(ge=0)
+    committed: int = Field(ge=0)
+    reinforced: int = Field(ge=0)
+    superseded: int = Field(ge=0)
+    rejected: int = Field(ge=0)
+    identity: tuple[str, str, str] | None = None
+    extraction: ProviderExtractionDiagnostics | None = None
+    evaluated_at: datetime
+
+
+class MemoryFormationCaseResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    case_id: str
+    expected_count: int = Field(ge=0)
+    must_remain_empty: bool
+    deterministic: FormationArmResult
+    provider: FormationArmResult
+    shared_beliefs: list[EvaluationBelief]
+    provider_added_beliefs: list[EvaluationBelief]
+
+
+class MemoryFormationEvaluationResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    passed: bool
+    failure_summary: str | None
+    cases: list[MemoryFormationCaseResult]
+    evidence: ProviderExtractionEvaluationEvidence | None = None
+
+    @model_validator(mode="after")
+    def outcome_matches_evidence(self) -> MemoryFormationEvaluationResult:
+        if self.passed != (self.evidence is not None):
+            raise ValueError("only a passing memory evaluation may carry activation evidence")
+        if self.passed and self.failure_summary is not None:
+            raise ValueError("passing memory evaluation must not carry a failure summary")
+        if not self.passed and not self.failure_summary:
+            raise ValueError("failed memory evaluation requires a failure summary")
+        return self
+
+
 def score_case(case: MemoryFormationCase, beliefs: list[EvaluationBelief]) -> FormationScore:
     occupied: set[int] = set()
     supported = 0
@@ -129,6 +184,14 @@ def _normalized(value: str) -> str:
     return " ".join(value.casefold().strip().rstrip(".!?").split())
 
 
+def _belief_key(belief: EvaluationBelief) -> tuple[str, str, str]:
+    return (
+        belief.belief_type.casefold(),
+        _normalized(belief.subject),
+        _normalized(belief.statement),
+    )
+
+
 def _evaluation_settings(settings: Settings, artifact_root: Path) -> Settings:
     if settings.deployment_mode is DeploymentMode.PRODUCTION:
         raise ValueError("provider memory extraction evaluation is unavailable in production")
@@ -151,7 +214,7 @@ async def _evaluate_case(
     model_policy: str,
     policy_profile: str,
     provider_assisted: bool,
-) -> tuple[FormationScore, tuple[str, str, str] | None, datetime]:
+) -> FormationArmResult:
     principal = Principal(
         tenant_id="evaluation",
         principal_id="memory-formation-evaluator",
@@ -187,6 +250,7 @@ async def _evaluate_case(
             session_id=session_id,
         )
         identity = None
+        extraction = None
         if provider_assisted:
             async with composition.uow_factory() as uow:
                 selections = await uow.process_events.list("memory.provider_extraction.selection")
@@ -203,6 +267,30 @@ async def _evaluate_case(
             ):
                 raise ValueError("provider evaluation recorded an incomplete model selection")
             identity = (provider, model, policy_version)
+            async with composition.uow_factory() as uow:
+                completed = await uow.process_events.list("memory.provider_extraction.completed")
+                failed = await uow.process_events.list("memory.provider_extraction.failed")
+            audits = [*completed, *failed]
+            if len(audits) != 1:
+                raise ValueError("provider evaluation did not record one extraction audit")
+            audit = audits[0].payload
+            outcome = audit.get("outcome")
+            error_class = audit.get("error_class")
+            candidate_count = audit.get("candidate_count")
+            grounded_candidate_count = audit.get("grounded_candidate_count")
+            if (
+                not isinstance(outcome, str)
+                or (error_class is not None and not isinstance(error_class, str))
+                or not isinstance(candidate_count, int)
+                or not isinstance(grounded_candidate_count, int)
+            ):
+                raise ValueError("provider evaluation recorded incomplete extraction diagnostics")
+            extraction = ProviderExtractionDiagnostics(
+                outcome=outcome,
+                error_class=error_class,
+                candidate_count=candidate_count,
+                grounded_candidate_count=grounded_candidate_count,
+            )
         evaluated_at = composition.clock.now()
     beliefs = [
         EvaluationBelief(
@@ -212,7 +300,18 @@ async def _evaluate_case(
         )
         for belief in result.beliefs
     ]
-    return score_case(case, beliefs), identity, evaluated_at
+    return FormationArmResult(
+        score=score_case(case, beliefs),
+        beliefs=beliefs,
+        candidates_proposed=result.run.candidates_proposed,
+        committed=result.run.committed,
+        reinforced=result.run.reinforced,
+        superseded=result.run.superseded,
+        rejected=result.run.rejected,
+        identity=identity,
+        extraction=extraction,
+        evaluated_at=evaluated_at,
+    )
 
 
 def _write_evidence(output: Path, evidence: ProviderExtractionEvaluationEvidence) -> None:
@@ -250,7 +349,7 @@ async def run_live_evaluation(
     policy_profile: str,
     build_ref: str,
     output: Path,
-) -> ProviderExtractionEvaluationEvidence | None:
+) -> MemoryFormationEvaluationResult | None:
     """Run paired cases and atomically publish only evidence that passes the gate."""
 
     if os.environ.get("RUN_LIVE_MODEL_TESTS") != "1":
@@ -262,47 +361,82 @@ async def run_live_evaluation(
 
     corpus, corpus_sha256 = load_corpus(repository_root)
     base_settings = load_settings()
+    positive_case_count = sum(bool(case.expected) for case in corpus.cases)
+    minimum_supported_case_count = (positive_case_count * 4 + 4) // 5
+    deterministic_supported_cases = 0
     deterministic_supported = 0
+    deterministic_fabricated = 0
     deterministic_policy_failures = 0
+    provider_supported_cases = 0
     provider_supported = 0
     provider_fabricated = 0
     provider_policy_failures = 0
     identities: set[tuple[str, str, str]] = set()
-    fabricated_case_ids: list[str] = []
+    deterministic_fabricated_case_ids: list[str] = []
+    provider_fabricated_case_ids: list[str] = []
     policy_regression_case_ids: list[str] = []
     missing_expected_case_ids: list[str] = []
+    case_results: list[MemoryFormationCaseResult] = []
     evaluated_at: datetime | None = None
     with tempfile.TemporaryDirectory(prefix="agent-memory-eval-") as temporary_root:
         settings = _evaluation_settings(base_settings, Path(temporary_root) / "artifacts")
         for case in corpus.cases:
-            deterministic, _, _ = await _evaluate_case(
+            deterministic = await _evaluate_case(
                 settings,
                 case,
                 model_policy=model_policy,
                 policy_profile=policy_profile,
                 provider_assisted=False,
             )
-            provider, identity, evaluated_at = await _evaluate_case(
+            provider = await _evaluate_case(
                 settings,
                 case,
                 model_policy=model_policy,
                 policy_profile=policy_profile,
                 provider_assisted=True,
             )
-            if identity is None:
+            if provider.identity is None:
                 raise ValueError("provider evaluation did not resolve a model")
-            identities.add(identity)
-            deterministic_supported += deterministic.supported_candidates
-            deterministic_policy_failures += deterministic.policy_failures
-            provider_supported += provider.supported_candidates
-            provider_fabricated += provider.fabricated_candidates
-            provider_policy_failures += provider.policy_failures
-            if provider.fabricated_candidates:
-                fabricated_case_ids.append(case.id)
-            if provider.policy_failures > deterministic.policy_failures:
+            identities.add(provider.identity)
+            evaluated_at = provider.evaluated_at
+            deterministic_supported += deterministic.score.supported_candidates
+            deterministic_fabricated += deterministic.score.fabricated_candidates
+            deterministic_policy_failures += deterministic.score.policy_failures
+            provider_supported += provider.score.supported_candidates
+            provider_fabricated += provider.score.fabricated_candidates
+            provider_policy_failures += provider.score.policy_failures
+            if case.expected and deterministic.score.supported_candidates == len(case.expected):
+                deterministic_supported_cases += 1
+            if case.expected and provider.score.supported_candidates == len(case.expected):
+                provider_supported_cases += 1
+            if deterministic.score.fabricated_candidates:
+                deterministic_fabricated_case_ids.append(case.id)
+            if provider.score.fabricated_candidates:
+                provider_fabricated_case_ids.append(case.id)
+            if provider.score.policy_failures > deterministic.score.policy_failures:
                 policy_regression_case_ids.append(case.id)
-            if provider.supported_candidates < len(case.expected):
+            if provider.score.supported_candidates < len(case.expected):
                 missing_expected_case_ids.append(case.id)
+            deterministic_keys = {_belief_key(belief) for belief in deterministic.beliefs}
+            shared = [
+                belief for belief in provider.beliefs if _belief_key(belief) in deterministic_keys
+            ]
+            added = [
+                belief
+                for belief in provider.beliefs
+                if _belief_key(belief) not in deterministic_keys
+            ]
+            case_results.append(
+                MemoryFormationCaseResult(
+                    case_id=case.id,
+                    expected_count=len(case.expected),
+                    must_remain_empty=case.must_remain_empty,
+                    deterministic=deterministic,
+                    provider=provider,
+                    shared_beliefs=shared,
+                    provider_added_beliefs=added,
+                )
+            )
 
     if len(identities) != 1:
         raise ValueError("provider evaluation resolved more than one provider/model tuple")
@@ -310,15 +444,26 @@ async def run_live_evaluation(
         raise ValueError("provider evaluation corpus is empty")
     provider_name, model_name, policy_version = identities.pop()
     failures: list[str] = []
+    if provider_supported_cases < minimum_supported_case_count:
+        failures.append(
+            f"positive coverage {provider_supported_cases}/{positive_case_count} "
+            f"(minimum={minimum_supported_case_count}, "
+            f"missing_cases={','.join(missing_expected_case_ids) or 'none'})"
+        )
     if provider_supported <= deterministic_supported:
         failures.append(
             "no formation lift "
             f"(deterministic={deterministic_supported}, provider={provider_supported}, "
             f"missing_cases={','.join(missing_expected_case_ids) or 'none'})"
         )
-    if provider_fabricated:
+    if deterministic_fabricated or provider_fabricated:
         failures.append(
-            f"fabricated candidates={provider_fabricated} (cases={','.join(fabricated_case_ids)})"
+            "fabricated candidates "
+            f"(deterministic={deterministic_fabricated}, "
+            f"provider={provider_fabricated}, "
+            "deterministic_cases="
+            f"{','.join(deterministic_fabricated_case_ids) or 'none'}, "
+            f"provider_cases={','.join(provider_fabricated_case_ids) or 'none'})"
         )
     if provider_policy_failures > deterministic_policy_failures:
         failures.append(
@@ -328,7 +473,11 @@ async def run_live_evaluation(
             f"cases={','.join(policy_regression_case_ids)})"
         )
     if failures:
-        raise ValueError("provider memory formation did not pass: " + "; ".join(failures))
+        return MemoryFormationEvaluationResult(
+            passed=False,
+            failure_summary="; ".join(failures),
+            cases=case_results,
+        )
     evidence = ProviderExtractionEvaluationEvidence(
         extractor_version=PROVIDER_EXTRACTOR_VERSION,
         formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
@@ -340,12 +489,22 @@ async def run_live_evaluation(
         build_ref=build_ref,
         corpus_sha256=corpus_sha256,
         sample_count=len(corpus.cases),
+        positive_case_count=positive_case_count,
+        minimum_supported_case_count=minimum_supported_case_count,
+        deterministic_supported_case_count=deterministic_supported_cases,
+        provider_supported_case_count=provider_supported_cases,
         deterministic_supported_candidates=deterministic_supported,
         provider_supported_candidates=provider_supported,
-        fabricated_candidates=provider_fabricated,
+        deterministic_fabricated_candidates=deterministic_fabricated,
+        provider_fabricated_candidates=provider_fabricated,
         deterministic_policy_failures=deterministic_policy_failures,
         provider_policy_failures=provider_policy_failures,
         evaluated_at=evaluated_at,
     )
     _write_evidence(output, evidence)
-    return evidence
+    return MemoryFormationEvaluationResult(
+        passed=True,
+        failure_summary=None,
+        cases=case_results,
+        evidence=evidence,
+    )

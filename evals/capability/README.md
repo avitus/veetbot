@@ -33,5 +33,9 @@ RUN_LIVE_MODEL_TESTS=1 uv run agent eval memory-formation \
 The command refuses to overwrite an existing path. It resolves the provider and
 model, computes the corpus hash, compares isolated deterministic and provider
 arms, and atomically creates the artifact only after the typed activation gate
-passes. The 24 provider calls have a combined USD 1.20 policy ceiling. Startup
+passes. Passing requires lift over the deterministic arm, complete support for at
+least 16 of the 20 positive cases, zero fabrication in both arms, and no policy
+regression. Every run prints structured per-case arm diagnostics; a failed run
+exits non-zero and prints those diagnostics without creating an activation
+artifact. The 24 provider calls have a combined USD 1.20 policy ceiling. Startup
 still checks the artifact against the exact active extraction tuple.

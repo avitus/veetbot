@@ -102,7 +102,7 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     extractor_version: str = Field(min_length=1)
     formation_policy_version: str = Field(min_length=1)
     model_policy: str = Field(min_length=1)
@@ -113,9 +113,14 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
     build_ref: str = Field(min_length=1)
     corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     sample_count: int = Field(ge=20)
+    positive_case_count: int = Field(ge=20)
+    minimum_supported_case_count: int = Field(ge=1)
+    deterministic_supported_case_count: int = Field(ge=0)
+    provider_supported_case_count: int = Field(ge=0)
     deterministic_supported_candidates: int = Field(ge=0)
     provider_supported_candidates: int = Field(ge=0)
-    fabricated_candidates: int = Field(ge=0)
+    deterministic_fabricated_candidates: int = Field(ge=0)
+    provider_fabricated_candidates: int = Field(ge=0)
     deterministic_policy_failures: int = Field(ge=0)
     provider_policy_failures: int = Field(ge=0)
     evaluated_at: datetime
@@ -124,10 +129,24 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
     def passed_activation_gate(self) -> ProviderExtractionEvaluationEvidence:
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
             raise ValueError("provider extraction evaluation time must be timezone-aware")
+        if self.positive_case_count > self.sample_count:
+            raise ValueError("positive case count exceeds the evaluation sample count")
+        if self.minimum_supported_case_count > self.positive_case_count:
+            raise ValueError("minimum supported case count exceeds positive cases")
+        required_coverage = (self.positive_case_count * 4 + 4) // 5
+        if self.minimum_supported_case_count != required_coverage:
+            raise ValueError("minimum supported case count must equal eighty percent coverage")
+        if (
+            self.deterministic_supported_case_count > self.positive_case_count
+            or self.provider_supported_case_count > self.positive_case_count
+        ):
+            raise ValueError("supported case count exceeds positive cases")
+        if self.provider_supported_case_count < self.minimum_supported_case_count:
+            raise ValueError("provider extraction evaluation missed the positive coverage floor")
         if self.provider_supported_candidates <= self.deterministic_supported_candidates:
             raise ValueError("provider extraction evaluation did not demonstrate formation lift")
-        if self.fabricated_candidates:
-            raise ValueError("provider extraction evaluation observed fabricated candidates")
+        if self.deterministic_fabricated_candidates or self.provider_fabricated_candidates:
+            raise ValueError("memory extraction evaluation observed fabricated candidates")
         if self.provider_policy_failures > self.deterministic_policy_failures:
             raise ValueError("provider extraction evaluation observed a policy regression")
         return self

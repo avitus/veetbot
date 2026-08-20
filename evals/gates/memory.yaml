@@ -85,7 +85,7 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Provider safety boundary** — invented source ids and secret-shaped provider proposals cannot pass the governed service's provenance and eligibility checks."
+  statement: "**Provider provenance boundary** — provider proposals remain proposals: invented source ids cannot pass the governed service's provenance check."
   check: tests/unit/test_memory_provider_extraction.py::test_provider_proposals_still_pass_source_and_secret_gates
 - id: gate.memory.provider_audit_fallback
   milestone: 10
@@ -97,8 +97,32 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Evidence publication** — the checked-in paired evaluation publishes an exact activation tuple and corpus hash only after lift, fabrication, and policy-regression gates pass, while failures leave no artifact."
+  statement: "**Evidence publication** — the checked-in paired evaluation derives the active provider tuple and corpus hash and atomically publishes activation evidence only after formation lift, at least eighty percent positive-case coverage, zero fabrication in either arm, and no policy regression pass; a failed evaluation leaves no artifact."
   check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_pass_publishes_the_exact_tuple
+- id: gate.memory.provider_claim_rendering
+  milestone: 10
+  kind: structural
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Canonical provider claims** — the provider returns a closed semantic claim with an exact cited evidence substring; deterministic local rendering owns the final belief type, canonical subject, statement, and authorized scope."
+  check: tests/unit/test_memory_provider_extraction.py::test_provider_semantic_claims_render_canonical_memories
+- id: gate.memory.provider_failure_diagnostics
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Inspectable evaluation failure** — paired evaluation results retain each arm's normalized beliefs, consolidation counts, provider audit outcome and candidate counts, and shared-versus-provider-added attribution; a failed gate returns those diagnostics and the CLI exits non-zero without publishing an activation artifact."
+  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_failure_returns_diagnostics_and_leaves_no_activation_artifact
+- id: gate.memory.provider_positive_coverage
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least sixteen of the twenty labeled positive cases before evidence can be published."
+  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_lift_without_minimum_positive_coverage_does_not_publish
+- id: gate.memory.provider_source_safety
+  milestone: 10
+  kind: case
+  spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
+  statement: "**Authoritative source safety** — secret, injection, or transient markers in authoritative cited source text cannot be erased by provider normalization before the automatic eligibility check."
+  check: tests/gates/test_memory_m10.py::test_automatic_formation_rechecks_source_hazards_after_extraction
 - id: gate.memory.currency
   milestone: 9
   kind: case

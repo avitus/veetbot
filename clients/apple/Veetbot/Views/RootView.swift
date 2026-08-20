@@ -4,6 +4,21 @@ import SwiftUI
 import AppKit
 #endif
 
+struct VeetbotSceneRoot: View {
+    @ObservedObject var model: ChatViewModel
+    @ObservedObject var appearance: AppearancePreferences
+
+    var body: some View {
+        RootView(model: model)
+            .environmentObject(appearance)
+            .appTypography(appearance)
+            .tint(AppTheme.turquoise)
+        #if os(macOS)
+            .frame(minWidth: 780, minHeight: 560)
+        #endif
+    }
+}
+
 public struct RootView: View {
     @ObservedObject var model: ChatViewModel
     #if !os(macOS)

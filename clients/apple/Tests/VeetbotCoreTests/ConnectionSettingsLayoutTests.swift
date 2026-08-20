@@ -20,6 +20,24 @@ import AppKit
 
 @Suite struct SettingsWindowConfigurationTests {
     @Test
+    func testAppWindowUsesAStableNamedSceneRoot() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/VeetbotApp.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("WindowGroup {\n            VeetbotSceneRoot("))
+        #expect(!source.contains("WindowGroup {\n            RootView("))
+        let rootTypeName = String(reflecting: VeetbotSceneRoot.self)
+        #expect(rootTypeName.hasSuffix(".VeetbotSceneRoot"))
+        #expect(!rootTypeName.contains("unknown context"))
+    }
+
+    @Test
     func testMainAndSettingsWindowsHaveDistinctPersistentFrames() {
         #expect(MainWindowConfiguration.frameName == "VeetbotMainWindow")
         #expect(SettingsWindowConfiguration.frameName == "VeetbotSettingsWindow")
