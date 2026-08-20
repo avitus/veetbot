@@ -105,6 +105,24 @@ class MemoryClaimKind(StrEnum):
     PROJECT_FACT = "project_fact"
 
 
+_SUBJECT_VALUE_CLAIM_KINDS = frozenset(
+    {
+        MemoryClaimKind.OCCUPATION,
+        MemoryClaimKind.HOME_LOCATION,
+        MemoryClaimKind.ACCESSIBILITY_TOOL,
+        MemoryClaimKind.LANGUAGE_STUDY,
+        MemoryClaimKind.HOBBY,
+        MemoryClaimKind.TIME_ZONE,
+        MemoryClaimKind.PET_OWNERSHIP,
+        MemoryClaimKind.DIET,
+        MemoryClaimKind.GOAL,
+    }
+)
+_EXPLANATION_STYLE_CUE_TOKENS = frozenset(
+    {"best", "better", "for", "me", "prefer", "preferred", "prefers", "work", "works"}
+)
+
+
 class _SemanticClaim(BaseModel):
     """Require every property so provider strict-schema modes accept the shape."""
 
@@ -170,8 +188,16 @@ _COUNT_WORDS = {
 }
 
 
+def _claim_value(claim: _SemanticClaim) -> str | None:
+    raw = claim.value
+    if raw is None and claim.claim_kind in _SUBJECT_VALUE_CLAIM_KINDS:
+        raw = claim.subject
+    value = "" if raw is None else raw.strip(" \t\n\r,.:;!?")
+    return value or None
+
+
 def _required_value(claim: _SemanticClaim) -> str:
-    value = "" if claim.value is None else claim.value.strip(" \t\n\r,.:;!?")
+    value = _claim_value(claim)
     if not value:
         raise ValueError(f"{claim.claim_kind.value} claim requires a value")
     return value
@@ -338,10 +364,20 @@ def _assistant_text(turn: ModelTurn) -> str:
 def _merge_candidates(
     proposed: list[MemoryCandidate], fallback: list[MemoryCandidate]
 ) -> list[MemoryCandidate]:
-    """Prefer evaluated provider proposals while retaining deterministic coverage."""
+    """Prefer provider lift without letting duplicates weaken deterministic metadata."""
 
     merged: list[MemoryCandidate] = []
     occupied: set[tuple[str, str, str, Polarity, tuple[int, ...]]] = set()
+    fallback_by_key = {
+        (
+            candidate.belief_type.value,
+            candidate.subject.casefold(),
+            candidate.statement.casefold(),
+            candidate.polarity,
+            tuple(candidate.source_event_ids),
+        ): candidate
+        for candidate in fallback
+    }
     for candidate in [*proposed, *fallback]:
         key = (
             candidate.belief_type.value,
@@ -353,7 +389,7 @@ def _merge_candidates(
         if key in occupied:
             continue
         occupied.add(key)
-        merged.append(candidate)
+        merged.append(fallback_by_key.get(key, candidate))
         if len(merged) >= 256:
             break
     return merged
@@ -697,9 +733,15 @@ class ProviderAssistedCandidateExtractor:
             and not grounding_tokens(claim.subject) <= source_tokens
         ):
             return False
-        if claim.value is not None:
-            value_tokens = grounding_tokens(claim.value)
+        claim_value = _claim_value(claim)
+        if claim_value is not None:
+            value_tokens = grounding_tokens(claim_value)
             if not value_tokens <= source_tokens:
+                return False
+            if (
+                claim.claim_kind is MemoryClaimKind.EXPLANATION_STYLE
+                and not value_tokens - _EXPLANATION_STYLE_CUE_TOKENS
+            ):
                 return False
         if claim.context is not None:
             context_tokens = grounding_tokens(claim.context)

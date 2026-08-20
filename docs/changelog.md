@@ -19,6 +19,9 @@ title: Changelog
 - Removed annotation siblings from JSON Schema references so OpenAI strict
   structured output accepts the semantic-claim schema, with recursive regression
   coverage for the provider request boundary.
+- Normalized source-grounded specialized values from either semantic slot,
+  rejected cue-only explanation styles, and retained deterministic metadata when
+  an otherwise identical provider claim would weaken the fallback candidate.
 
 ## 2026-08-20 — Deployment provisioning contract hardening
 

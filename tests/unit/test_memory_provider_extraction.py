@@ -212,6 +212,20 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
             ("user_model_attr", "occupation", "User is a marine biologist."),
         ),
         (
+            "As a marine biologist, I spend a lot of time analyzing field samples.",
+            {
+                "claim_kind": "occupation",
+                "subject": "marine biologist",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "marine biologist",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "occupation", "User is a marine biologist."),
+        ),
+        (
             "Most weekends I restore old shortwave radios.",
             {
                 "claim_kind": "hobby",
@@ -226,11 +240,39 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
             ("user_model_attr", "hobby", "User restores old shortwave radios."),
         ),
         (
+            "Most weekends I restore old shortwave radios.",
+            {
+                "claim_kind": "hobby",
+                "subject": "restore old shortwave radios",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "restore old shortwave radios",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "hobby", "User restores old shortwave radios."),
+        ),
+        (
             "Portland is home for me, although I travel often for work.",
             {
                 "claim_kind": "home_location",
                 "subject": "home location",
                 "value": "Portland",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "Portland is home for me",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "home location", "User lives in Portland."),
+        ),
+        (
+            "Portland is home for me, although I travel often for work.",
+            {
+                "claim_kind": "home_location",
+                "subject": "Portland",
+                "value": None,
                 "context": None,
                 "quantity": None,
                 "evidence_quote": "Portland is home for me",
@@ -254,6 +296,20 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
             ("user_model_attr", "accessibility", "User relies on a screen reader."),
         ),
         (
+            "I rely on a screen reader when I use desktop applications.",
+            {
+                "claim_kind": "accessibility_tool",
+                "subject": "screen reader",
+                "value": None,
+                "context": "desktop applications",
+                "quantity": None,
+                "evidence_quote": "I rely on a screen reader",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "sensitive",
+            },
+            ("user_model_attr", "accessibility", "User relies on a screen reader."),
+        ),
+        (
             "I've been studying Japanese for three years.",
             {
                 "claim_kind": "language_study",
@@ -268,11 +324,39 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
             ("user_model_attr", "language study", "User studies Japanese."),
         ),
         (
+            "I've been studying Japanese for three years.",
+            {
+                "claim_kind": "language_study",
+                "subject": "Japanese",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "studying Japanese",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "language study", "User studies Japanese."),
+        ),
+        (
             "I'm in Pacific time, which matters when we schedule calls.",
             {
                 "claim_kind": "time_zone",
                 "subject": "time zone",
                 "value": "Pacific time",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "in Pacific time",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "time zone", "User is in Pacific time."),
+        ),
+        (
+            "I'm in Pacific time, which matters when we schedule calls.",
+            {
+                "claim_kind": "time_zone",
+                "subject": "Pacific time",
+                "value": None,
                 "context": None,
                 "quantity": None,
                 "evidence_quote": "in Pacific time",
@@ -296,6 +380,20 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
             ("user_model_attr", "cats", "User has two cats."),
         ),
         (
+            "Our two cats always sit beside the telescope case.",
+            {
+                "claim_kind": "pet_ownership",
+                "subject": "cats",
+                "value": None,
+                "context": None,
+                "quantity": 2,
+                "evidence_quote": "two cats",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+            ("user_model_attr", "cats", "User has two cats."),
+        ),
+        (
             "Please keep recipe suggestions vegan; that is how I eat.",
             {
                 "claim_kind": "diet",
@@ -306,6 +404,20 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "evidence_quote": "vegan",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "sensitive",
+            },
+            ("preference", "diet", "User follows a vegan diet."),
+        ),
+        (
+            "Please keep recipe suggestions vegan; that is how I eat.",
+            {
+                "claim_kind": "diet",
+                "subject": "vegan",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "vegan",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
             },
             ("preference", "diet", "User follows a vegan diet."),
         ),
@@ -351,6 +463,20 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "claim_kind": "goal",
                 "subject": "goal",
                 "value": "learn astrophotography",
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "learn astrophotography",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "internal",
+            },
+            ("user_model_attr", "goal", "User wants to learn astrophotography."),
+        ),
+        (
+            "I'm hoping to learn astrophotography this year.",
+            {
+                "claim_kind": "goal",
+                "subject": "learn astrophotography",
+                "value": None,
                 "context": None,
                 "quantity": None,
                 "evidence_quote": "learn astrophotography",
@@ -588,6 +714,94 @@ async def test_provider_extractor_rejects_ungrounded_named_claim_with_valid_sour
 
 
 @pytest.mark.parametrize(
+    ("episode", "claim"),
+    [
+        (
+            "As a marine biologist, I spend a lot of time analyzing field samples.",
+            {
+                "claim_kind": "occupation",
+                "subject": "astronaut",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "marine biologist",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+        ),
+        (
+            "For technical explanations, short paragraphs and examples work best for me.",
+            {
+                "claim_kind": "explanation_style",
+                "subject": "explanation style",
+                "value": "work best",
+                "context": "technical explanations",
+                "quantity": None,
+                "evidence_quote": (
+                    "For technical explanations, short paragraphs and examples work best for me."
+                ),
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+        ),
+    ],
+)
+async def test_provider_rejects_ungrounded_subject_values_and_cue_only_styles(
+    episode: str,
+    claim: dict[str, object],
+) -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, episode)
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    **claim,
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.99,
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(8_150, 8_250)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert candidates == []
+    async with factory() as uow:
+        audits = await uow.process_events.list("memory.provider_extraction.completed")
+    assert len(audits) == 1
+    assert audits[0].payload["candidate_count"] == 1
+    assert audits[0].payload["grounded_candidate_count"] == 0
+
+
+@pytest.mark.parametrize(
     ("claim_subject", "evidence_quote"),
     [("wife", "my daughter"), ("daughter", "MY DAUGHTER")],
 )
@@ -718,6 +932,28 @@ def test_provider_merge_preserves_distinct_statements_and_sources() -> None:
         different_statement,
         different_source,
     ]
+
+
+def test_provider_merge_retains_deterministic_metadata_for_an_exact_duplicate() -> None:
+    deterministic = MemoryCandidate(
+        belief_type=BeliefType.RELATIONSHIP,
+        subject="daughter",
+        statement="User has at least one daughter.",
+        source_event_ids=[1],
+        model_confidence=0.8,
+        proposed_scope="project-a",
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+    )
+    provider = deterministic.model_copy(
+        update={
+            "model_confidence": 0.99,
+            "proposed_portability": Portability.PORTABLE,
+            "sensitivity_guess": Sensitivity.PUBLIC,
+        }
+    )
+
+    assert _merge_candidates([provider], [deterministic]) == [deterministic]
 
 
 async def test_provider_extractor_caps_output_before_call_to_stay_inside_cost_budget() -> None:
