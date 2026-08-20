@@ -64,7 +64,7 @@ if [[ -n "$EXPECTED_RELEASE_ID" ]]; then
   if ! grep -Fqx "VEETBOT_RELEASE_ID=$EXPECTED_RELEASE_ID" "$ACTIVE_RELEASE_ENV"; then
     printf 'Skipping stale Nginx deployment for %s; a newer application release is active.\n' \
       "$EXPECTED_RELEASE_ID"
-    exit 0
+    exit 3
   fi
 fi
 

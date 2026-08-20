@@ -538,6 +538,17 @@ def test_ci_has_the_required_partitions() -> None:
         "https://docs.veetbot.com" in command and "documentation did not report release" in command
         for command in commands["deploy-nginx"]
     )
+    assert any(
+        "nginx-deployment-outcome" in command
+        and '[[ "$deployment_status" == 3 ]]' in command
+        and "printf 'stale\\n'" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "nginx-deployment-outcome" in command
+        and "Skipping documentation identity probe for stale release" in command
+        for command in commands["deploy-nginx"]
+    )
     assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
     deployment_key_step = {
         "add_ssh_keys": {"fingerprints": ["SHA256:vt3iKfD3dv6dxtjS+Tre6B1EH6408yvMHFrMpp64sao"]}

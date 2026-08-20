@@ -265,6 +265,8 @@ jobs:
             remote_docs_dir="/tmp/veetbot-docs-$CIRCLE_SHA1"
             remote_docs="$remote_docs_dir/veetbot-docs.tar.gz"
             remote_docs_checksum="$remote_docs.sha256"
+            deployment_outcome="/tmp/veetbot-release/nginx-deployment-outcome"
+            rm -f "$deployment_outcome"
             scp -P "${DEPLOY_PORT:-22}" nginx/veetbot.conf \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_config"
             scp -P "${DEPLOY_PORT:-22}" deploy/nginx/deploy.sh \
@@ -277,19 +279,34 @@ jobs:
             scp -P "${DEPLOY_PORT:-22}" \
               /tmp/veetbot-release/veetbot-docs.tar.gz.sha256 \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_docs_checksum"
-            ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            if ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "VEETBOT_EXPECTED_RELEASE_ID='$expected_release_id' \
-               bash '$remote_script' '$remote_config' '$remote_docs' \
-                 '$remote_docs_checksum'; \
+                 bash '$remote_script' '$remote_config' '$remote_docs' \
+                   '$remote_docs_checksum'; \
                status=\$?; \
                rm -f '$remote_script' '$remote_config' '$remote_docs' \
                  '$remote_docs_checksum'; \
                rmdir '$remote_docs_dir' 2>/dev/null || true; \
-               exit \$status"
+               exit \$status"; then
+              printf 'published\n' >"$deployment_outcome"
+            else
+              deployment_status=$?
+              if [[ "$deployment_status" == 3 ]]; then
+                printf 'stale\n' >"$deployment_outcome"
+              else
+                exit "$deployment_status"
+              fi
+            fi
       - run:
           name: Verify public documentation release
           command: |
             expected_release_id="$(cat /tmp/veetbot-release/release-id)"
+            deployment_outcome="$(cat /tmp/veetbot-release/nginx-deployment-outcome)"
+            if [[ "$deployment_outcome" == stale ]]; then
+              echo "Skipping documentation identity probe for stale release $expected_release_id"
+              exit 0
+            fi
+            [[ "$deployment_outcome" == published ]]
             docs_url="${DOCS_URL:-https://docs.veetbot.com}"
             attempt=0
             max_attempts=10

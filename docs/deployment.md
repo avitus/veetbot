@@ -294,7 +294,9 @@ four required verification lanes pass:
   lock, atomically promotes `/opt/veetbot/docs/current`, and reconciles the
   versioned virtual hosts. If a newer pipeline has already promoted another
   application release, the older proxy job detects the release-identity
-  mismatch and exits without overwriting the newer site or config.
+  mismatch, reports a distinct stale outcome, and exits without overwriting the
+  newer site or config. CircleCI skips that older job's documentation identity
+  probe because the newer release remains authoritative.
 
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and

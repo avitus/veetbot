@@ -128,8 +128,18 @@ grep -Fqx \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0/release.txt"
 
 printf 'server { return 418; }\n' >"$SOURCE_CONFIG"
-VEETBOT_EXPECTED_RELEASE_ID=20260810-152244-bcdef01 run_deploy \
-  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" >"$TEST_ROOT/stale.out"
+if VEETBOT_EXPECTED_RELEASE_ID=20260810-152244-bcdef01 run_deploy \
+  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" >"$TEST_ROOT/stale.out"; then
+  printf 'stale Nginx deployment unexpectedly reported publication\n' >&2
+  exit 1
+else
+  stale_status=$?
+fi
+[[ "$stale_status" == 3 ]] || {
+  printf 'stale Nginx deployment returned status %s, expected 3\n' \
+    "$stale_status" >&2
+  exit 1
+}
 grep -Fq 'Skipping stale Nginx deployment' "$TEST_ROOT/stale.out"
 grep -Fq 'return 204' "$AVAILABLE"
 [[ "$(readlink "$DOCS_ROOT/current")" == \

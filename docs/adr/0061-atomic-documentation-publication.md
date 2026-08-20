@@ -40,7 +40,9 @@ work without coupling documentation links, search, and assets to a prefix.
    documentation symlink. Five immutable documentation releases are retained.
 6. CircleCI verifies `release.txt` through the public TLS endpoint after Nginx
    reload. A release is not successfully delivered when the public site reports
-   a different identity or cannot be reached.
+   a different identity or cannot be reached. If a newer application release
+   wins the deployment race first, the Nginx deployment reports a distinct
+   stale outcome and CircleCI skips the obsolete identity probe.
 7. The DigitalOcean DNS record and the Let's Encrypt certificate are one-time
    operator prerequisites. Credentials for either system remain outside the
    repository and CircleCI. The deployment must not be merged to `main` until
