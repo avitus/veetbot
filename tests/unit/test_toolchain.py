@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import re
 import socket
 import subprocess
 import tomllib
@@ -144,6 +145,18 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" in environment
+    # The container requires the service-auth file to be owned by uid 65532,
+    # while the agent units read the control-plane credential as the veetbot
+    # user; both are mode 0600, so one file cannot serve both readers.
+    example_values = dict(
+        line.split("=", 1)
+        for line in environment.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert (
+        example_values["BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE"]
+        != example_values["BROWSER_PROFILE_SERVICE_AUTH_FILE"]
+    )
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
     assert "FIRECRAWL_API_KEY=" in template_lines
@@ -945,3 +958,126 @@ def test_required_files_include_the_status_split_surfaces(
     check_docs.check_required_files()
     assert "required file missing: docs/status/verification-history.yaml" in check_docs.errors
     assert "required file missing: docs/status/corpus-audit-log.md" in check_docs.errors
+
+
+_SUDOERS_RULE = re.compile(r"^(\S+) (\S+)=\((\S+)\) NOPASSWD: (/\S+)( .+)?$")
+_SUDOERS_INCLUDE = re.compile(r"^[#@]include(dir)?\b")
+
+
+def _sudoers_rules(lines: list[str]) -> list[str]:
+    """The non-comment, non-blank lines of a sudoers file, unfiltered of directives."""
+
+    return [
+        line.strip()
+        for line in lines
+        if line.strip()
+        and (_SUDOERS_INCLUDE.match(line.strip()) or not line.strip().startswith("#"))
+    ]
+
+
+def _sudoers_rule_violations(lines: list[str]) -> list[str]:
+    """Reject any sudoers line wider than the deploy contract permits.
+
+    Operates on raw file lines: true comments are skipped, but #include and
+    #includedir (and their modern @ forms) are active sudoers directives that
+    pull in additional grants, so they are rejected rather than filtered.
+    """
+
+    violations = []
+    for rule in _sudoers_rules(lines):
+        if _SUDOERS_INCLUDE.match(rule):
+            violations.append(f"include directives are forbidden in the contract: {rule}")
+            continue
+        match = _SUDOERS_RULE.match(rule)
+        if match is None:
+            violations.append(f"not a NOPASSWD rule with an absolute command path: {rule}")
+            continue
+        subject, host, runas, _path, arguments = match.groups()
+        if subject != "deploy":
+            violations.append(f"subject must be the documented deploy placeholder: {rule}")
+        if host != "ALL":
+            violations.append(f"host must be ALL: {rule}")
+        if runas != "root":
+            violations.append(f"run-as target must be root only: {rule}")
+        if arguments is None:
+            violations.append(f"command must constrain its arguments: {rule}")
+        if "," in rule:
+            violations.append(f"one rule per command specification: {rule}")
+    return violations
+
+
+def test_sudoers_contract_rejects_include_directives() -> None:
+    # In sudoers, #include and #includedir are active directives, not
+    # comments; an included file could grant extra root commands invisibly.
+    for directive in (
+        "#include /etc/sudoers.local",
+        "#includedir /etc/sudoers.d",
+        "@include /etc/sudoers.local",
+        "@includedir /etc/sudoers.d",
+    ):
+        assert _sudoers_rule_violations(["# an ordinary comment", directive]), directive
+    assert _sudoers_rule_violations(["# an ordinary comment", ""]) == []
+
+
+def test_sudoers_contract_rejects_widened_rules() -> None:
+    for widened in (
+        "ALL ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload",
+        "%admin ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload",
+        "deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload",
+        "deploy ALL=(root) NOPASSWD: /usr/bin/systemctl",
+        "deploy ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload, /bin/sh",
+        "deploy ALL=(root) NOPASSWD: systemctl daemon-reload",
+        "deploy ALL=(root) PASSWD: /usr/bin/systemctl daemon-reload",
+        "deploy ALL=(root) NOPASSWD: ALL",
+    ):
+        assert _sudoers_rule_violations([widened]), widened
+
+
+def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
+    contract = ROOT / "deploy" / "sudoers" / "veetbot-deploy"
+    assert contract.is_file(), "deploy/sudoers/veetbot-deploy is the deploy account's sudo contract"
+
+    raw_lines = contract.read_text(encoding="utf-8").splitlines()
+    assert _sudoers_rule_violations(raw_lines) == []
+    rules = _sudoers_rules(raw_lines)
+    assert rules
+    specs = set()
+    for rule in rules:
+        match = _SUDOERS_RULE.match(rule)
+        assert match is not None
+        specs.add(f"{match.group(4)}{match.group(5) or ''}")
+
+    # systemctl argv is deterministic, so its rules are exact — never globbed.
+    assert all("*" not in spec for spec in specs if spec.startswith("/usr/bin/systemctl")), (
+        "systemctl rules must name exact units and arguments"
+    )
+
+    # The exact unit lists come from release.sh itself, so a UNITS change
+    # fails this test until the contract names the new argv.
+    release_text = (ROOT / "deploy" / "app" / "release.sh").read_text(encoding="utf-8")
+    units_match = re.search(r"^UNITS=\(([^)]*)\)", release_text, re.MULTILINE)
+    assert units_match is not None
+    units = units_match.group(1).split()
+    scheduled_units = ["veetbot-schedule", *units]
+    for argv in (units, scheduled_units):
+        assert f"/usr/bin/systemctl enable --now {' '.join(argv)}" in specs
+        assert f"/usr/bin/systemctl restart {' '.join(argv)}" in specs
+    for unit in scheduled_units:
+        assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
+        assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
+    assert "/usr/bin/systemctl daemon-reload" in specs
+    assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
+
+    used = set()
+    for script in ("deploy/app/release.sh", "deploy/nginx/deploy.sh"):
+        used.update(
+            re.findall(
+                r"\bsudo\s+([a-z][a-z0-9_.-]*)",
+                (ROOT / script).read_text(encoding="utf-8"),
+            )
+        )
+    assert used, "the contract exists because the deploy scripts invoke sudo"
+    rule_binaries = {Path(spec.split()[0]).name for spec in specs}
+    assert used <= rule_binaries, (
+        f"sudo commands without a contract rule: {sorted(used - rule_binaries)}"
+    )
