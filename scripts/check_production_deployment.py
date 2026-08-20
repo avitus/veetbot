@@ -32,6 +32,17 @@ def _run(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[st
         return subprocess.CompletedProcess(command, 124, stdout or "", f"timed out: {exc}")
 
 
+def _same_credential_file(credential: str, service_auth: str) -> bool:
+    try:
+        # samefile compares inode identity, catching hard links whose
+        # resolved paths differ.
+        return Path(credential).samefile(service_auth)
+    except OSError:
+        # Files that do not exist yet still conflict through `..` aliases
+        # and symlinked parents.
+        return Path(credential).resolve() == Path(service_auth).resolve()
+
+
 def _browser_credential_failures(environment: Mapping[str, str]) -> list[str]:
     """Reject the shared-path browser credential misconfiguration.
 
@@ -42,9 +53,7 @@ def _browser_credential_failures(environment: Mapping[str, str]) -> list[str]:
 
     credential = environment.get("BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE", "").strip()
     service_auth = environment.get("BROWSER_PROFILE_SERVICE_AUTH_FILE", "").strip()
-    # Compare effective file identities: `..` aliases and symlinked parents
-    # reach the same file the loaders would open, so they conflict equally.
-    if credential and service_auth and Path(credential).resolve() == Path(service_auth).resolve():
+    if credential and service_auth and _same_credential_file(credential, service_auth):
         return [
             "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE and "
             "BROWSER_PROFILE_SERVICE_AUTH_FILE must name different files: the "

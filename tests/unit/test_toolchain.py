@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import os
 import re
 import socket
 import subprocess
@@ -210,6 +211,22 @@ def test_deployment_validation_rejects_aliased_browser_credential_paths(
         "BROWSER_PROFILE_SERVICE_AUTH_FILE": str(real / "auth"),
     }
     assert production_check._browser_credential_failures(symlinked)
+
+
+def test_deployment_validation_rejects_hard_linked_browser_credential_paths(
+    tmp_path: Path,
+) -> None:
+    # Hard links share an inode but resolve to distinct paths, so identity
+    # must be compared with samefile when both files exist.
+    original = tmp_path / "browser-profile-service-auth"
+    original.write_text("credential\n", encoding="utf-8")
+    linked = tmp_path / "browser-control-plane-credential"
+    os.link(original, linked)
+    hard_linked = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": str(linked),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": str(original),
+    }
+    assert production_check._browser_credential_failures(hard_linked)
 
 
 def test_production_compose_preserves_browser_profile_isolation() -> None:
