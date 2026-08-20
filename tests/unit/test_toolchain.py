@@ -168,6 +168,26 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert set(configured_scopes) <= PLATFORM_SCOPES
 
 
+def test_deployment_validation_rejects_shared_browser_credential_path() -> None:
+    shared_path = "/etc/veetbot/secrets/browser-profile-service-auth"
+    shared = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": shared_path,
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": shared_path,
+    }
+    failures = production_check._browser_credential_failures(shared)
+    assert failures
+    assert "different files" in failures[0]
+
+    distinct = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": (
+            "/etc/veetbot/secrets/browser-control-plane-credential"
+        ),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": shared_path,
+    }
+    assert production_check._browser_credential_failures(distinct) == []
+    assert production_check._browser_credential_failures({}) == []
+
+
 def test_production_compose_preserves_browser_profile_isolation() -> None:
     deploy = ROOT / "deploy"
     production_compose = yaml.safe_load(
