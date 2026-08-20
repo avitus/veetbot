@@ -7,6 +7,9 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import UUID
 
+import pytest
+
+import agent_core.config as config_module
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
@@ -258,8 +261,16 @@ async def test_model_assisted_extractor_rejects_output_over_its_dedicated_budget
 
 
 async def test_routed_composition_does_not_activate_rich_extraction_without_evidence(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    release_root = tmp_path / "release-evidence"
+    release_root.mkdir()
+    monkeypatch.setattr(
+        config_module,
+        "PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT",
+        release_root,
+    )
     provider = FakeModelProvider(
         FakeModelScript(
             turns=[

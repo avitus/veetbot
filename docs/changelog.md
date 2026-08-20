@@ -26,6 +26,10 @@ title: Changelog
   canonicalized irregular base verbs so `go hiking` renders as `goes hiking`.
 - Rejected duration-only language-study values such as `three years` instead of
   allowing a grounded time phrase to become a fabricated language memory.
+- Accepted ADR-0057 after the version-bound OpenAI `gpt-5.6-sol` evaluation
+  supported 18 of 20 positive cases and 19 candidates versus 9 deterministic
+  candidates, with zero fabrication and zero policy failures in both arms, and
+  bundled the passing schema-v2 evidence for exact-tuple startup activation.
 
 ## 2026-08-20 — Deployment provisioning contract hardening
 

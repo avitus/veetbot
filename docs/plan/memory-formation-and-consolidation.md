@@ -484,12 +484,11 @@ ADR-0051 introduced a schema-constrained hybrid reference extractor over trusted
 principal-authored events and a compact existing-belief view. Its focused tests
 retain regression coverage for grounding, strict output, independent limits,
 content-free `memory.extraction.completed` auditing, and deterministic fallback.
-Those tests are not production activation evidence. ADR-0057 proposes
-superseding the earlier routed-policy selection rule; pending owner acceptance,
-the provisional implementation enforces that stricter boundary without treating
-the ADR as accepted. Normal composition does not select a provider extractor
-until a version-bound artifact for the exact runtime tuple passes startup
-validation.
+Those tests are not production activation evidence. Accepted ADR-0057 supersedes
+the earlier routed-policy selection rule. Normal composition does not select a
+provider extractor until a version-bound artifact for the exact runtime tuple
+passes startup validation; the balanced OpenAI `gpt-5.6-sol` and default-policy
+tuple now has bundled passing evidence from the checked-in 24-case corpus.
 
 ### Evaluation-gated provider assistance (`formation@4`)
 

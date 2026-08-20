@@ -1,6 +1,6 @@
 # ADR-0057: Evaluation-gated provider-assisted memory extraction
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-18
 - Related: Milestone 10, ADR-0002, ADR-0018, ADR-0023, ADR-0045,
   ADR-0051
@@ -30,7 +30,7 @@ memory design separately permits a dedicated maintenance job, so provider
 assistance does not require introducing `delegate.run` or changing routing
 behavior.
 
-## Proposed decision
+## Decision
 
 1. **Use a dedicated maintenance extractor.** `ProviderAssistedCandidateExtractor`
    implements the existing `MemoryCandidateExtractor` port and is called only by

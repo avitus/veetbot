@@ -121,12 +121,10 @@ verification:
           unsupported named entity, falls back on malformed output, and rejects
           output beyond its dedicated budget. The existing memory formation,
           source-integrity, injection, candidate-cap, and no-policy-regression
-          gates remain unchanged. Pending owner acceptance, the implementation
-          provisionally applies ADR-0057's stricter composition boundary without
-          claiming architectural acceptance: the reference extractor remains
-          covered directly, while normal composition requires exact activation
-          evidence. No provider credential was available for a live smoke test in
-          this worktree.
+          gates remain unchanged. Accepted ADR-0057 now owns the stricter
+          composition boundary: the reference extractor remains covered directly,
+          while normal composition requires exact activation evidence and the
+          balanced OpenAI/default tuple has passing release-bundled evidence.
       - check: Milestone 10A skill-authoring gates
         outcome: passed_locally
         detail: >-
@@ -285,11 +283,10 @@ verification:
           ceiling, temporal-hint preservation, transactional replacement,
           formation-scan index, hybrid extractor reference implementation,
           content-free model-usage audit, deterministic fallback, and formation@3
-          policy boundary are approved and implemented. ADR-0051 remains the
-          accepted architecture. The implementation enforces proposed ADR-0057's
-          stricter evidence gate while owner review is pending; ADR-0057 would
-          supersede ADR-0051's unconditional routed-policy activation and provider
-          budget only if accepted.
+          policy boundary are approved and implemented. ADR-0051 remains accepted
+          architecture for the automatic-memory lifecycle, while accepted ADR-0057
+          supersedes its unconditional routed-policy activation and provider budget
+          with the stricter version-bound evidence gate.
       - check: proposed ADR-0052
         outcome: owner_review_requested
         detail: >-
@@ -327,23 +324,34 @@ verification:
           source hazard rechecks, symmetric arm scoring and fabrication reporting,
           inspectable failed-run diagnostics, non-zero failed CLI status, and a
           sixteen-of-twenty positive-case publication floor. The final repository
-          check passed formatting, lint, type checking, 833 static tests, 324
+          check passed formatting, lint, type checking, 853 static tests, 324
           contract tests, deployment-script tests, and strict documentation and
           227-entry gate-registry reconciliation. After Docker became available,
           all 10 real-container sandbox security tests passed and the unrestricted
           repository suite completed with 1,182 passed and 94 explicitly skipped.
-      - check: proposed ADR-0057
-        outcome: owner_review_requested
+      - check: formation@4 intended-production-model activation evaluation
+        outcome: passed
+        detail: >-
+          The version-bound 24-case evaluation at immutable build
+          7de9a98f550e60130f7f7131d78ca537e720685b resolved the balanced policy to
+          OpenAI gpt-5.6-sol and the default compiled policy to
+          default@8905b6f85895+hb03f69cf. The provider arm completely supported
+          18 of 20 positive cases and 19 candidates versus 9 deterministic
+          candidates, with zero fabrication and zero policy failures in both
+          arms. The protected question, transient, secret, and injection cases
+          remained empty. Schema-v2 evidence for corpus hash
+          b10ae25558d3236b9a0a47cad59d4b89ff6824085cba79656cc90740bc7d8c43 is
+          bundled under the provider-memory release-evidence trust boundary.
+      - check: accepted ADR-0057
+        outcome: approved_and_implemented
         detail: >-
           The dedicated maintenance placement, exact evidence binding, fixed
           provider budget, user-episode selection, deterministic safety authority,
           content-free call audit, non-production evaluation mode, fallback, and
           formation@4 semantic-claim, source-safety, diagnostic, and positive-case
-          coverage boundaries are recorded for owner review.
+          coverage boundaries are accepted, implemented, and backed by passing
+          intended-production-model evidence.
     remaining:
-      - Rerun the labeled live-provider formation evaluation against the intended
-        production model after the formation@4 repair and activate the restricted
-        extractor only when its version-bound evidence passes ADR-0057.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
