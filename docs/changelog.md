@@ -24,6 +24,8 @@ title: Changelog
   an otherwise identical provider claim would weaken the fallback candidate.
 - Labeled the explicit hiking hobby in the wife relationship evaluation case and
   canonicalized irregular base verbs so `go hiking` renders as `goes hiking`.
+- Rejected duration-only language-study values such as `three years` instead of
+  allowing a grounded time phrase to become a fabricated language memory.
 
 ## 2026-08-20 — Deployment provisioning contract hardening
 

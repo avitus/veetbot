@@ -121,6 +121,28 @@ _SUBJECT_VALUE_CLAIM_KINDS = frozenset(
 _EXPLANATION_STYLE_CUE_TOKENS = frozenset(
     {"best", "better", "for", "me", "prefer", "preferred", "prefers", "work", "works"}
 )
+_DURATION_TOKENS = frozenset(
+    {
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "day",
+        "days",
+        "week",
+        "weeks",
+        "month",
+        "months",
+        "year",
+        "years",
+    }
+)
 
 
 class _SemanticClaim(BaseModel):
@@ -744,6 +766,10 @@ class ProviderAssistedCandidateExtractor:
             if (
                 claim.claim_kind is MemoryClaimKind.EXPLANATION_STYLE
                 and not value_tokens - _EXPLANATION_STYLE_CUE_TOKENS
+            ):
+                return False
+            if claim.claim_kind is MemoryClaimKind.LANGUAGE_STUDY and all(
+                token.isdecimal() or token in _DURATION_TOKENS for token in value_tokens
             ):
                 return False
         if claim.context is not None:

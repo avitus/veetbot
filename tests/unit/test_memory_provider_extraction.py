@@ -801,6 +801,19 @@ async def test_provider_extractor_rejects_ungrounded_named_claim_with_valid_sour
                 "sensitivity_guess": "public",
             },
         ),
+        (
+            "I've been studying Japanese for three years.",
+            {
+                "claim_kind": "language_study",
+                "subject": "three years",
+                "value": None,
+                "context": None,
+                "quantity": None,
+                "evidence_quote": "studying Japanese for three years",
+                "proposed_portability": "portable",
+                "sensitivity_guess": "public",
+            },
+        ),
     ],
 )
 async def test_provider_rejects_ungrounded_subject_values_and_cue_only_styles(
