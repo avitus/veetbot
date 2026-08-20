@@ -176,11 +176,12 @@ def test_gate_table_arithmetic_reports_stale_digits() -> None:
         "declarations, 184 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
-    findings = gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED)
-    assert any("187" in finding and "226" in finding for finding in findings)
-    assert any("184" in finding and "223" in finding for finding in findings)
-    assert any("15" in finding and "17" in finding for finding in findings)
-    assert any("178" in finding and "217" in finding for finding in findings)
+    assert gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED) == [
+        "gate table intro says 15 subject specs; registry derives 17",
+        "gate table intro says 178 subject gates; registry derives 217",
+        "gate table intro says 187 declarations; registry derives 226",
+        "gate table intro says 184 entries; registry derives 223",
+    ]
 
 
 def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
@@ -191,9 +192,10 @@ def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
         "declarations, 223 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
-    findings = gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED)
-    assert any("3 plan gates" in finding and "2" in finding for finding in findings)
-    assert any("6 map gates" in finding and "7" in finding for finding in findings)
+    assert gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED) == [
+        "gate table intro says 3 plan gates; registry derives 2",
+        "gate table intro says 6 map gates; registry derives 7",
+    ]
 
 
 def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
