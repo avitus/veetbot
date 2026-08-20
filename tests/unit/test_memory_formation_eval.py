@@ -92,6 +92,25 @@ def test_checked_in_memory_formation_corpus_is_versioned_and_large_enough() -> N
         "secret-001",
         "injection-001",
     }
+    wife = next(case for case in corpus.cases if case.id == "relationship-wife-001")
+    score = score_case(
+        wife,
+        [
+            EvaluationBelief(
+                belief_type="relationship",
+                subject="wife",
+                statement="User has a wife.",
+            ),
+            EvaluationBelief(
+                belief_type="user_model_attr",
+                subject="hobby",
+                statement="User goes hiking.",
+            ),
+        ],
+    )
+    assert len(wife.expected) == 2
+    assert score.supported_candidates == 2
+    assert score.fabricated_candidates == 0
 
 
 def test_case_schema_requires_an_expectation_or_an_explicit_protection_label() -> None:
@@ -168,9 +187,9 @@ class TestProviderEvidencePublicationGate:
             provider_assisted: bool,
         ) -> FormationArmResult:
             assert (model_policy, policy_profile) == ("balanced", "default")
-            supported = not _case.must_remain_empty and provider_assisted
+            supported = len(_case.expected) if provider_assisted else 0
             score = FormationScore(
-                supported_candidates=int(supported),
+                supported_candidates=supported,
                 fabricated_candidates=0,
                 policy_failures=0,
             )
@@ -179,8 +198,8 @@ class TestProviderEvidencePublicationGate:
                 identity=(
                     ("openai", "gpt-memory", "default@profile+hline") if provider_assisted else None
                 ),
-                candidate_count=int(supported),
-                grounded_candidate_count=int(supported),
+                candidate_count=supported,
+                grounded_candidate_count=supported,
             )
 
         monkeypatch.setattr(memory_eval, "_evaluate_case", evaluate)
@@ -202,7 +221,9 @@ class TestProviderEvidencePublicationGate:
         assert evidence.provider == "openai"
         assert evidence.model == "gpt-memory"
         assert evidence.deterministic_supported_candidates == 0
-        assert evidence.provider_supported_candidates == evidence.positive_case_count
+        assert evidence.provider_supported_candidates == sum(
+            len(case.expected) for case in load_corpus(Path(__file__).resolve().parents[2])[0].cases
+        )
         rendered = output.read_text(encoding="utf-8")
         persisted = type(evidence).model_validate_json(rendered)
         assert persisted == evidence
@@ -225,7 +246,7 @@ class TestProviderEvidencePublicationGate:
         assert len(persisted.corpus_sha256) == 64
         assert persisted.sample_count == evidence.sample_count == 24
         assert persisted.deterministic_supported_candidates == 0
-        assert persisted.provider_supported_candidates == persisted.positive_case_count
+        assert persisted.provider_supported_candidates == evidence.provider_supported_candidates
         assert persisted.deterministic_fabricated_candidates == 0
         assert persisted.provider_fabricated_candidates == 0
         assert persisted.provider_supported_case_count == persisted.positive_case_count

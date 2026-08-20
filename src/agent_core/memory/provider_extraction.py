@@ -206,7 +206,10 @@ def _required_value(claim: _SemanticClaim) -> str:
 def _third_person_phrase(value: str) -> str:
     first, separator, rest = value.partition(" ")
     lowered = first.casefold()
-    if lowered.endswith(("s", "x", "z", "ch", "sh")):
+    irregular = {"be": "is", "do": "does", "go": "goes", "have": "has"}
+    if lowered in irregular:
+        rendered = irregular[lowered]
+    elif lowered.endswith(("s", "x", "z", "ch", "sh")):
         rendered = f"{first}es"
     elif lowered.endswith("y") and len(first) > 1 and first[-2].casefold() not in "aeiou":
         rendered = f"{first[:-1]}ies"

@@ -22,6 +22,8 @@ title: Changelog
 - Normalized source-grounded specialized values from either semantic slot,
   rejected cue-only explanation styles, and retained deterministic metadata when
   an otherwise identical provider claim would weaken the fallback candidate.
+- Labeled the explicit hiking hobby in the wife relationship evaluation case and
+  canonicalized irregular base verbs so `go hiking` renders as `goes hiking`.
 
 ## 2026-08-20 — Deployment provisioning contract hardening
 

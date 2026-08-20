@@ -559,6 +559,63 @@ async def test_provider_semantic_claims_render_canonical_memories(
     ] == [expected]
 
 
+async def test_provider_canonicalizes_go_hiking_without_losing_the_wife_fallback() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "My wife and I go hiking most weekends.")
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "hobby",
+                    "subject": "go hiking",
+                    "value": None,
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": "go hiking most weekends",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.99,
+                    "proposed_portability": "portable",
+                    "sensitivity_guess": "public",
+                    "valid_from": None,
+                    "expires_hint": None,
+                }
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(7_100, 7_200)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert [(candidate.subject, candidate.statement) for candidate in candidates] == [
+        ("hobby", "User goes hiking."),
+        ("wife", "User has a wife."),
+    ]
+
+
 async def test_provider_extractor_uses_bounded_structured_call_and_audits_usage() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     source = await user_event(factory, "The astronomy club was my daughter's idea.")
