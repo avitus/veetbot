@@ -36,6 +36,11 @@ jobs:
       - checkout
       - install_uv
       - run:
+          name: Reading lane floor
+          command: |
+            READING_LANE_BASE="<< pipeline.git.base_revision >>" \
+              uv run python -m scripts.check_reading_lane
+      - run:
           name: Install Pandoc
           command: sudo apt-get update && sudo apt-get install -y pandoc
       - run:

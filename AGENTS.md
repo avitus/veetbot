@@ -5,30 +5,46 @@ router, not a copy of the plan. Read it fully before making changes.
 
 ## Project mission
 
-This repository is building the modular, general-purpose AI agent platform
-defined by the canonical engineering plan:
-
-- `docs/plan/engineering-plan.md`
-
-The plan is normative. Your job is to implement it milestone by milestone,
-without changing its requirements to suit your implementation.
+Build the modular, general-purpose AI agent platform defined by the canonical
+engineering plan, `docs/plan/engineering-plan.md`. The plan is normative:
+implement it milestone by milestone without changing its requirements.
 
 ## Required reading order
 
 Read, in this order, before starting an assignment:
 
 1. `AGENTS.md` (this file)
-2. `docs/status/project-state.yaml` — current phase and authorized milestones
+2. `docs/status/project-state.yaml` — current phase and authorized work
 3. `docs/plan/current-milestone.md` — the work currently authorized
 4. The relevant sections of `docs/plan/engineering-plan.md`
 5. The detailed-design document that expands those sections — see the routing
    table below. The plan states the requirement; the spec states the mechanism.
-6. `docs/plan/milestone-map.md` — which gates the active milestone must make
-   true, and the milestone every gate in the corpus belongs to
-7. `docs/plan/readiness.md` — what the corpus does and does not cover for that
-   milestone, including what it names as designed nowhere
-8. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
-9. Existing code and tests related to the assignment
+6. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
+7. Existing code and tests related to the assignment
+
+Additionally, read `docs/plan/milestone-map.md` whenever the change could move
+a gate, and `docs/plan/readiness.md` before concluding anything is undesigned.
+
+## Reading lanes
+
+The order above is lane A, the default. Two narrower lanes exist. The floor is
+set by what the diff can invalidate, never by its size; `reading_lane_errors`
+in `scripts/architecture_checks.py` derives the minimum lane from changed paths.
+
+- **Lane A — the full order.** New behavior, and any change touching policy,
+  ports, memory, or execution code, specs under `docs/plan/`, gate or contract
+  tests, evals, migrations, scripts, security files, CI, the Makefile, project
+  state, or this contract.
+- **Lane B — repair.** Fixing behavior an existing gate or regression test
+  already observes: steps 1, 2, and 7, plus the design document that owns the
+  subject. Any other change under `src/`, `tests/`, `clients/`, or `deploy/`
+  is at least lane B.
+- **Lane C — local.** Changes that cannot alter observable behavior (comments,
+  formatting, docstrings, prose outside the plan): steps 1 and 7.
+
+The lane is a floor, not a ceiling: escalate as the diff grows. Declare the
+lane in the completion report and a `Reading-Lane: A|B|C` git trailer; CI
+validates the floor, and no trailer means lane A.
 
 ## Where each subject is designed
 
@@ -51,6 +67,7 @@ Read, in this order, before starting an assignment:
 | Skill packages, the catalog, the authoring loop | `skills.md` |
 | Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
 | Public-web search and page extraction | `web-access.md` |
+| Authenticated browser automation | `browser-automation.md` |
 | Scheduled runs and recurrence | `scheduling.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
@@ -58,17 +75,13 @@ Read, in this order, before starting an assignment:
 
 ## Authority and conflicts
 
-- The **engineering plan** contains the normative requirements and acceptance
-  criteria.
-- **Project state** (`docs/status/project-state.yaml`) determines what work is
-  currently authorized.
-- **Code and tests** describe actual current behavior.
-- Do **not** silently modify requirements to match an implementation. If the
-  implementation must diverge, propose the change explicitly.
-- An architectural conflict with the plan requires a **proposed ADR** in
-  `docs/adr/` (see the ADR overview at `docs/adr/index.md`).
-- Security requirements and acceptance criteria must **not** be weakened without
-  explicit human approval.
+- The **engineering plan** holds the normative requirements and acceptance
+  criteria; **project state** (`docs/status/project-state.yaml`) determines
+  what work is authorized; **code and tests** describe actual behavior.
+- Do **not** silently modify requirements to match an implementation; propose
+  divergence explicitly. An architectural conflict with the plan requires a
+  **proposed ADR** in `docs/adr/` (index at `docs/adr/index.md`).
+- Security requirements and acceptance criteria must **not** be weakened without explicit human approval.
 
 ## Scope control
 
@@ -94,21 +107,15 @@ make check          # runs docs-check; will grow as tooling is added
 make citations-fix  # repoints line-number citations an edit has moved
 ```
 
-The specifications cite each other by line number, and an insertion
-anywhere above a cited line moves it. `make docs-check` fails when a
-citation no longer holds the text it was recorded against. After editing
-a document that others cite into, run `make citations-fix` and review the
-diff; a citation whose text is gone or now ambiguous is reported rather
-than guessed, and needs a human.
+The specifications cite each other by line number through the citation ledger.
+After editing a document that others cite into, run `make citations-fix` and
+review the diff; a citation whose text is gone or now ambiguous is reported
+rather than guessed, and needs a human. Write every line reference as
+`file.md:LINE` or `file.md:LO-HI`; a prose form like "line 1408" is invisible
+to the ledger, and `make docs-check` rejects it in a specification.
 
-Write every line reference as `file.md:LINE` or `file.md:LO-HI`. A line
-named in prose - "line 1408", "lines 659 to 661", "tool-system.md 1102" -
-is invisible to the ledger, so it is never checked and never repaired.
-`make docs-check` rejects that form in a specification.
-
-As implementation tooling is added in later milestones, this section and
-`make check` must also require formatting, linting, type checking, and tests.
-Do not claim a command works unless it exists in this repository.
+This section and `make check` must grow formatting, linting, type checking,
+and tests as tooling lands. Do not claim a command works unless it exists here.
 
 ## Test-driven development
 
@@ -131,24 +138,18 @@ failure, and retry coverage.
 
 ## Pull request review gate
 
-A pull request is not ready or mergeable under this project's operating
-contract merely because GitHub reports that it can be merged. Before describing
-a PR as ready or merging it:
-
-Use only the CodeRabbit GitHub PR integration. Never run local CodeRabbit CLI
-reviews; the local service is continually rate-limited and is not the
-authoritative review channel for this project. The required loop is:
+GitHub mergeability does not make a PR ready under this contract. Use only the
+CodeRabbit GitHub PR integration; never run local CodeRabbit CLI reviews (the
+local service is continually rate-limited and is not authoritative). Loop:
 
 1. Wait for CodeRabbit to finish reviewing the current head commit.
-2. Address every CodeRabbit comment, regardless of severity or where CodeRabbit
-   presents it. This includes inline comments, review-summary findings,
-   outside-diff comments, nitpicks, suggestions, and trivial or low-priority
-   observations. Fix each valid finding; when a finding is not applicable,
-   respond with concrete evidence and resolve the conversation.
-3. Push the changes and wait for CodeRabbit to review the new head commit.
-4. Repeat the review, fix, and re-review loop until CodeRabbit reports no further
-   findings of any severity and every review conversation is resolved.
-5. Confirm all required CI checks pass on that same final head commit.
+2. Address every CodeRabbit comment of any severity or placement — inline,
+   summary, outside-diff, nitpick, suggestion, or trivial. Fix each valid
+   finding; answer inapplicable ones with concrete evidence and resolve the
+   conversation.
+3. Push, wait for the review of the new head commit, and repeat until
+   CodeRabbit reports no findings and every conversation is resolved.
+4. Confirm all required CI checks pass on that same final head commit.
 
 Never call a PR ready, mergeable, approved, or complete while CodeRabbit is
 queued, running, has unresolved comments, or has not reviewed the latest push.
@@ -156,13 +157,13 @@ queued, running, has unresolved comments, or has not reviewed the latest push.
 ## Documentation update rules
 
 - Update the **smallest** relevant documentation surface when behavior changes.
-- Update `docs/status/project-state.yaml` when project status changes.
+- Update `docs/status/project-state.yaml` when project status changes; move a
+  completed milestone's evidence to `docs/status/verification-history.yaml`.
 - Update the current architecture documentation when an implementation changes it.
 - Add an **ADR** for material architectural decisions.
 - Add **verification evidence** before marking any acceptance criterion complete.
 - Never edit generated files under `site/` or `dist/` (they are regenerated).
-- Never store private reasoning, secrets, raw credentials, sensitive tool output,
-  or temporary debugging transcripts in project documentation.
+- Never store private reasoning, secrets, raw credentials, sensitive tool output, or temporary debugging transcripts in project documentation.
 
 ## Documentation governance (canonical rules)
 
@@ -175,8 +176,7 @@ queued, running, has unresolved comments, or has not reviewed the latest push.
 7. Architectural changes require an ADR.
 8. Status changes require evidence.
 9. Documentation changes ship alongside the corresponding code changes.
-10. Temporary notes, raw transcripts, secrets, credentials, and private reasoning
-    never belong in durable documentation.
+10. Temporary notes, raw transcripts, secrets, credentials, and private reasoning never belong in durable documentation.
 
 ## Completion report
 
@@ -184,6 +184,7 @@ End every coding assignment with a report covering:
 
 - Files changed
 - Behavior implemented
+- Reading lane declared (and the diff-derived minimum)
 - Tests and checks run (with outcomes)
 - Red test command and expected failure
 - Documentation updated
@@ -194,6 +195,5 @@ End every coding assignment with a report covering:
 
 ## Do not
 
-- Do not start implementation work during a documentation-only assignment.
-- Do not edit `archive/` (the archived Word source) or generated `site/` and
-  `dist/` outputs.
+- Do not start implementation work during a documentation-only assignment, and
+  do not edit `archive/` or the generated `site/` and `dist/` outputs.

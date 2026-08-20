@@ -167,9 +167,10 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of two hundred and twenty-three gates are green before
+**Forty-one gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
-agent in it.
+agent in it. The current registry total is derived in the
+[milestone map](milestone-map.md), not restated here.
 That is not a sign that the gates are weak. It is the consequence of
 building the in-memory tier as real adapters rather than as test
 doubles: the invariants that hold for the slice hold for the durable

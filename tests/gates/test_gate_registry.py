@@ -9,6 +9,7 @@ import yaml
 from scripts.gate_registry import (
     GATE_ID,
     _check_resolves,
+    gate_table_arithmetic_errors,
     hard_gate_items,
     load_registry,
     map_entries,
@@ -154,6 +155,68 @@ def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
     assert all(
         entry.check.startswith("tests/gates/test_browser_m10.py::") for entry in browser_entries
     )
+
+
+_GATE_TABLE_DERIVED = {
+    "subject_specs": 17,
+    "subject_gates": 217,
+    "plan_gates": 2,
+    "map_gates": 7,
+    "declarations": 226,
+    "entries": 223,
+    "aliases": 3,
+}
+
+
+def test_gate_table_arithmetic_reports_stale_digits() -> None:
+    stale = (
+        "## The gate table\n\n"
+        "The 15 subject specifications declare 178 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 187\n"
+        "declarations, 184 registry entries once the 3 aliases are subtracted.\n\n"
+        "```text\n"
+    )
+    assert gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED) == [
+        "gate table intro says 15 subject specs; registry derives 17",
+        "gate table intro says 178 subject gates; registry derives 217",
+        "gate table intro says 187 declarations; registry derives 226",
+        "gate table intro says 184 entries; registry derives 223",
+    ]
+
+
+def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
+    shifted = (
+        "## The gate table\n\n"
+        "The 17 subject specifications declare 217 gates, the engineering plan\n"
+        "declares 3 more, and this document declares 6 over the corpus: 226\n"
+        "declarations, 223 registry entries once the 3 aliases are subtracted.\n\n"
+        "```text\n"
+    )
+    assert gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED) == [
+        "gate table intro says 3 plan gates; registry derives 2",
+        "gate table intro says 6 map gates; registry derives 7",
+    ]
+
+
+def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
+    reconciled = (
+        "## The gate table\n\n"
+        "The 17 subject specifications declare 217 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 226\n"
+        "declarations, 223 registry entries once the 3 aliases are subtracted.\n\n"
+        "```text\n"
+    )
+    assert gate_table_arithmetic_errors(reconciled, _GATE_TABLE_DERIVED) == []
+
+
+def test_gate_table_arithmetic_requires_stated_figures() -> None:
+    silent = "## The gate table\n\nProse that states no figures.\n\n```text\n"
+    assert gate_table_arithmetic_errors(silent, _GATE_TABLE_DERIVED)
+
+
+def test_gate_table_prose_matches_registry() -> None:
+    errors = registry_errors(ROOT, current_milestone=11)
+    assert [error for error in errors if "gate table" in error] == []
 
 
 def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> None:

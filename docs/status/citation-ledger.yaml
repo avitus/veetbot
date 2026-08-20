@@ -307,7 +307,7 @@ citations:
   - cite: "docs/plan/skills.md#docs/plan/policy-and-approvals.md:137"
     excerpt: "Section 30.3 requires that authoring a skill be gated by pol"
     digest: "8303c22dc150bdf2"
-  - cite: "docs/plan/skills.md#docs/plan/readiness.md:729"
+  - cite: "docs/plan/skills.md#docs/plan/readiness.md:730"
     excerpt: "selected skill is version-pinned in the run\"* at"
     digest: "a50341f7f8166f0d"
   - cite: "docs/plan/skills.md#docs/plan/tool-system.md:1303-1350"

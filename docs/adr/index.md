@@ -68,3 +68,4 @@ implementation without one.
 - [ADR-0057 — Evaluation-gated provider-assisted memory extraction (Proposed)](0057-evaluation-gated-provider-memory-extraction.md)
 - [ADR-0058 — Provider-neutral authenticated browser automation (Proposed)](0058-authenticated-browser-automation.md)
 - [ADR-0059 — Milestone 11 scheduled runs (Proposed)](0059-milestone-11-scheduled-runs.md)
+- [ADR-0060 — Reading lanes and the state-file split](0060-reading-lanes-and-state-file-split.md)

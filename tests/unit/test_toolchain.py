@@ -411,6 +411,10 @@ def test_ci_has_the_required_partitions() -> None:
         ]
     assert "make lint typecheck test-static test-deploy docs-check" in commands["static"]
     assert "make client-build" in commands["static"]
+    assert any(
+        "python -m scripts.check_reading_lane" in command and "READING_LANE_BASE" in command
+        for command in commands["static"]
+    )
     assert "make test-contract" in commands["contract"]
     assert "make migrate test-integration" in commands["integration"]
     assert "make test-sandbox" in commands["sandbox"]
@@ -918,3 +922,24 @@ def test_eval_command_normalizes_lazy_import_failure(monkeypatch: pytest.MonkeyP
     result = CliRunner().invoke(app, ["eval", "run"])
     assert result.exit_code == 1
     assert "evaluation failed: eval dependency unavailable" in result.stderr
+
+
+def test_required_files_include_the_status_split_surfaces(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_required_files()
+    assert [
+        error
+        for error in check_docs.errors
+        if "verification-history" in error or "corpus-audit-log" in error
+    ] == []
+
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_required_files()
+    assert "required file missing: docs/status/verification-history.yaml" in check_docs.errors
+    assert "required file missing: docs/status/corpus-audit-log.md" in check_docs.errors

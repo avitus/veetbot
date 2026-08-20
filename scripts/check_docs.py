@@ -77,6 +77,8 @@ def check_required_files() -> None:
         "docs/plan/engineering-plan.md",
         "docs/plan/current-milestone.md",
         "docs/status/project-state.yaml",
+        "docs/status/verification-history.yaml",
+        "docs/status/corpus-audit-log.md",
         "docs/status/index.md",
         "docs/assets/stylesheets/extra.css",
         "scripts/build_docs.py",

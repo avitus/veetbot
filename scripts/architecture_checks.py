@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -527,6 +528,62 @@ def transaction_hygiene_errors(root: Path) -> list[str]:
                         f"{path.relative_to(root)}:{child.lineno}: "
                         f"external I/O awaited in transaction via {called}"
                     )
+    return errors
+
+
+READING_LANES: dict[str, int] = {"C": 0, "B": 1, "A": 2}
+_LANE_A_PREFIXES: tuple[str, ...] = (
+    ".circleci/",
+    "docs/plan/",
+    "docs/status/project-state.yaml",
+    "evals/",
+    "execution/",
+    "migrations/",
+    "scripts/",
+    "security/",
+    "src/agent_core/execution/",
+    "src/agent_core/memory/",
+    "src/agent_core/policy/",
+    "src/agent_core/ports/",
+    "src/agent_core/sandbox/",
+    "tests/contract/",
+    "tests/gates/",
+)
+_LANE_A_FILES: frozenset[str] = frozenset({"AGENTS.md", "CLAUDE.md", "Makefile"})
+_LANE_B_PREFIXES: tuple[str, ...] = ("src/", "tests/", "clients/", "deploy/", "nginx/")
+
+
+def _reading_lane_floor(path: str) -> str:
+    if path in _LANE_A_FILES or path.startswith(_LANE_A_PREFIXES):
+        return "A"
+    if path.startswith(_LANE_B_PREFIXES):
+        return "B"
+    return "C"
+
+
+def minimum_reading_lane(paths: Iterable[str]) -> str:
+    """Derive the least AGENTS.md reading lane the changed paths permit."""
+
+    floor = "C"
+    for path in paths:
+        candidate = _reading_lane_floor(path)
+        if READING_LANES[candidate] > READING_LANES[floor]:
+            floor = candidate
+    return floor
+
+
+def reading_lane_errors(declared: str, paths: Iterable[str]) -> list[str]:
+    """Reject a declared reading lane below the diff-derived minimum."""
+
+    if declared not in READING_LANES:
+        return [f"unknown reading lane {declared}; declare A, B, or C"]
+    errors: list[str] = []
+    for path in sorted(set(paths)):
+        floor = _reading_lane_floor(path)
+        if READING_LANES[declared] < READING_LANES[floor]:
+            errors.append(
+                f"declared reading lane {declared} is below the minimum {floor} set by {path}"
+            )
     return errors
 
 

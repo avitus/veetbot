@@ -296,16 +296,27 @@ job           target invoked         needs     runs on
 ```
 
 Jobs 1 and 2 partition `make check`, split so the cheap one fails
-first. This is the only place where CI's shape differs from the
-Makefile's, and it differs in scheduling rather than in content: the
-union of the two jobs is exactly `make check`, including `test-deploy`
-in both the static lane and the local aggregate. No check appears in
-both jobs, and a developer who runs `make check` locally has run both
-jobs' contents. Job 5 is an additional real-runtime sandbox gate; it
+first. The union of the two jobs' `make` targets is exactly
+`make check`, including `test-deploy` in both the static lane and the
+local aggregate; job 1's reading-lane step below is the one check
+outside that equality, because it reads git range state `make check`
+does not assume. No check appears in both jobs, and a developer who
+runs `make check` locally has run both jobs' `make` contents. Job 5 is an additional real-runtime sandbox gate; it
 builds the gVisor image and is deliberately outside `make check`.
 Job 6 is an additional native-client gate outside `make check`; it runs under
 full Xcode because Command Line Tools can compile a Swift Testing bundle
 without executing it. Release packaging depends on both additional gates.
+
+Job 1 also runs the reading-lane floor first:
+`python -m scripts.check_reading_lane` reads the newest `Reading-Lane:` git
+trailer in the pushed range and fails when the declared lane sits below the
+minimum that `reading_lane_errors` derives from the changed paths. The base
+of the range is CircleCI's `pipeline.git.base_revision` when the pipeline
+supplies one, then `origin/dev`, then `origin/main`, then the parent commit.
+No trailer means lane A, the full reading order, so the check constrains only
+work that claims a narrower lane. It is not a `make` target because it reads
+git range state that `make check` does not assume; run the same module
+locally to preview the verdict before pushing.
 
 Job 3 uses `postgres:16-alpine` as a secondary CircleCI Docker image rather
 than the compose file, because the compose file publishes a port on the

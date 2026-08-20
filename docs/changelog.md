@@ -4,6 +4,31 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-19 — Reading lanes, state-file split, and census reconciliation
+
+- Added three reading lanes to the `AGENTS.md` operating contract: the full
+  order (lane A) stays the default, repairs guarded by an existing gate or
+  regression test read a narrower set (lane B), and changes that cannot alter
+  observable behavior read the minimum (lane C).
+  `scripts/architecture_checks.py` derives the minimum lane from the changed
+  paths and rejects a declaration below it; the completion report now names
+  the lane used.
+- Wired the lane floor into CircleCI: the static job runs
+  `scripts/check_reading_lane.py` first, reading the newest `Reading-Lane:`
+  git trailer in the pushed range (absence means lane A) and failing when the
+  declaration sits below the diff-derived minimum. The range's base is
+  `pipeline.git.base_revision`, then `origin/dev`, `origin/main`, or the
+  parent commit.
+- Split `docs/status/project-state.yaml` so it carries status rather than
+  history: completed-milestone evidence moved to
+  `docs/status/verification-history.yaml`, and the ten-pass corpus-audit
+  narrative moved verbatim to `docs/status/corpus-audit-log.md`. The state
+  file's stale 172-entry census claims left with it.
+- Reconciled the milestone map's gate-table arithmetic paragraph against the
+  derived registry in `make docs-check` and corrected or de-counted the
+  remaining stale census-bearing prose. Recorded in ADR-0060, which also
+  retains the citation ledger over the earlier anchor proposal.
+
 ## 2026-08-19 — Milestone 11 local implementation complete
 
 - Added the complete authenticated schedule lifecycle and occurrence HTTP
