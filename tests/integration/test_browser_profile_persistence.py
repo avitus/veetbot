@@ -118,16 +118,16 @@ async def test_postgres_browser_authentication_admission_lock_timeout_is_conflic
 
         async def wait_for_second_admission() -> None:
             await first_acquired.wait()
-            async with composition.uow_factory() as uow:
-                second_attempted.set()
-                with pytest.raises(ConflictError):
+            with pytest.raises(ConflictError):
+                async with composition.uow_factory() as uow:
+                    second_attempted.set()
                     async with uow.browser_profiles.authentication_admission(
                         profile_id,
                         composition.principal,
                         timeout_seconds=0.05,
                     ):
                         second_acquired.set()
-                second_rejected.set()
+            second_rejected.set()
 
         first = asyncio.create_task(hold_first_admission())
         done, _pending = await asyncio.wait({first}, timeout=0.1)

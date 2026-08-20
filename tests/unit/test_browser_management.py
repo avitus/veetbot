@@ -117,6 +117,32 @@ class FakeAuthenticationControlPlane:
         return await self.authentication_status(ceremony_id, owner)
 
 
+class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
+    def __init__(self) -> None:
+        super().__init__()
+        self.begin_calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def begin_authentication(
+        self,
+        profile_id: UUID,
+        owner: Principal,
+        provider_ref: str,
+        *,
+        login_url: str,
+    ) -> BrowserAuthenticationView:
+        self.begin_calls += 1
+        self.started.set()
+        await self.release.wait()
+        return await super().begin_authentication(
+            profile_id,
+            owner,
+            provider_ref,
+            login_url=login_url,
+        )
+
+
 def owner(*scopes: str) -> Principal:
     return principal().model_copy(update={"scopes": set(scopes)})
 
@@ -394,31 +420,6 @@ async def test_active_authentication_ceremony_is_not_replayed_without_launch_cap
 
 
 async def test_concurrent_authentication_requests_admit_only_one_ceremony() -> None:
-    class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
-        def __init__(self) -> None:
-            super().__init__()
-            self.begin_calls = 0
-            self.first_started = asyncio.Event()
-            self.release = asyncio.Event()
-
-        async def begin_authentication(
-            self,
-            profile_id: UUID,
-            owner: Principal,
-            provider_ref: str,
-            *,
-            login_url: str,
-        ) -> BrowserAuthenticationView:
-            self.begin_calls += 1
-            self.first_started.set()
-            await self.release.wait()
-            return await super().begin_authentication(
-                profile_id,
-                owner,
-                provider_ref,
-                login_url=login_url,
-            )
-
     uow = FakeUnitOfWorkFactory()
     authentication = BlockingAuthenticationControlPlane()
     service = BrowserProfileManagementService(
@@ -438,7 +439,7 @@ async def test_concurrent_authentication_requests_admit_only_one_ceremony() -> N
             login_url="https://example.org/login",
         )
     )
-    await authentication.first_started.wait()
+    await authentication.started.wait()
     second = asyncio.create_task(
         service.begin_authentication(
             subject,
@@ -495,31 +496,6 @@ async def test_authentication_provider_launch_has_total_deadline() -> None:
 
 
 async def test_authentication_admission_lock_wait_is_bounded() -> None:
-    class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
-        def __init__(self) -> None:
-            super().__init__()
-            self.begin_calls = 0
-            self.started = asyncio.Event()
-            self.release = asyncio.Event()
-
-        async def begin_authentication(
-            self,
-            profile_id: UUID,
-            owner: Principal,
-            provider_ref: str,
-            *,
-            login_url: str,
-        ) -> BrowserAuthenticationView:
-            self.begin_calls += 1
-            self.started.set()
-            await self.release.wait()
-            return await super().begin_authentication(
-                profile_id,
-                owner,
-                provider_ref,
-                login_url=login_url,
-            )
-
     uow = FakeUnitOfWorkFactory()
     authentication = BlockingAuthenticationControlPlane()
     service = BrowserProfileManagementService(
