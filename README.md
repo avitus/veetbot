@@ -2,8 +2,8 @@
 
 This repository implements the provider-neutral agent platform defined by the
 canonical [engineering plan](docs/plan/engineering-plan.md). Work is strictly
-milestone-gated: Milestones 0 through 9 are complete, and Milestone 10 is in
-progress through three separately authorized workstreams.
+milestone-gated: Milestones 0 through 9 are complete, and Milestones 10 and 11
+have separately authorized workstreams in progress.
 
 ## Features
 
@@ -36,16 +36,16 @@ progress through three separately authorized workstreams.
   recommended Tavily-search/Firecrawl-fetch deployment.
 - **Governed trajectory export** — consent-gated, redacted, and verified
   before any artifact is committed.
-- **Evaluation harness** — deterministic evaluation cases, a 177-entry gate
+- **Evaluation harness** — deterministic evaluation cases, a 223-entry gate
   registry, and a credential- and cost-gated live capability lane.
 - **Clients** — a dependency-free downloadable terminal client and a native
   SwiftUI client for iOS and macOS.
 - **Production deployment** — CircleCI-driven atomic releases to
   `api.veetbot.com` with systemd, Nginx, gVisor, and production validation.
 
-### In progress (Milestone 10)
+### In progress (Milestones 10 and 11)
 
-Three separately authorized workstreams are underway. Optional capabilities
+Five separately authorized workstreams are underway. Optional capabilities
 stay behind default-off controls:
 
 - **Automatic memory formation** — post-run extraction and consolidation of
@@ -56,14 +56,19 @@ stay behind default-off controls:
   confined background-review child run.
 - **Public-web access** — read-only search and page extraction through
   independently configured providers; every result remains external-untrusted.
+- **Authenticated browser automation** — default-off browser navigation,
+  observation, and approval-governed actions with scoped profiles and grants.
+- **Scheduled runs** — default-off one-time, daily, and weekly task management
+  with immutable revisions, exact scopes, bounded misfires and costs, a
+  least-privilege production scheduler role, and durable offline results. The
+  local Milestone 11 implementation and all schedule gate targets are present;
+  hosted CI and final review remain.
 
 ### Planned
 
 The remaining Milestone 10 extensions are designed but deliberately deferred
 and not yet authorized:
 
-- **Scheduling** — scheduled runs that fire in the cloud regardless of which
-  devices are online.
 - **Model routing** — richer routing behavior across the declared model
   policies.
 - **General-purpose subagents** — `delegate.run` child runs with their own
@@ -377,6 +382,7 @@ grant, without exposing either identifier to model tool arguments:
 BROWSER_PROVIDER=hosted
 BROWSER_ALLOWED_ORIGINS=https://example.org
 BROWSER_PROFILE_SERVICE_URL=https://browser.example.org
+BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.org
 BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=/run/secrets/browser-control-plane
 BROWSER_PROFILE_ID=00000000-0000-0000-0000-000000000000
 BROWSER_GRANT_ID=

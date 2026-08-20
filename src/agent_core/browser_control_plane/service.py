@@ -11,22 +11,12 @@ from agent_core.browser_control_plane.models import (
 )
 from agent_core.browser_control_plane.ports import EncryptedProfileStore
 from agent_core.domain.agents import Principal
-from agent_core.domain.browser import BrowserProfileProvisioning
+from agent_core.domain.browser import BrowserProfileProvisioning, normalize_browser_origin
 from agent_core.domain.errors import ConflictError
 from agent_core.ports.browser_profiles import BrowserProfileControlPlane
 
 INITIAL_PROFILE_MATERIAL = b'{"format_version":1}'
 PROVIDER_NAME = "hosted-isolated"
-
-
-def _identity(metadata: ProfileMaterialMetadata) -> ProfileMaterialIdentity:
-    return ProfileMaterialIdentity(
-        profile_id=metadata.profile_id,
-        tenant_id=metadata.tenant_id,
-        principal_id=metadata.principal_id,
-        provider_ref=metadata.provider_ref,
-        allowed_origins=metadata.allowed_origins,
-    )
 
 
 class HostedProfileLifecycleService(BrowserProfileControlPlane):
@@ -74,12 +64,13 @@ class HostedProfileLifecycleService(BrowserProfileControlPlane):
         principal: Principal,
         allowed_origins: tuple[str, ...],
     ) -> BrowserProfileProvisioning:
+        normalized_origins = tuple(normalize_browser_origin(origin) for origin in allowed_origins)
         existing = await self._store.find_by_profile(profile_id)
         if existing is not None:
             if (
                 existing.tenant_id != principal.tenant_id
                 or existing.principal_id != principal.principal_id
-                or existing.allowed_origins != allowed_origins
+                or existing.allowed_origins != normalized_origins
                 or existing.revoked
             ):
                 raise ConflictError("browser profile provisioning scope conflicts")
@@ -89,7 +80,7 @@ class HostedProfileLifecycleService(BrowserProfileControlPlane):
             tenant_id=principal.tenant_id,
             principal_id=principal.principal_id,
             provider_ref=self._reference_factory(),
-            allowed_origins=allowed_origins,
+            allowed_origins=normalized_origins,
         )
         metadata = await self._store.create(identity, INITIAL_PROFILE_MATERIAL)
         return self._provisioning(metadata)
@@ -102,7 +93,7 @@ class HostedProfileLifecycleService(BrowserProfileControlPlane):
     ) -> None:
         metadata = await self._owned_metadata(profile_id, principal, provider_ref)
         if metadata is not None:
-            await self._store.revoke(_identity(metadata))
+            await self._store.revoke(metadata.identity())
         if self._invalidate_profile is not None:
             await self._invalidate_profile(profile_id)
 
@@ -116,12 +107,15 @@ class HostedProfileLifecycleService(BrowserProfileControlPlane):
         if metadata is not None:
             if self._invalidate_profile is not None:
                 await self._invalidate_profile(profile_id)
-            await self._store.delete(_identity(metadata))
+            await self._store.delete(metadata.identity())
 
     async def rotate_all(self) -> int:
         rotated = 0
         for metadata in await self._store.list_metadata():
-            updated = await self._store.rotate(_identity(metadata))
+            try:
+                updated = await self._store.rotate(metadata.identity())
+            except ConflictError:
+                continue
             if updated.encryption_key_version != metadata.encryption_key_version:
                 rotated += 1
         return rotated

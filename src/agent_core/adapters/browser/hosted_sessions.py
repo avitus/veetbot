@@ -7,7 +7,6 @@ import json
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import UUID
 
 import httpx
@@ -20,6 +19,7 @@ from agent_core.domain.browser import (
     BrowserLease,
     BrowserObservation,
     BrowserProviderError,
+    require_service_origin,
 )
 from agent_core.domain.credentials import CredentialRef
 from agent_core.ports.credentials import CredentialResolver
@@ -36,18 +36,10 @@ class HostedBrowserSessionControlPlane:
         credentials: CredentialResolver,
         client: httpx.AsyncClient,
     ) -> None:
-        parsed = urlsplit(base_url)
-        if (
-            parsed.scheme != "https"
-            or parsed.hostname is None
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("hosted browser sessions require one HTTPS service origin")
-        self._base_url = base_url.rstrip("/")
+        self._base_url = require_service_origin(
+            base_url,
+            message="hosted browser sessions require one HTTPS service origin",
+        )
         self._credentials = credentials
         self._client = client
 

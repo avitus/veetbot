@@ -152,3 +152,32 @@ async def test_hosted_runtime_rejects_oversized_interactive_frames() -> None:
 
     with pytest.raises(ValueError, match="frame exceeds"):
         await runtime.interactive_frame()
+
+
+async def test_hosted_runtime_accepts_additional_playwright_storage_state_keys() -> None:
+    low_level = FakeStatefulRuntime()
+
+    async def proxy_factory(*args: object, **kwargs: object) -> FakeProxy:
+        del args, kwargs
+        return FakeProxy()
+
+    runtime = HostedPlaywrightSessionRuntime(
+        tenant_id="tenant-a",
+        runtime=low_level,
+        proxy_factory=proxy_factory,
+    )
+    material = json.dumps(
+        {
+            "format_version": 1,
+            "storage_state": {
+                "cookies": [],
+                "origins": [],
+                "future_playwright_field": {"version": 2},
+            },
+        }
+    ).encode()
+
+    await runtime.start(material, ("https://example.org",), interactive=False)
+
+    assert low_level.started is not None
+    assert low_level.started[2]["future_playwright_field"] == {"version": 2}

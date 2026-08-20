@@ -10,10 +10,10 @@ from agent_core.domain.browser import BrowserAction, BrowserProviderError
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import ToolExecutionContext, ToolFailureKind, ToolResult, ToolSpec
 from agent_core.ports.browser import BrowserProvider, bind_browser_execution
-from agent_core.tools.browser_navigate import (
+from agent_core.tools.browser_results import (
     OUTPUT_SCHEMA,
-    _failure,
-    _observation_result,
+    browser_failure,
+    observation_result,
 )
 
 INPUT_SCHEMA: dict[str, Any] = {
@@ -46,31 +46,6 @@ INPUT_SCHEMA: dict[str, Any] = {
 }
 
 
-def _action_failure(error: BrowserProviderError) -> ToolResult:
-    if error.reason_code == "tool.browser.outcome_unknown":
-        kind = ToolFailureKind.OUTCOME_UNKNOWN
-    elif error.reason_code == "tool.browser.element_not_found":
-        kind = ToolFailureKind.NOT_FOUND
-    elif error.reason_code in {
-        "tool.browser.page_changed",
-        "tool.browser.action_not_allowed",
-    }:
-        kind = ToolFailureKind.INVALID_ARGUMENTS
-    elif error.reason_code in {
-        "tool.browser.profile_unavailable",
-        "tool.browser.authentication_required",
-        "tool.browser.needs_user",
-    }:
-        kind = ToolFailureKind.PERMISSION
-    elif error.reason_code == "tool.browser.output_invalid":
-        kind = ToolFailureKind.OUTPUT_INVALID
-    elif error.reason_code == "tool.browser.provider_unavailable":
-        kind = ToolFailureKind.TRANSPORT
-    else:
-        kind = ToolFailureKind.UPSTREAM_ERROR
-    return _failure(kind, error.reason_code, retryable=error.retryable)
-
-
 class BrowserActTool:
     spec = ToolSpec(
         name="browser.act",
@@ -95,7 +70,7 @@ class BrowserActTool:
         try:
             action = BrowserAction.model_validate(arguments)
         except ValidationError:
-            return _failure(
+            return browser_failure(
                 ToolFailureKind.INVALID_ARGUMENTS,
                 "tool.arguments_invalid",
                 retryable=False,
@@ -105,5 +80,5 @@ class BrowserActTool:
             await context.mark_effect_sent()
             observation = await self._provider.act(action)
         except BrowserProviderError as error:
-            return _action_failure(error)
-        return _observation_result(self._provider, observation)
+            return browser_failure(error)
+        return observation_result(self._provider, observation, self.spec.maximum_output_bytes)

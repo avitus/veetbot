@@ -8,6 +8,7 @@ import yaml
 
 from scripts.gate_registry import (
     GATE_ID,
+    _check_resolves,
     gate_table_arithmetic_errors,
     hard_gate_items,
     load_registry,
@@ -19,14 +20,26 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_registry_complete() -> None:
-    assert registry_errors(ROOT, current_milestone=10) == []
+    assert registry_errors(ROOT, current_milestone=11) == []
+
+
+def test_nested_pytest_method_selector_resolves(tmp_path: Path) -> None:
+    check = tmp_path / "tests" / "test_example.py"
+    check.parent.mkdir()
+    check.write_text(
+        "class TestGate:\n    def test_behavior(self) -> None:\n        pass\n",
+        encoding="utf-8",
+    )
+
+    assert _check_resolves(tmp_path, "tests/test_example.py::TestGate::test_behavior")
+    assert not _check_resolves(tmp_path, "tests/test_example.py::TestGate")
 
 
 def test_no_stale_active_gate() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    active = [entry for entry in entries if entry.milestone <= 10]
-    assert len(active) == 200
+    active = [entry for entry in entries if entry.milestone <= 11]
+    assert len(active) == 223
     assert all(entry.check != "tests/gates/pending.py::pending_gate" for entry in active)
     assert all(not entry.optional for entry in active)
 
@@ -49,6 +62,7 @@ def test_milestone_tokens_present() -> None:
         "knowledge-documents.md",
         "web-access.md",
         "browser-automation.md",
+        "scheduling.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -77,7 +91,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 200
+    assert len(entries) == 223
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -113,6 +127,7 @@ def test_census_is_derived() -> None:
         8: 17,
         9: 26,
         10: 34,
+        11: 23,
     }
 
 
@@ -183,7 +198,7 @@ def test_gate_table_arithmetic_requires_stated_figures() -> None:
 
 
 def test_gate_table_prose_matches_registry() -> None:
-    errors = registry_errors(ROOT, current_milestone=10)
+    errors = registry_errors(ROOT, current_milestone=11)
     assert [error for error in errors if "gate table" in error] == []
 
 

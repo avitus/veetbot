@@ -59,12 +59,16 @@ class InMemoryBrowserAuthenticationRepository:
         authentication = await self.get(authentication_id, principal)
         if authentication.status is not expected_status:
             raise ConflictError("browser authentication status changed")
-        if authentication.status is status:
-            return authentication
-        if status not in ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS[authentication.status]:
-            raise ConflictError("browser authentication transition is not allowed")
         if updated_at < authentication.updated_at:
             raise ConflictError("browser authentication update time moved backwards")
+        if authentication.status is status:
+            if updated_at == authentication.updated_at:
+                return authentication
+            updated = authentication.model_copy(update={"updated_at": updated_at}, deep=True)
+            self._authentications[authentication_id] = updated
+            return updated.model_copy(deep=True)
+        if status not in ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS[authentication.status]:
+            raise ConflictError("browser authentication transition is not allowed")
         updated = authentication.model_copy(
             update={"status": status, "updated_at": updated_at},
             deep=True,

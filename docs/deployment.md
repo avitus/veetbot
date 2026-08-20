@@ -151,6 +151,23 @@ sudo chown root:veetbot /etc/veetbot/veetbot.env
 sudo chmod 0640 /etc/veetbot/veetbot.env
 ```
 
+When scheduled runs are enabled, separately copy
+`deploy/veetbot-schedule.env.example` to
+`/etc/veetbot/veetbot-schedule.env`, fill its required database and identity
+values, and protect it with the same ownership and mode. The schedule unit never
+loads the shared environment because that file contains API, model-provider,
+web-provider, and browser-profile credentials that the scheduler must not see.
+The tenant-scoped database role must not have PostgreSQL `BYPASSRLS` authority:
+schedule child-table isolation depends on the forced row-level-security policy
+on `schedules` applying inside each child-policy lookup. Reserve `BYPASSRLS`
+roles for explicit administration and never use one for API, worker, or
+scheduler tenant access.
+
+```bash
+sudo chown root:veetbot /etc/veetbot/veetbot-schedule.env
+sudo chmod 0640 /etc/veetbot/veetbot-schedule.env
+```
+
 Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
 it to `/opt/veetbot/current/.release.env`, which only the API systemd unit loads.
 

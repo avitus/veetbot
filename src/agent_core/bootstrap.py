@@ -12,12 +12,15 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, cast
+from types import TracebackType
+from typing import Any, Literal, Self, cast
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.functions import func
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
@@ -49,7 +52,10 @@ from agent_core.adapters.execution.docker import (
     resolve_local_image_digest,
 )
 from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
-from agent_core.adapters.identity import StaticPrincipalResolver
+from agent_core.adapters.identity import (
+    ConfiguredSchedulePrincipalDirectory,
+    StaticPrincipalResolver,
+)
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
@@ -125,6 +131,14 @@ from agent_core.adapters.persistence.repositories import (
     PostgresTrajectoryExportRepository,
     PostgresUsageRepository,
 )
+from agent_core.adapters.persistence.schedules import (
+    InMemoryScheduleIdempotencyRepository,
+    InMemoryScheduleOccurrenceRepository,
+    InMemoryScheduleRepository,
+    PostgresScheduleIdempotencyRepository,
+    PostgresScheduleOccurrenceRepository,
+    PostgresScheduleRepository,
+)
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
     PostgresSessionDeletionRepository,
@@ -137,6 +151,14 @@ from agent_core.adapters.persistence.unit_of_work import (
     UnitOfWorkRepositories,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
+from agent_core.adapters.schedule_admission import (
+    AllowScheduleAdmissionController,
+    PostgresScheduleAdmissionController,
+)
+from agent_core.adapters.schedule_wakeup import (
+    InMemoryScheduleWakeup,
+    PostgresScheduleWakeup,
+)
 from agent_core.adapters.skills.memory import InMemorySkillRepository
 from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
@@ -159,6 +181,7 @@ from agent_core.application.public_services import (
     PublicSessionService,
 )
 from agent_core.application.run_service import RunService
+from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.services import (
     ApprovalService as PublicApprovalServiceContract,
 )
@@ -175,6 +198,9 @@ from agent_core.application.services import (
     RunService as PublicRunServiceContract,
 )
 from agent_core.application.services import (
+    ScheduleService as PublicScheduleServiceContract,
+)
+from agent_core.application.services import (
     SessionService as PublicSessionServiceContract,
 )
 from agent_core.application.session_service import SessionService
@@ -185,6 +211,7 @@ from agent_core.application.trajectory_service import (
 )
 from agent_core.config import (
     PACKAGE_ROOT,
+    AuthMode,
     BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
@@ -193,6 +220,7 @@ from agent_core.config import (
     WebProviderKind,
     load_config_document,
     load_provider_extraction_evidence,
+    load_schedule_worker_settings,
     load_settings,
     provider_extraction_evidence_paths,
     validate_runtime_identity,
@@ -227,6 +255,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
+from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
 from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
@@ -252,6 +281,7 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
@@ -267,7 +297,12 @@ from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
-from agent_core.ports.persistence import TransactionCallbackRegistrar, UnitOfWorkFactory
+from agent_core.ports.persistence import (
+    ScheduleUnitOfWork,
+    TransactionCallback,
+    TransactionCallbackRegistrar,
+    UnitOfWorkFactory,
+)
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.web import WebProvider
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
@@ -275,6 +310,9 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
+from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
+from agent_core.scheduling.materializer import ScheduleMaterializer
+from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
 from agent_core.tools.artifact_export import ArtifactExportTool
@@ -318,6 +356,7 @@ class ApplicationServices:
     artifacts: PublicArtifactServiceContract
     browser_profiles: PublicBrowserProfileServiceContract
     browser_grants: PublicBrowserGrantServiceContract
+    schedules: PublicScheduleServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,13 +370,16 @@ class Composition:
     runs: RunService
     approvals: ApprovalService
     sessions: SessionService
+    schedules: ScheduleService
     trajectories: TrajectoryExportService
     executor: RunExecutor
     uow_factory: UnitOfWorkFactory
     clock: Clock
     ids: IdFactory
     worker_factory: Callable[[str], WorkerService]
+    async_worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
+    schedule_worker_factory: Callable[[], WorkerService]
     sandbox: SandboxManager
     mcp: MCPRuntime
     skill_catalogs: SkillCatalogService
@@ -458,6 +500,8 @@ def _memory_uow_repositories(
     memories = memories or InMemoryMemoryStore(clock)
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
+    schedules = InMemoryScheduleRepository()
+    schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -477,6 +521,7 @@ def _memory_uow_repositories(
         memories=memories,
         traces=traces,
         knowledge=knowledge,
+        schedules=schedules,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -506,6 +551,10 @@ def _memory_uow_repositories(
         traces=traces,
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
+        schedules=schedules,
+        schedule_occurrences=schedule_occurrences,
+        schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
+        schedule_admission=AllowScheduleAdmissionController(),
         queue=None,
     )
 
@@ -519,6 +568,8 @@ def _postgres_repository_factory(
     skill_store: SkillPackageStore,
     skill_validator: SkillPackageValidator,
     ids: IdFactory,
+    schedule_admission_limits: ScheduleAdmissionLimits,
+    schedule_metrics: ScheduleMetrics,
 ) -> PostgresRepositoryFactory:
     def repositories(
         session: AsyncSession,
@@ -535,6 +586,7 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         traces = PostgresTraceStore(session)
         knowledge = PostgresKnowledgeStore(session, clock)
+        schedules = PostgresScheduleRepository(session)
         return UnitOfWorkRepositories(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
@@ -570,6 +622,12 @@ def _postgres_repository_factory(
             traces=traces,
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
+            schedules=schedules,
+            schedule_occurrences=PostgresScheduleOccurrenceRepository(schedules),
+            schedule_idempotency=PostgresScheduleIdempotencyRepository(schedules),
+            schedule_admission=PostgresScheduleAdmissionController(
+                session, schedule_admission_limits, schedule_metrics
+            ),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -580,6 +638,217 @@ def _postgres_repository_factory(
         )
 
     return repositories
+
+
+class _ScheduleUnitOfWork(ScheduleUnitOfWork):
+    """Least-privilege repository set for the production scheduler role."""
+
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+        lease_seconds: float,
+        max_attempts: int,
+        admission_limits: ScheduleAdmissionLimits,
+        metrics: ScheduleMetrics,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+        self._lease_seconds = lease_seconds
+        self._max_attempts = max_attempts
+        self._admission_limits = admission_limits
+        self._metrics = metrics
+        self._session: AsyncSession | None = None
+        self._rollback_callbacks: list[TransactionCallback] = []
+
+    def on_rollback(self, callback: TransactionCallback) -> None:
+        self._rollback_callbacks.append(callback)
+
+    async def __aenter__(self) -> Self:
+        session = self._maker()
+        self._session = session
+        await session.execute(
+            select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
+        )
+        upcasters = EventUpcasterRegistry()
+        events = PostgresEventRepository(session, self._clock, upcasters)
+        history = PostgresSessionHistoryRepository(session, self._clock, upcasters)
+        schedules = PostgresScheduleRepository(session)
+        self.agents = PostgresAgentRepository(session, self._clock)
+        self.process_events = PostgresProcessEventRepository(session)
+        self.sessions = PostgresSessionRepository(session)
+        self.runs = PostgresRunRepository(session, self._clock)
+        self.events = events
+        self.history = history
+        self.checkpoints = PostgresCheckpointRepository(session, self._clock, history)
+        self.schedules = schedules
+        self.schedule_occurrences = PostgresScheduleOccurrenceRepository(schedules)
+        self.schedule_admission = PostgresScheduleAdmissionController(
+            session, self._admission_limits, self._metrics
+        )
+        self.queue = PostgresRunQueue(
+            session,
+            self._clock,
+            events,
+            lease_seconds=self._lease_seconds,
+            max_attempts=self._max_attempts,
+        )
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        del exc, traceback
+        if self._session is None:
+            return
+        try:
+            if exc_type is None:
+                await self._session.commit()
+                self._rollback_callbacks.clear()
+            else:
+                await self._run_rollback_callbacks()
+                await self._session.rollback()
+        finally:
+            await self._session.close()
+            self._session = None
+
+    async def _run_rollback_callbacks(self) -> None:
+        callbacks = list(self._rollback_callbacks)
+        self._rollback_callbacks.clear()
+        for callback in reversed(callbacks):
+            await callback()
+
+
+class _ScheduleUnitOfWorkFactory:
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+        lease_seconds: float,
+        max_attempts: int,
+        admission_limits: ScheduleAdmissionLimits,
+        metrics: ScheduleMetrics,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+        self._lease_seconds = lease_seconds
+        self._max_attempts = max_attempts
+        self._admission_limits = admission_limits
+        self._metrics = metrics
+
+    def __call__(self) -> _ScheduleUnitOfWork:
+        return _ScheduleUnitOfWork(
+            self._maker,
+            tenant_id=self._tenant_id,
+            clock=self._clock,
+            lease_seconds=self._lease_seconds,
+            max_attempts=self._max_attempts,
+            admission_limits=self._admission_limits,
+            metrics=self._metrics,
+        )
+
+    def is_open(self) -> bool:
+        return False
+
+
+def _validate_schedule_role(settings: Settings) -> Principal:
+    validate_settings(settings, require_auth_token=False)
+    if not settings.schedule_worker_enabled:
+        raise ConfigurationError("schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1")
+    if not settings.schedule_api_enabled:
+        raise ConfigurationError(
+            "schedule API is disabled; set AGENT_SCHEDULE_API_ENABLED=1 before the worker"
+        )
+    if settings.deployment_mode is not DeploymentMode.PRODUCTION:
+        raise ConfigurationError("schedule worker requires the production process topology")
+    if settings.auth_mode is not AuthMode.TOKEN:
+        raise ConfigurationError("schedule worker requires configured non-development identity")
+    if not settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://")):
+        raise ConfigurationError("schedule worker requires PostgreSQL storage")
+    if settings.credentials:
+        raise ConfigurationError("schedule worker environment must not contain provider keys")
+    unknown = set(settings.auth_scopes) - set(PLATFORM_SCOPES)
+    if unknown:
+        raise ConfigurationError(
+            "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
+        )
+    return Principal(
+        tenant_id=settings.auth_tenant_id,
+        principal_id=settings.auth_principal_id,
+        roles=set(settings.auth_roles),
+        scopes=set(settings.auth_scopes),
+    )
+
+
+@asynccontextmanager
+async def build_schedule_worker(
+    *,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+    ids: IdFactory | None = None,
+) -> AsyncIterator[ScheduleWorker]:
+    """Build only the resources needed to materialize scheduled runs."""
+
+    effective_settings = settings or load_schedule_worker_settings()
+    principal = _validate_schedule_role(effective_settings)
+    runtime = load_config_document(effective_settings, "runtime/limits.yaml")
+    queue = runtime["queue"]
+    worker = runtime["worker"]
+    scheduling = runtime["scheduling"]
+    admission_limits = ScheduleAdmissionLimits.model_validate(
+        {
+            "max_active_runs_per_tenant": scheduling["max_active_runs_per_tenant"],
+            "max_materializations_per_minute": scheduling["max_materializations_per_minute"],
+            "daily_cost": scheduling["daily_cost"],
+            "monthly_cost": scheduling["monthly_cost"],
+        }
+    )
+    effective_clock = clock or SystemClock()
+    effective_ids = ids or RandomIdFactory()
+    wakeup = PostgresScheduleWakeup(effective_settings.database_url)
+    metrics = ScheduleMetrics(tenant_hash_key=tenant_hash_key(effective_settings.database_url))
+    engine = create_engine(effective_settings.database_url)
+    try:
+        await assert_schema_revision(engine)
+        factory = _ScheduleUnitOfWorkFactory(
+            create_session_factory(engine),
+            tenant_id=principal.tenant_id,
+            clock=effective_clock,
+            lease_seconds=float(worker["lease_seconds"]),
+            max_attempts=int(queue["max_attempts"]),
+            admission_limits=admission_limits,
+            metrics=metrics,
+        )
+        materializer = ScheduleMaterializer(
+            uow_factory=factory,
+            principals=ConfiguredSchedulePrincipalDirectory(principal),
+            clock=effective_clock,
+            ids=effective_ids,
+            seed_checkpoint=DurableCheckpointSeeder(effective_clock),
+            metrics=metrics,
+        )
+        yield ScheduleWorker(
+            uow_factory=factory,
+            materialize=materializer.materialize,
+            clock=effective_clock,
+            scan_batch=int(scheduling["scan_batch"]),
+            fallback_poll_seconds=float(scheduling["fallback_poll_seconds"]),
+            admission_backoff_seconds=float(scheduling["admission_backoff_seconds"]),
+            wait_for_wakeup=wakeup.wait,
+            metrics=metrics,
+        )
+    finally:
+        await wakeup.close()
+        await engine.dispose()
 
 
 async def _compose(
@@ -605,6 +874,15 @@ async def _compose(
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
+    interactive_priority: int,
+    async_priority: int,
+    schedule_scan_batch: int,
+    schedule_fallback_poll_seconds: float,
+    schedule_admission_backoff_seconds: float,
+    schedule_definition_limits: ScheduleDefinitionLimits,
+    schedule_notify: Callable[[], Awaitable[None]],
+    schedule_wait: Callable[[float], Awaitable[None]],
+    schedule_metrics: ScheduleMetrics,
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
@@ -1136,6 +1414,12 @@ async def _compose(
         )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
+        schedule_accountant = ScheduleOutcomeAccountant(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            metrics=schedule_metrics,
+        )
         principal_resolver = StaticPrincipalResolver(principal)
         skill_reviews: SkillBackgroundReview | None = None
 
@@ -1144,6 +1428,10 @@ async def _compose(
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
+            try:
+                await schedule_accountant.account(run_id)
+            except Exception:
+                logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
             try:
                 async with uow_factory() as uow:
                     run = await uow.runs.get(run_id, principal)
@@ -1295,6 +1583,13 @@ async def _compose(
             policy_version=ruleset.policy_version,
         )
 
+        schedule_service = ScheduleService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            limits=schedule_definition_limits,
+            wake_worker=schedule_notify,
+        )
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -1324,8 +1619,38 @@ async def _compose(
             ),
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
+            schedules=schedule_service,
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
+
+        def schedule_worker_factory() -> WorkerService:
+            if not settings.schedule_worker_enabled:
+                raise ConfigurationError(
+                    "schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1"
+                )
+            if settings.deployment_mode is DeploymentMode.PRODUCTION:
+                raise ConfigurationError(
+                    "production schedule workers require the lean scheduler composition"
+                )
+            materializer = ScheduleMaterializer(
+                uow_factory=uow_factory,
+                principals=ConfiguredSchedulePrincipalDirectory(principal),
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                metrics=schedule_metrics,
+            )
+            return ScheduleWorker(
+                uow_factory=uow_factory,
+                materialize=materializer.materialize,
+                clock=clock,
+                scan_batch=schedule_scan_batch,
+                fallback_poll_seconds=schedule_fallback_poll_seconds,
+                admission_backoff_seconds=schedule_admission_backoff_seconds,
+                wait_for_wakeup=schedule_wait,
+                metrics=schedule_metrics,
+            )
+
         return (
             Composition(
                 settings=settings,
@@ -1337,6 +1662,7 @@ async def _compose(
                 runs=run_service,
                 approvals=approval_service,
                 sessions=session_service,
+                schedules=schedule_service,
                 trajectories=trajectory_service,
                 executor=executor,
                 uow_factory=uow_factory,
@@ -1347,9 +1673,36 @@ async def _compose(
                     executor=executor,
                     clock=clock,
                     worker_id=worker_id,
+                    eligible_classes=(interactive_priority,),
+                    interactive_priority=interactive_priority,
+                    async_priority=async_priority,
                     lease_seconds=lease_seconds,
                     heartbeat_divisor=heartbeat_divisor,
                     poll_interval_seconds=worker_poll_interval,
+                    record_claim_metric=lambda worker_class, duration_seconds: (
+                        schedule_metrics.record_claim(
+                            worker_class=worker_class,
+                            duration_seconds=duration_seconds,
+                        )
+                    ),
+                ),
+                async_worker_factory=lambda worker_id: DurableWorker(
+                    uow_factory=uow_factory,
+                    executor=executor,
+                    clock=clock,
+                    worker_id=worker_id,
+                    eligible_classes=(async_priority,),
+                    interactive_priority=interactive_priority,
+                    async_priority=async_priority,
+                    lease_seconds=lease_seconds,
+                    heartbeat_divisor=heartbeat_divisor,
+                    poll_interval_seconds=worker_poll_interval,
+                    record_claim_metric=lambda worker_class, duration_seconds: (
+                        schedule_metrics.record_claim(
+                            worker_class=worker_class,
+                            duration_seconds=duration_seconds,
+                        )
+                    ),
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
@@ -1362,6 +1715,7 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_session_deletions=sweep_session_deletions,
                 ),
+                schedule_worker_factory=schedule_worker_factory,
                 sandbox=sandbox_manager,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
@@ -1536,6 +1890,12 @@ async def build(
         raise ConfigurationError(
             "provider memory extraction evaluation mode is unavailable in production"
         )
+    if (
+        effective_settings.deployment_mode is DeploymentMode.PRODUCTION
+        and (effective_settings.schedule_api_enabled or effective_settings.schedule_worker_enabled)
+        and storage != "postgres"
+    ):
+        raise ConfigurationError("production scheduling requires PostgreSQL storage")
     provider_registry = ProviderRegistry.load(
         PACKAGE_ROOT / "models",
         adapters=ADAPTER_DEFINITIONS,
@@ -1596,6 +1956,25 @@ async def build(
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
     worker_config = runtime_config["worker"]
+    scheduling_config = runtime_config["scheduling"]
+    schedule_admission_limits = ScheduleAdmissionLimits.model_validate(
+        {
+            "max_active_runs_per_tenant": scheduling_config["max_active_runs_per_tenant"],
+            "max_materializations_per_minute": scheduling_config["max_materializations_per_minute"],
+            "daily_cost": scheduling_config["daily_cost"],
+            "monthly_cost": scheduling_config["monthly_cost"],
+        }
+    )
+    schedule_definition_limits = ScheduleDefinitionLimits.model_validate(
+        {
+            "max_run_timeout_seconds": scheduling_config["max_run_timeout_seconds"],
+            "max_misfire_grace_seconds": scheduling_config["max_misfire_grace_seconds"],
+            "max_steps_per_run": scheduling_config["max_steps_per_run"],
+            "max_model_calls_per_run": scheduling_config["max_model_calls_per_run"],
+            "max_tool_calls_per_run": scheduling_config["max_tool_calls_per_run"],
+            "max_cost_per_run": scheduling_config["max_cost_per_run"],
+        }
+    )
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
@@ -1689,6 +2068,14 @@ async def build(
         if storage == "memory"
         else PostgresLiveEventBroadcaster(effective_settings.database_url)
     )
+    schedule_wakeup = (
+        InMemoryScheduleWakeup()
+        if storage == "memory"
+        else PostgresScheduleWakeup(effective_settings.database_url)
+    )
+    schedule_metrics = ScheduleMetrics(
+        tenant_hash_key=tenant_hash_key(effective_settings.database_url)
+    )
     composition: Composition | None = None
     skill_validator = SkillPackageValidator(ConservativeTokenEstimator())
     skill_store: SkillPackageStore
@@ -1744,6 +2131,8 @@ async def build(
                         skill_store=skill_store,
                         skill_validator=skill_validator,
                         ids=effective_ids,
+                        schedule_admission_limits=schedule_admission_limits,
+                        schedule_metrics=schedule_metrics,
                     ),
                     effective_principal.tenant_id,
                 ),
@@ -1763,6 +2152,8 @@ async def build(
                 UnavailableBrowserAuthenticationControlPlane()
             )
         else:
+            # Public profile management uses this control plane even when browser
+            # tools are disabled, so the client is gated by the service URL.
             browser_profile_http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(30.0, connect=5.0),
                 follow_redirects=False,
@@ -1853,6 +2244,17 @@ async def build(
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
+            interactive_priority=int(queue_config["priorities"]["interactive"]),
+            async_priority=int(queue_config["priorities"]["async"]),
+            schedule_scan_batch=int(scheduling_config["scan_batch"]),
+            schedule_fallback_poll_seconds=float(scheduling_config["fallback_poll_seconds"]),
+            schedule_admission_backoff_seconds=float(
+                scheduling_config["admission_backoff_seconds"]
+            ),
+            schedule_definition_limits=schedule_definition_limits,
+            schedule_notify=schedule_wakeup.notify,
+            schedule_wait=schedule_wakeup.wait,
+            schedule_metrics=schedule_metrics,
             ruleset=ruleset,
             live_events=live_events,
             context_config=context_config,
@@ -1928,6 +2330,12 @@ async def build(
             await live_events.close()
         except Exception as exc:
             logger.warning("live_events_close_failed", extra={"error_class": type(exc).__name__})
+        try:
+            await schedule_wakeup.close()
+        except Exception as exc:
+            logger.warning(
+                "schedule_wakeup_close_failed", extra={"error_class": type(exc).__name__}
+            )
         if engine is not None:
             try:
                 await engine.dispose()

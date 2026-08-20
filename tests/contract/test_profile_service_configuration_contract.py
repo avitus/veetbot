@@ -13,6 +13,7 @@ import uvicorn
 import agent_core.browser_control_plane.main as service_main
 from agent_core.browser_control_plane.configuration import load_profile_service_settings
 from agent_core.browser_control_plane.models import ProfileStoreIntegrityError
+from agent_core.domain.browser import require_service_origin
 
 OPAQUE_AUTH_VALUE = "synthetic-profile-service-auth-value"
 
@@ -40,7 +41,7 @@ def environment(tmp_path: Path) -> dict[str, str]:
         "BROWSER_PROFILE_SESSION_SECRET_FILE": str(session_secret_file),
         "BROWSER_PROFILE_KEY_DIR": str(key_dir),
         "BROWSER_PROFILE_MATERIAL_ROOT": str(tmp_path / "materials"),
-        "BROWSER_PROFILE_BIND_HOST": "0.0.0.0",
+        "BROWSER_PROFILE_BIND_HOST": "0.0.0.0",  # noqa: S104 - boundary fixture
         "BROWSER_PROFILE_BIND_PORT": "8080",
         "BROWSER_PROFILE_CEREMONY_BASE_URL": "https://login.example.test",
     }
@@ -54,7 +55,7 @@ def test_profile_service_loads_only_private_file_mounted_material(tmp_path: Path
     assert settings.keyring.current_version == "key-v1"
     assert len(settings.keyring.resolve("key-v1")) == 32
     assert settings.material_root == (tmp_path / "materials").resolve()
-    assert settings.bind_host == "0.0.0.0"
+    assert settings.bind_host == "0.0.0.0"  # noqa: S104 - boundary fixture
     assert settings.bind_port == 8080
     assert settings.ceremony_base_url == "https://login.example.test"
 
@@ -85,6 +86,35 @@ def test_profile_service_rejects_insecure_or_symlinked_secret_files(tmp_path: Pa
     with pytest.raises(ProfileStoreIntegrityError):
         load_profile_service_settings(values)
 
+
+def test_profile_service_fails_closed_without_atomic_no_follow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = environment(tmp_path)
+    monkeypatch.delattr(os, "O_NOFOLLOW", raising=False)
+
+    with pytest.raises(ProfileStoreIntegrityError):
+        load_profile_service_settings(values)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    (
+        "https://login.example.test:not-a-port",
+        "https://login.example.test:0",
+        "https://login.example.test:65536",
+    ),
+)
+def test_service_origins_reject_invalid_ports(tmp_path: Path, origin: str) -> None:
+    with pytest.raises(ValueError):
+        require_service_origin(origin, message="invalid service origin")
+
+    values = environment(tmp_path)
+    values["BROWSER_PROFILE_CEREMONY_BASE_URL"] = origin
+    with pytest.raises(ProfileStoreIntegrityError):
+        load_profile_service_settings(values)
+
     values = environment(tmp_path / "second")
     auth_file = Path(values["BROWSER_PROFILE_SERVICE_AUTH_FILE"])
     target = auth_file.with_name("target-auth")
@@ -110,12 +140,13 @@ def test_profile_service_rejects_unknown_duplicate_or_invalid_keys(tmp_path: Pat
 
 def test_profile_service_does_not_accept_secret_bytes_from_environment(tmp_path: Path) -> None:
     values = environment(tmp_path)
-    values["BROWSER_PROFILE_SERVICE_AUTH_TOKEN"] = OPAQUE_AUTH_VALUE
+    values["BROWSER_PROFILE_SERVICE_AUTH_TOKEN"] = "different-environment-authorization-value"
     values["BROWSER_PROFILE_ENCRYPTION_KEY"] = "synthetic-environment-key-material"
 
     settings = load_profile_service_settings(values)
 
     assert settings.authorization.reveal() == OPAQUE_AUTH_VALUE
+    assert settings.keyring.resolve("key-v1") == hashlib.sha256(b"synthetic-mounted-key").digest()
 
 
 def test_profile_service_entrypoint_uses_only_mounted_settings(
@@ -153,6 +184,6 @@ def test_profile_service_entrypoint_uses_only_mounted_settings(
     assert observed["authorization"] is settings.authorization
     assert observed["sessions"] is not None
     assert observed["app"] == "synthetic-app"
-    assert observed["host"] == "0.0.0.0"
+    assert observed["host"] == "0.0.0.0"  # noqa: S104 - boundary fixture
     assert observed["port"] == 8080
     assert observed["access_log"] is False

@@ -87,6 +87,22 @@ async def test_encrypted_store_uses_fresh_nonce_and_hashed_filenames(tmp_path: P
     assert all(OTHER_PROVIDER_REF not in path.name for path in root.iterdir())
 
 
+async def test_encrypted_store_metadata_refresh_does_not_decrypt_profile_material(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = store(tmp_path / "profiles")
+    expected = await adapter.create(identity(), PLAINTEXT_MARKER)
+
+    def reject_decryption(path: Path) -> tuple[object, bytes]:
+        del path
+        raise AssertionError("metadata refresh decrypted profile material")
+
+    monkeypatch.setattr(adapter, "_decode", reject_decryption)
+
+    assert await adapter.list_metadata() == (expected,)
+
+
 async def test_encrypted_store_enforces_exact_scope_and_unique_identities(
     tmp_path: Path,
 ) -> None:
@@ -150,7 +166,7 @@ async def test_encrypted_store_delete_is_scoped_durable_and_idempotent(tmp_path:
 
 
 @pytest.mark.parametrize("field", ["tenant_id", "ciphertext"])
-async def test_encrypted_store_rejects_tampered_envelopes_on_restart(
+async def test_encrypted_store_rejects_tampered_envelopes_on_material_access_after_restart(
     tmp_path: Path,
     field: str,
 ) -> None:
@@ -162,8 +178,11 @@ async def test_encrypted_store_rejects_tampered_envelopes_on_restart(
     envelope[field] = "tampered"
     path.write_text(json.dumps(envelope))
 
+    restarted = store(root)
+    metadata = await restarted.find_by_profile(PROFILE_ID)
+    assert metadata is not None
     with pytest.raises(ProfileStoreIntegrityError):
-        store(root)
+        await restarted.load(metadata.identity())
 
 
 async def test_encrypted_store_atomic_failure_preserves_previous_record(
@@ -209,7 +228,7 @@ async def test_encrypted_store_rotation_is_restartable_and_drops_old_key_depende
 def test_encrypted_store_fails_closed_for_permissions_key_and_schema(tmp_path: Path) -> None:
     insecure = tmp_path / "insecure"
     insecure.mkdir(mode=0o755)
-    os.chmod(insecure, 0o755)
+    os.chmod(insecure, 0o755)  # noqa: S103 - intentionally insecure fixture
     with pytest.raises(ProfileStoreIntegrityError):
         store(insecure)
 

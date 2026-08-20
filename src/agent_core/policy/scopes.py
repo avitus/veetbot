@@ -27,6 +27,9 @@ PLATFORM_SCOPES = frozenset(
         "browser.profile.write",
         "browser.grant.read",
         "browser.grant.write",
+        "schedule.read",
+        "schedule.write",
+        "schedule.cancel",
     }
 )
 _SCOPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")

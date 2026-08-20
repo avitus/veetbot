@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -39,6 +40,8 @@ class FakeSessionRuntime:
     authentication: BrowserAuthenticationStatus = BrowserAuthenticationStatus.READY
     closed: bool = False
     actions: list[BrowserAction] = field(default_factory=list)
+    observe_started: asyncio.Event | None = None
+    observe_release: asyncio.Event | None = None
 
     async def start(
         self,
@@ -55,6 +58,10 @@ class FakeSessionRuntime:
         return BrowserObservation(url=url, revision="revision-1", text="safe observation")
 
     async def observe(self) -> BrowserObservation:
+        if self.observe_started is not None:
+            self.observe_started.set()
+        if self.observe_release is not None:
+            await self.observe_release.wait()
         return BrowserObservation(
             url=self.allowed_origins[0] + "/current",
             revision="revision-1",
@@ -215,21 +222,40 @@ async def test_expired_lease_fails_without_sealing_client_material(tmp_path: Pat
     assert runtimes[-1].closed is True
 
 
-@pytest.mark.parametrize(
-    "runtime_status,expected",
-    [
-        (BrowserAuthenticationStatus.READY, BrowserAuthenticationStatus.READY),
-        (BrowserAuthenticationStatus.NEEDS_USER, BrowserAuthenticationStatus.NEEDS_USER),
-        (
-            BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
-            BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
-        ),
-    ],
-)
-async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+async def test_expired_lease_waits_for_an_active_operation_before_closing(
+    tmp_path: Path,
+) -> None:
+    lifecycle, sessions, runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    lease = await sessions.acquire(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        run_id=RUN_ID,
+        attempt_number=1,
+        deadline_at=NOW + timedelta(seconds=1),
+    )
+    runtime = runtimes[-1]
+    runtime.observe_started = asyncio.Event()
+    runtime.observe_release = asyncio.Event()
+    active = asyncio.create_task(sessions.observe(lease.lease_ref))
+    await runtime.observe_started.wait()
+    times[0] = NOW + timedelta(seconds=2)
+
+    expiry = asyncio.create_task(sessions.observe(lease.lease_ref))
+    await asyncio.sleep(0)
+
+    assert runtime.closed is False
+    runtime.observe_release.set()
+    await active
+    with pytest.raises(BrowserProviderError):
+        await expiry
+    assert runtime.closed is True
+
+
+async def assert_authentication_ceremony_is_direct_single_use_and_runtime_decided(
     tmp_path: Path,
     runtime_status: BrowserAuthenticationStatus,
-    expected: BrowserAuthenticationStatus,
 ) -> None:
     lifecycle, sessions, runtimes, _times = services(tmp_path)
     await provision(lifecycle)
@@ -247,10 +273,28 @@ async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
     assert ceremony.launch_url is not None
     assert "#capability=" in ceremony.launch_url
     assert public_before.launch_url is None
-    assert result.status is expected
+    assert result.status is runtime_status
     assert "capability" not in result.model_dump_json()
-    if expected is BrowserAuthenticationStatus.READY:
+    if runtime_status is BrowserAuthenticationStatus.READY:
         assert runtimes[0].closed is True
+
+
+@pytest.mark.parametrize(
+    "runtime_status",
+    [
+        BrowserAuthenticationStatus.READY,
+        BrowserAuthenticationStatus.NEEDS_USER,
+        BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
+    ],
+)
+async def test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+    tmp_path: Path,
+    runtime_status: BrowserAuthenticationStatus,
+) -> None:
+    await assert_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+        tmp_path,
+        runtime_status=runtime_status,
+    )
 
 
 async def test_authentication_scope_mismatch_and_caller_asserted_success_are_absent(
@@ -278,7 +322,7 @@ async def test_authentication_scope_mismatch_and_caller_asserted_success_are_abs
     assert "submit_credential" not in public_methods
 
 
-async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(
+async def assert_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(
     tmp_path: Path,
 ) -> None:
     lifecycle, sessions, runtimes, _times = services(tmp_path)
@@ -296,3 +340,33 @@ async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runti
     assert cancelled.status is BrowserAuthenticationStatus.CANCELLED
     assert replay == cancelled
     assert runtimes[0].closed is True
+
+
+async def test_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(
+    tmp_path: Path,
+) -> None:
+    await assert_authentication_cancellation_is_scoped_idempotent_and_closes_runtime(tmp_path)
+
+
+async def test_expired_authentication_is_retained_for_bounded_idempotency(
+    tmp_path: Path,
+) -> None:
+    lifecycle, sessions, _runtimes, times = services(tmp_path)
+    await provision(lifecycle)
+    ceremony = await sessions.begin_authentication(
+        PROFILE_ID,
+        principal(),
+        PROVIDER_REF,
+        login_url="https://example.org/login",
+    )
+    times[0] = ceremony.expires_at + timedelta(seconds=1)
+
+    expired = await sessions.authentication_status(ceremony.id, principal())
+    replay = await sessions.cancel_authentication(ceremony.id, principal())
+
+    assert expired.status is BrowserAuthenticationStatus.EXPIRED
+    assert replay == expired
+
+    times[0] += timedelta(minutes=5, seconds=1)
+    with pytest.raises(ConflictError):
+        await sessions.authentication_status(ceremony.id, principal())

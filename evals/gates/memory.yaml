@@ -73,7 +73,7 @@
   milestone: 10
   kind: structural
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Extractor contract coverage** — every shipped MemoryCandidateExtractor implementation is registered against the shared contract for separate, scope-correct, provenance-bound proposals and deterministic assisted-extractor fallback."
+  statement: "**Extractor contract coverage** — every shipped MemoryCandidateExtractor implementation is registered against the shared contract for separate, scope-correct, provenance-bound proposals."
   check: tests/contract/test_memory_candidate_extractor_contract.py::test_extractor_returns_separate_provenance_bound_candidate_proposals
 - id: gate.memory.provider_activation_bound
   milestone: 10
@@ -98,7 +98,7 @@
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
   statement: "**Evidence publication** — the checked-in paired evaluation publishes an exact activation tuple and corpus hash only after lift, fabrication, and policy-regression gates pass, while failures leave no artifact."
-  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate
+  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_pass_publishes_the_exact_tuple
 - id: gate.memory.currency
   milestone: 9
   kind: case

@@ -9,6 +9,8 @@ queue:
 worker:
   lease_seconds: 30.0
   heartbeat_divisor: 3
+  reserved_interactive_slots: 1
+  reserved_async_slots: 1
 sweeps:
   reclaim_expired_seconds: 5
   approval_reaper_seconds: 30
@@ -22,3 +24,17 @@ run_defaults:
   max_steps: 32
   max_model_calls: 16
   max_tool_calls: 32
+scheduling:
+  scan_batch: 100
+  fallback_poll_seconds: 30
+  admission_backoff_seconds: 5
+  max_run_timeout_seconds: 86400
+  max_misfire_grace_seconds: 86400
+  max_steps_per_run: 128
+  max_model_calls_per_run: 64
+  max_tool_calls_per_run: 256
+  max_cost_per_run: 100
+  max_active_runs_per_tenant: 4
+  max_materializations_per_minute: 60
+  daily_cost: 25
+  monthly_cost: 250

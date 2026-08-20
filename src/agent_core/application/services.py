@@ -16,6 +16,11 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
+from agent_core.domain.schedules import (
+    ScheduleDefinition,
+    ScheduleOccurrence,
+    ScheduleRecord,
+)
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -122,7 +127,12 @@ class BrowserProfileService(Protocol):
 
     async def get(self, principal: Principal, profile_id: UUID) -> BrowserProfileView: ...
 
-    async def list(self, principal: Principal) -> list[BrowserProfileView]: ...
+    async def list(
+        self,
+        principal: Principal,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[BrowserProfileView]: ...
 
     async def revoke(self, principal: Principal, profile_id: UUID) -> BrowserProfileView: ...
 
@@ -134,7 +144,6 @@ class BrowserProfileService(Protocol):
         profile_id: UUID,
         *,
         login_url: str,
-        idempotency_key: str | None = None,
     ) -> BrowserAuthenticationView: ...
 
     async def list_authentications(
@@ -179,8 +188,54 @@ class BrowserGrantService(Protocol):
         principal: Principal,
         *,
         profile_id: UUID | None = None,
-    ) -> list[BrowserGrantView]: ...
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserGrantView]: ...
 
     async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserGrantView: ...
 
     async def delete(self, principal: Principal, grant_id: UUID) -> None: ...
+
+
+class ScheduleService(Protocol):
+    async def create(
+        self,
+        principal: Principal,
+        definition: ScheduleDefinition,
+        idempotency_key: str,
+    ) -> ScheduleRecord: ...
+
+    async def get(self, principal: Principal, schedule_id: UUID) -> ScheduleRecord: ...
+
+    async def list(
+        self, principal: Principal, limit: int, cursor: str | None
+    ) -> Page[ScheduleRecord]: ...
+
+    async def update(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        expected_revision: int,
+        definition: ScheduleDefinition,
+    ) -> ScheduleRecord: ...
+
+    async def pause(
+        self, principal: Principal, schedule_id: UUID, expected_revision: int
+    ) -> ScheduleRecord: ...
+
+    async def resume(
+        self, principal: Principal, schedule_id: UUID, expected_revision: int
+    ) -> ScheduleRecord: ...
+
+    async def cancel(
+        self, principal: Principal, schedule_id: UUID, expected_revision: int
+    ) -> ScheduleRecord: ...
+
+    async def list_occurrences(
+        self,
+        principal: Principal,
+        schedule_id: UUID,
+        *,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[ScheduleOccurrence]: ...

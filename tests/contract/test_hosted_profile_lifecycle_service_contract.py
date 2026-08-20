@@ -106,6 +106,25 @@ async def test_lifecycle_service_provision_is_durable_and_scope_idempotent(
         )
 
 
+async def test_lifecycle_service_normalizes_origins_before_idempotency_comparison(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "profiles"
+
+    first = await service(root).provision(
+        PROFILE_ID,
+        principal(),
+        ("https://Example.ORG",),
+    )
+    replay = await service(root).provision(
+        PROFILE_ID,
+        principal(),
+        ("https://example.org/",),
+    )
+
+    assert replay == first
+
+
 async def test_lifecycle_service_revoke_delete_and_rotation_are_restart_safe(
     tmp_path: Path,
 ) -> None:

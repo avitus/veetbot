@@ -68,6 +68,7 @@ validates the floor, and no trailer means lane A.
 | Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
 | Public-web search and page extraction | `web-access.md` |
 | Authenticated browser automation | `browser-automation.md` |
+| Scheduled runs and recurrence | `scheduling.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -84,13 +85,12 @@ validates the floor, and no trailer means lane A.
 
 ## Scope control
 
-- Work only on the **active** milestone or an explicitly authorized one
-  (see project state; currently Milestone 10 automatic memory, self-authored
-  skills, provider-neutral web access, and authenticated browser automation).
-  Do not begin later milestones speculatively.
-- Milestones 0 through 9 are complete. The Milestone 10 tranches above are
-  authorized with their own acceptance contracts; routing, general-purpose
-  subagents, and other Milestone 10 extensions remain unauthorized; scheduling is an unauthorized Milestone 11.
+- Work only on the **active** milestone or an explicitly authorized one (see project state).
+- Do not begin later milestones speculatively.
+- Milestones 0 through 9 are complete. Milestones 10 and 11 have separate contracts.
+  Milestone 10 covers automatic memory, self-authored skills,
+  provider-neutral web access, and authenticated browser automation; routing,
+  general-purpose subagents, and other extensions remain unauthorized.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).

@@ -3,10 +3,10 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_10_in_progress
+  status: milestone_11_in_progress
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 9
-  active_milestone: 10
+  active_milestone: 11
   authorized_milestones:
     - 0
     - 1
@@ -19,6 +19,7 @@ project:
     - 8
     - 9
     - 10
+    - 11
 
 milestones:
   "0":
@@ -65,15 +66,23 @@ milestones:
       - model routing changes
       - general-purpose subagents and delegate.run
   "11":
-    title: Scheduling
-    status: planned
-    authorized_scope: []
+    title: Scheduled runs
+    status: in_progress
+    authorized_scope:
+      - one-time, daily, and weekly schedules with IANA time zones
+      - immutable schedule revisions and occurrence history
+      - governed occurrence materialization into ordinary durable runs
+      - schedule lifecycle HTTP API and exact schedule scopes
+      - bounded misfires, no-overlap execution, admission, and cost controls
+      - offline occurrence and result retrieval
     deferred_scope:
-      - scheduler design and hard gates
-      - recurring and delayed run dispatch
+      - arbitrary cron and monthly recurrence
+      - dependency graphs and workflow DAGs
+      - push, email, mobile, and webhook notifications
+      - continuous-session recurrence
 
 # Evidence for completed milestones 0 through 9 lives in
-# docs/status/verification-history.yaml; the in-progress milestone's
+# docs/status/verification-history.yaml; an in-progress milestone's
 # evidence stays here until it completes.
 verification:
   history: docs/status/verification-history.yaml
@@ -315,8 +324,194 @@ verification:
         Clopper-Pearson lower bound, and zero additional policy failures.
       - Run every hosted CI lane and complete the GitHub CodeRabbit review on
         the same final head, resolving every finding and conversation.
-      - Design and separately authorize Milestone 11 scheduling; keep routing
-        and subagent extensions independently gated.
+      - Implement separately gated routing and subagent extensions.
+  milestone_11:
+    recorded_at: 2026-08-19T20:49:16Z
+    status: in_progress
+    evidence:
+      - check: focused gate-registry red-green cycle
+        outcome: passed
+        detail: >-
+          The valid red run failed three assertions because the registry parser
+          rejected Milestone 11 and schedule gate identifiers and the census
+          still expected 177 gates through Milestone 10. The implementation
+          step admitted the schedule area and Milestone 11, initially
+          registered fifteen functional gates, and updated the census; all nine
+          focused tests passed.
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 375 source and test
+          files, 504 static tests, 191 contracts, deployment-script checks,
+          123 citation checks, and strict documentation builds pass. The gate
+          registry initially contained 192 entries and retained 166 as the
+          verified ceiling through Milestone 9. This evidence predates the
+          persistence-discipline gate expansion.
+      - check: proposed ADR-0059
+        outcome: owner_review_requested
+        detail: >-
+          The ordinary-run execution model, immutable revisions, civil-time and
+          daylight-saving rules, bounded misfires, fresh authority, occurrence
+          idempotency, non-overlap, quotas, and default-off rollout boundary are
+          recorded for owner review.
+      - check: recurrence and civil-time red-green cycle
+        outcome: passed_locally
+        detail: >-
+          After an import-only scaffold made the behavioral test collect, the
+          valid red run failed all seven cadence and recurrence tests. The
+          implementation now validates one-time, daily, and weekly definitions,
+          normalizes aware instants and weekdays, computes next and latest-due
+          occurrences without backlog iteration, preserves civil time across
+          offset changes, advances spring gaps, and chooses the earlier fall-fold
+          instant. Seven focused tests, including generated cases across five
+          time zones, pass; gate.schedule.civil_time now names the real property
+          check. The later gate expansion does not alter that evidence.
+      - check: scheduling persistence discipline red-green cycle
+        outcome: passed
+        detail: >-
+          A valid registry red failed at 192 rather than 200 entries, and the
+          existing contract-coverage gate reported missing named contracts for
+          the occurrence and idempotency ports. The registry now contains 200
+          entries, including eight explicit domain, contract, schema,
+          migration, transaction, erasure, and isolation gates. All three
+          scheduling ports have shared in-memory and PostgreSQL adapter
+          contracts. Domain, schema, repository, gate-registry, static, and
+          contract lanes pass. A repository-managed PostgreSQL 16 service then
+          passed all six focused migration and scheduling-persistence tests and
+          all 109 integration and resilience tests, including unit-of-work
+          rollback, erasure, isolation, and migration behavior.
+      - check: schedule materialization red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The valid behavioral red run failed three tests at the unimplemented
+          principal-directory and materializer seams. Shared principal-directory,
+          due-lock, advance, and occurrence-lookup contracts now pass. The
+          materializer revalidates current scopes and enabled state, stamps only
+          requested scopes and finite revision limits on a priority-10 ordinary
+          run, creates its session, event sequence, seed checkpoint, process
+          event, occurrence, and schedule advance in one transaction, and uses
+          deferred occurrence-link foreign keys so the natural-key occurrence is
+          written first. PostgreSQL gates prove two concurrent schedulers commit
+          exactly one result and injected crashes after each of nine write
+          boundaries leave no partial state; retry returns the one complete
+          occurrence. The three registry entries materialize_once,
+          materialize_atomic, and authority_fresh now point to those executable
+          checks. The final local verification passes Ruff, mypy over 385 files,
+          516 static tests, 197 contract tests, deployment checks, strict docs
+          and citation validation, and all 111 PostgreSQL integration and
+          resilience tests, including both materialization gates.
+      - check: schedule overlap and admission red-green cycles
+        outcome: passed_locally
+        detail: >-
+          The valid overlap red materialized a second run while the preceding
+          occurrence remained queued. The implementation adds a contracted
+          latest-materialized occurrence query for both memory and PostgreSQL,
+          records one SKIPPED_OVERLAP decision without incrementing failures,
+          leaves the linked run unchanged, and allows another schedule to
+          progress. The admission red separately failed at the unimplemented
+          development controller and because the materializer ignored retry;
+          the closed controller contract now distinguishes ALLOW, transient
+          RETRY with no write, and terminal REJECT recorded as MISSED. Seventeen
+          focused registry, contract, and static tests and all seven focused
+          PostgreSQL schedule persistence and materialization tests pass. The
+          final repository verification passes Ruff, mypy over 387 files, 518
+          static tests, 198 contract tests, deployment and strict documentation
+          checks, and all 112 PostgreSQL integration and resilience tests.
+      - check: PostgreSQL schedule admission red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The valid PostgreSQL red failed at the unimplemented production
+          controller. The controller now shares the materialization transaction,
+          takes a tenant-derived advisory transaction lock, and decides against
+          committed active scheduled runs, one-minute materializations, active
+          maximum-cost reservations, and daily and monthly scheduled usage. Four
+          positive versioned ceilings extend the executable configuration
+          inventory from 106 to 110. Empty-tenant, decision-matrix, and concurrent
+          last-slot tests pass; the race admits exactly one run and leaves the
+          other schedule due without an occurrence. Final verification passes
+          Ruff, mypy over 388 files, 518 static tests, 198 contract tests,
+          deployment and strict documentation checks, and all 115 PostgreSQL
+          integration and resilience tests.
+      - check: bounded schedule worker red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The valid worker red failed at the unimplemented run_once method. The
+          worker now scans one deterministic bounded due batch, materializes
+          each definition in its own transaction, isolates definition and scan
+          failures while propagating cancellation, and waits for the earlier of
+          the next durable fire time and a bounded fallback poll. Already-due
+          work uses an admission backoff. Shared repository contracts cover the
+          next-fire query, the worker-service contract includes the new role,
+          and a PostgreSQL integration proof leaves the third of three due
+          definitions untouched when the batch is two. Three positive
+          versioned limits extend the executable inventory from 110 to 113.
+          Composition exposes the worker for development but fails closed for
+          non-development identity until a durable principal directory exists;
+          production deployment remains default-off. Final verification passes
+          Ruff, mypy over 391 files, 520 static tests, 198 contract tests,
+          deployment and strict documentation checks, and all 126 PostgreSQL
+          integration and resilience tests.
+      - check: schedule lifecycle and public-boundary red-green cycles
+        outcome: passed_locally
+        detail: >-
+          Valid reds first exposed absent lifecycle operations, absent
+          default-off flags and routes, incomplete definition ceilings, and
+          missing terminal accounting. Create, list, point read, update, pause,
+          resume, cancel, and occurrence history now enforce exact scopes,
+          optimistic revisions, immutable definitions, request idempotency,
+          stable bounded cursors, principal isolation, and secret-shaped input
+          rejection. Materialized run completion is linked back to its owner,
+          accounted exactly once, and resets or increments the consecutive
+          failure counter before applying the automatic-pause threshold. The
+          offline boundary recovers completed, failed, cancelled, missed, and
+          overlap-skipped outcomes through exact durable run links.
+      - check: isolated production topology, wakeup, fairness, and metrics red-green cycles
+        outcome: passed_locally
+        detail: >-
+          Valid reds exposed the missing lean production builder, async worker
+          factory, schedule systemd unit, cross-process wakeup, and telemetry
+          vocabulary. The sole bootstrap root now builds a least-privilege
+          PostgreSQL schedule role with configured content-versioned authority
+          and no execution or API credential. Fixed-channel LISTEN/NOTIFY
+          interrupts a bounded durable poll without becoming a correctness
+          dependency. Interactive and async workers claim disjoint priority
+          classes; production release tests exercise both default-off and
+          enabled scheduler activation. Content-free OpenTelemetry instruments
+          cover scans, lag, dispositions, misfires, admission, cost, outcomes,
+          auto-pause, cancellation, lease reclaim, and class-specific claim
+          latency. Six definition ceilings and two reserved-capacity limits
+          extend the executable configuration inventory from 113 to 121.
+      - check: complete Milestone 11 executable gate contract
+        outcome: passed_locally
+        detail: >-
+          Every one of the twenty-three gate.schedule registry entries names a
+          real test, property, corpus, contract, migration, or structural check;
+          none uses a provisional target. The canonical gate runner reports
+          23 passed, zero failed, and zero pending for Milestone 11. Integration
+          with the current origin/dev head produced valid cumulative reds for
+          documentation allowlist drift and a class-only provider-evidence
+          selector that pytest could not collect. Exact allowlist locations, an
+          executable test-method selector, and nested-selector registry
+          validation corrected those failures. The final canonical run reports
+          all 223 cumulative gates passed with zero failed or pending.
+      - check: complete local static, contract, deployment, migration, integration, and resilience lanes
+        outcome: passed_locally
+        detail: >-
+          On the final rebased origin/dev head, Ruff formatting and linting,
+          strict mypy over 469 source and test files, 760 static tests, 305 adapter
+          contracts, both production deployment script suites, strict
+          documentation and 121 citation checks, and 102 PostgreSQL integration
+          and resilience tests pass. Migration coverage upgrades an empty
+          PostgreSQL 16 database through the Milestone 10 browser revisions and
+          then to schedule head b6f4c2d8e901; the integration partition exercises
+          the Milestone 11 clean and stepwise migration boundary. The cumulative
+          canonical runner reports all 223 gates passed with zero failed or
+          pending.
+    remaining:
+      - Run every hosted CI lane and complete the GitHub CodeRabbit review on
+        the same final head, resolving every finding and conversation.
+      - Complete Milestone 10's rollout and hosted-review contract before
+        advancing the verified gate ceiling through Milestone 11.
 
 documentation:
   canonical_format: markdown
@@ -342,14 +537,15 @@ readiness:
     Milestone 10 is in progress for the four authorized tranches: automatic
     memory formation, self-authored skills, provider-neutral public-web
     access, and authenticated browser automation, with 34 registered gates
-    across the four workstreams. Scheduling is a planned Milestone 11;
-    model routing and general-purpose subagents remain deferred. Every
-    plan subject has a design document, no milestone carries a named gap,
-    and the gate registry, its census, and the milestone map are
-    reconciled by make docs-check. The corpus audit passes and their
-    findings are preserved in the audit log.
+    across the four workstreams. The owner separately authorized Milestone
+    11 scheduled runs, whose detailed design and 23 registered gates are
+    locally implemented. Model routing and general-purpose subagents remain
+    deferred. Every plan subject has a design document, no milestone
+    carries a named gap, and the gate registry, its census, and the
+    milestone map are reconciled by make docs-check. The corpus audit
+    passes and their findings are preserved in the audit log.
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-19T21:45:45Z
-last_reviewed_commit: e491d6f
+last_updated: 2026-08-20T03:56:09Z
+last_reviewed_commit: ca0eaae

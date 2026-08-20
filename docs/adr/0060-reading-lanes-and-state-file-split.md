@@ -1,4 +1,4 @@
-# ADR-0059: Reading lanes and the state-file split
+# ADR-0060: Reading lanes and the state-file split
 
 - Status: Accepted (directed by the repository owner, 2026-08-19)
 - Date: 2026-08-19

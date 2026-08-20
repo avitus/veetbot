@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import builtins
+import json
+import math
 from datetime import datetime
 from types import TracebackType
 from typing import Protocol, Self
@@ -11,6 +15,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 from agent_core.application.authorization import require_scope
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
     BrowserAuthenticationRecord,
     BrowserAuthenticationStatus,
@@ -20,9 +25,11 @@ from agent_core.domain.browser import (
     BrowserProfile,
     BrowserProfileStatus,
     BrowserProfileView,
+    BrowserProviderError,
     normalize_browser_origin,
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
+from agent_core.domain.views import Page
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import (
@@ -86,12 +93,23 @@ class BrowserProfileManagementService:
         authentications: BrowserAuthenticationControlPlane,
         clock: Clock,
         ids: IdFactory,
+        authentication_timeout_seconds: float = 30.0,
+        authentication_lock_timeout_seconds: float = 5.0,
     ) -> None:
+        if not math.isfinite(authentication_timeout_seconds) or authentication_timeout_seconds <= 0:
+            raise ValueError("authentication timeout must be positive and finite")
+        if (
+            not math.isfinite(authentication_lock_timeout_seconds)
+            or authentication_lock_timeout_seconds <= 0
+        ):
+            raise ValueError("authentication lock timeout must be positive and finite")
         self._uow_factory = uow_factory
         self._lifecycle = lifecycle
         self._authentications = authentications
         self._clock = clock
         self._ids = ids
+        self._authentication_timeout_seconds = authentication_timeout_seconds
+        self._authentication_lock_timeout_seconds = authentication_lock_timeout_seconds
 
     async def create(
         self,
@@ -136,15 +154,24 @@ class BrowserProfileManagementService:
                 principal,
                 normalized,
             )
-        except Exception:
-            async with self._uow_factory() as uow:
-                await uow.browser_profiles.transition(
-                    reservation.id,
-                    principal,
-                    expected_generation=0,
-                    status=BrowserProfileStatus.REVOKED,
-                    updated_at=self._clock.now(),
-                )
+        except Exception as original:
+            failures: list[Exception] = [original]
+            try:
+                async with self._uow_factory() as uow:
+                    await uow.browser_profiles.transition(
+                        reservation.id,
+                        principal,
+                        expected_generation=0,
+                        status=BrowserProfileStatus.REVOKED,
+                        updated_at=self._clock.now(),
+                    )
+            except Exception as compensation:
+                failures.append(compensation)
+            if len(failures) > 1:
+                raise ExceptionGroup(
+                    "browser profile provisioning and compensation failed",
+                    failures,
+                ) from original
             raise
         try:
             async with self._uow_factory() as uow:
@@ -155,20 +182,32 @@ class BrowserProfileManagementService:
                     provisioning=provisioning,
                     updated_at=self._clock.now(),
                 )
-        except Exception:
-            await self._lifecycle.delete(
-                reservation.id,
-                principal,
-                provisioning.provider_ref,
-            )
-            async with self._uow_factory() as uow:
-                await uow.browser_profiles.transition(
+        except Exception as original:
+            failures = [original]
+            try:
+                await self._lifecycle.delete(
                     reservation.id,
                     principal,
-                    expected_generation=0,
-                    status=BrowserProfileStatus.REVOKED,
-                    updated_at=self._clock.now(),
+                    provisioning.provider_ref,
                 )
+            except Exception as cleanup:
+                failures.append(cleanup)
+            try:
+                async with self._uow_factory() as uow:
+                    await uow.browser_profiles.transition(
+                        reservation.id,
+                        principal,
+                        expected_generation=0,
+                        status=BrowserProfileStatus.REVOKED,
+                        updated_at=self._clock.now(),
+                    )
+            except Exception as compensation:
+                failures.append(compensation)
+            if len(failures) > 1:
+                raise ExceptionGroup(
+                    "browser profile binding and compensation failed",
+                    failures,
+                ) from original
             raise
         return _profile_view(bound)
 
@@ -177,16 +216,39 @@ class BrowserProfileManagementService:
         async with self._uow_factory() as uow:
             return _profile_view(await uow.browser_profiles.get(profile_id, principal))
 
-    async def list(self, principal: Principal) -> list[BrowserProfileView]:
+    async def list(
+        self,
+        principal: Principal,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserProfileView]:
         require_scope(principal, "browser.profile.read")
+        after_created_at, after_id = _decode_browser_cursor(cursor)
         async with self._uow_factory() as uow:
-            profiles = await uow.browser_profiles.list(principal)
-        return [_profile_view(profile) for profile in profiles]
+            profiles = await uow.browser_profiles.list(
+                principal,
+                limit=limit + 1,
+                after_created_at=after_created_at,
+                after_id=after_id,
+            )
+        has_more = len(profiles) > limit
+        visible = profiles[:limit]
+        return Page(
+            items=[_profile_view(profile) for profile in visible],
+            next_cursor=(
+                _encode_browser_cursor(visible[-1].created_at, visible[-1].id)
+                if has_more and visible
+                else None
+            ),
+        )
 
     async def revoke(self, principal: Principal, profile_id: UUID) -> BrowserProfileView:
         require_scope(principal, "browser.profile.write")
         async with self._uow_factory() as uow:
             profile = await uow.browser_profiles.get(profile_id, principal)
+        if profile.provider_ref is not None:
+            await self._lifecycle.revoke(profile_id, principal, profile.provider_ref)
+        async with self._uow_factory() as uow:
             if profile.status is BrowserProfileStatus.REVOKED:
                 revoked = profile
             else:
@@ -197,8 +259,6 @@ class BrowserProfileManagementService:
                     status=BrowserProfileStatus.REVOKED,
                     updated_at=self._clock.now(),
                 )
-        if profile.provider_ref is not None:
-            await self._lifecycle.revoke(profile_id, principal, profile.provider_ref)
         return _profile_view(revoked)
 
     async def delete(self, principal: Principal, profile_id: UUID) -> None:
@@ -225,12 +285,24 @@ class BrowserProfileManagementService:
         profile_id: UUID,
         *,
         login_url: str,
-        idempotency_key: str | None = None,
     ) -> BrowserAuthenticationView:
         require_scope(principal, "browser.profile.write")
-        async with self._uow_factory() as uow:
-            profile = await uow.browser_profiles.get(profile_id, principal)
-            if idempotency_key is not None:
+        launched: BrowserAuthenticationView | None = None
+        try:
+            async with (
+                self._uow_factory() as uow,
+                uow.browser_profiles.authentication_admission(
+                    profile_id,
+                    principal,
+                    timeout_seconds=self._authentication_lock_timeout_seconds,
+                ) as profile,
+            ):
+                if (
+                    profile.status
+                    in {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}
+                    or profile.provider_ref is None
+                ):
+                    raise ConflictError("browser profile cannot authenticate in its current state")
                 existing = await uow.browser_authentications.list(
                     principal,
                     profile_id=profile_id,
@@ -250,34 +322,42 @@ class BrowserProfileManagementService:
                     None,
                 )
                 if active is not None:
-                    return _authentication_view(active)
-        if (
-            profile.status in {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}
-            or profile.provider_ref is None
-        ):
-            raise ConflictError("browser profile cannot authenticate in its current state")
-        launched = await self._authentications.begin_authentication(
-            profile_id,
-            principal,
-            profile.provider_ref,
-            login_url=login_url,
-        )
-        now = self._clock.now()
-        record = BrowserAuthenticationRecord(
-            id=launched.id,
-            tenant_id=principal.tenant_id,
-            principal_id=principal.principal_id,
-            profile_id=profile_id,
-            status=launched.status,
-            expires_at=launched.expires_at,
-            created_at=now,
-            updated_at=now,
-        )
-        try:
-            async with self._uow_factory() as uow:
+                    raise ConflictError("browser profile already has an active authentication")
+                try:
+                    async with asyncio.timeout(self._authentication_timeout_seconds):
+                        launched = await self._authentications.begin_authentication(
+                            profile_id,
+                            principal,
+                            profile.provider_ref,
+                            login_url=login_url,
+                        )
+                except TimeoutError as exc:
+                    raise BrowserProviderError(
+                        "tool.browser.provider_unavailable",
+                        retryable=True,
+                    ) from exc
+                now = self._clock.now()
+                record = BrowserAuthenticationRecord(
+                    id=launched.id,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    profile_id=profile_id,
+                    status=launched.status,
+                    expires_at=launched.expires_at,
+                    created_at=now,
+                    updated_at=now,
+                )
                 await uow.browser_authentications.create(record)
-        except Exception:
-            await self._authentications.cancel_authentication(launched.id, principal)
+        except Exception as original:
+            if launched is None:
+                raise
+            try:
+                await self._authentications.cancel_authentication(launched.id, principal)
+            except Exception as compensation:
+                raise ExceptionGroup(
+                    "browser authentication persistence and compensation failed",
+                    [original, compensation],
+                ) from original
             raise
         return launched
 
@@ -354,7 +434,9 @@ class BrowserProfileManagementService:
         if target is None:
             return
         profile = await profiles.get(authentication.profile_id, principal)
-        if profile.status is target:
+        if profile.status is target or target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS.get(
+            profile.status, frozenset()
+        ):
             return
         await profiles.transition(
             profile.id,
@@ -450,11 +532,29 @@ class BrowserGrantManagementService:
         principal: Principal,
         *,
         profile_id: UUID | None = None,
-    ) -> list[BrowserGrantView]:
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserGrantView]:
         require_scope(principal, "browser.grant.read")
+        after_created_at, after_id = _decode_browser_cursor(cursor)
         async with self._uow_factory() as uow:
-            grants = await uow.browser_grants.list(principal, profile_id=profile_id)
-        return [_grant_view(grant) for grant in grants]
+            grants = await uow.browser_grants.list(
+                principal,
+                profile_id=profile_id,
+                limit=limit + 1,
+                after_created_at=after_created_at,
+                after_id=after_id,
+            )
+        has_more = len(grants) > limit
+        visible = grants[:limit]
+        return Page(
+            items=[_grant_view(grant) for grant in visible],
+            next_cursor=(
+                _encode_browser_cursor(visible[-1].created_at, visible[-1].id)
+                if has_more and visible
+                else None
+            ),
+        )
 
     async def revoke(self, principal: Principal, grant_id: UUID) -> BrowserGrantView:
         require_scope(principal, "browser.grant.write")
@@ -486,3 +586,29 @@ def _idempotent_resource_id(kind: str, principal: Principal, key: str) -> UUID:
         NAMESPACE_URL,
         f"veetbot:{kind}:{principal.tenant_id}:{principal.principal_id}:{key}",
     )
+
+
+def _encode_browser_cursor(created_at: datetime, resource_id: UUID) -> str:
+    payload = json.dumps(
+        {"created_at": created_at.isoformat(), "id": str(resource_id)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_browser_cursor(value: str | None) -> tuple[datetime | None, UUID | None]:
+    if value is None:
+        return None, None
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        if not isinstance(decoded, dict) or set(decoded) != {"created_at", "id"}:
+            raise ValueError
+        created_at = datetime.fromisoformat(decoded["created_at"])
+        resource_id = UUID(decoded["id"])
+        if created_at.tzinfo is None:
+            raise ValueError
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("browser cursor is malformed") from exc
+    return created_at, resource_id

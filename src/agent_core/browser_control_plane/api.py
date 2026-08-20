@@ -7,14 +7,13 @@ import hmac
 import logging
 import re
 from collections.abc import Callable
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -58,7 +57,7 @@ class _LifecycleRequest(BaseModel):
 class _AcquireRequest(_LifecycleRequest):
     run_id: UUID
     attempt_number: int = Field(ge=1)
-    deadline_at: datetime
+    deadline_at: AwareDatetime
 
 
 class _LeaseRequest(BaseModel):
@@ -539,6 +538,7 @@ def _principal(tenant_id: str, principal_id: str) -> Principal:
 def _validate_idempotency(
     request: Request, profile_id: UUID, operation: str
 ) -> JSONResponse | None:
+    """Validate caller intent; the key is not a cached-response mechanism."""
     expected = f"browser-profile:{profile_id}:{operation}"
     if request.headers.get("idempotency-key") != expected:
         return _error(400, "invalid_request", "idempotency key is invalid")
@@ -546,6 +546,7 @@ def _validate_idempotency(
 
 
 def _require_idempotency(request: Request, expected: str) -> JSONResponse | None:
+    """Assert exact retry intent; successful action replays remain sequence-bound."""
     if request.headers.get("idempotency-key") != expected:
         return _error(400, "invalid_request", "idempotency key is invalid")
     return None

@@ -252,6 +252,12 @@ Version 0.1 is complete when all of the following work:
 
 The detailed design - the settings object and the eight environment values that survive the test "differs between two deployments of the same revision and cannot be committed"; the three configuration layers and why the environment is interpolated into files at named points rather than allowed to override them; the six configuration files, the operator overlay directory, and the one file the overlay may not touch; `.env.example` reconciled with the 106 knobs the corpus declares; the composition root's five startup phases and where each of the seventeen stated startup constraints lands; the shape of `build` and what a `Composition` may expose; the three entry points and the deployment role each passes; the eleven files this tree gains and the one name it retires; the Milestone 1 in-memory repositories, the `RunDispatcher` Protocol, and the minimal context builder; the CLI's arguments, output streams, reserved words, and exit codes; and the secret scanner's five rule families - is specified in [bootstrap-and-composition.md](bootstrap-and-composition.md) and ADR-0024. That document expands Sections 4, 5, 7, 10.5, 10.7, 11.1, 15, 16, 17, 25, 26, and 28 and Milestones 0, 1, 2, and 3; it does not replace the requirements below, and it removes no file this tree names.
 
+Milestone 11 extends that original inventory additively to 121 by placing its
+four scheduling-admission ceilings, six finite schedule-definition ceilings,
+three positive worker batch and timing limits, and two reserved-capacity limits
+in versioned runtime YAML. Its two default-off deployment feature flags remain
+environment controls rather than tuning knobs.
+
 Use a `src` layout.
 
 ```text
@@ -2188,7 +2194,7 @@ budget_exceeded_total
 
 Build evaluations before advanced features.
 
-The detailed design - what a hard gate is, and the registry that makes two hundred and three gate declarations — one hundred and ninety-four across sixteen detailed-design specifications, two in this plan, and seven in the milestone map — reconcile as two hundred registry entries after subtracting three cross-spec aliases; the four gate kinds, and why eighty-three of those registry entries cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
+The detailed design - what a hard gate is, and the registry that makes two hundred and twenty-six gate declarations — two hundred and seventeen across seventeen detailed-design specifications, two in this plan, and seven in the milestone map — reconcile as two hundred and twenty-three registry entries after subtracting three cross-spec aliases; the four gate kinds, and why ninety of those registry entries cannot be expressed as eval cases at all; the seven sources of nondeterminism and their treatments; how `model_fixture` resolves to a file and what validates it; the `interventions` field, without which cases 12 through 18 and 22 are unwritable; the `effect_sent_at` watermark that makes "no unauthorized side effects" decidable; the tenant, principals, and policy profiles an evaluation runs as, and why there is no test mode; contract suites bound to ports rather than implementations; `resilience` as the sixth test category; the milestone at which each of the twenty-five cases becomes writable; judge governance and distribution-based regression rules for the capability track; and the lossy trajectory-to-case conversion Section 31.3 asserts - is specified in [evaluation-harness.md](evaluation-harness.md), ADR-0022, and ADR-0001. That document expands Sections 3, 4, 10.3, 19, this section, 21, 22, and 31 and Milestones 0 through 6; it does not replace the requirements below. The twenty-five cases stay twenty-five - a twenty-sixth is added later by [sandbox-isolation.md](sandbox-isolation.md), for the container-escape test Section 28 demands and Section 20.3 never enumerated, a twenty-seventh by [skills.md](skills.md), for the Section 30.5 evidence gate that had no case behind it, and a twenty-eighth through thirty-first by [evaluation-harness.md](evaluation-harness.md) itself on a later pass, for the long-session, MCP, and memory-recall gates the milestone map's census showed carrying no case, and none of Section 20's own cases change - the sixteen assertion types stay and gain five, the capability track stays non-blocking, and the deterministic suite still runs in CI without an API key.
 
 ### 20.1 Evaluation case format
 
@@ -2345,7 +2351,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - one hundred and eighty-six gate declarations, comprising one hundred and seventy-seven across fourteen detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to one hundred and eighty-three registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 10; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the one hundred and eighty-three registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - two hundred and twenty-six gate declarations, comprising two hundred and seventeen across seventeen detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to two hundred and twenty-three registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 11; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the two hundred and twenty-three registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -2835,15 +2841,17 @@ These are separately gated extensions. The repository owner authorized Milestone
 separately authorized the self-authored-skills tranche. That authorization does
 not waive the entry conditions or acceptance gates of the other extensions.
 On 2026-08-18 the owner also authorized the independently deliverable
-public-web-access tranche specified in Section 32; it adds neither Milestone 11
-scheduling, new model routing, nor general-purpose subagents.
+public-web-access tranche specified in Section 32; it adds neither new model
+routing nor general-purpose subagents. Scheduling moved to its own Milestone 11
+when the owner authorized it on 2026-08-19, so it no longer shares Milestone
+10's completion contract.
 
 A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill.manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document.
 
 #### Self-authored skills (authorized tranche)
 
-This tranche is independently deliverable and does not authorize Milestone 11 scheduling,
-new routing behavior, or the general-purpose `delegate.run` path.
+This tranche is independently deliverable and does not authorize Milestone 11
+scheduling, new routing behavior, or the general-purpose `delegate.run` path.
 
 Implement:
 
@@ -2905,7 +2913,10 @@ Acceptance criteria for this workstream:
 - An ordinary correction supersedes only the matching subject and belief type;
   unrelated preferences and entities continue to coexist.
 
-#### Second model provider
+#### Second model provider — deferred
+
+This section is design-only. Milestone 10 does not authorize model-routing or
+second-provider implementation work.
 
 Add a second provider adapter and run the same contract suite against it.
 
@@ -2918,7 +2929,10 @@ Provider routing may then consider:
 - Availability
 - Evaluation performance
 
-#### Subagents
+#### Subagents — deferred
+
+This section is design-only. Milestone 10 does not authorize general-purpose
+subagents or `delegate.run`.
 
 Represent subagents as a special tool:
 
@@ -2951,22 +2965,67 @@ Add subagents only when evaluation evidence shows that a single agent fails beca
 
 Do not add role-named agents merely for planning, writing, or criticism without evidence of improvement.
 
-### Milestone 11: Scheduling
+### Milestone 11: Scheduled runs
 
-Scheduling is a separately authorized future milestone. Implement a scheduler
-only after durable on-demand runs are reliable and a detailed design has
-declared its hard gates. Milestone 10 browser work may define the handoff data a
-future scheduler will need, but it does not authorize scheduler implementation.
+The owner authorized scheduling as the next logical milestone on 2026-08-19.
+The entry condition is satisfied because durable on-demand runs, queue leases,
+fencing, checkpoints, recovery, cancellation, and the public run API are
+complete. [scheduling.md](scheduling.md) and ADR-0059 specify the mechanism and
+own the Milestone 11 gates.
 
-A scheduled run must still have:
+Implement:
 
-- Principal
-- Agent version
-- Policy profile
-- Tool scopes
-- Budget
-- Deadline
-- Audit record
+- A versioned schedule definition and immutable occurrence ledger.
+- One-time, daily, and weekly cadence with IANA time zones and deterministic
+  daylight-saving-time behavior.
+- A scheduler role that materializes an occurrence, dedicated session, and
+  ordinary priority-10 durable run in one PostgreSQL transaction.
+- Current-principal, exact-scope, pinned-agent, policy-profile, tenant-admission,
+  budget, and deadline checks at every firing.
+- Bounded misfire coalescing, no overlap within one schedule, automatic pause
+  after a configured consecutive-failure limit, and separate schedule/run
+  cancellation authority.
+- Authenticated create, list, read, update, pause, resume, cancel, and
+  occurrence-list HTTP operations with schedule-specific exact scopes.
+- Per-tenant scheduled concurrency, rate, daily-cost, and monthly-cost ceilings;
+  reserved interactive and async worker capacity; durable audit events and
+  offline result retrieval.
+- Default-off production activation that requires PostgreSQL, a durable
+  principal directory, finite limits, and the schedule worker role.
+
+A scheduled run must still have a principal, pinned agent version, policy
+profile, exact tool scopes, finite budget, finite deadline, and audit record.
+The schedule stores identity and requested authority, never a credential; the
+current authority is resolved again when the occurrence fires.
+
+Acceptance criteria:
+
+- Every hard gate declared by [scheduling.md](scheduling.md#hard-gates) passes.
+- Two schedulers racing or retrying after an unknown commit create exactly one
+  occurrence and one linked run for a nominal firing instant; no injected crash
+  leaves a partial occurrence, session, checkpoint, or run.
+- No occurrence fires early. Daily and weekly rules preserve declared civil
+  time across IANA-zone transitions using the documented gap and fold rules.
+- Downtime produces at most one candidate occurrence per schedule per scan,
+  records bounded coalescing evidence, and never replays an unbounded backlog.
+- One schedule never has overlapping runs. Different schedules still progress
+  within tenant admission and reserved async capacity, without starving
+  interactive work.
+- Revoked authority, missing agent versions, mismatched policy profiles, and
+  exceeded cost or rate admission fail closed before any session or run exists.
+- Updating a schedule affects only future occurrences. Past occurrences remain
+  reproducible from their immutable revision and exact run link.
+- Pausing never backfills paused time, cancellation never reopens, and cancelling
+  a schedule never cancels an already materialized run.
+- A client that was offline for every firing can later enumerate successful,
+  failed, cancelled, missed, and overlap-skipped occurrences and reach the exact
+  durable run result where one exists.
+- No raw token, cookie, key, or credential is persisted or logged as schedule,
+  revision, occurrence, event, session, or run state.
+
+Arbitrary cron, monthly rules, dependency graphs, workflow DAGs, push
+notifications, and continuous-session recurrence remain later extensions. They
+are not alternate implementations of Milestone 11.
 
 ## 22. Security baseline
 

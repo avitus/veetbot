@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser)\.[a-z0-9]+(?:_[a-z0-9]+)*$"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule)\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
     r"^\s*(?:\d+\s+)?(gate\.[a-z0-9_.]+)\s+"
@@ -40,6 +40,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "knowledge-documents.md": (12, 0),
     "web-access.md": (7, 0),
     "browser-automation.md": (10, 0),
+    "scheduling.md": (23, 0),
     "milestone-map.md": (7, 0),
 }
 
@@ -154,12 +155,26 @@ def _check_resolves(root: Path, reference: str) -> bool:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except (OSError, SyntaxError):
         return False
-    first = symbol.split(".")[0]
-    return any(
-        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        and node.name == first
-        for node in tree.body
-    )
+    parts = [part.split("[", 1)[0] for part in symbol.split("::")]
+    nodes: list[ast.stmt] = tree.body
+    resolved: ast.stmt | None = None
+    for index, part in enumerate(parts):
+        resolved = next(
+            (
+                node
+                for node in nodes
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name == part
+            ),
+            None,
+        )
+        if resolved is None:
+            return False
+        if index < len(parts) - 1:
+            if not isinstance(resolved, ast.ClassDef):
+                return False
+            nodes = resolved.body
+    return isinstance(resolved, (ast.FunctionDef, ast.AsyncFunctionDef))
 
 
 _GATE_TABLE_FIGURES: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -223,7 +238,7 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
             errors.append(f"invalid gate identifier: {gate_id}")
         if entry.kind not in {"case", "property", "corpus", "structural"}:
             errors.append(f"{gate_id} has invalid kind {entry.kind}")
-        if entry.milestone < 0 or entry.milestone > 10:
+        if entry.milestone < 0 or entry.milestone > 11:
             errors.append(f"{gate_id} has invalid milestone {entry.milestone}")
         mapped = expected.get(gate_id)
         if mapped is not None and mapped != (entry.kind, entry.milestone):
@@ -298,7 +313,7 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
     counts = Counter(entry.milestone for entry in entries)
     cumulative = 0
     derived: dict[int, tuple[int, int]] = {}
-    for milestone in range(11):
+    for milestone in range(12):
         cumulative += counts[milestone]
         derived[milestone] = (counts[milestone], cumulative)
     if written != derived:

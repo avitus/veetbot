@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import fcntl
@@ -36,16 +37,6 @@ LOCK_FILENAME = ".profile-store.lock"
 class _ProfileEnvelope(ProfileMaterialMetadata):
     nonce: str
     ciphertext: str
-
-
-def _identity(metadata: ProfileMaterialMetadata) -> ProfileMaterialIdentity:
-    return ProfileMaterialIdentity(
-        profile_id=metadata.profile_id,
-        tenant_id=metadata.tenant_id,
-        principal_id=metadata.principal_id,
-        provider_ref=metadata.provider_ref,
-        allowed_origins=metadata.allowed_origins,
-    )
 
 
 def _aad(record: ProfileMaterialMetadata) -> bytes:
@@ -103,7 +94,7 @@ class FilesystemEncryptedProfileStore:
                 continue
             if not path.is_file() or path.suffix != ".profile":
                 raise ProfileStoreIntegrityError("encrypted profile root contains unknown data")
-            envelope, _material = self._decode(path)
+            envelope = self._read_envelope(path)
             metadata = ProfileMaterialMetadata.model_validate(
                 envelope.model_dump(exclude={"nonce", "ciphertext"})
             )
@@ -134,7 +125,7 @@ class FilesystemEncryptedProfileStore:
     def _path(self, provider_ref: str) -> Path:
         return self._root / _filename(provider_ref)
 
-    def _decode(self, path: Path) -> tuple[_ProfileEnvelope, bytes]:
+    def _read_envelope(self, path: Path) -> _ProfileEnvelope:
         try:
             if path.stat().st_size > MAX_PROFILE_ENVELOPE_BYTES:
                 raise ProfileStoreIntegrityError("encrypted profile envelope exceeds its bound")
@@ -147,17 +138,7 @@ class FilesystemEncryptedProfileStore:
             ciphertext = base64.b64decode(envelope.ciphertext, validate=True)
             if len(nonce) != NONCE_BYTES or len(ciphertext) > MAX_PROFILE_MATERIAL_BYTES + 16:
                 raise ProfileStoreIntegrityError("encrypted profile envelope has invalid bounds")
-            metadata = ProfileMaterialMetadata.model_validate(
-                envelope.model_dump(exclude={"nonce", "ciphertext"})
-            )
-            material = AESGCM(self._keyring.resolve(metadata.encryption_key_version)).decrypt(
-                nonce,
-                ciphertext,
-                _aad(metadata),
-            )
-            if len(material) > MAX_PROFILE_MATERIAL_BYTES:
-                raise ProfileStoreIntegrityError("decrypted profile material exceeds its bound")
-            return envelope, material
+            return envelope
         except ProfileStoreIntegrityError:
             raise
         except (
@@ -173,6 +154,29 @@ class FilesystemEncryptedProfileStore:
                 "encrypted profile envelope failed validation"
             ) from exc
 
+    def _decode(self, path: Path) -> tuple[_ProfileEnvelope, bytes]:
+        envelope = self._read_envelope(path)
+        try:
+            nonce = base64.b64decode(envelope.nonce, validate=True)
+            ciphertext = base64.b64decode(envelope.ciphertext, validate=True)
+            metadata = ProfileMaterialMetadata.model_validate(
+                envelope.model_dump(exclude={"nonce", "ciphertext"})
+            )
+            material = AESGCM(self._keyring.resolve(metadata.encryption_key_version)).decrypt(
+                nonce,
+                ciphertext,
+                _aad(metadata),
+            )
+            if len(material) > MAX_PROFILE_MATERIAL_BYTES:
+                raise ProfileStoreIntegrityError("decrypted profile material exceeds its bound")
+            return envelope, material
+        except ProfileStoreIntegrityError:
+            raise
+        except (ValueError, InvalidTag, binascii.Error) as exc:
+            raise ProfileStoreIntegrityError(
+                "encrypted profile envelope failed validation"
+            ) from exc
+
     def _metadata_for(
         self,
         identity: ProfileMaterialIdentity,
@@ -183,7 +187,7 @@ class FilesystemEncryptedProfileStore:
             return None
         if by_profile is None or by_ref is None or by_profile != by_ref:
             raise ConflictError("browser profile material identity conflicts with existing state")
-        if _identity(by_profile) != identity:
+        if by_profile.identity() != identity:
             raise ConflictError("browser profile material scope mismatch")
         return by_profile
 
@@ -265,6 +269,13 @@ class FilesystemEncryptedProfileStore:
         identity: ProfileMaterialIdentity,
         material: bytes,
     ) -> ProfileMaterialMetadata:
+        return await asyncio.to_thread(self._create, identity, bytes(material))
+
+    def _create(
+        self,
+        identity: ProfileMaterialIdentity,
+        material: bytes,
+    ) -> ProfileMaterialMetadata:
         with self._locked():
             self._refresh_index()
             if identity.profile_id in self._by_profile or identity.provider_ref in self._by_ref:
@@ -278,18 +289,27 @@ class FilesystemEncryptedProfileStore:
             return metadata.model_copy(deep=True)
 
     async def find_by_profile(self, profile_id: UUID) -> ProfileMaterialMetadata | None:
+        return await asyncio.to_thread(self._find_by_profile, profile_id)
+
+    def _find_by_profile(self, profile_id: UUID) -> ProfileMaterialMetadata | None:
         with self._locked():
             self._refresh_index()
             metadata = self._by_profile.get(profile_id)
             return None if metadata is None else metadata.model_copy(deep=True)
 
     async def find_by_ref(self, provider_ref: str) -> ProfileMaterialMetadata | None:
+        return await asyncio.to_thread(self._find_by_ref, provider_ref)
+
+    def _find_by_ref(self, provider_ref: str) -> ProfileMaterialMetadata | None:
         with self._locked():
             self._refresh_index()
             metadata = self._by_ref.get(provider_ref)
             return None if metadata is None else metadata.model_copy(deep=True)
 
     async def load(self, identity: ProfileMaterialIdentity) -> bytes:
+        return await asyncio.to_thread(self._load, identity)
+
+    def _load(self, identity: ProfileMaterialIdentity) -> bytes:
         with self._locked():
             self._refresh_index()
             metadata = self._metadata_for(identity)
@@ -301,6 +321,13 @@ class FilesystemEncryptedProfileStore:
             return bytes(material)
 
     async def write(
+        self,
+        identity: ProfileMaterialIdentity,
+        material: bytes,
+    ) -> ProfileMaterialMetadata:
+        return await asyncio.to_thread(self._write, identity, bytes(material))
+
+    def _write(
         self,
         identity: ProfileMaterialIdentity,
         material: bytes,
@@ -320,6 +347,9 @@ class FilesystemEncryptedProfileStore:
             return metadata.model_copy(deep=True)
 
     async def revoke(self, identity: ProfileMaterialIdentity) -> None:
+        await asyncio.to_thread(self._revoke, identity)
+
+    def _revoke(self, identity: ProfileMaterialIdentity) -> None:
         with self._locked():
             self._refresh_index()
             previous = self._metadata_for(identity)
@@ -333,6 +363,9 @@ class FilesystemEncryptedProfileStore:
             self._replace_index(previous, metadata)
 
     async def delete(self, identity: ProfileMaterialIdentity) -> None:
+        await asyncio.to_thread(self._delete, identity)
+
+    def _delete(self, identity: ProfileMaterialIdentity) -> None:
         with self._locked():
             self._refresh_index()
             metadata = self._metadata_for(identity)
@@ -345,6 +378,9 @@ class FilesystemEncryptedProfileStore:
             self._by_ref.pop(metadata.provider_ref, None)
 
     async def rotate(self, identity: ProfileMaterialIdentity) -> ProfileMaterialMetadata:
+        return await asyncio.to_thread(self._rotate, identity)
+
+    def _rotate(self, identity: ProfileMaterialIdentity) -> ProfileMaterialMetadata:
         with self._locked():
             self._refresh_index()
             previous = self._metadata_for(identity)
@@ -361,6 +397,9 @@ class FilesystemEncryptedProfileStore:
             return metadata.model_copy(deep=True)
 
     async def list_metadata(self) -> tuple[ProfileMaterialMetadata, ...]:
+        return await asyncio.to_thread(self._list_metadata)
+
+    def _list_metadata(self) -> tuple[ProfileMaterialMetadata, ...]:
         with self._locked():
             self._refresh_index()
             return tuple(

@@ -55,15 +55,23 @@ async def assert_profile_repository_scopes_create_get_and_list(
     assert await repository.get(profile_id, owner) == expected
     assert expected in await repository.list(owner)
 
-    foreign = Principal(
-        tenant_id=owner.tenant_id,
-        principal_id="principal-b",
-        roles={"user"},
-        scopes=set(),
-    )
-    with pytest.raises(NotFoundError):
-        await repository.get(profile_id, foreign)
-    assert await repository.list(foreign) == []
+    for foreign in (
+        Principal(
+            tenant_id=owner.tenant_id,
+            principal_id="principal-b",
+            roles={"user"},
+            scopes=set(),
+        ),
+        Principal(
+            tenant_id="foreign-tenant",
+            principal_id=owner.principal_id,
+            roles={"user"},
+            scopes=set(),
+        ),
+    ):
+        with pytest.raises(NotFoundError):
+            await repository.get(profile_id, foreign)
+        assert await repository.list(foreign) == []
 
 
 async def assert_profile_repository_rejects_duplicate_and_stale_writes(
@@ -78,6 +86,15 @@ async def assert_profile_repository_rejects_duplicate_and_stale_writes(
     with pytest.raises(ConflictError):
         await repository.create(expected)
 
+    with pytest.raises(ConflictError):
+        await repository.transition(
+            profile_id,
+            owner,
+            expected_generation=0,
+            status=BrowserProfileStatus.PROVISIONING,
+            updated_at=NOW + timedelta(seconds=1),
+        )
+
     ready = await repository.transition(
         profile_id,
         owner,
@@ -87,6 +104,15 @@ async def assert_profile_repository_rejects_duplicate_and_stale_writes(
     )
     assert ready.status is BrowserProfileStatus.READY
     assert ready.generation == 1
+
+    with pytest.raises(ConflictError):
+        await repository.transition(
+            profile_id,
+            owner,
+            expected_generation=1,
+            status=BrowserProfileStatus.NEEDS_USER,
+            updated_at=NOW,
+        )
 
     with pytest.raises(ConcurrencyConflict):
         await repository.transition(
@@ -143,6 +169,81 @@ async def assert_profile_repository_binds_only_the_reserved_generation(
         )
 
 
+async def assert_profile_repository_rejects_duplicate_provider_references(
+    repository: BrowserProfileRepository,
+    profile_id: UUID = PROFILE_ID,
+    owner: Principal | None = None,
+) -> None:
+    owner = owner or principal()
+    reservation = profile(profile_id=profile_id, owner=owner).model_copy(
+        update={
+            "provider_name": None,
+            "provider_ref": None,
+            "encryption_key_version": None,
+            "status": BrowserProfileStatus.PROVISIONING,
+        }
+    )
+    await repository.create(reservation)
+    await repository.bind(
+        profile_id,
+        owner,
+        expected_generation=0,
+        provisioning=BrowserProfileProvisioning(
+            provider_name="isolated-hosted",
+            provider_ref=f"opaque/{profile_id}/provider-ref",
+            encryption_key_version="key-v1",
+        ),
+        updated_at=NOW + timedelta(seconds=1),
+    )
+    duplicate_id = UUID(int=profile_id.int + 1000)
+    duplicate_reservation = reservation.model_copy(update={"id": duplicate_id})
+    await repository.create(duplicate_reservation)
+    with pytest.raises(ConflictError):
+        await repository.bind(
+            duplicate_id,
+            owner,
+            expected_generation=0,
+            provisioning=BrowserProfileProvisioning(
+                provider_name="isolated-hosted",
+                provider_ref=f"opaque/{profile_id}/provider-ref",
+                encryption_key_version="key-v1",
+            ),
+            updated_at=NOW + timedelta(seconds=2),
+        )
+
+
+async def assert_profile_repository_paginates_by_created_at_and_id(
+    repository: BrowserProfileRepository,
+    profile_id: UUID = PROFILE_ID,
+    owner: Principal | None = None,
+) -> None:
+    owner = owner or principal()
+    values = [
+        profile(profile_id=UUID(int=profile_id.int + index), owner=owner) for index in range(2)
+    ]
+    for value in values:
+        await repository.create(value)
+
+    first = await repository.list(
+        owner,
+        limit=1,
+        after_created_at=values[0].created_at,
+        after_id=UUID(int=values[0].id.int - 1),
+    )
+    second = await repository.list(
+        owner,
+        limit=1,
+        after_created_at=first[-1].created_at,
+        after_id=first[-1].id,
+    )
+
+    assert [item.id for item in first + second] == [item.id for item in values]
+    with pytest.raises(ValueError):
+        await repository.list(owner, after_created_at=NOW)
+    with pytest.raises(ValueError):
+        await repository.list(owner, after_id=values[0].id)
+
+
 async def assert_profile_repository_requires_revocation_before_idempotent_delete(
     repository: BrowserProfileRepository,
     profile_id: UUID = PROFILE_ID,
@@ -187,6 +288,18 @@ async def test_profile_repository_rejects_duplicate_and_stale_writes() -> None:
 
 async def test_profile_repository_binds_only_the_reserved_generation() -> None:
     await assert_profile_repository_binds_only_the_reserved_generation(
+        InMemoryBrowserProfileRepository()
+    )
+
+
+async def test_profile_repository_rejects_duplicate_provider_references() -> None:
+    await assert_profile_repository_rejects_duplicate_provider_references(
+        InMemoryBrowserProfileRepository()
+    )
+
+
+async def test_profile_repository_paginates_by_created_at_and_id() -> None:
+    await assert_profile_repository_paginates_by_created_at_and_id(
         InMemoryBrowserProfileRepository()
     )
 

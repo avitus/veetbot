@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -19,7 +20,29 @@ class BrowserProfileRepository(Protocol):
 
     async def get(self, profile_id: UUID, principal: Principal) -> BrowserProfile: ...
 
-    async def list(self, principal: Principal) -> list[BrowserProfile]: ...
+    def authentication_admission(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        timeout_seconds: float,
+    ) -> AbstractAsyncContextManager[BrowserProfile]:
+        """Lock one owned profile until authentication admission finishes."""
+        ...
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserProfile]:
+        """Return ascending ``(created_at, id)`` rows after one strict composite cursor.
+
+        Both cursor components must be supplied together.
+        """
+        ...
 
     async def bind(
         self,
@@ -29,7 +52,9 @@ class BrowserProfileRepository(Protocol):
         expected_generation: int,
         provisioning: BrowserProfileProvisioning,
         updated_at: datetime,
-    ) -> BrowserProfile: ...
+    ) -> BrowserProfile:
+        """Bind a reservation to a tenant-unique opaque provider reference."""
+        ...
 
     async def transition(
         self,

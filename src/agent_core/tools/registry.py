@@ -126,6 +126,7 @@ def validate_registration(spec: ToolSpec) -> ToolSpec:
             and spec.side_effect is SideEffectClass.NETWORK_READ
             and spec.risk is RiskLevel.LOW
             and spec.idempotency is IdempotencyClass.READ_ONLY
+            and not spec.allow_parallel
         )
         browser_write = (
             spec.name == "browser.act"

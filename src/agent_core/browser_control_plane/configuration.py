@@ -63,6 +63,10 @@ def load_profile_service_settings(
         raise ProfileStoreIntegrityError("profile service bind port is invalid")
     ceremony_base_url = values.get("BROWSER_PROFILE_CEREMONY_BASE_URL", "")
     parsed_ceremony = urlsplit(ceremony_base_url)
+    try:
+        ceremony_port = parsed_ceremony.port
+    except ValueError as exc:
+        raise ProfileStoreIntegrityError("authentication ceremony origin is invalid") from exc
     if (
         parsed_ceremony.scheme != "https"
         or parsed_ceremony.hostname is None
@@ -71,6 +75,7 @@ def load_profile_service_settings(
         or parsed_ceremony.path not in {"", "/"}
         or parsed_ceremony.query
         or parsed_ceremony.fragment
+        or ceremony_port == 0
     ):
         raise ProfileStoreIntegrityError("authentication ceremony origin is invalid")
     return ProfileServiceSettings(
@@ -108,14 +113,31 @@ def _assert_owned_private(path: Path, *, directory: bool) -> os.stat_result:
 
 
 def _read_private_text(path: Path, label: str) -> str:
-    metadata = _assert_owned_private(path, directory=False)
-    if metadata.st_size > _MAXIMUM_SECRET_FILE_BYTES:
-        raise ProfileStoreIntegrityError(f"{label} is invalid")
+    flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    if no_follow == 0:
+        raise ProfileStoreIntegrityError(f"{label} cannot be opened without O_NOFOLLOW")
     try:
-        raw = path.read_bytes()
+        descriptor = os.open(path, flags | no_follow)
+    except OSError as exc:
+        raise ProfileStoreIntegrityError(f"{label} is invalid") from exc
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_mode & 0o077
+            or metadata.st_size > _MAXIMUM_SECRET_FILE_BYTES
+        ):
+            raise ProfileStoreIntegrityError(f"{label} is invalid")
+        raw = os.read(descriptor, _MAXIMUM_SECRET_FILE_BYTES + 1)
+        if len(raw) > _MAXIMUM_SECRET_FILE_BYTES or len(raw) != metadata.st_size:
+            raise ProfileStoreIntegrityError(f"{label} is invalid")
         text = raw.decode("ascii")
     except (OSError, UnicodeDecodeError) as exc:
         raise ProfileStoreIntegrityError(f"{label} is invalid") from exc
+    finally:
+        os.close(descriptor)
     value = text.removesuffix("\n").removesuffix("\r")
     if not value or "\n" in value or "\r" in value:
         raise ProfileStoreIntegrityError(f"{label} is invalid")

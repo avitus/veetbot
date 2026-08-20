@@ -686,7 +686,7 @@ class ModelCapabilities(BaseModel):
     streaming: bool = True
 ```
 
-This is not the `ModelCapabilities` of `engineering-plan.md:599`. Two
+This is not the `ModelCapabilities` of `engineering-plan.md:605`. Two
 fields are renamed, one moves into `ModelLimits` below, and three are
 added, so the two declarations are a divergence rather than an extension.
 They are reconciled field by field further down, under "The two
@@ -715,7 +715,7 @@ class ModelPricing(BaseModel):
 ```
 
 The router is a port with one implementation in 0.1, reading the model
-registry described at `engineering-plan.md:1288-1295`. The registry is
+registry described at `engineering-plan.md:1294-1301`. The registry is
 configuration, not code: a YAML file per provider profile, validated at load,
 hashed the way the policy profile is hashed so that a run records which
 registry it resolved against. That document's schema, its validation, and the
@@ -725,8 +725,8 @@ call sites.
 
 ### Pinning, and the contradiction with availability routing
 
-Section 10 (`engineering-plan.md:1305`) requires a run to be pinned to one
-provider. Milestone 10 (`engineering-plan.md:2918`) wants routing to move work
+Section 10 (`engineering-plan.md:1311`) requires a run to be pinned to one
+provider. Milestone 10 (`engineering-plan.md:2929`) wants routing to move work
 between providers on availability. These are in tension and the resolution is
 temporal, not architectural.
 
@@ -760,9 +760,9 @@ compound that into a provider switch on resume.
 
 ## The provider profile document
 
-`engineering-plan.md:1288` calls a provider profile "a plugin the registry
+`engineering-plan.md:1294` calls a provider profile "a plugin the registry
 loads and the user can override without editing core" and
-`engineering-plan.md:1290-1293` says what it declares: an API mode, aliases
+`engineering-plan.md:1296-1299` says what it declares: an API mode, aliases
 and capabilities and limits and prices, credential pools, and a
 model-catalog import. ADR-0012 decision 2 requires that a new
 OpenAI-compatible provider be addable without writing code. Neither
@@ -773,7 +773,7 @@ This section is that shape.
 ### Where a profile lives, and the two files it is not
 
 The routing section above says the registry is a YAML file per provider
-profile. `bootstrap-and-composition.md:360-361` places `models/policies.yaml`
+profile. `bootstrap-and-composition.md:364-365` places `models/policies.yaml`
 ("model_policies and provider profiles") and `models/catalog.yaml`
 ("aliases, limits, context windows, prices") inside the package. Read
 together those describe two layouts, and the difference is not cosmetic: one
@@ -794,7 +794,7 @@ src/agent_core/models/
 `policies.yaml` keeps `model_policies` unchanged and satisfies its "and
 provider profiles" half with the list of profile names this deployment
 loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
-the four things `bootstrap-and-composition.md:361` names it for and becomes
+the four things `bootstrap-and-composition.md:365` names it for and becomes
 the target of Section 10.5's fourth declaration, the model-catalog import,
 rather than a second place models are defined. A profile either declares a
 model inline or imports a catalog entry for it, never both.
@@ -939,7 +939,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1105-1142` is
+family of the secret scanner at `bootstrap-and-composition.md:1116-1153` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -976,7 +976,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:638` because it answers the
+`policy_version` at `policy-and-approvals.md:654` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1038,13 +1038,13 @@ capability intersection, one layer up.
 
 ### The two `ModelCapabilities` declarations
 
-`engineering-plan.md:599` declares `ModelCapabilities` with eight fields and
+`engineering-plan.md:605` declares `ModelCapabilities` with eight fields and
 this document declares it with ten. That is a divergence rather than an
 addition, and this is where it gets reconciled instead of being left for an
 implementer to discover.
 
 ```text
-engineering-plan.md:599   here                     what changed
+engineering-plan.md:605   here                     what changed
 ------------------------  -----------------------  ------------
 tool_calling              native_tool_calling      narrowed
 parallel_tool_calls       parallel_tool_calls      unchanged
@@ -1073,7 +1073,7 @@ bounded by the adapter's ceiling, and a field subject to both rules has no
 correct home. The three additions are things the gateway branches on that
 the plan had no reason to name before adapters existed.
 
-Where the row for a field and `engineering-plan.md:599` conflict the plan
+Where the row for a field and `engineering-plan.md:605` conflict the plan
 wins, per this document's preamble, and the conflict is a defect here. The
 renaming is recorded as an open question rather than fixed by editing a plan
 sentence.
@@ -1081,7 +1081,7 @@ sentence.
 ## Usage, cost, and where the numbers live
 
 Section 6.5 fixes the precedence order for cost figures and Section 15 has no
-table to put them in. `runs.usage JSONB` at `engineering-plan.md:1680` is the
+table to put them in. `runs.usage JSONB` at `engineering-plan.md:1686` is the
 only persistence the plan gives usage, and a JSONB blob on the run cannot
 answer the questions the budget enforcement in Section 6.5 needs to ask: what
 did this step cost, which attempt burned the tokens, and what were we charged
@@ -1146,7 +1146,7 @@ denormalized rather than computed on read for the same reason.
 `runs.usage` stays exactly as Section 15 defines it. It becomes a rollup of
 `model_calls` for that run rather than the source of truth, and it is
 maintained in the same transaction that writes the attempt row so that the two
-never disagree. The usage repository port named at `engineering-plan.md:810`
+never disagree. The usage repository port named at `engineering-plan.md:816`
 and never typed is:
 
 ```python
@@ -1191,8 +1191,8 @@ not an oversight.
 
 ## Provider metadata, and why the key set is closed
 
-`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1205` as
-`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1207`:
+`ModelTurn.provider_metadata` is declared at `engineering-plan.md:1211` as
+`dict[str, Any]` and given exactly one rule at `engineering-plan.md:1213`:
 it "may include response IDs and cache information, but application logic
 must not rely on provider-specific fields." That is a constraint on readers.
 It says nothing about writers, and an adapter is a writer.
@@ -1231,7 +1231,7 @@ yet.
 | key | source | why it earns a key |
 | --- | --- | --- |
 | `provider_api` | the profile | one adapter fronts three APIs, and a row that does not say which is a row that cannot be compared |
-| `response_id` | the response body | `engineering-plan.md:1250` requires the OpenAI adapter to capture it |
+| `response_id` | the response body | `engineering-plan.md:1256` requires the OpenAI adapter to capture it |
 | `request_id` | a response header | the only identifier a vendor support ticket can be opened against |
 | `resolved_model` | the response body | an alias resolves to a dated model, and reproducibility needs the dated one |
 | `previous_response_id` | the request | which continuation this attempt resumed, which is the first thing to check when a reasoning chain breaks |
@@ -1325,14 +1325,14 @@ Flattening `metadata` into columns happens in the persistence adapter and is
 the first of exactly two places in the system that read `ProviderMetadata`
 at all. The second is the span builder in the telemetry section below.
 Nothing in the runtime, the policy engine, the context engine, or any tool
-reads it, which is what `engineering-plan.md:1207`'s "application logic must
+reads it, which is what `engineering-plan.md:1213`'s "application logic must
 not rely on provider-specific fields" means once it is a rule a test can
 evaluate.
 
 ## Retries, and who owns them
 
-`engineering-plan.md:1253` puts retries in the adapter.
-`engineering-plan.md:1580` says "Keep retry decisions in application code, not
+`engineering-plan.md:1259` puts retries in the adapter.
+`engineering-plan.md:1586` says "Keep retry decisions in application code, not
 in provider adapters alone." The word "alone" is doing the work, and the split
 it implies is the right one.
 
@@ -1374,7 +1374,7 @@ telemetry rather than hidden behind eventual success.
 ### Timeouts
 
 No document defines a model-call timeout. `ToolSpec.timeout_seconds` exists at
-`engineering-plan.md:837` and has no counterpart here, which means today a
+`engineering-plan.md:843` and has no counterpart here, which means today a
 hung provider connection stalls a run until the worker's own deadline fires,
 if it has one. Two timeouts close that:
 
@@ -1440,7 +1440,7 @@ ordered and the order has to survive a round trip. `token_count` is added
 because `ModelPricing.reasoning_priced_separately` exists and Section 6.5's
 cost precedence has nothing to attribute reasoning tokens to otherwise.
 `provider` and `trust_level` are unchanged, and the plan's rules for
-provider-opaque items at `engineering-plan.md:594` — store verbatim, never
+provider-opaque items at `engineering-plan.md:600` — store verbatim, never
 log or summarize or place in long-term memory, carry only for the life of
 the active tool loop, drop on a provider switch — govern the renamed field
 without change. The rename is recorded as an open question rather than
@@ -1449,9 +1449,9 @@ renames are.
 
 ### The PLATFORM default is a privilege inversion, and it is bounded here
 
-`engineering-plan.md:592` defaults `ProviderReasoningItem.trust_level` to
+`engineering-plan.md:598` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:833-862` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:849-878` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.
@@ -1552,7 +1552,7 @@ plus the `ModelError` and whatever partial usage the provider reported. It is
 a separate event rather than a status field on the completed event so that
 subscribers counting successful attempts do not have to filter.
 
-Section 19's telemetry attributes (`engineering-plan.md:2127-2136`) omit the
+Section 19's telemetry attributes (`engineering-plan.md:2133-2142`) omit the
 cached and reasoning token classes. The gateway's spans add
 `gen_ai.usage.cached_input_tokens`, `gen_ai.usage.cache_write_tokens` and
 `gen_ai.usage.reasoning_tokens` alongside the attributes already listed, plus
@@ -1654,8 +1654,8 @@ the failure that grep misses.
 Section 2.3's provider list at `engineering-plan.md:157-161` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
-(`engineering-plan.md:2551`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2295`
+(`engineering-plan.md:2557`) requires "the same contract suite against OpenAI,
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2301`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the
@@ -1683,7 +1683,7 @@ the provider boundary.
 
 ### The fake and the recorded adapters
 
-`engineering-plan.md:1216-1224` uses `FakeModelScript`, `ToolCallTurn` and
+`engineering-plan.md:1222-1230` uses `FakeModelScript`, `ToolCallTurn` and
 `FinalTurn` at a call site and never defines them.
 
 ```python
@@ -1894,7 +1894,7 @@ These are decisions taken to keep the plan moving. Each is recorded in
    the two declarations and cannot edit the plan's. The reconciliation table
    makes the divergence readable; it does not make it go away.
 7. Is one file per provider profile right, given that
-   `bootstrap-and-composition.md:360` describes a single `models/policies.yaml`
+   `bootstrap-and-composition.md:364` describes a single `models/policies.yaml`
    holding both policies and profiles? One file per profile is what ADR-0012's
    "without editing core" requires of an overlay, and merging the two back is
    a compatible change in the other direction.

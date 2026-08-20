@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import math
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
+from weakref import WeakValueDictionary
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
@@ -29,6 +34,9 @@ def _owned(profile: BrowserProfile, principal: Principal) -> bool:
 class InMemoryBrowserProfileRepository:
     def __init__(self) -> None:
         self._profiles: dict[UUID, BrowserProfile] = {}
+        self._authentication_locks: WeakValueDictionary[tuple[str, str, UUID], asyncio.Lock] = (
+            WeakValueDictionary()
+        )
 
     async def create(self, profile: BrowserProfile) -> BrowserProfile:
         if profile.id in self._profiles:
@@ -42,11 +50,52 @@ class InMemoryBrowserProfileRepository:
             raise NotFoundError("browser profile not found")
         return _copy(profile)
 
-    async def list(self, principal: Principal) -> list[BrowserProfile]:
+    @asynccontextmanager
+    async def authentication_admission(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        timeout_seconds: float,
+    ) -> AsyncIterator[BrowserProfile]:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("authentication lock timeout must be positive and finite")
+        key = (principal.tenant_id, principal.principal_id, profile_id)
+        lock = self._authentication_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._authentication_locks[key] = lock
+        try:
+            async with asyncio.timeout(timeout_seconds):
+                await lock.acquire()
+        except TimeoutError as exc:
+            raise ConflictError("browser authentication admission is busy") from exc
+        try:
+            yield await self.get(profile_id, principal)
+        finally:
+            lock.release()
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserProfile]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
         profiles = [
             _copy(profile) for profile in self._profiles.values() if _owned(profile, principal)
         ]
-        return sorted(profiles, key=lambda profile: (profile.created_at, str(profile.id)))
+        ordered = sorted(profiles, key=lambda profile: (profile.created_at, str(profile.id)))
+        if after_created_at is not None and after_id is not None:
+            ordered = [
+                profile
+                for profile in ordered
+                if (profile.created_at, str(profile.id)) > (after_created_at, str(after_id))
+            ]
+        return ordered if limit is None else ordered[:limit]
 
     async def bind(
         self,
@@ -64,6 +113,13 @@ class InMemoryBrowserProfileRepository:
             raise ConflictError("browser profile is not awaiting a provider binding")
         if updated_at < profile.updated_at:
             raise ConflictError("browser profile update time moved backwards")
+        if any(
+            existing.id != profile_id
+            and existing.tenant_id == principal.tenant_id
+            and existing.provider_ref == provisioning.provider_ref
+            for existing in self._profiles.values()
+        ):
+            raise ConflictError("browser provider reference is already bound")
         updated = profile.model_copy(
             update={
                 "provider_name": provisioning.provider_name,

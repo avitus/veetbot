@@ -351,7 +351,9 @@ async def test_limits_enforced(runtime: tuple[DockerExecutionEnvironment, str]) 
                 handle,
                 (
                     "import os,pathlib,time; "
-                    "pathlib.Path('cancel.pid').write_text(str(os.getpid())); time.sleep(30)"
+                    "started=pathlib.Path('/proc/self/stat').read_text().split()[21]; "
+                    "pathlib.Path('cancel.pid').write_text(f'{os.getpid()} {started}'); "
+                    "time.sleep(30)"
                 ),
                 timeout=12,
             )
@@ -359,7 +361,10 @@ async def test_limits_enforced(runtime: tuple[DockerExecutionEnvironment, str]) 
         workspace = adapter.workspace(handle)
         for _attempt in range(50):
             try:
-                cancelled_pid = int((await workspace.read("cancel.pid")).decode())
+                cancelled_pid, cancelled_started_at = map(
+                    int,
+                    (await workspace.read("cancel.pid")).decode().split(),
+                )
                 break
             except FileNotFoundError:
                 await asyncio.sleep(0.05)
@@ -371,7 +376,11 @@ async def test_limits_enforced(runtime: tuple[DockerExecutionEnvironment, str]) 
         after_cancel = await _execute(
             adapter,
             handle,
-            f"import pathlib; print(pathlib.Path('/proc/{cancelled_pid}').exists())",
+            (
+                f"import pathlib; path=pathlib.Path('/proc/{cancelled_pid}/stat'); "
+                "current=path.read_text().split()[21] if path.exists() else None; "
+                f"print(current == '{cancelled_started_at}')"
+            ),
         )
     assert result.killed_by is KillReason.OUTPUT_LIMIT
     assert len(result.stdout) + len(result.stderr) <= 4096

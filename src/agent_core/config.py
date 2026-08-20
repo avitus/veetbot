@@ -83,6 +83,8 @@ class Settings:
         MemoryProviderExtractionMode.AUTO
     )
     memory_provider_extraction_evidence: Path | None = None
+    schedule_api_enabled: bool = False
+    schedule_worker_enabled: bool = False
     artifact_root: Path = Path(".agent/artifacts")
     auth_tenant_id: str = ""
     auth_principal_id: str = ""
@@ -117,7 +119,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 106 operator-reviewable knobs. Metadata such as
+# The design corpus declares 121 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -211,6 +213,8 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "queue.priorities.maintenance",
             "worker.lease_seconds",
             "worker.heartbeat_divisor",
+            "worker.reserved_interactive_slots",
+            "worker.reserved_async_slots",
             "sweeps.reclaim_expired_seconds",
             "sweeps.approval_reaper_seconds",
             "sweeps.checkpoint_prune_seconds",
@@ -220,6 +224,19 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "run_defaults.max_steps",
             "run_defaults.max_model_calls",
             "run_defaults.max_tool_calls",
+            "scheduling.scan_batch",
+            "scheduling.fallback_poll_seconds",
+            "scheduling.admission_backoff_seconds",
+            "scheduling.max_run_timeout_seconds",
+            "scheduling.max_misfire_grace_seconds",
+            "scheduling.max_steps_per_run",
+            "scheduling.max_model_calls_per_run",
+            "scheduling.max_tool_calls_per_run",
+            "scheduling.max_cost_per_run",
+            "scheduling.max_active_runs_per_tenant",
+            "scheduling.max_materializations_per_minute",
+            "scheduling.daily_cost",
+            "scheduling.monthly_cost",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -254,6 +271,21 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:run_defaults.max_tool_calls": 1,
         "runtime/limits.yaml:worker.heartbeat_divisor": 2,
         "runtime/limits.yaml:worker.lease_seconds": 1,
+        "runtime/limits.yaml:worker.reserved_interactive_slots": 1,
+        "runtime/limits.yaml:worker.reserved_async_slots": 1,
+        "runtime/limits.yaml:scheduling.scan_batch": 1,
+        "runtime/limits.yaml:scheduling.fallback_poll_seconds": 1,
+        "runtime/limits.yaml:scheduling.admission_backoff_seconds": 1,
+        "runtime/limits.yaml:scheduling.max_run_timeout_seconds": 1,
+        "runtime/limits.yaml:scheduling.max_misfire_grace_seconds": 1,
+        "runtime/limits.yaml:scheduling.max_steps_per_run": 1,
+        "runtime/limits.yaml:scheduling.max_model_calls_per_run": 1,
+        "runtime/limits.yaml:scheduling.max_tool_calls_per_run": 1,
+        "runtime/limits.yaml:scheduling.max_cost_per_run": 0.01,
+        "runtime/limits.yaml:scheduling.max_active_runs_per_tenant": 1,
+        "runtime/limits.yaml:scheduling.max_materializations_per_minute": 1,
+        "runtime/limits.yaml:scheduling.daily_cost": 0.01,
+        "runtime/limits.yaml:scheduling.monthly_cost": 0.01,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
         "tools/limits.yaml:circuit_breaker.identical_denied_threshold": 1,
         "tools/limits.yaml:circuit_breaker.uncertain_threshold": 1,
@@ -540,7 +572,7 @@ def _provider_extraction_evidence_is_valid(path: Path) -> bool:
     return True
 
 
-def validate_settings(settings: Settings) -> None:
+def validate_settings(settings: Settings, *, require_auth_token: bool = True) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
     _validate_release_id(settings.release_id)
@@ -561,7 +593,7 @@ def validate_settings(settings: Settings) -> None:
             )
     if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
-    if settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
+    if require_auth_token and settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE} and (
         settings.deployment_mode is DeploymentMode.PRODUCTION
@@ -641,6 +673,23 @@ def validate_runtime_identity(
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Load and validate the environment layer before constructing resources."""
 
+    return _load_settings(environ, require_auth_token=True)
+
+
+def load_schedule_worker_settings(
+    environ: Mapping[str, str] | None = None,
+) -> Settings:
+    """Load the credential-minimized environment for the scheduler-only role."""
+
+    return _load_settings(environ, require_auth_token=False)
+
+
+def _load_settings(
+    environ: Mapping[str, str] | None,
+    *,
+    require_auth_token: bool,
+) -> Settings:
+
     values = _environment(environ)
     database_url = _required(values, "DATABASE_URL")
     deployment_mode = _parse_enum(
@@ -653,7 +702,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     raw_token = values.get("AUTH_TOKEN", "").strip()
     auth_token = SecretStr(raw_token) if raw_token else None
 
-    if auth_mode is AuthMode.TOKEN and auth_token is None:
+    if require_auth_token and auth_mode is AuthMode.TOKEN and auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     raw_dir = values.get("AGENT_CONFIG_DIR", "").strip()
     config_dir = Path(raw_dir).expanduser().resolve() if raw_dir else None
@@ -704,6 +753,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     memory_provider_extraction_evidence = (
         Path(raw_memory_evidence).expanduser().resolve() if raw_memory_evidence else None
     )
+    schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
+    schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
@@ -799,6 +850,8 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         skill_background_review_enabled=skill_background_review_enabled,
         memory_provider_extraction_mode=memory_provider_extraction_mode,
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
+        schedule_api_enabled=schedule_api_enabled,
+        schedule_worker_enabled=schedule_worker_enabled,
         artifact_root=artifact_root,
         auth_tenant_id=auth_tenant_id,
         auth_principal_id=auth_principal_id,
@@ -816,5 +869,5 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         browser_grant_id=browser_grant_id,
         browser_run_purpose=browser_run_purpose,
     )
-    validate_settings(settings)
+    validate_settings(settings, require_auth_token=require_auth_token)
     return settings

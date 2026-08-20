@@ -339,6 +339,7 @@ artifact.read
 skill.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
+schedule.read     schedule.write     schedule.cancel
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow
@@ -396,6 +397,29 @@ is not an authorization input.
 | `GET /health/live` | none |
 | `GET /health/ready` | none |
 
+### The Milestone 11 schedule extension
+
+[scheduling.md](scheduling.md) adds eight routes after the completed Milestone
+5 surface. They use the same authentication middleware, principal-first
+application signatures, request-id header, error envelope, cross-principal
+not-found rule, opaque pagination, and OpenAPI scope assertion as every route
+above:
+
+```text
+POST   /v1/schedules                              schedule.write
+GET    /v1/schedules                              schedule.read
+GET    /v1/schedules/{schedule_id}                schedule.read
+PATCH  /v1/schedules/{schedule_id}                schedule.write
+POST   /v1/schedules/{schedule_id}/pause          schedule.write
+POST   /v1/schedules/{schedule_id}/resume         schedule.write
+DELETE /v1/schedules/{schedule_id}                schedule.cancel
+GET    /v1/schedules/{schedule_id}/occurrences    schedule.read
+```
+
+The schedule specification owns their request and response schemas,
+idempotency, revision preconditions, and fifteen gates. This document's
+Milestone 5 route census remains historical and is not rewritten.
+
 Submitting a message requires `run.write` rather than `session.write`
 because submitting is what creates a run; `session.write` gates creating
 the session itself. `run.cancel` is separate from `run.write` because a
@@ -419,7 +443,7 @@ governs. There is no `skill.read`: nothing reads skills over the API in
 `skill.write` is not the only such scope, and the rest arrive a milestone
 earlier than this document does.
 [policy-and-approvals.md](policy-and-approvals.md) enumerates the whole
-closed vocabulary — these thirteen plus the six that
+closed vocabulary — these fifteen plus the seven that
 `ToolSpec.required_scopes` carries — states the grammar that lets an MCP
 server's operator-configured scopes exist outside a closed list, and
 specifies the subset test the pipeline runs. Nothing there changes what a

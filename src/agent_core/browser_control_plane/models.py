@@ -37,6 +37,11 @@ class ProfileMaterialMetadata(ProfileMaterialIdentity):
     encryption_key_version: str = Field(min_length=1, max_length=128)
     revoked: bool = False
 
+    def identity(self) -> ProfileMaterialIdentity:
+        return ProfileMaterialIdentity.model_validate(
+            self.model_dump(include=set(ProfileMaterialIdentity.model_fields))
+        )
+
 
 class ProfileStoreIntegrityError(AgentCoreError):
     """Encrypted profile storage failed closed without exposing material."""

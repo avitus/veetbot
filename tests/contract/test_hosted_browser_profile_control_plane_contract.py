@@ -18,11 +18,11 @@ BASE_URL = "https://profiles.internal.example"
 OPAQUE_AUTH_VALUE = "synthetic-control-plane-auth-value"
 
 
-def adapter(transport: httpx.AsyncBaseTransport) -> HostedBrowserProfileControlPlane:
+def adapter(client: httpx.AsyncClient) -> HostedBrowserProfileControlPlane:
     return HostedBrowserProfileControlPlane(
         base_url=BASE_URL,
         credentials=MappingCredentialResolver({"browser_profile_control_plane": OPAQUE_AUTH_VALUE}),
-        client=httpx.AsyncClient(transport=transport, follow_redirects=False),
+        client=client,
     )
 
 
@@ -30,17 +30,18 @@ def adapter(transport: httpx.AsyncBaseTransport) -> HostedBrowserProfileControlP
     "base_url",
     ["http://profiles.internal.example", "https://profiles.internal.example/path"],
 )
-def test_hosted_control_plane_requires_one_https_service_origin(base_url: str) -> None:
-    with pytest.raises(ValueError):
-        HostedBrowserProfileControlPlane(
-            base_url=base_url,
-            credentials=MappingCredentialResolver(
-                {"browser_profile_control_plane": OPAQUE_AUTH_VALUE}
-            ),
-            client=httpx.AsyncClient(
-                transport=httpx.MockTransport(lambda request: httpx.Response(204))
-            ),
-        )
+async def test_hosted_control_plane_requires_one_https_service_origin(base_url: str) -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(204))
+    ) as client:
+        with pytest.raises(ValueError):
+            HostedBrowserProfileControlPlane(
+                base_url=base_url,
+                credentials=MappingCredentialResolver(
+                    {"browser_profile_control_plane": OPAQUE_AUTH_VALUE}
+                ),
+                client=client,
+            )
 
 
 async def test_hosted_control_plane_sends_authenticated_scoped_idempotent_lifecycle() -> None:
@@ -59,15 +60,18 @@ async def test_hosted_control_plane_sends_authenticated_scoped_idempotent_lifecy
             )
         return httpx.Response(204)
 
-    control_plane = adapter(httpx.MockTransport(wire))
-    owner = principal()
-    provisioned = await control_plane.provision(
-        PROFILE_ID,
-        owner,
-        ("https://example.org",),
-    )
-    await control_plane.revoke(PROFILE_ID, owner, provisioned.provider_ref)
-    await control_plane.delete(PROFILE_ID, owner, provisioned.provider_ref)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(wire), follow_redirects=False
+    ) as client:
+        control_plane = adapter(client)
+        owner = principal()
+        provisioned = await control_plane.provision(
+            PROFILE_ID,
+            owner,
+            ("https://example.org",),
+        )
+        await control_plane.revoke(PROFILE_ID, owner, provisioned.provider_ref)
+        await control_plane.delete(PROFILE_ID, owner, provisioned.provider_ref)
 
     assert provisioned.provider_name == "hosted-isolated"
     assert [request.url.path for request in requests] == [
@@ -98,12 +102,13 @@ async def test_hosted_control_plane_maps_authentication_failure_without_body(
     async def wire(request: httpx.Request) -> httpx.Response:
         return httpx.Response(status, text=diagnostic)
 
-    with pytest.raises(BrowserProfileControlPlaneError) as raised:
-        await adapter(httpx.MockTransport(wire)).provision(
-            PROFILE_ID,
-            principal(),
-            ("https://example.org",),
-        )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(BrowserProfileControlPlaneError) as raised:
+            await adapter(client).provision(
+                PROFILE_ID,
+                principal(),
+                ("https://example.org",),
+            )
 
     assert raised.value.reason == "browser_profile.control_plane_auth_failed"
     assert raised.value.retryable is False
@@ -118,12 +123,13 @@ async def test_hosted_control_plane_maps_conflict_and_transient_failures(
     async def wire(request: httpx.Request) -> httpx.Response:
         return httpx.Response(status, text="provider-private failure")
 
-    with pytest.raises(BrowserProfileControlPlaneError) as raised:
-        await adapter(httpx.MockTransport(wire)).provision(
-            PROFILE_ID,
-            principal(),
-            ("https://example.org",),
-        )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(wire)) as client:
+        with pytest.raises(BrowserProfileControlPlaneError) as raised:
+            await adapter(client).provision(
+                PROFILE_ID,
+                principal(),
+                ("https://example.org",),
+            )
 
     assert raised.value.retryable is retryable
     assert "provider-private" not in str(raised.value)
@@ -133,12 +139,13 @@ async def test_hosted_control_plane_rejects_invalid_or_oversized_output() -> Non
     async def invalid(request: httpx.Request) -> httpx.Response:
         return httpx.Response(201, content=b"x" * 65_537)
 
-    with pytest.raises(BrowserProfileControlPlaneError) as raised:
-        await adapter(httpx.MockTransport(invalid)).provision(
-            PROFILE_ID,
-            principal(),
-            ("https://example.org",),
-        )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(invalid)) as client:
+        with pytest.raises(BrowserProfileControlPlaneError) as raised:
+            await adapter(client).provision(
+                PROFILE_ID,
+                principal(),
+                ("https://example.org",),
+            )
 
     assert raised.value.reason == "browser_profile.control_plane_output_invalid"
     assert raised.value.retryable is False
@@ -148,12 +155,13 @@ async def test_hosted_control_plane_maps_transport_failure_as_retryable() -> Non
     async def unavailable(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("private transport detail", request=request)
 
-    with pytest.raises(BrowserProfileControlPlaneError) as raised:
-        await adapter(httpx.MockTransport(unavailable)).provision(
-            PROFILE_ID,
-            principal(),
-            ("https://example.org",),
-        )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(unavailable)) as client:
+        with pytest.raises(BrowserProfileControlPlaneError) as raised:
+            await adapter(client).provision(
+                PROFILE_ID,
+                principal(),
+                ("https://example.org",),
+            )
 
     assert raised.value.reason == "browser_profile.control_plane_unavailable"
     assert raised.value.retryable is True

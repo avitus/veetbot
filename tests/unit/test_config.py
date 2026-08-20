@@ -18,6 +18,7 @@ from agent_core.config import (
     SandboxMechanism,
     WebProviderKind,
     load_config_document,
+    load_schedule_worker_settings,
     load_settings,
     validate_runtime_identity,
     validate_settings,
@@ -208,6 +209,24 @@ def test_browser_origins_reject_duplicates_after_normalization() -> None:
         )
 
 
+def test_schedule_roles_default_off() -> None:
+    settings = load_settings(base_environment())
+    assert settings.schedule_api_enabled is False
+    assert settings.schedule_worker_enabled is False
+
+
+def test_schedule_roles_require_independent_explicit_enablement() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "AGENT_SCHEDULE_API_ENABLED": "1",
+            "AGENT_SCHEDULE_WORKER_ENABLED": "1",
+        }
+    )
+    assert settings.schedule_api_enabled is True
+    assert settings.schedule_worker_enabled is True
+
+
 def test_web_provider_selection_is_per_capability() -> None:
     settings = load_settings(
         {
@@ -368,6 +387,20 @@ def test_token_auth_requires_token() -> None:
     values = {**base_environment(), "AUTH_MODE": "token"}
     with pytest.raises(ConfigurationError, match="AUTH_TOKEN"):
         load_settings(values)
+
+
+def test_schedule_worker_identity_does_not_require_the_api_bearer_token() -> None:
+    values = {
+        **base_environment(),
+        "AUTH_MODE": "token",
+        "AUTH_TENANT_ID": "tenant-a",
+        "AUTH_PRINCIPAL_ID": "principal-a",
+        "AUTH_SCOPES": "schedule.read",
+        "SANDBOX_MECHANISM": "gvisor",
+    }
+    settings = load_schedule_worker_settings(values)
+    assert settings.auth_token is None
+    assert settings.auth_principal_id == "principal-a"
 
 
 @pytest.mark.parametrize("mechanism", ["docker", "fake"])
@@ -577,11 +610,11 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_106_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_121_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 106
+    assert len(qualified_paths) == 121
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))

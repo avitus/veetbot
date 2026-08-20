@@ -51,7 +51,7 @@ waiting on a chat turn from queueing behind a four-hour research run.
    fails immediately and is never retried by the queue. `max_attempts` is 3;
    `runs.failure` is the dead letter, so a failed run stays visible in its own
    table rather than moving to a separate one nobody reads.
-6. **`scheduled_for` carries both retry backoff and Milestone 10 scheduling.**
+6. **`scheduled_for` carries both retry backoff and Milestone 11 scheduling.**
    One nullable timestamp and one predicate in the claim query serve both, so the
    scheduling primitive is built once and exercised from Milestone 2.
 7. **Recovery resumes from the last checkpoint at a tool-invocation boundary**,
@@ -114,7 +114,7 @@ waiting on a chat turn from queueing behind a four-hour research run.
   genuinely executing. A design that routed the answer to a new run would
   deadlock every question the agent asks.
 - Priority classes are three fixed integers rather than a scheduling policy. When
-  Milestone 10 adds scheduled work at scale this may need revisiting; the column
+  Milestone 11 adds scheduled work at scale this may need revisiting; the column
   is a `SMALLINT`, so the classes can subdivide without a migration.
 
 ## Alternatives considered

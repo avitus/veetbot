@@ -105,7 +105,12 @@ async def test_profile_lifecycle(tmp_path: Path) -> None:
     )
     await hosted_lease_contract()
     persistence_schema.test_browser_profiles_schema_contains_metadata_only()
-    toolchain_contract.test_production_deployment_assets_preserve_process_boundaries()
+    toolchain_contract.test_production_environment_preserves_process_boundaries()
+    toolchain_contract.test_production_compose_preserves_browser_profile_isolation()
+    toolchain_contract.test_browser_profile_dockerfile_preserves_process_isolation()
+    toolchain_contract.test_systemd_units_preserve_role_boundaries()
+    toolchain_contract.test_release_script_preserves_release_boundaries()
+    toolchain_contract.test_nginx_configuration_preserves_public_process_boundaries()
 
 
 async def test_authentication_boundary(tmp_path: Path) -> None:
@@ -121,10 +126,12 @@ async def test_authentication_boundary(tmp_path: Path) -> None:
             BrowserAuthenticationStatus.AUTHENTICATION_REQUIRED,
         )
     ):
-        await session_service.test_authentication_ceremony_is_direct_single_use_and_runtime_decided(
+        ceremony_contract = (
+            session_service.assert_authentication_ceremony_is_direct_single_use_and_runtime_decided
+        )
+        await ceremony_contract(
             tmp_path / f"ceremony-{index}",
-            status,
-            status,
+            runtime_status=status,
         )
     await session_service.test_authentication_scope_mismatch_and_caller_asserted_success_are_absent(
         tmp_path / "ceremony-scope"

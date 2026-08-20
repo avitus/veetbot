@@ -61,7 +61,7 @@ def upgrade() -> None:
     op.create_index(
         "uq_browser_profiles_provider_ref",
         "browser_profiles",
-        ["provider_ref"],
+        ["tenant_id", "provider_ref"],
         unique=True,
         postgresql_where=sa.text("provider_ref IS NOT NULL"),
     )

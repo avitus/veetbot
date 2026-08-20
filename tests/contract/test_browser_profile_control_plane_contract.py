@@ -16,6 +16,15 @@ from tests.contract.support import principal
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000d0")
 
 
+def foreign_principal() -> Principal:
+    return Principal(
+        tenant_id=principal().tenant_id,
+        principal_id="principal-b",
+        roles={"user"},
+        scopes=set(),
+    )
+
+
 async def assert_control_plane_provisioning_is_scoped_and_recoverably_idempotent(
     control_plane: BrowserProfileControlPlane,
 ) -> None:
@@ -34,12 +43,7 @@ async def assert_control_plane_provisioning_is_scoped_and_recoverably_idempotent
     assert first.provider_ref
     assert first.encryption_key_version
 
-    foreign = Principal(
-        tenant_id=principal().tenant_id,
-        principal_id="principal-b",
-        roles={"user"},
-        scopes=set(),
-    )
+    foreign = foreign_principal()
     with pytest.raises(ConflictError):
         await control_plane.provision(
             PROFILE_ID,
@@ -71,12 +75,7 @@ async def assert_control_plane_lifecycle_rejects_scope_mismatch(
         principal(),
         ("https://example.org",),
     )
-    foreign = Principal(
-        tenant_id=principal().tenant_id,
-        principal_id="principal-b",
-        roles={"user"},
-        scopes=set(),
-    )
+    foreign = foreign_principal()
 
     with pytest.raises(ConflictError):
         await control_plane.revoke(PROFILE_ID, foreign, provisioned.provider_ref)

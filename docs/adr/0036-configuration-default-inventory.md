@@ -1,4 +1,4 @@
-# ADR-0036: The executable 106-knob configuration inventory
+# ADR-0036: The executable configuration inventory
 
 - Status: Accepted
 - Date: 2026-07-31
@@ -24,6 +24,14 @@ tests continue to claim that all 106 exist.
 23 policy, 4 model, 26 context, 20 tool, 16 runtime, and 17 memory paths. Static
 tests assert that the paths are unique, resolve in shipped YAML, and are non-null.
 
+Milestone 11 amends the inventory additively to 121 paths. Its fifteen additions
+are maximum active scheduled runs per tenant, maximum materializations per
+tenant per minute, daily and monthly scheduled cost, scan batch, fallback poll
+interval, admission backoff, maximum run timeout, maximum misfire grace,
+maximum steps, model calls, tool calls, and cost per run, and one reserved slot
+for each interactive and async work. The original 106-path classification
+remains unchanged; ADR-0059 authorizes the added scheduling surface.
+
 Schema versions, profile and rule identifiers, conditions, model-catalog data,
 and the frozen hardline rules are not knobs and therefore do not enter the count.
 They remain validated configuration, but they cannot inflate the declared total.
@@ -40,7 +48,7 @@ reviewed YAML change when operational evidence exists.
 
 ## Consequences
 
-- The 106-knob claim fails closed when a path disappears or becomes null.
+- The current 121-knob claim fails closed when a path disappears or becomes null.
 - Changing a dotted path requires updating the inventory in the same review.
 - The five selected defaults are explicit decisions rather than undocumented
   implementation guesses.

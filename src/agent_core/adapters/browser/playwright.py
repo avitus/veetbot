@@ -95,6 +95,8 @@ class PythonPlaywrightRuntime:
     ) -> None:
         if self._browser is not None:
             return
+        # Authentication uses screenshots and synthetic input, both supported
+        # by the same headless context, so no alternate launch mode is needed.
         del interactive
         self._allowed_origins = allowed_origins
         self._temporary_home = tempfile.TemporaryDirectory(prefix="veetbot-browser-")
@@ -302,24 +304,27 @@ class PythonPlaywrightRuntime:
             await page.keyboard.press(event.key)
 
     async def close(self) -> None:
-        if self._context is not None:
-            with suppress(Exception):
-                await self._context.close()
-        if self._browser is not None:
-            with suppress(Exception):
-                await self._browser.close()
-        if self._playwright is not None:
-            with suppress(Exception):
-                await self._playwright.stop()
-        if self._temporary_home is not None:
-            self._temporary_home.cleanup()
-        self._context = None
-        self._browser = None
-        self._playwright = None
-        self._page = None
-        self._temporary_home = None
-        self._revision = None
-        self._elements = {}
+        try:
+            if self._context is not None:
+                with suppress(Exception):
+                    await self._context.close()
+            if self._browser is not None:
+                with suppress(Exception):
+                    await self._browser.close()
+            if self._playwright is not None:
+                with suppress(Exception):
+                    await self._playwright.stop()
+            if self._temporary_home is not None:
+                with suppress(OSError):
+                    self._temporary_home.cleanup()
+        finally:
+            self._context = None
+            self._browser = None
+            self._playwright = None
+            self._page = None
+            self._temporary_home = None
+            self._revision = None
+            self._elements = {}
 
 
 def _default_role(tag: str, input_type: str | None) -> str:

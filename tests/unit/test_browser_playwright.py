@@ -6,7 +6,10 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
+from agent_core.adapters.browser.playwright import (
+    PlaywrightBrowserProvider,
+    PythonPlaywrightRuntime,
+)
 from agent_core.domain.browser import (
     BrowserAction,
     BrowserActionKind,
@@ -201,3 +204,23 @@ async def test_playwright_provider_dispatches_revision_bound_action() -> None:
 
     assert runtime.actions == [action]
     assert observation.revision == "revision-2"
+
+
+async def test_playwright_runtime_close_resets_state_when_home_cleanup_fails() -> None:
+    class FailingTemporaryHome:
+        def cleanup(self) -> None:
+            raise OSError("synthetic cleanup failure")
+
+    runtime = PythonPlaywrightRuntime()
+    runtime._temporary_home = FailingTemporaryHome()  # type: ignore[assignment]
+    runtime._revision = "stale-revision"
+    runtime._elements = {"stale": object()}  # type: ignore[dict-item]
+
+    await runtime.close()
+
+    assert runtime._temporary_home is None
+    assert runtime._browser is None
+    assert runtime._context is None
+    assert runtime._page is None
+    assert runtime._revision is None
+    assert runtime._elements == {}

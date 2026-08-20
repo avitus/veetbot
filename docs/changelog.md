@@ -25,10 +25,26 @@ title: Changelog
   narrative moved verbatim to `docs/status/corpus-audit-log.md`. The state
   file's stale 172-entry census claims left with it.
 - Reconciled the milestone map's gate-table arithmetic paragraph against the
-  derived registry in `make docs-check` (203 declarations, 200 registry
-  entries, 3 aliases) and corrected or de-counted the remaining stale
-  census-bearing prose. Recorded in ADR-0059, which also retains the citation
-  ledger over the earlier anchor proposal.
+  derived registry in `make docs-check` and corrected or de-counted the
+  remaining stale census-bearing prose. Recorded in ADR-0060, which also
+  retains the citation ledger over the earlier anchor proposal.
+
+## 2026-08-19 — Milestone 11 local implementation complete
+
+- Added the complete authenticated schedule lifecycle and occurrence HTTP
+  surface with exact scopes, optimistic revisions, request idempotency, bounded
+  pagination, immutable definitions, and default-off routing.
+- Added fresh configured authority, finite definition ceilings, terminal run
+  accounting and automatic pause, content-safe OpenTelemetry metrics,
+  best-effort PostgreSQL wakeup, and offline recovery of completed, failed,
+  cancelled, missed, and overlap-skipped results.
+- Split interactive, asynchronous, and schedule production roles. The schedule
+  role uses a least-privilege PostgreSQL composition and receives no execution
+  or API credential; release tests cover both disabled and enabled activation.
+- Replaced every provisional schedule registry target with executable coverage,
+  bringing the registry to twenty-three Milestone 11 gates and 223 cumulative
+  gates. Local static, contract, deployment, migration, PostgreSQL integration,
+  and resilience lanes pass; hosted CI and final CodeRabbit review remain.
 
 ## 2026-08-19 — Automatic provider-memory rollout and evidence generation
 
@@ -41,6 +57,44 @@ title: Changelog
   after positive lift, zero fabrication, and no policy regression.
 - Preserved the legacy enable flag as fail-closed `required` mode and retained
   deterministic fallback for model-resolution and provider-call failures.
+- Bound the provider-evidence publication gate to its executable test method so
+  the canonical cumulative runner collects and reports the check.
+
+## 2026-08-19 — Milestone 11 persistence discipline
+
+- Expanded the Milestone 11 contract from fifteen functional scheduling gates
+  to twenty-three gates, adding explicit domain, adapter-contract, schema,
+  migration, transaction, erasure, and isolation coverage.
+- Added immutable schedule/revision/occurrence domain values, in-memory and
+  PostgreSQL repositories, unit-of-work composition, four RLS-protected tables,
+  and clean/stepwise migration coverage.
+- Made erased materialized links an explicit audited state: session deletion
+  atomically clears the session/run links and records `links_erased_at` while
+  retaining non-secret occurrence history.
+- Passed the full 109-test PostgreSQL integration and resilience lane.
+
+## 2026-08-19 — Milestone 11 civil-time recurrence
+
+- Added validated one-time, daily, and weekly cadence values with aware-instant,
+  IANA-zone, whole-second local-time, and normalized weekday boundaries.
+- Added pure next and latest-due recurrence calculation from civil rules,
+  including first-valid spring-gap resolution and earlier-instant fall-fold
+  selection without iterating through downtime backlogs.
+- Backed `gate.schedule.civil_time` with deterministic examples and generated
+  coverage across UTC, one-hour DST, half-hour DST, and quarter-hour zones.
+
+## 2026-08-19 — Milestone 11 scheduled-runs design
+
+- Authorized scheduling as Milestone 11 rather than changing Milestone 10's
+  established completion contract.
+- Specified versioned schedules, immutable occurrence identity, deterministic
+  civil time, bounded misfires, fresh authority at firing, atomic ordinary-run
+  materialization, dedicated occurrence sessions, and separate schedule/run
+  cancellation.
+- Added twenty-three scheduling gates, including explicit domain, adapter-
+  contract, schema, migration, transaction, erasure, and isolation coverage,
+  and extended the canonical registry from 200 entries through Milestone 10 to
+  223 through Milestone 11.
 
 ## 2026-08-18 — Web output bounds and pinned-version compatibility
 

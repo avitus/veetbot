@@ -237,6 +237,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "sandbox_execution_error",
         "artifact_storage_error",
         "concurrency_conflict",
+        "schedule_validation_error",
         "malformed_request",
         "unsupported_media_type",
         "payload_too_large",
@@ -329,6 +330,7 @@ def test_error_status_map_is_total_over_the_public_taxonomy() -> None:
         domain_errors.SandboxExecutionError,
         domain_errors.ArtifactStorageError,
         domain_errors.ConcurrencyConflict,
+        domain_errors.ScheduleValidationError,
     }
     assert public_types <= set(ERROR_STATUS_MAP)
     assert INTERNAL_ONLY_ERROR_TYPES.isdisjoint(ERROR_STATUS_MAP)

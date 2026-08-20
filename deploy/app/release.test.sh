@@ -128,12 +128,23 @@ make_stage() {
     "$stage/docker-compose.yml" \
     "$stage/deploy/docker-compose.production.yml" \
     "$stage/deploy/browser-profile-service.Dockerfile" \
+    "$stage/deploy/veetbot-schedule.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_production_deployment.py"
-  for unit in veetbot-api veetbot-worker veetbot-maintenance; do
+  for unit in \
+    veetbot-api \
+    veetbot-worker \
+    veetbot-async-worker \
+    veetbot-maintenance \
+    veetbot-schedule; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
       >"$stage/deploy/systemd/$unit.service"
   done
+  printf '%s\n' \
+    '[Service]' \
+    'WorkingDirectory=/opt/veetbot/current' \
+    'EnvironmentFile=/etc/veetbot/veetbot-schedule.env' \
+    >"$stage/deploy/systemd/veetbot-schedule.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
   printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
@@ -148,6 +159,7 @@ run_release() {
   BASH_ENV=/dev/null \
   VEETBOT_ROOT="$DEPLOY_ROOT" \
   VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
+  VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
@@ -189,7 +201,10 @@ grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
-grep -Fq 'systemctl restart veetbot-maintenance veetbot-worker veetbot-api' "$LOG_FILE"
+grep -Fq \
+  'systemctl restart veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  "$LOG_FILE"
+grep -Fq 'systemctl disable --now veetbot-schedule' "$LOG_FILE"
 grep -Fq 'curl session-index' "$LOG_FILE"
 grep -Fq 'curl session-index http://127.0.0.1:8000/v1/sessions?limit=1' "$LOG_FILE"
 auth_scheme='Bearer'
@@ -284,5 +299,33 @@ ln -s "$DEPLOY_ROOT/releases/$equal_timestamp_id" "$PROCESS_ROOT/4242/cwd"
 run_release "$equal_timestamp_id"
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == \
   "$DEPLOY_ROOT/releases/$equal_timestamp_id" ]]
+
+schedule_env="$TEST_ROOT/schedule.env"
+schedule_worker_env="$TEST_ROOT/veetbot-schedule.env"
+cp "$ENV_FILE" "$schedule_env"
+printf '%s\n' \
+  "DATABASE_URL=$test_database_url" \
+  'DEPLOYMENT_MODE=production' \
+  'AUTH_MODE=token' \
+  'AUTH_TENANT_ID=test' \
+  'AUTH_PRINCIPAL_ID=test' \
+  'AUTH_SCOPES=session.read,schedule.read,schedule.write,schedule.cancel' \
+  'AGENT_SCHEDULE_API_ENABLED=1' \
+  'AGENT_SCHEDULE_WORKER_ENABLED=1' >"$schedule_worker_env"
+printf '%s\n' \
+  'AGENT_SCHEDULE_API_ENABLED=1' \
+  'AGENT_SCHEDULE_WORKER_ENABLED=1' >>"$schedule_env"
+schedule_id="20260810-152256-0000001"
+make_stage "$schedule_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$schedule_id" "$PROCESS_ROOT/4242/cwd"
+VEETBOT_TEST_ENV_FILE="$schedule_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_worker_env" \
+  run_release "$schedule_id"
+grep -Fxq "EnvironmentFile=$schedule_worker_env" \
+  "$SYSTEMD_DIR/veetbot-schedule.service"
+grep -Fq \
+  'systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  "$LOG_FILE"
 
 printf 'release script tests passed\n'
