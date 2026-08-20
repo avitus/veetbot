@@ -50,6 +50,7 @@ from agent_core.domain.policies import (
     ProposedAction,
     RiskLevel,
     SideEffectClass,
+    StandingAuthorization,
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunCheckpoint, Step
@@ -74,7 +75,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
 from agent_core.ports.execution import WorkspaceFactory
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
-from agent_core.ports.policies import PolicyEngine
+from agent_core.ports.policies import PolicyEngine, StandingAuthorizer
 from agent_core.ports.repositories import ToolInvocationRepository
 from agent_core.ports.tools import Tool, ToolRegistry
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME
@@ -345,6 +346,7 @@ class ToolPipeline:
         maximum_loaded_skills: int = 2,
         maximum_skill_body_tokens: int = 6_000,
         approval_expiry_seconds: Mapping[RiskLevel, int] | None = None,
+        standing_authorizer: StandingAuthorizer | None = None,
     ) -> None:
         self._registry = registry
         self._uow_factory = uow_factory
@@ -377,6 +379,7 @@ class ToolPipeline:
                 RiskLevel.CRITICAL: 3_600,
             }
         )
+        self._standing_authorizer = standing_authorizer
         self._key_locks: dict[str, _KeyLockEntry] = {}
         self._key_locks_guard = asyncio.Lock()
         self._completed_traces: deque[PipelineTrace] = deque(maxlen=1_024)
@@ -745,6 +748,7 @@ class ToolPipeline:
         }:
             raise AssertionError(f"unhandled tool recovery action {recovery.value}")
 
+        standing_authorization: StandingAuthorization | None = None
         if not approval_granted:
             if decision is None:
                 raise AssertionError("policy decision was not evaluated")
@@ -754,21 +758,46 @@ class ToolPipeline:
                     run, call, tool, invocation, decision.reason_code, lease
                 )
             if decision.decision is PolicyDecisionType.REQUIRE_APPROVAL:
-                approval = await self._request_approval(
-                    run, call, principal, agent, tool, invocation, decision, lease
+                standing_authorization = await self._standing_authorization(
+                    run=run,
+                    checkpoint=checkpoint,
+                    principal=principal,
+                    agent=agent,
+                    step=step,
+                    tool=tool,
+                    invocation=invocation,
+                    arguments=arguments,
+                    arguments_hash=arguments_hash,
+                    decision=decision,
                 )
-                raise ApprovalRequiredError(approval.id)
+                if standing_authorization is None or not standing_authorization.allowed:
+                    approval = await self._request_approval(
+                        run, call, principal, agent, tool, invocation, decision, lease
+                    )
+                    raise ApprovalRequiredError(approval.id)
 
         if invocation.status is ToolInvocationStatus.PROPOSED:
             async with self._uow_factory() as uow:
                 invocation = await authorize_tool_invocation(
                     uow.invocations, invocation, self._clock, lease
                 )
+                authorization_payload: dict[str, object] = {
+                    "name": call.name,
+                    "call_id": call.call_id,
+                }
+                if standing_authorization is not None:
+                    authorization_payload.update(
+                        {
+                            "authorization_kind": standing_authorization.authorization_kind,
+                            "authorization_ref": standing_authorization.authorization_ref,
+                            "authorization_reason": standing_authorization.reason_code,
+                        }
+                    )
                 await self._event_in(
                     uow,
                     run,
                     "tool.call.authorized",
-                    {"name": call.name, "call_id": call.call_id},
+                    authorization_payload,
                     lease,
                 )
         if invocation.status is ToolInvocationStatus.AUTHORIZED and progress[-1] == 7:
@@ -915,8 +944,8 @@ class ToolPipeline:
             maximum_output_bytes=tool.spec.maximum_output_bytes,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
-                isolated=tool.spec.target_kind == "sandbox",
-                network_enabled=tool.spec.target_kind == "web_provider",
+                isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
+                network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
             ),
             workspace=(
                 None
@@ -1230,12 +1259,65 @@ class ToolPipeline:
             origin_trust=invocation.origin_trust,
             target=ExecutionTarget(
                 kind=tool.spec.target_kind,
-                isolated=tool.spec.target_kind == "sandbox",
-                network_enabled=tool.spec.target_kind == "web_provider",
+                isolated=tool.spec.target_kind in {"sandbox", "browser_provider"},
+                network_enabled=tool.spec.target_kind in {"web_provider", "browser_provider"},
                 server_id=tool.spec.server_id,
             ),
             evaluated_at=self._clock.now(),
         )
+
+    async def _standing_authorization(
+        self,
+        *,
+        run: Run,
+        checkpoint: RunCheckpoint,
+        principal: Principal,
+        agent: AgentSpec,
+        step: Step,
+        tool: Tool,
+        invocation: ToolInvocation,
+        arguments: dict[str, Any],
+        arguments_hash: str,
+        decision: PolicyDecision,
+    ) -> StandingAuthorization | None:
+        if self._standing_authorizer is None:
+            return None
+        action = self._proposed_action(
+            run,
+            checkpoint,
+            step,
+            tool,
+            invocation,
+            arguments,
+            arguments_hash,
+        )
+        deadline = self._clock.now() + timedelta(seconds=tool.spec.timeout_seconds)
+        if run.deadline_at is not None:
+            deadline = min(deadline, run.deadline_at)
+        try:
+            authorization = await self._standing_authorizer.authorize(
+                action=action,
+                decision=decision,
+                principal=principal,
+                run=run,
+                agent_version=agent.version,
+                action_deadline=deadline,
+            )
+        except Exception:
+            logger.exception(
+                "standing_authorization_failed",
+                extra={"tool_name": tool.spec.name},
+            )
+            return None
+        if authorization.allowed and (
+            authorization.authorization_kind is None or authorization.authorization_ref is None
+        ):
+            logger.error(
+                "standing_authorization_missing_evidence",
+                extra={"tool_name": tool.spec.name},
+            )
+            return None
+        return authorization
 
     async def _request_approval(
         self,

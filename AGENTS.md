@@ -51,6 +51,7 @@ Read, in this order, before starting an assignment:
 | Skill packages, the catalog, the authoring loop | `skills.md` |
 | Knowledge documents, ingestion, passage retrieval | `knowledge-documents.md` |
 | Public-web search and page extraction | `web-access.md` |
+| Scheduled runs and recurrence | `scheduling.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -71,13 +72,12 @@ Read, in this order, before starting an assignment:
 
 ## Scope control
 
-- Work only on the **active** milestone or an explicitly authorized one
-  (see project state; currently Milestone 10 automatic memory, self-authored
-  skills, and provider-neutral web access).
+- Work only on the **active** milestone or an explicitly authorized one (see project state).
 - Do not begin later milestones speculatively.
-- Milestones 0 through 9 are complete. The Milestone 10 tranches above are
-  authorized with their own acceptance contracts; scheduling, routing,
-  general-purpose subagents, and other Milestone 10 extensions remain unauthorized.
+- Milestones 0 through 9 are complete. Milestones 10 and 11 have separate contracts.
+  Milestone 10 covers automatic memory, self-authored skills,
+  provider-neutral web access, and authenticated browser automation; routing,
+  general-purpose subagents, and other extensions remain unauthorized.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).

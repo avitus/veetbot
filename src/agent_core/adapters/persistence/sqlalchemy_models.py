@@ -10,6 +10,7 @@ from uuid import UUID
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -331,6 +332,127 @@ class PolicyProfileRow(Base):
     rule_count: Mapped[int] = mapped_column(Integer)
     loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     loaded_by: Mapped[str] = mapped_column(Text)
+
+
+class BrowserProfileRow(Base):
+    __tablename__ = "browser_profiles"
+    __table_args__ = (
+        CheckConstraint("generation >= 0", name="generation_nonnegative"),
+        CheckConstraint(
+            "status IN ('provisioning','authentication_required','ready','needs_user','revoked')",
+            name="status_closed",
+        ),
+        CheckConstraint(
+            "(status = 'provisioning' AND provider_name IS NULL "
+            "AND provider_ref IS NULL AND encryption_key_version IS NULL) OR "
+            "(status = 'revoked' AND ((provider_name IS NULL "
+            "AND provider_ref IS NULL AND encryption_key_version IS NULL) OR "
+            "(provider_name IS NOT NULL AND provider_ref IS NOT NULL "
+            "AND encryption_key_version IS NOT NULL))) OR "
+            "(status IN ('authentication_required','ready','needs_user') "
+            "AND provider_name IS NOT NULL AND provider_ref IS NOT NULL "
+            "AND encryption_key_version IS NOT NULL)",
+            name="binding_consistent",
+        ),
+        Index(
+            "ix_browser_profiles_tenant_principal_created",
+            "tenant_id",
+            "principal_id",
+            "created_at",
+        ),
+        Index(
+            "uq_browser_profiles_provider_ref",
+            "tenant_id",
+            "provider_ref",
+            unique=True,
+            postgresql_where=text("provider_ref IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    provider_name: Mapped[str | None] = mapped_column(Text)
+    provider_ref: Mapped[str | None] = mapped_column(Text)
+    allowed_origins: Mapped[list[str]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(Text)
+    generation: Mapped[int] = mapped_column(Integer)
+    encryption_key_version: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserGrantRow(Base):
+    __tablename__ = "browser_grants"
+    __table_args__ = (
+        CheckConstraint("profile_generation >= 0", name="generation_nonnegative"),
+        CheckConstraint(
+            "expires_at > starts_at AND expires_at <= starts_at + interval '30 days'",
+            name="time_window",
+        ),
+        CheckConstraint("jsonb_array_length(action_kinds) > 0", name="action_kinds_nonempty"),
+        Index(
+            "ix_browser_grants_tenant_principal_profile",
+            "tenant_id",
+            "principal_id",
+            "profile_id",
+        ),
+        Index("ix_browser_grants_active_expiry", "expires_at", "revoked_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("browser_profiles.id", ondelete="CASCADE")
+    )
+    profile_generation: Mapped[int] = mapped_column(Integer)
+    agent_version: Mapped[str] = mapped_column(Text)
+    policy_version: Mapped[str] = mapped_column(Text)
+    allowed_origins: Mapped[list[str]] = mapped_column(JSONB)
+    action_kinds: Mapped[list[str]] = mapped_column(JSONB)
+    element_roles: Mapped[list[str]] = mapped_column(JSONB)
+    element_names: Mapped[list[str]] = mapped_column(JSONB)
+    purpose: Mapped[str | None] = mapped_column(Text)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    approved_by: Mapped[str] = mapped_column(Text)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BrowserAuthenticationRow(Base):
+    __tablename__ = "browser_authentications"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('authentication_required','needs_user','ready','expired','cancelled')",
+            name="status_closed",
+        ),
+        CheckConstraint(
+            "expires_at > created_at AND expires_at <= created_at + interval '5 minutes'",
+            name="time_window",
+        ),
+        Index(
+            "ix_browser_authentications_tenant_principal_profile",
+            "tenant_id",
+            "principal_id",
+            "profile_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    profile_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("browser_profiles.id", ondelete="CASCADE")
+    )
+    status: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class ProcessEventRow(Base):
@@ -904,3 +1026,124 @@ class KnowledgeChunkRow(Base):
     tokens: Mapped[int] = mapped_column(Integer)
     contains_instruction_like_text: Mapped[bool] = mapped_column(Boolean)
     content_sha256: Mapped[str] = mapped_column(String(64))
+
+
+class ScheduleRow(Base):
+    __tablename__ = "schedules"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('ACTIVE','PAUSED','COMPLETED','CANCELLED')",
+            name="schedule_state_values",
+        ),
+        CheckConstraint(
+            "(state = 'PAUSED' AND pause_reason IN ('user','failure_limit')) OR "
+            "(state <> 'PAUSED' AND pause_reason IS NULL)",
+            name="schedule_pause_reason_consistency",
+        ),
+        CheckConstraint("current_revision > 0", name="schedule_revision_positive"),
+        CheckConstraint("consecutive_failures >= 0", name="schedule_failures_nonnegative"),
+        CheckConstraint(
+            "state NOT IN ('COMPLETED','CANCELLED') OR next_fire_at IS NULL",
+            name="schedule_terminal_not_due",
+        ),
+        Index("ix_schedules_due", "state", "next_fire_at"),
+        Index(
+            "ix_schedules_tenant_principal_updated",
+            "tenant_id",
+            "principal_id",
+            "updated_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    state: Mapped[str] = mapped_column(String(32))
+    pause_reason: Mapped[str | None] = mapped_column(Text)
+    current_revision: Mapped[int] = mapped_column(Integer)
+    next_fire_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    consecutive_failures: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleRevisionRow(Base):
+    __tablename__ = "schedule_revisions"
+
+    schedule_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="RESTRICT"), primary_key=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    definition: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_by_principal_id: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleOccurrenceRow(Base):
+    __tablename__ = "schedule_occurrences"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["schedule_id", "schedule_revision"],
+            ["schedule_revisions.schedule_id", "schedule_revisions.revision"],
+            name="fk_schedule_occurrences_revision",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("schedule_id", "nominal_fire_at", name="uq_schedule_occurrence_nominal"),
+        CheckConstraint(
+            "disposition IN ('MATERIALIZED','MISSED','SKIPPED_OVERLAP',"
+            "'AUTHORIZATION_FAILED','CONFIGURATION_FAILED')",
+            name="schedule_occurrence_disposition_values",
+        ),
+        CheckConstraint(
+            "(disposition = 'MATERIALIZED' AND authority_version IS NOT NULL "
+            "AND materialized_at IS NOT NULL AND reason_code IS NULL "
+            "AND materialized_at >= nominal_fire_at AND ((links_erased_at IS NULL "
+            "AND session_id IS NOT NULL AND run_id IS NOT NULL) OR "
+            "(links_erased_at IS NOT NULL AND session_id IS NULL AND run_id IS NULL "
+            "AND links_erased_at >= materialized_at))) OR "
+            "(disposition <> 'MATERIALIZED' AND session_id IS NULL AND run_id IS NULL "
+            "AND materialized_at IS NULL AND links_erased_at IS NULL "
+            "AND reason_code IS NOT NULL)",
+            name="schedule_occurrence_links_consistent",
+        ),
+        Index("ix_schedule_occurrences_history", "schedule_id", "nominal_fire_at"),
+        Index(
+            "uq_schedule_occurrences_run_id",
+            "run_id",
+            unique=True,
+            postgresql_where=text("run_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    schedule_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True))
+    schedule_revision: Mapped[int] = mapped_column(Integer)
+    nominal_fire_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    disposition: Mapped[str] = mapped_column(String(32))
+    session_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("sessions.id", ondelete="RESTRICT", deferrable=True, initially="DEFERRED"),
+    )
+    run_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("runs.id", ondelete="RESTRICT", deferrable=True, initially="DEFERRED"),
+    )
+    reason_code: Mapped[str | None] = mapped_column(Text)
+    authority_version: Mapped[str | None] = mapped_column(Text)
+    materialized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    links_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ScheduleIdempotencyKeyRow(Base):
+    __tablename__ = "schedule_idempotency_keys"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    schedule_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

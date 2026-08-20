@@ -385,7 +385,10 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
 - **`MemoryCandidateExtractor` port**: `extract(events, principal, scope) ->
   list[MemoryCandidate]`. Extractors propose only; the service owns the candidate
   cap and every provenance, scope, portability, salience, rejection, and conflict
-  check.
+  check. `agent_core.memory.SHIPPED_MEMORY_CANDIDATE_EXTRACTORS` is the
+  authoritative implementation census; the shared contract parameterizes itself
+  from that production-package registry so a new shipped extractor cannot bypass
+  the common proposal and fallback assertions.
 - **`Salience` and `ConflictResolver`** are replaceable strategies.
 - **Runtime placement.** Consolidation runs as a **restricted child run**
   (subagent, Section 27.6 / Milestone 10) or a dedicated background worker job:
@@ -481,10 +484,12 @@ ADR-0051 introduced a schema-constrained hybrid reference extractor over trusted
 principal-authored events and a compact existing-belief view. Its focused tests
 retain regression coverage for grounding, strict output, independent limits,
 content-free `memory.extraction.completed` auditing, and deterministic fallback.
-Those tests are not production activation evidence. ADR-0057 supersedes the
-earlier routed-policy selection rule: normal composition does not select a
-provider extractor until a version-bound artifact for the exact runtime tuple
-passes startup validation.
+Those tests are not production activation evidence. ADR-0057 proposes
+superseding the earlier routed-policy selection rule; pending owner acceptance,
+the provisional implementation enforces that stricter boundary without treating
+the ADR as accepted. Normal composition does not select a provider extractor
+until a version-bound artifact for the exact runtime tuple passes startup
+validation.
 
 ### Evaluation-gated provider assistance (`formation@3`)
 
@@ -576,6 +581,29 @@ first formation layer (Section 20).
 10. **Ordinary correction isolation** — a natural-language retraction supersedes
     the matching entity while unrelated entities and preference topics continue
     to coexist. **M10.**
+11. **Governed inspection and reversibility** — the public memory surface can
+    list and inspect beliefs, source-session formation audits, and recall traces;
+    edit and delete use the same principal-scoped service, and a foreign
+    principal can observe or mutate none of them. **M10.**
+12. **Extractor contract coverage** — every shipped
+    `MemoryCandidateExtractor` implementation is registered against the shared
+    contract for separate, scope-correct, provenance-bound proposals, including
+    deterministic fallback when an assisted extractor receives unusable provider
+    output. **M10.**
+13. **Evidence-bound activation** — provider assistance is eligible only when
+    the evaluation artifact exactly matches extractor version, formation policy,
+    model policy, provider, model, policy profile, and compiled policy version;
+    a mismatch in any field does not activate it. **M10.**
+14. **Provider safety boundary** — provider proposals remain proposals: invented
+    source ids and secret-shaped statements cannot pass the governed service's
+    provenance and eligibility checks. **M10.**
+15. **Audited deterministic fallback** — a failed provider attempt records a
+    content-free failed audit and returns the independently derived deterministic
+    proposals rather than suppressing memory formation. **M10.**
+16. **Evidence publication** — the checked-in paired evaluation derives the
+    active provider tuple and corpus hash and atomically publishes activation
+    evidence only after formation lift, zero fabrication, and no policy
+    regression pass; a failed evaluation leaves no artifact. **M10.**
 
 ## Tracked metrics
 

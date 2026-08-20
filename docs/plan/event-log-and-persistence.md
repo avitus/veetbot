@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:671`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:711`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -343,7 +343,7 @@ they fix four acceptance criteria and one exclusion list. Neither states a
 format, a redaction procedure, or what "consent-gated" means mechanically,
 and [evaluation-harness.md](evaluation-harness.md) has already built the
 consuming half against the assumption that this half is redacted before a
-converter ever sees it (`evaluation-harness.md:1320`). This is the
+converter ever sees it (`evaluation-harness.md:1323`). This is the
 producing half, and it is the third projection in the table above.
 
 ### The export is an artifact, not a query
@@ -421,7 +421,7 @@ same question in the same words.
 `recorded_on` is a date, not a timestamp, and there are no per-message
 timestamps at all. Per-message timing is the highest-entropy correlatable
 field an export could carry, no stated consumer needs it — the harness
-discards timestamps at conversion (`evaluation-harness.md:1297`) and a
+discards timestamps at conversion (`evaluation-harness.md:1300`) and a
 training corpus has no use for them — and a field that is dropped by every
 consumer and re-identifies a user is a field that should not have been
 written. `tools` records the name and schema hash of every tool the run
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1128-1136`) run over every message body,
+   (`bootstrap-and-composition.md:1139-1147`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1141-1143`).
+(`bootstrap-and-composition.md:1152-1154`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -568,7 +568,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:969`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:980`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s five
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an
@@ -662,7 +662,7 @@ Three priority classes, low number first:
 | Class | Value | Contents | Latency budget |
 | --- | --- | --- | --- |
 | Interactive | 0 | A user is waiting on this turn | Seconds |
-| Async | 10 | Scheduled and long-running work (Milestone 10) | Minutes |
+| Async | 10 | Scheduled and long-running work (Milestone 11) | Minutes |
 | Maintenance | 20 | Consolidation, rebuilds, exports | Hours |
 
 Strict priority starves the bottom of the queue, so **capacity is reserved by
@@ -729,8 +729,8 @@ failures retained. There is no separate dead-letter table: `runs` already has a
 `failure JSONB` column and a terminal status, and a dead-letter queue whose
 entries nothing reads is a table that only ever grows.
 
-`scheduled_for` carries the backoff for a requeued run and doubles as the
-scheduling primitive Milestone 10 needs, which is why it lands here rather than
+`scheduled_for` carries the backoff for a requeued run and doubles as the queue
+eligibility primitive Milestone 11 needs, which is why it lands here rather than
 being invented twice.
 
 ### Recovery at a safe boundary
@@ -1463,7 +1463,7 @@ checkpoint bytes per run, and rebuild duration per projection.
     a zero-row update means stop, not retry.
 14. **Only lease expiry requeues a run.** Permanent Section 13 classifications
     fail immediately; `max_attempts` is 3; `runs.failure` is the dead letter.
-15. **`scheduled_for` carries both retry backoff and Milestone 10 scheduling**,
+15. **`scheduled_for` carries both retry backoff and Milestone 11 scheduling**,
     so the primitive is built once.
 16. **Ambiguous non-idempotent tool executions become `UNCERTAIN`** and are
     reported to the model as unknown-outcome rather than as failed.

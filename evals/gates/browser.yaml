@@ -1,0 +1,61 @@
+# Canonical gate registry entries for authenticated browser automation.
+- id: gate.browser.provider_contract
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Provider contract** — shared navigation, observation, action, and cleanup semantics do not change across provider placements."
+  check: tests/gates/test_browser_m10.py::test_provider_contract
+- id: gate.browser.default_off
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Default-off composition** — no browser capability is registered or started without an explicitly bound provider."
+  check: tests/gates/test_browser_m10.py::test_default_off_composition
+- id: gate.browser.origin_isolation
+  milestone: 10
+  kind: property
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Origin isolation** — browser interception and audited egress confine all navigation and action to exact public HTTPS origins."
+  check: tests/gates/test_browser_m10.py::test_origin_isolation
+- id: gate.browser.observation_trust
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Observation trust** — validated browser reads persist bounded external-untrusted observations without secret-bearing browser internals."
+  check: tests/gates/test_browser_m10.py::test_observation_trust
+- id: gate.browser.action_authority
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Action authorization** — browser actions are serial high-risk non-idempotent external writes dispatched only after authorization."
+  check: tests/gates/test_browser_m10.py::test_action_authority
+- id: gate.browser.revision_binding
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Revision binding** — stable element handles are bound to an exact observation revision and stale actions fail before dispatch."
+  check: tests/gates/test_browser_m10.py::test_revision_binding
+- id: gate.browser.uncertain_write
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Uncertain writes** — possibly sent browser mutations record their watermark and uncertain outcome and are not blindly replayed."
+  check: tests/gates/test_browser_m10.py::test_uncertain_write
+- id: gate.browser.profile_lifecycle
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Profile lifecycle** — profile metadata and material are scoped, encrypted, revocable, deletable, lease-invalidating, and absent from model-selected identifiers."
+  check: tests/gates/test_browser_m10.py::test_profile_lifecycle
+- id: gate.browser.authentication
+  milestone: 10
+  kind: property
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Authentication boundary** — login is user-controlled, secrets never cross the orchestration boundary, and intervention states produce needs_user."
+  check: tests/gates/test_browser_m10.py::test_authentication_boundary
+- id: gate.browser.standing_grant
+  milestone: 10
+  kind: case
+  spec: docs/plan/browser-automation.md#hard-gates
+  statement: "**Standing grants** — grants are exact, expiring, revocable, revalidated, and cannot cover hard exclusions."
+  check: tests/gates/test_browser_m10.py::test_standing_grant

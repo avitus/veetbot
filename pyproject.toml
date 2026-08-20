@@ -13,6 +13,7 @@ dependencies = [
   "alembic>=1.14,<2",
   "anthropic>=0.74,<1",
   "asyncpg>=0.30,<1",
+  "cryptography>=46,<51",
   "fastapi>=0.115,<1",
   "httpx>=0.28,<1",
   "jsonschema>=4.23,<5",
@@ -20,6 +21,7 @@ dependencies = [
   "opentelemetry-sdk>=1.29,<2",
   "openai>=2.0,<3",
   "pydantic>=2.10.6,<3",
+  "playwright>=1.55,<2",
   "pyyaml>=6.0,<7",
   "python-dotenv>=1.0,<2",
   "sqlalchemy[asyncio]>=2.0,<3",
@@ -33,6 +35,7 @@ dependencies = [
 
 [project.scripts]
 agent = "agent_core.cli.main:app"
+browser-profile-service = "agent_core.browser_control_plane.main:main"
 
 [dependency-groups]
 dev = [

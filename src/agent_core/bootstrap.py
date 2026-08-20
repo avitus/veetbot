@@ -12,14 +12,31 @@ from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, cast
+from types import TracebackType
+from typing import Any, Literal, Self, cast
 from urllib.parse import urlsplit
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from sqlalchemy.ext.asyncio import AsyncSession
+import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.functions import func
 
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
+from agent_core.adapters.browser.authentications import (
+    InMemoryBrowserAuthenticationRepository,
+)
+from agent_core.adapters.browser.grants import InMemoryBrowserGrantRepository
+from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
+from agent_core.adapters.browser.hosted_provider import HostedBrowserProvider
+from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
+from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
+from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
+from agent_core.adapters.browser.unavailable import (
+    UnavailableBrowserAuthenticationControlPlane,
+    UnavailableBrowserProfileControlPlane,
+)
 from agent_core.adapters.credentials import MappingCredentialResolver
 from agent_core.adapters.determinism import (
     FixedClock,
@@ -35,7 +52,10 @@ from agent_core.adapters.execution.docker import (
     resolve_local_image_digest,
 )
 from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
-from agent_core.adapters.identity import StaticPrincipalResolver
+from agent_core.adapters.identity import (
+    ConfiguredSchedulePrincipalDirectory,
+    StaticPrincipalResolver,
+)
 from agent_core.adapters.live_events import (
     InMemoryLiveEventBroadcaster,
     PostgresLiveEventBroadcaster,
@@ -94,6 +114,9 @@ from agent_core.adapters.persistence.repositories import (
     PostgresAgentRepository,
     PostgresApprovalRepository,
     PostgresArtifactRepository,
+    PostgresBrowserAuthenticationRepository,
+    PostgresBrowserGrantRepository,
+    PostgresBrowserProfileRepository,
     PostgresCapabilityEvaluationRepository,
     PostgresCheckpointRepository,
     PostgresEventRepository,
@@ -108,6 +131,14 @@ from agent_core.adapters.persistence.repositories import (
     PostgresTrajectoryExportRepository,
     PostgresUsageRepository,
 )
+from agent_core.adapters.persistence.schedules import (
+    InMemoryScheduleIdempotencyRepository,
+    InMemoryScheduleOccurrenceRepository,
+    InMemoryScheduleRepository,
+    PostgresScheduleIdempotencyRepository,
+    PostgresScheduleOccurrenceRepository,
+    PostgresScheduleRepository,
+)
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
     PostgresSessionDeletionRepository,
@@ -120,6 +151,14 @@ from agent_core.adapters.persistence.unit_of_work import (
     UnitOfWorkRepositories,
 )
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
+from agent_core.adapters.schedule_admission import (
+    AllowScheduleAdmissionController,
+    PostgresScheduleAdmissionController,
+)
+from agent_core.adapters.schedule_wakeup import (
+    InMemoryScheduleWakeup,
+    PostgresScheduleWakeup,
+)
 from agent_core.adapters.skills.memory import InMemorySkillRepository
 from agent_core.adapters.skills.stores import (
     FilesystemSkillPackageStore,
@@ -129,6 +168,12 @@ from agent_core.adapters.web.firecrawl import FirecrawlWebProvider
 from agent_core.adapters.web.tavily import TavilyWebProvider
 from agent_core.application.approval_service import ApprovalService
 from agent_core.application.artifact_writer import ArtifactWriterFactory
+from agent_core.application.browser_grants import ConfiguredBrowserStandingAuthorizer
+from agent_core.application.browser_management import (
+    BrowserGrantManagementService,
+    BrowserProfileManagementService,
+    BrowserUnitOfWorkFactory,
+)
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -136,6 +181,7 @@ from agent_core.application.public_services import (
     PublicSessionService,
 )
 from agent_core.application.run_service import RunService
+from agent_core.application.schedule_service import ScheduleService
 from agent_core.application.services import (
     ApprovalService as PublicApprovalServiceContract,
 )
@@ -143,7 +189,16 @@ from agent_core.application.services import (
     ArtifactService as PublicArtifactServiceContract,
 )
 from agent_core.application.services import (
+    BrowserGrantService as PublicBrowserGrantServiceContract,
+)
+from agent_core.application.services import (
+    BrowserProfileService as PublicBrowserProfileServiceContract,
+)
+from agent_core.application.services import (
     RunService as PublicRunServiceContract,
+)
+from agent_core.application.services import (
+    ScheduleService as PublicScheduleServiceContract,
 )
 from agent_core.application.services import (
     SessionService as PublicSessionServiceContract,
@@ -156,6 +211,8 @@ from agent_core.application.trajectory_service import (
 )
 from agent_core.config import (
     PACKAGE_ROOT,
+    AuthMode,
+    BrowserProviderKind,
     ConfigurationError,
     DeploymentMode,
     MemoryProviderExtractionMode,
@@ -163,6 +220,7 @@ from agent_core.config import (
     WebProviderKind,
     load_config_document,
     load_provider_extraction_evidence,
+    load_schedule_worker_settings,
     load_settings,
     provider_extraction_evidence_paths,
     validate_runtime_identity,
@@ -174,6 +232,7 @@ from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
+from agent_core.domain.browser import BrowserProfile
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
@@ -196,6 +255,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
+from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
 from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
@@ -221,16 +281,28 @@ from agent_core.memory.retrieval import (
 )
 from agent_core.model import NON_ROUTED_MODEL_POLICIES
 from agent_core.model.registry import ProviderRegistry, StaticModelRouter
+from agent_core.observability.schedules import ScheduleMetrics, tenant_hash_key
 from agent_core.policy.engine import DeterministicPolicyEngine
 from agent_core.policy.loader import load_ruleset_documents
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.browser import BrowserProvider
+from agent_core.ports.browser_profiles import BrowserProfileControlPlane
+from agent_core.ports.browser_sessions import (
+    BrowserAuthenticationControlPlane,
+    BrowserSessionControlPlane,
+)
 from agent_core.ports.credentials import CredentialResolver
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
-from agent_core.ports.persistence import TransactionCallbackRegistrar, UnitOfWorkFactory
+from agent_core.ports.persistence import (
+    ScheduleUnitOfWork,
+    TransactionCallback,
+    TransactionCallbackRegistrar,
+    UnitOfWorkFactory,
+)
 from agent_core.ports.skills import SkillPackageStore, SkillRepository
 from agent_core.ports.web import WebProvider
 from agent_core.runtime.budgets import UnitOfWorkBudgetLedger
@@ -238,10 +310,16 @@ from agent_core.runtime.cancellation import RunCancellationToken
 from agent_core.runtime.checkpoints import DurableCheckpointSeeder
 from agent_core.runtime.executor import RunExecutor
 from agent_core.runtime.worker import DurableWorker, MaintenanceWorker
+from agent_core.scheduling.accounting import ScheduleOutcomeAccountant
+from agent_core.scheduling.materializer import ScheduleMaterializer
+from agent_core.scheduling.worker import ScheduleWorker
 from agent_core.skills.catalog import SkillCatalogService
 from agent_core.skills.package import SkillPackageValidator
 from agent_core.tools.artifact_export import ArtifactExportTool
 from agent_core.tools.ask_user import AskUserTool
+from agent_core.tools.browser_act import BrowserActTool
+from agent_core.tools.browser_navigate import BrowserNavigateTool
+from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
@@ -276,6 +354,9 @@ class ApplicationServices:
     runs: PublicRunServiceContract
     approvals: PublicApprovalServiceContract
     artifacts: PublicArtifactServiceContract
+    browser_profiles: PublicBrowserProfileServiceContract
+    browser_grants: PublicBrowserGrantServiceContract
+    schedules: PublicScheduleServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,13 +370,16 @@ class Composition:
     runs: RunService
     approvals: ApprovalService
     sessions: SessionService
+    schedules: ScheduleService
     trajectories: TrajectoryExportService
     executor: RunExecutor
     uow_factory: UnitOfWorkFactory
     clock: Clock
     ids: IdFactory
     worker_factory: Callable[[str], WorkerService]
+    async_worker_factory: Callable[[str], WorkerService]
     maintenance_factory: Callable[[], WorkerService]
+    schedule_worker_factory: Callable[[], WorkerService]
     sandbox: SandboxManager
     mcp: MCPRuntime
     skill_catalogs: SkillCatalogService
@@ -416,6 +500,8 @@ def _memory_uow_repositories(
     memories = memories or InMemoryMemoryStore(clock)
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
+    schedules = InMemoryScheduleRepository()
+    schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -435,11 +521,15 @@ def _memory_uow_repositories(
         memories=memories,
         traces=traces,
         knowledge=knowledge,
+        schedules=schedules,
     )
     return UnitOfWorkRepositories(
         agents=agents,
         approvals=approvals,
         policy_profiles=InMemoryPolicyProfileRepository(),
+        browser_profiles=InMemoryBrowserProfileRepository(),
+        browser_grants=InMemoryBrowserGrantRepository(),
+        browser_authentications=InMemoryBrowserAuthenticationRepository(),
         process_events=InMemoryProcessEventRepository(),
         sessions=sessions,
         session_deletions=session_deletions,
@@ -461,6 +551,10 @@ def _memory_uow_repositories(
         traces=traces,
         knowledge=knowledge,
         evaluations=InMemoryCapabilityEvaluationRepository(),
+        schedules=schedules,
+        schedule_occurrences=schedule_occurrences,
+        schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
+        schedule_admission=AllowScheduleAdmissionController(),
         queue=None,
     )
 
@@ -474,6 +568,8 @@ def _postgres_repository_factory(
     skill_store: SkillPackageStore,
     skill_validator: SkillPackageValidator,
     ids: IdFactory,
+    schedule_admission_limits: ScheduleAdmissionLimits,
+    schedule_metrics: ScheduleMetrics,
 ) -> PostgresRepositoryFactory:
     def repositories(
         session: AsyncSession,
@@ -490,10 +586,14 @@ def _postgres_repository_factory(
         memories = PostgresMemoryStore(session, clock)
         traces = PostgresTraceStore(session)
         knowledge = PostgresKnowledgeStore(session, clock)
+        schedules = PostgresScheduleRepository(session)
         return UnitOfWorkRepositories(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
             policy_profiles=PostgresPolicyProfileRepository(session),
+            browser_profiles=PostgresBrowserProfileRepository(session),
+            browser_grants=PostgresBrowserGrantRepository(session),
+            browser_authentications=PostgresBrowserAuthenticationRepository(session),
             process_events=PostgresProcessEventRepository(session),
             sessions=sessions,
             session_deletions=PostgresSessionDeletionRepository(session),
@@ -522,6 +622,12 @@ def _postgres_repository_factory(
             traces=traces,
             knowledge=knowledge,
             evaluations=PostgresCapabilityEvaluationRepository(session),
+            schedules=schedules,
+            schedule_occurrences=PostgresScheduleOccurrenceRepository(schedules),
+            schedule_idempotency=PostgresScheduleIdempotencyRepository(schedules),
+            schedule_admission=PostgresScheduleAdmissionController(
+                session, schedule_admission_limits, schedule_metrics
+            ),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -532,6 +638,217 @@ def _postgres_repository_factory(
         )
 
     return repositories
+
+
+class _ScheduleUnitOfWork(ScheduleUnitOfWork):
+    """Least-privilege repository set for the production scheduler role."""
+
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+        lease_seconds: float,
+        max_attempts: int,
+        admission_limits: ScheduleAdmissionLimits,
+        metrics: ScheduleMetrics,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+        self._lease_seconds = lease_seconds
+        self._max_attempts = max_attempts
+        self._admission_limits = admission_limits
+        self._metrics = metrics
+        self._session: AsyncSession | None = None
+        self._rollback_callbacks: list[TransactionCallback] = []
+
+    def on_rollback(self, callback: TransactionCallback) -> None:
+        self._rollback_callbacks.append(callback)
+
+    async def __aenter__(self) -> Self:
+        session = self._maker()
+        self._session = session
+        await session.execute(
+            select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
+        )
+        upcasters = EventUpcasterRegistry()
+        events = PostgresEventRepository(session, self._clock, upcasters)
+        history = PostgresSessionHistoryRepository(session, self._clock, upcasters)
+        schedules = PostgresScheduleRepository(session)
+        self.agents = PostgresAgentRepository(session, self._clock)
+        self.process_events = PostgresProcessEventRepository(session)
+        self.sessions = PostgresSessionRepository(session)
+        self.runs = PostgresRunRepository(session, self._clock)
+        self.events = events
+        self.history = history
+        self.checkpoints = PostgresCheckpointRepository(session, self._clock, history)
+        self.schedules = schedules
+        self.schedule_occurrences = PostgresScheduleOccurrenceRepository(schedules)
+        self.schedule_admission = PostgresScheduleAdmissionController(
+            session, self._admission_limits, self._metrics
+        )
+        self.queue = PostgresRunQueue(
+            session,
+            self._clock,
+            events,
+            lease_seconds=self._lease_seconds,
+            max_attempts=self._max_attempts,
+        )
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        del exc, traceback
+        if self._session is None:
+            return
+        try:
+            if exc_type is None:
+                await self._session.commit()
+                self._rollback_callbacks.clear()
+            else:
+                await self._run_rollback_callbacks()
+                await self._session.rollback()
+        finally:
+            await self._session.close()
+            self._session = None
+
+    async def _run_rollback_callbacks(self) -> None:
+        callbacks = list(self._rollback_callbacks)
+        self._rollback_callbacks.clear()
+        for callback in reversed(callbacks):
+            await callback()
+
+
+class _ScheduleUnitOfWorkFactory:
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+        lease_seconds: float,
+        max_attempts: int,
+        admission_limits: ScheduleAdmissionLimits,
+        metrics: ScheduleMetrics,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+        self._lease_seconds = lease_seconds
+        self._max_attempts = max_attempts
+        self._admission_limits = admission_limits
+        self._metrics = metrics
+
+    def __call__(self) -> _ScheduleUnitOfWork:
+        return _ScheduleUnitOfWork(
+            self._maker,
+            tenant_id=self._tenant_id,
+            clock=self._clock,
+            lease_seconds=self._lease_seconds,
+            max_attempts=self._max_attempts,
+            admission_limits=self._admission_limits,
+            metrics=self._metrics,
+        )
+
+    def is_open(self) -> bool:
+        return False
+
+
+def _validate_schedule_role(settings: Settings) -> Principal:
+    validate_settings(settings, require_auth_token=False)
+    if not settings.schedule_worker_enabled:
+        raise ConfigurationError("schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1")
+    if not settings.schedule_api_enabled:
+        raise ConfigurationError(
+            "schedule API is disabled; set AGENT_SCHEDULE_API_ENABLED=1 before the worker"
+        )
+    if settings.deployment_mode is not DeploymentMode.PRODUCTION:
+        raise ConfigurationError("schedule worker requires the production process topology")
+    if settings.auth_mode is not AuthMode.TOKEN:
+        raise ConfigurationError("schedule worker requires configured non-development identity")
+    if not settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://")):
+        raise ConfigurationError("schedule worker requires PostgreSQL storage")
+    if settings.credentials:
+        raise ConfigurationError("schedule worker environment must not contain provider keys")
+    unknown = set(settings.auth_scopes) - set(PLATFORM_SCOPES)
+    if unknown:
+        raise ConfigurationError(
+            "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
+        )
+    return Principal(
+        tenant_id=settings.auth_tenant_id,
+        principal_id=settings.auth_principal_id,
+        roles=set(settings.auth_roles),
+        scopes=set(settings.auth_scopes),
+    )
+
+
+@asynccontextmanager
+async def build_schedule_worker(
+    *,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+    ids: IdFactory | None = None,
+) -> AsyncIterator[ScheduleWorker]:
+    """Build only the resources needed to materialize scheduled runs."""
+
+    effective_settings = settings or load_schedule_worker_settings()
+    principal = _validate_schedule_role(effective_settings)
+    runtime = load_config_document(effective_settings, "runtime/limits.yaml")
+    queue = runtime["queue"]
+    worker = runtime["worker"]
+    scheduling = runtime["scheduling"]
+    admission_limits = ScheduleAdmissionLimits.model_validate(
+        {
+            "max_active_runs_per_tenant": scheduling["max_active_runs_per_tenant"],
+            "max_materializations_per_minute": scheduling["max_materializations_per_minute"],
+            "daily_cost": scheduling["daily_cost"],
+            "monthly_cost": scheduling["monthly_cost"],
+        }
+    )
+    effective_clock = clock or SystemClock()
+    effective_ids = ids or RandomIdFactory()
+    wakeup = PostgresScheduleWakeup(effective_settings.database_url)
+    metrics = ScheduleMetrics(tenant_hash_key=tenant_hash_key(effective_settings.database_url))
+    engine = create_engine(effective_settings.database_url)
+    try:
+        await assert_schema_revision(engine)
+        factory = _ScheduleUnitOfWorkFactory(
+            create_session_factory(engine),
+            tenant_id=principal.tenant_id,
+            clock=effective_clock,
+            lease_seconds=float(worker["lease_seconds"]),
+            max_attempts=int(queue["max_attempts"]),
+            admission_limits=admission_limits,
+            metrics=metrics,
+        )
+        materializer = ScheduleMaterializer(
+            uow_factory=factory,
+            principals=ConfiguredSchedulePrincipalDirectory(principal),
+            clock=effective_clock,
+            ids=effective_ids,
+            seed_checkpoint=DurableCheckpointSeeder(effective_clock),
+            metrics=metrics,
+        )
+        yield ScheduleWorker(
+            uow_factory=factory,
+            materialize=materializer.materialize,
+            clock=effective_clock,
+            scan_batch=int(scheduling["scan_batch"]),
+            fallback_poll_seconds=float(scheduling["fallback_poll_seconds"]),
+            admission_backoff_seconds=float(scheduling["admission_backoff_seconds"]),
+            wait_for_wakeup=wakeup.wait,
+            metrics=metrics,
+        )
+    finally:
+        await wakeup.close()
+        await engine.dispose()
 
 
 async def _compose(
@@ -557,6 +874,15 @@ async def _compose(
     lease_seconds: float,
     heartbeat_divisor: int,
     worker_poll_interval: float,
+    interactive_priority: int,
+    async_priority: int,
+    schedule_scan_batch: int,
+    schedule_fallback_poll_seconds: float,
+    schedule_admission_backoff_seconds: float,
+    schedule_definition_limits: ScheduleDefinitionLimits,
+    schedule_notify: Callable[[], Awaitable[None]],
+    schedule_wait: Callable[[float], Awaitable[None]],
+    schedule_metrics: ScheduleMetrics,
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
@@ -570,6 +896,9 @@ async def _compose(
     web_search_provider: WebProvider | None,
     web_fetch_provider: WebProvider | None,
     memory_provider_evaluation_mode: bool,
+    browser_provider: BrowserProvider | None,
+    browser_profile_lifecycle: BrowserProfileControlPlane,
+    browser_authentications: BrowserAuthenticationControlPlane,
 ) -> tuple[Composition, list[ModelProvider]]:
     sandbox_config = load_config_document(settings, "sandbox/limits.yaml")
     raw_resources = sandbox_config["resources"]
@@ -694,6 +1023,10 @@ async def _compose(
         registry.register(WebSearchTool(web_search_provider))
     if web_fetch_provider is not None:
         registry.register(WebFetchTool(web_fetch_provider))
+    if browser_provider is not None:
+        registry.register(BrowserNavigateTool(browser_provider))
+        registry.register(BrowserObserveTool(browser_provider))
+        registry.register(BrowserActTool(browser_provider))
 
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
@@ -1049,12 +1382,26 @@ async def _compose(
                     completed += 1
             return completed
 
+        policy_engine = DeterministicPolicyEngine(ruleset)
+        standing_authorizer = None
+        if settings.browser_grant_id is not None:
+            if browser_provider is None or settings.browser_profile_id is None:
+                raise ConfigurationError("standing browser grant composition is incomplete")
+            standing_authorizer = ConfiguredBrowserStandingAuthorizer(
+                grant_id=settings.browser_grant_id,
+                profile_id=settings.browser_profile_id,
+                purpose=settings.browser_run_purpose,
+                provider=browser_provider,
+                uow_factory=uow_factory,
+                policy=policy_engine,
+                now=clock.now,
+            )
         pipeline = ToolPipeline(
             registry,
             uow_factory,
             clock,
             ids,
-            policy=DeterministicPolicyEngine(ruleset),
+            policy=policy_engine,
             workspace_factory=sandbox_manager,
             artifact_writers=artifact_writers,
             current_principal=principal,
@@ -1063,9 +1410,16 @@ async def _compose(
             maximum_loaded_skills=int(skill_bodies_config["max_items"]),
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
+            standing_authorizer=standing_authorizer,
         )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
+        schedule_accountant = ScheduleOutcomeAccountant(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            metrics=schedule_metrics,
+        )
         principal_resolver = StaticPrincipalResolver(principal)
         skill_reviews: SkillBackgroundReview | None = None
 
@@ -1074,6 +1428,10 @@ async def _compose(
                 await sandbox_manager.release_run(run_id, lease_epoch)
             except Exception:
                 logger.exception("run_resource_cleanup_failed", extra={"run_id": str(run_id)})
+            try:
+                await schedule_accountant.account(run_id)
+            except Exception:
+                logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
             try:
                 async with uow_factory() as uow:
                     run = await uow.runs.get(run_id, principal)
@@ -1209,6 +1567,29 @@ async def _compose(
         async def sweep_session_deletions() -> int:
             return await public_session_service.purge_pending_artifacts(principal)
 
+        browser_uow_factory = cast(BrowserUnitOfWorkFactory, uow_factory)
+        browser_profile_service = BrowserProfileManagementService(
+            uow_factory=browser_uow_factory,
+            lifecycle=browser_profile_lifecycle,
+            authentications=browser_authentications,
+            clock=clock,
+            ids=ids,
+        )
+        browser_grant_service = BrowserGrantManagementService(
+            uow_factory=browser_uow_factory,
+            clock=clock,
+            ids=ids,
+            agent_version=agent.version,
+            policy_version=ruleset.policy_version,
+        )
+
+        schedule_service = ScheduleService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            limits=schedule_definition_limits,
+            wake_worker=schedule_notify,
+        )
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -1236,8 +1617,40 @@ async def _compose(
                 general_artifacts=general_artifact_store,
                 clock=clock,
             ),
+            browser_profiles=browser_profile_service,
+            browser_grants=browser_grant_service,
+            schedules=schedule_service,
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
+
+        def schedule_worker_factory() -> WorkerService:
+            if not settings.schedule_worker_enabled:
+                raise ConfigurationError(
+                    "schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1"
+                )
+            if settings.deployment_mode is DeploymentMode.PRODUCTION:
+                raise ConfigurationError(
+                    "production schedule workers require the lean scheduler composition"
+                )
+            materializer = ScheduleMaterializer(
+                uow_factory=uow_factory,
+                principals=ConfiguredSchedulePrincipalDirectory(principal),
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                metrics=schedule_metrics,
+            )
+            return ScheduleWorker(
+                uow_factory=uow_factory,
+                materialize=materializer.materialize,
+                clock=clock,
+                scan_batch=schedule_scan_batch,
+                fallback_poll_seconds=schedule_fallback_poll_seconds,
+                admission_backoff_seconds=schedule_admission_backoff_seconds,
+                wait_for_wakeup=schedule_wait,
+                metrics=schedule_metrics,
+            )
+
         return (
             Composition(
                 settings=settings,
@@ -1249,6 +1662,7 @@ async def _compose(
                 runs=run_service,
                 approvals=approval_service,
                 sessions=session_service,
+                schedules=schedule_service,
                 trajectories=trajectory_service,
                 executor=executor,
                 uow_factory=uow_factory,
@@ -1259,9 +1673,36 @@ async def _compose(
                     executor=executor,
                     clock=clock,
                     worker_id=worker_id,
+                    eligible_classes=(interactive_priority,),
+                    interactive_priority=interactive_priority,
+                    async_priority=async_priority,
                     lease_seconds=lease_seconds,
                     heartbeat_divisor=heartbeat_divisor,
                     poll_interval_seconds=worker_poll_interval,
+                    record_claim_metric=lambda worker_class, duration_seconds: (
+                        schedule_metrics.record_claim(
+                            worker_class=worker_class,
+                            duration_seconds=duration_seconds,
+                        )
+                    ),
+                ),
+                async_worker_factory=lambda worker_id: DurableWorker(
+                    uow_factory=uow_factory,
+                    executor=executor,
+                    clock=clock,
+                    worker_id=worker_id,
+                    eligible_classes=(async_priority,),
+                    interactive_priority=interactive_priority,
+                    async_priority=async_priority,
+                    lease_seconds=lease_seconds,
+                    heartbeat_divisor=heartbeat_divisor,
+                    poll_interval_seconds=worker_poll_interval,
+                    record_claim_metric=lambda worker_class, duration_seconds: (
+                        schedule_metrics.record_claim(
+                            worker_class=worker_class,
+                            duration_seconds=duration_seconds,
+                        )
+                    ),
                 ),
                 maintenance_factory=lambda: MaintenanceWorker(
                     uow_factory=uow_factory,
@@ -1274,6 +1715,7 @@ async def _compose(
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_session_deletions=sweep_session_deletions,
                 ),
+                schedule_worker_factory=schedule_worker_factory,
                 sandbox=sandbox_manager,
                 mcp=mcp_runtime,
                 skill_catalogs=skill_catalogs,
@@ -1350,6 +1792,43 @@ def _web_provider(
     raise ConfigurationError(f"unsupported web provider {kind.value!r}")
 
 
+def _browser_provider(
+    kind: BrowserProviderKind,
+    *,
+    principal: Principal,
+    allowed_origins: tuple[str, ...],
+    profile_id: UUID | None,
+    profiles: UnitOfWorkFactory,
+    sessions: BrowserSessionControlPlane | None,
+) -> BrowserProvider | None:
+    if kind is BrowserProviderKind.DISABLED:
+        return None
+    if kind is BrowserProviderKind.PLAYWRIGHT:
+        return PlaywrightBrowserProvider(
+            tenant_id=principal.tenant_id,
+            allowed_origins=allowed_origins,
+        )
+    if kind is BrowserProviderKind.HOSTED:
+        if profile_id is None or sessions is None:
+            raise ConfigurationError("hosted browser provider composition is incomplete")
+
+        async def load_profile(
+            owner: Principal,
+            requested_profile_id: UUID,
+        ) -> BrowserProfile:
+            async with profiles() as uow:
+                return await uow.browser_profiles.get(requested_profile_id, owner)
+
+        return HostedBrowserProvider(
+            principal=principal,
+            profile_id=profile_id,
+            allowed_origins=allowed_origins,
+            profiles=load_profile,
+            sessions=sessions,
+        )
+    raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
+
+
 def _effective_model_policy(
     deployment_mode: DeploymentMode,
     requested_policy: str | None,
@@ -1387,6 +1866,7 @@ async def build(
     model_provider_overrides: Mapping[str, ModelProvider] | None = None,
     web_search_provider_override: WebProvider | None = None,
     web_fetch_provider_override: WebProvider | None = None,
+    browser_provider_override: BrowserProvider | None = None,
     trajectory_redactor: TrajectoryRedactor | None = None,
     memory_provider_evaluation_mode: bool = False,
 ) -> AsyncIterator[Composition]:
@@ -1410,6 +1890,12 @@ async def build(
         raise ConfigurationError(
             "provider memory extraction evaluation mode is unavailable in production"
         )
+    if (
+        effective_settings.deployment_mode is DeploymentMode.PRODUCTION
+        and (effective_settings.schedule_api_enabled or effective_settings.schedule_worker_enabled)
+        and storage != "postgres"
+    ):
+        raise ConfigurationError("production scheduling requires PostgreSQL storage")
     provider_registry = ProviderRegistry.load(
         PACKAGE_ROOT / "models",
         adapters=ADAPTER_DEFINITIONS,
@@ -1470,6 +1956,25 @@ async def build(
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
     worker_config = runtime_config["worker"]
+    scheduling_config = runtime_config["scheduling"]
+    schedule_admission_limits = ScheduleAdmissionLimits.model_validate(
+        {
+            "max_active_runs_per_tenant": scheduling_config["max_active_runs_per_tenant"],
+            "max_materializations_per_minute": scheduling_config["max_materializations_per_minute"],
+            "daily_cost": scheduling_config["daily_cost"],
+            "monthly_cost": scheduling_config["monthly_cost"],
+        }
+    )
+    schedule_definition_limits = ScheduleDefinitionLimits.model_validate(
+        {
+            "max_run_timeout_seconds": scheduling_config["max_run_timeout_seconds"],
+            "max_misfire_grace_seconds": scheduling_config["max_misfire_grace_seconds"],
+            "max_steps_per_run": scheduling_config["max_steps_per_run"],
+            "max_model_calls_per_run": scheduling_config["max_model_calls_per_run"],
+            "max_tool_calls_per_run": scheduling_config["max_tool_calls_per_run"],
+            "max_cost_per_run": scheduling_config["max_cost_per_run"],
+        }
+    )
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
@@ -1499,6 +2004,10 @@ async def build(
         web_fetch_provider_override is not None
         or effective_settings.web_fetch_provider is not WebProviderKind.DISABLED
     )
+    browser_enabled = (
+        browser_provider_override is not None
+        or effective_settings.browser_provider is not BrowserProviderKind.DISABLED
+    )
     default_enabled_tools = [
         "math.calculate",
         "conversation.ask_user",
@@ -1506,7 +2015,11 @@ async def build(
         "workspace.read_text",
         "workspace.write_text",
         "workspace.list_files",
-        *([] if web_search_enabled or web_fetch_enabled else ["demo.external_write"]),
+        *(
+            []
+            if web_search_enabled or web_fetch_enabled or browser_enabled
+            else ["demo.external_write"]
+        ),
         "sandbox.run_command",
         "artifact.export",
         WORKING_STATE_TOOL_NAME,
@@ -1518,6 +2031,7 @@ async def build(
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
+        *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
     ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
@@ -1546,10 +2060,21 @@ async def build(
     engine = None
     model_providers: list[ModelProvider] = []
     web_providers: list[WebProvider] = []
+    browser_provider: BrowserProvider | None = None
+    browser_profile_http_client: httpx.AsyncClient | None = None
+    browser_sessions: BrowserSessionControlPlane | None = None
     live_events: LiveEventBroadcaster = (
         InMemoryLiveEventBroadcaster()
         if storage == "memory"
         else PostgresLiveEventBroadcaster(effective_settings.database_url)
+    )
+    schedule_wakeup = (
+        InMemoryScheduleWakeup()
+        if storage == "memory"
+        else PostgresScheduleWakeup(effective_settings.database_url)
+    )
+    schedule_metrics = ScheduleMetrics(
+        tenant_hash_key=tenant_hash_key(effective_settings.database_url)
     )
     composition: Composition | None = None
     skill_validator = SkillPackageValidator(ConservativeTokenEstimator())
@@ -1606,6 +2131,8 @@ async def build(
                         skill_store=skill_store,
                         skill_validator=skill_validator,
                         ids=effective_ids,
+                        schedule_admission_limits=schedule_admission_limits,
+                        schedule_metrics=schedule_metrics,
                     ),
                     effective_principal.tenant_id,
                 ),
@@ -1617,6 +2144,32 @@ async def build(
                 for name, secret in effective_settings.credentials.items()
             }
         )
+        if effective_settings.browser_profile_service_url is None:
+            browser_profile_lifecycle: BrowserProfileControlPlane = (
+                UnavailableBrowserProfileControlPlane()
+            )
+            browser_authentications: BrowserAuthenticationControlPlane = (
+                UnavailableBrowserAuthenticationControlPlane()
+            )
+        else:
+            # Public profile management uses this control plane even when browser
+            # tools are disabled, so the client is gated by the service URL.
+            browser_profile_http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(30.0, connect=5.0),
+                follow_redirects=False,
+            )
+            browser_profile_lifecycle = HostedBrowserProfileControlPlane(
+                base_url=effective_settings.browser_profile_service_url,
+                credentials=effective_credential_resolver,
+                client=browser_profile_http_client,
+            )
+            hosted_browser_sessions = HostedBrowserSessionControlPlane(
+                base_url=effective_settings.browser_profile_service_url,
+                credentials=effective_credential_resolver,
+                client=browser_profile_http_client,
+            )
+            browser_authentications = hosted_browser_sessions
+            browser_sessions = hosted_browser_sessions
         web_search_provider = (
             web_search_provider_override
             if web_search_provider_override is not None
@@ -1643,6 +2196,18 @@ async def build(
         )
         if web_fetch_provider is not None and web_fetch_provider is not web_search_provider:
             web_providers.append(web_fetch_provider)
+        browser_provider = (
+            browser_provider_override
+            if browser_provider_override is not None
+            else _browser_provider(
+                effective_settings.browser_provider,
+                principal=effective_principal,
+                allowed_origins=effective_settings.browser_allowed_origins,
+                profile_id=effective_settings.browser_profile_id,
+                profiles=uow_factory,
+                sessions=browser_sessions,
+            )
+        )
         for package, source in skill_packages:
             async with uow_factory() as uow:
                 await uow.skills.install(
@@ -1679,6 +2244,17 @@ async def build(
             lease_seconds=float(worker_config["lease_seconds"]),
             heartbeat_divisor=int(worker_config["heartbeat_divisor"]),
             worker_poll_interval=float(queue_config["poll_interval_seconds"]),
+            interactive_priority=int(queue_config["priorities"]["interactive"]),
+            async_priority=int(queue_config["priorities"]["async"]),
+            schedule_scan_batch=int(scheduling_config["scan_batch"]),
+            schedule_fallback_poll_seconds=float(scheduling_config["fallback_poll_seconds"]),
+            schedule_admission_backoff_seconds=float(
+                scheduling_config["admission_backoff_seconds"]
+            ),
+            schedule_definition_limits=schedule_definition_limits,
+            schedule_notify=schedule_wakeup.notify,
+            schedule_wait=schedule_wakeup.wait,
+            schedule_metrics=schedule_metrics,
             ruleset=ruleset,
             live_events=live_events,
             context_config=context_config,
@@ -1692,6 +2268,9 @@ async def build(
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,
+            browser_provider=browser_provider,
+            browser_profile_lifecycle=browser_profile_lifecycle,
+            browser_authentications=browser_authentications,
         )
         yield composition
     finally:
@@ -1728,10 +2307,35 @@ async def build(
                     "web_provider_close_failed",
                     extra={"provider": web_provider.name, "error_class": type(exc).__name__},
                 )
+        if browser_provider is not None:
+            try:
+                await browser_provider.close()
+            except Exception as exc:
+                logger.warning(
+                    "browser_provider_close_failed",
+                    extra={
+                        "provider": browser_provider.name,
+                        "error_class": type(exc).__name__,
+                    },
+                )
+        if browser_profile_http_client is not None:
+            try:
+                await browser_profile_http_client.aclose()
+            except Exception as exc:
+                logger.warning(
+                    "browser_profile_client_close_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
         try:
             await live_events.close()
         except Exception as exc:
             logger.warning("live_events_close_failed", extra={"error_class": type(exc).__name__})
+        try:
+            await schedule_wakeup.close()
+        except Exception as exc:
+            logger.warning(
+                "schedule_wakeup_close_failed", extra={"error_class": type(exc).__name__}
+            )
         if engine is not None:
             try:
                 await engine.dispose()

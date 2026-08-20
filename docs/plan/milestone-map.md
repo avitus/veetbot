@@ -40,11 +40,14 @@ more, in a new thirteenth area, and is the first spec to declare
 gates at Milestone 10. [model-gateway.md](model-gateway.md) and
 [event-log-and-persistence.md](event-log-and-persistence.md) each
 gained two more on a later pass, all four at Milestone 3.
-[knowledge-documents.md](knowledge-documents.md) was written last
-and declares twelve more, in a new fourteenth area, all of them at
-Milestone 9. The counts throughout this document are the corpus as
-it now stands: one hundred and seventy-one declared across fourteen
-specs, one hundred and seventy-seven registry entries.
+[knowledge-documents.md](knowledge-documents.md) declares twelve more, in a new
+fourteenth area, all of them at Milestone 9. [web-access.md](web-access.md)
+declares seven more in a fifteenth area, all at Milestone 10.
+[browser-automation.md](browser-automation.md) adds ten more in a
+sixteenth area, also at Milestone 10. [scheduling.md](scheduling.md) declares
+twenty-three Milestone 11 gates in a seventeenth area. The counts throughout
+this document are the corpus as it now stands: two hundred and seventeen
+declared across seventeen specs, two hundred and twenty-three registry entries.
 
 ## What this document is responsible for
 
@@ -162,7 +165,7 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge
+      knowledge, web, browser, schedule
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -198,6 +201,20 @@ different unit of retrieval. The alternative considered was splitting
 its gates across `memory`, `context`, and `tool`, and it was rejected
 for the reason `skill` rejected the same split: `visibility` and
 `no_belief_write` are two halves of one governance story.
+
+`web` is the fifteenth. It owns the provider contract, routing,
+default-off registration, context advertisement, invocation trust, failure
+normalization, and fetch confinement as one public-web governance story rather
+than distributing those invariants across `tool`, `policy`, and `context`.
+
+`browser` is the sixteenth. It owns authenticated browser navigation, observation,
+action authority, profile lifecycle, authentication, and standing grants as one
+origin-confined governance story.
+
+`schedule` is the seventeenth area. It is not folded into `event`, `runtime`, or
+`api` because occurrence identity, civil-time behavior, authority refresh, and
+lifecycle are one control-plane subject whose gates cross all three. The
+ordinary run remains owned by those existing areas after materialization.
 
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
@@ -257,11 +274,10 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-One hundred and seventy-one gates declared across fourteen specs, two
-more declared in the engineering plan, and seven this document declares
-over the corpus: one hundred and eighty declarations, one hundred
-and seventy-seven registry entries once the three aliases are
-subtracted.
+Two hundred and seventeen gates declared across seventeen specs, two more
+declared in the engineering plan, and seven this document declares over the
+corpus: two hundred and twenty-six declarations, two hundred and twenty-three
+registry entries once the three aliases are subtracted.
 Each table gives the gate's number in its own spec, its registry
 identifier, its kind, and its milestone.
 
@@ -572,14 +588,14 @@ about a chosen one.
 The build sequence's seven steps are Milestone 7 except step 1, which
 is Milestone 1 by the same decision.
 
-### Memory formation, ten gates and four metrics
+### Memory formation, sixteen gates and four metrics
 
 The original list of eight bullets separates into four Milestone 9 gates and
 four metrics by what the spec calls them. The trailing sentence *"Gate: memory
 improves target eval cases without increasing policy failures"* is a fifth
-gate, not a closing remark. Milestone 10 memory maturation later adds five
-explicit gates for multiple candidates, source integrity, idle lifecycle,
-bounded formation, and correction isolation.
+gate, not a closing remark. Milestone 10 memory maturation adds eleven explicit
+gates: five for ordinary-conversation formation and lifecycle, then six for the
+governed inspection surface and evaluation-gated provider-assisted extractor.
 
 ```text
 #   id                              kind         M
@@ -594,6 +610,12 @@ bounded formation, and correction isolation.
 8   gate.memory.idle_lifecycle      case        10
 9   gate.memory.formation_bounded   case        10
 10  gate.memory.correction_isolated case        10
+11  gate.memory.inspection_governed case        10
+12  gate.memory.extractor_contract  structural  10
+13  gate.memory.provider_activation_bound property 10
+14  gate.memory.provider_boundary   case        10
+15  gate.memory.provider_audit_fallback case     10
+16  gate.memory.provider_evidence_publish case   10
 ```
 
 Moved to `## Tracked metrics`: formation precision, recall of
@@ -806,6 +828,100 @@ labelled question set. The remaining eight need a running session and
 are cases. None is structural: every one of them is a statement about
 what a run retrieves rather than about the shape of the repository.
 
+### Web access, seven gates
+
+Seven gates in the fifteenth area, all at Milestone 10. They turn the
+public-web acceptance contract into blocking checks over the two shared
+provider operations, capability routing, default-off composition, context
+advertisement, durable trust, failure normalization, and fetch confinement.
+
+```text
+#   id                              kind         M
+--  ------------------------------  -----------  --
+1   gate.web.provider_contract      case        10
+2   gate.web.capability_routing     case        10
+3   gate.web.default_off            case        10
+4   gate.web.context_advertisement  case        10
+5   gate.web.invocation_trust       case        10
+6   gate.web.failure_boundary       case        10
+7   gate.web.fetch_confinement      property    10
+```
+
+The first gate executes the complete shared search-and-fetch contract against
+both adapters. Gate 7 is a property gate because it covers a family of hostile
+destinations and response/output sizes; the other five require concrete
+composition or run outcomes.
+
+### Authenticated browser automation, ten gates
+
+Ten gates in the sixteenth area, all at Milestone 10. The first seven make the
+implemented provider seam, isolation boundary, read path, approval path,
+revision binding, and uncertain-write behavior blocking. The final three keep
+profiles, authentication, and standing grants visibly incomplete until their
+security contracts execute.
+
+```text
+#   id                                kind         M
+--  --------------------------------  -----------  --
+1   gate.browser.provider_contract    case        10
+2   gate.browser.default_off          case        10
+3   gate.browser.origin_isolation     property    10
+4   gate.browser.observation_trust    case        10
+5   gate.browser.action_authority     case        10
+6   gate.browser.revision_binding     case        10
+7   gate.browser.uncertain_write      case        10
+8   gate.browser.profile_lifecycle    case        10
+9   gate.browser.authentication       property    10
+10  gate.browser.standing_grant       case        10
+```
+
+Origin isolation is a property over allowed and hostile URL/resource families;
+authentication is a property over secret classes and user-intervention states.
+The remaining eight require concrete provider, run, profile, or grant outcomes.
+
+### Scheduled runs, twenty-three gates
+
+Twenty-three gates, all new, in the seventeenth area and all at Milestone 11. They
+cover the time, authority, atomicity, lifecycle, fairness, offline-result,
+contract, schema, migration, erasure, and isolation boundaries introduced by a
+scheduler rather than resting those guarantees on generic milestone checks.
+
+```text
+#   id                                kind         M
+--  --------------------------------  -----------  --
+1   gate.schedule.not_early           property     11
+2   gate.schedule.materialize_once    case         11
+3   gate.schedule.materialize_atomic  case         11
+4   gate.schedule.civil_time          property     11
+5   gate.schedule.misfire_bounded     case         11
+6   gate.schedule.no_overlap          case         11
+7   gate.schedule.authority_fresh     case         11
+8   gate.schedule.scope_isolated      case         11
+9   gate.schedule.revision_pinned     case         11
+10  gate.schedule.lifecycle_linear    property     11
+11  gate.schedule.cancel_separate     case         11
+12  gate.schedule.run_bounded         case         11
+13  gate.schedule.priority_fair       case         11
+14  gate.schedule.offline_results     case         11
+15  gate.schedule.no_credentials      corpus       11
+16  gate.schedule.domain_invariants   property     11
+17  gate.schedule.repository_contract structural   11
+18  gate.schedule.persistence_schema  structural   11
+19  gate.schedule.migration_clean     case         11
+20  gate.schedule.migration_stepwise  case         11
+21  gate.schedule.uow_atomic          case         11
+22  gate.schedule.erasure_audited     case         11
+23  gate.schedule.persistence_isolated case        11
+```
+
+Gates 1, 4, and 10 are properties because early firing, civil-time resolution,
+state-transition linearizability are claims over generated clocks, zones, and
+interleavings; gate 16 applies the same standard to domain construction. Gate
+15 is a corpus because credential-shaped input is a family rather than one
+example. Gates 17 and 18 are structural because they inspect contract coverage
+and declared schema. The remaining sixteen are boundary cases over the
+application, PostgreSQL, queue, and API seams.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -863,8 +979,12 @@ milestone  new gates  cumulative  the earliest of them
                                   boundary, package validation
 9                 26         166  formation, retrieval, ingestion,
                                   and the corpus
-10                11         177  the authoring loop, background
-                                  review, and memory maturation
+10                34         200  the authoring loop, background review,
+                                  governed memory maturation, public-web
+                                  access, and browser automation
+11                23         223  recurrence, occurrence atomicity,
+                                  authority refresh, offline results,
+                                  contracts, migration, erasure, isolation
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -875,29 +995,28 @@ leaving for someone to notice.
     section's criteria in the engineering plan.
     [sandbox-isolation.md](sandbox-isolation.md) gave Milestone 6
     eleven, and [skills.md](skills.md) gave Milestone 8 ten and
-    Milestone 10 six, which is what milestones that add a new trust
-    boundary, a new context class, and a new write path should
-    carry. Milestone 8's MCP half was the last to be covered: it
+    Milestone 10 six. The memory-formation specification later gave
+    Milestone 10 eleven more, for seventeen total. That is what milestones
+    that add a new trust boundary, a new context class, and new write paths
+    should carry. Milestone 8's MCP half was the last to be covered: it
     contributed corpus members to gates 2 and 5 of the tool system and
     nothing of its own, which reads as the right shape for a milestone
     that widens an existing surface until you notice it leaves build
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of one hundred and seventy-seven gates are green before
-    Milestone 2.** Nearly a third of the plan's stated invariants are
+2.  **Forty-one of two hundred and twenty-three gates are green before
+    Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches one hundred and seventy-seven, which is
-every registry entry, at Milestone 10, and the plan defines no
-milestone after it. Six of Milestone 10's gates are `gate.skill.*` and
-five are `gate.memory.*`. Its routing and subagent half adds none,
-because routing and subagents are covered by gates registered against
-the runtime loop and the policy engine, and the question this document
-used to raise about Milestone 8 now applies only to that half.
+The cumulative column reaches two hundred and twenty-three, which is every
+registry entry, at Milestone 11. Six of Milestone 10's gates are
+`gate.skill.*`, eleven are `gate.memory.*`, seven are `gate.web.*`, ten are
+`gate.browser.*`, and all twenty-three Milestone 11 gates are
+`gate.schedule.*`. Routing and subagents remain deferred and add none.
 
 ## Build-sequence milestones
 
@@ -1060,7 +1179,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the fourteen. **M0.**
+    of the sixteen. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**
@@ -1199,10 +1318,11 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     The old harness table said seven, but the formation specification
     classifies four of its original bullets as tracked metrics and declares
     four hard gates plus the trailing no-policy-regression gate. Milestone 10
-    memory maturation later added five more. The current formation census is
-    therefore ten owned gates — five at Milestone 9 and five at Milestone 10 —
-    with no unstated threshold turning formation precision or rejection rate
-    into a gate.
+    memory maturation later added eleven more: five for ordinary-conversation
+    formation and six for governed inspection and provider assistance. The
+    current formation census is therefore sixteen owned gates — five at
+    Milestone 9 and eleven at Milestone 10 — with no unstated threshold turning
+    formation precision or rejection rate into a gate.
 3.  **Whether Milestone 8 should acquire gates of its own** —
     answered yes, by [skills.md](skills.md), which gave it ten and
     gave Milestone 10 its first six. The sentence about a skill doing something

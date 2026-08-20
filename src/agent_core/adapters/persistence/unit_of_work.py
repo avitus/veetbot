@@ -12,6 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.functions import func
 
+from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
+from agent_core.ports.browser_grants import BrowserGrantRepository
+from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
@@ -37,6 +40,12 @@ from agent_core.ports.repositories import (
     TrajectoryProjectionRepository,
     UsageRepository,
 )
+from agent_core.ports.schedules import (
+    ScheduleAdmissionController,
+    ScheduleIdempotencyRepository,
+    ScheduleOccurrenceRepository,
+    ScheduleRepository,
+)
 from agent_core.ports.skills import SkillRepository
 
 _UNIT_OF_WORK_DEPTH: ContextVar[int] = ContextVar("unit_of_work_depth", default=0)
@@ -60,6 +69,9 @@ class UnitOfWorkRepositories:
     agents: AgentRepository
     approvals: ApprovalRepository
     policy_profiles: PolicyProfileRepository
+    browser_profiles: BrowserProfileRepository
+    browser_grants: BrowserGrantRepository
+    browser_authentications: BrowserAuthenticationRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
     session_deletions: SessionDeletionRepository
@@ -81,6 +93,10 @@ class UnitOfWorkRepositories:
     traces: TraceStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
+    schedules: ScheduleRepository
+    schedule_occurrences: ScheduleOccurrenceRepository
+    schedule_idempotency: ScheduleIdempotencyRepository
+    schedule_admission: ScheduleAdmissionController
     queue: RunQueue | None
 
 
@@ -104,6 +120,9 @@ class MemoryUnitOfWork:
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
+        self.browser_profiles = repositories.browser_profiles
+        self.browser_grants = repositories.browser_grants
+        self.browser_authentications = repositories.browser_authentications
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
         self.session_deletions = repositories.session_deletions
@@ -125,6 +144,10 @@ class MemoryUnitOfWork:
         self.traces = repositories.traces
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
+        self.schedules = repositories.schedules
+        self.schedule_occurrences = repositories.schedule_occurrences
+        self.schedule_idempotency = repositories.schedule_idempotency
+        self.schedule_admission = repositories.schedule_admission
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -188,6 +211,12 @@ class PostgresUnitOfWork:
     def on_rollback(self, callback: TransactionCallback) -> None:
         self._rollback_callbacks.append(callback)
 
+    @property
+    def session(self) -> AsyncSession:
+        if self._session is None:
+            raise RuntimeError("PostgreSQL unit of work is not active")
+        return self._session
+
     async def __aenter__(self) -> PostgresUnitOfWork:
         session = self._maker()
         self._session = session
@@ -198,6 +227,9 @@ class PostgresUnitOfWork:
         self.agents = repositories.agents
         self.approvals = repositories.approvals
         self.policy_profiles = repositories.policy_profiles
+        self.browser_profiles = repositories.browser_profiles
+        self.browser_grants = repositories.browser_grants
+        self.browser_authentications = repositories.browser_authentications
         self.process_events = repositories.process_events
         self.sessions = repositories.sessions
         self.session_deletions = repositories.session_deletions
@@ -219,6 +251,10 @@ class PostgresUnitOfWork:
         self.traces = repositories.traces
         self.knowledge = repositories.knowledge
         self.evaluations = repositories.evaluations
+        self.schedules = repositories.schedules
+        self.schedule_occurrences = repositories.schedule_occurrences
+        self.schedule_idempotency = repositories.schedule_idempotency
+        self.schedule_admission = repositories.schedule_admission
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self
@@ -248,6 +284,7 @@ class PostgresUnitOfWork:
             try:
                 await self._session.close()
             finally:
+                self._session = None
                 if self._depth_token is not None:
                     _exit_unit_of_work(self._depth_token)
                     self._depth_token = None

@@ -46,6 +46,14 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
             "    del row\n"
         ),
         "runtime/mcp_leak.py": "from mcp import Client\nVALUE = Client\n",
+        "adapters/profile_material_leak.py": (
+            "from agent_core.browser_control_plane.filesystem import "
+            "FilesystemEncryptedProfileStore\n"
+            "VALUE = FilesystemEncryptedProfileStore\n"
+        ),
+        "browser_control_plane_extra/bad.py": (
+            "from agent_core.browser_control_plane import filesystem\nVALUE = filesystem\n"
+        ),
     }
     for relative, content in fixtures.items():
         path = package / relative
@@ -63,3 +71,7 @@ def test_boundary_walk_rejects_representative_violations(tmp_path: Path) -> None
     assert any("module-scope database resource" in error for error in errors)
     assert any("ORM type crosses adapter signature" in error for error in errors)
     assert any("MCP SDK mcp crosses adapter boundary" in error for error in errors)
+    boundary_errors = [
+        error for error in errors if "isolated profile service crosses process boundary" in error
+    ]
+    assert len(boundary_errors) == 2

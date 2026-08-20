@@ -23,7 +23,7 @@ from typer.core import TyperGroup
 
 from agent_core import __version__
 from agent_core.api import create_app
-from agent_core.bootstrap import build
+from agent_core.bootstrap import build, build_schedule_worker
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import (
@@ -45,6 +45,7 @@ from agent_core.domain.views import (
     StreamFrame,
     TextContentBlock,
 )
+from agent_core.ports.dispatch import WorkerService
 
 RUN_RESERVED_WORDS = frozenset({"get", "events", "cancel", "export"})
 DEFAULT_RUN_WAIT_TIMEOUT_SECONDS = 300.0
@@ -54,7 +55,10 @@ API_BIND_HOST = "127.0.0.1"
 
 class WorkerRole(StrEnum):
     WORKER = "worker"
+    INTERACTIVE = "interactive"
+    ASYNC = "async"
     MAINTENANCE = "maintenance"
+    SCHEDULE = "schedule"
 
 
 class QueuedRunTimeoutError(TimeoutError):
@@ -428,25 +432,40 @@ async def _create_session() -> UUID:
 
 
 async def _serve_worker(role: WorkerRole) -> None:
+    if role is WorkerRole.SCHEDULE:
+        async with build_schedule_worker() as schedule_service:
+            await _run_worker_service(schedule_service)
+        return
     async with build(storage="postgres") as composition:
-        loop = asyncio.get_running_loop()
         worker_id = f"{socket.gethostname()}:{os.getpid()}"
-        if role is WorkerRole.WORKER:
+        service: WorkerService
+        if role in {WorkerRole.WORKER, WorkerRole.INTERACTIVE}:
             service = composition.worker_factory(worker_id)
+        elif role is WorkerRole.ASYNC:
+            service = composition.async_worker_factory(worker_id)
         else:
             service = composition.maintenance_factory()
-        for signum in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(signum, service.stop)
-        await service.run_forever()
+        await _run_worker_service(service)
+
+
+async def _run_worker_service(service: WorkerService) -> None:
+    loop = asyncio.get_running_loop()
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(signum, service.stop)
+    await service.run_forever()
 
 
 @app.command("worker")
 def worker_command(
     role: Annotated[
-        WorkerRole, typer.Option("--role", help="Process role: worker or maintenance.")
+        WorkerRole,
+        typer.Option(
+            "--role",
+            help="Process role: interactive, async, maintenance, schedule, or legacy worker.",
+        ),
     ] = WorkerRole.WORKER,
 ) -> None:
-    """Execute the durable worker or maintenance queue role."""
+    """Execute an interactive, async, maintenance, schedule, or legacy worker role."""
 
     try:
         asyncio.run(_serve_worker(role))

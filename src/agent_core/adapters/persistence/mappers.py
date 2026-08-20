@@ -12,6 +12,10 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     IdempotencyKeyRow,
     ModelCallRow,
     RunRow,
+    ScheduleIdempotencyKeyRow,
+    ScheduleOccurrenceRow,
+    ScheduleRevisionRow,
+    ScheduleRow,
     SessionRow,
     ToolInvocationRow,
     TrajectoryExportRow,
@@ -37,6 +41,15 @@ from agent_core.domain.policies import (
     TrustLevel,
 )
 from agent_core.domain.runs import Run, RunFailure, RunKind, RunLimits, RunStatus, RunUsage
+from agent_core.domain.schedules import (
+    OccurrenceDisposition,
+    Schedule,
+    ScheduleIdempotencyRecord,
+    ScheduleOccurrence,
+    SchedulePauseReason,
+    ScheduleRevision,
+    ScheduleState,
+)
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus, ToolOutcome, ToolSource
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
@@ -176,6 +189,96 @@ def run_values(run: Run) -> dict[str, Any]:
     if run.provider_pin is None:
         values.pop("provider_pin")
     return values
+
+
+def schedule_to_domain(row: ScheduleRow) -> Schedule:
+    return Schedule(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        state=ScheduleState(row.state),
+        pause_reason=None if row.pause_reason is None else SchedulePauseReason(row.pause_reason),
+        current_revision=row.current_revision,
+        next_fire_at=row.next_fire_at,
+        consecutive_failures=row.consecutive_failures,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def schedule_values(schedule: Schedule) -> dict[str, Any]:
+    return {
+        "id": schedule.id,
+        "tenant_id": schedule.tenant_id,
+        "principal_id": schedule.principal_id,
+        "state": schedule.state.value,
+        "pause_reason": None if schedule.pause_reason is None else schedule.pause_reason.value,
+        "current_revision": schedule.current_revision,
+        "next_fire_at": schedule.next_fire_at,
+        "consecutive_failures": schedule.consecutive_failures,
+        "created_at": schedule.created_at,
+        "updated_at": schedule.updated_at,
+    }
+
+
+def schedule_revision_to_domain(row: ScheduleRevisionRow) -> ScheduleRevision:
+    return ScheduleRevision.model_validate(
+        {
+            "schedule_id": row.schedule_id,
+            "revision": row.revision,
+            **row.definition,
+            "created_by_principal_id": row.created_by_principal_id,
+            "created_at": row.created_at,
+        }
+    )
+
+
+def schedule_revision_values(revision: ScheduleRevision) -> dict[str, Any]:
+    definition = revision.model_dump(
+        mode="json",
+        exclude={"schedule_id", "revision", "created_by_principal_id", "created_at"},
+    )
+    definition["requested_scopes"] = sorted(revision.requested_scopes)
+    return {
+        "schedule_id": revision.schedule_id,
+        "revision": revision.revision,
+        "definition": definition,
+        "created_by_principal_id": revision.created_by_principal_id,
+        "created_at": revision.created_at,
+    }
+
+
+def schedule_occurrence_to_domain(row: ScheduleOccurrenceRow) -> ScheduleOccurrence:
+    return ScheduleOccurrence(
+        id=row.id,
+        schedule_id=row.schedule_id,
+        schedule_revision=row.schedule_revision,
+        nominal_fire_at=row.nominal_fire_at,
+        disposition=OccurrenceDisposition(row.disposition),
+        session_id=row.session_id,
+        run_id=row.run_id,
+        reason_code=row.reason_code,
+        authority_version=row.authority_version,
+        materialized_at=row.materialized_at,
+        links_erased_at=row.links_erased_at,
+        created_at=row.created_at,
+    )
+
+
+def schedule_occurrence_values(occurrence: ScheduleOccurrence) -> dict[str, Any]:
+    values = occurrence.model_dump(mode="python")
+    values["disposition"] = occurrence.disposition.value
+    return values
+
+
+def schedule_idempotency_to_domain(row: ScheduleIdempotencyKeyRow) -> ScheduleIdempotencyRecord:
+    return ScheduleIdempotencyRecord.model_validate(
+        {key: getattr(row, key) for key in ScheduleIdempotencyRecord.model_fields}
+    )
+
+
+def schedule_idempotency_values(record: ScheduleIdempotencyRecord) -> dict[str, Any]:
+    return record.model_dump(mode="python")
 
 
 def event_to_domain(row: EventRow, upcasters: EventUpcasterRegistry) -> EventEnvelope:

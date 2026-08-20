@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import DateTime, Text, case, delete, func, select, update
+from sqlalchemy import DateTime, Text, and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import cast as sql_cast
 
@@ -40,6 +42,9 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
     ArtifactRow,
+    BrowserAuthenticationRow,
+    BrowserGrantRow,
+    BrowserProfileRow,
     CheckpointRow,
     ConsolidationWatermarkRow,
     DerivedEventKeyRow,
@@ -67,6 +72,17 @@ from agent_core.domain.approvals import (
     ApprovalResolutionState,
     ApprovalResolutionType,
     ApprovalStatus,
+)
+from agent_core.domain.browser import (
+    ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS,
+    ALLOWED_BROWSER_PROFILE_TRANSITIONS,
+    BrowserActionKind,
+    BrowserAuthenticationRecord,
+    BrowserAuthenticationStatus,
+    BrowserGrant,
+    BrowserProfile,
+    BrowserProfileProvisioning,
+    BrowserProfileStatus,
 )
 from agent_core.domain.errors import (
     ConcurrencyConflict,
@@ -133,6 +149,17 @@ def _constraint_name(exc: IntegrityError) -> str | None:
         name = getattr(diagnostic, "constraint_name", None)
         if isinstance(name, str):
             return name
+    return None
+
+
+def _sqlstate(exc: DBAPIError) -> str | None:
+    candidates = (exc.orig, getattr(exc.orig, "__cause__", None))
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        value = getattr(candidate, "sqlstate", None)
+        if isinstance(value, str):
+            return value
     return None
 
 
@@ -1400,6 +1427,513 @@ class PostgresPolicyProfileRepository:
         )
 
 
+def _browser_profile_to_domain(row: BrowserProfileRow) -> BrowserProfile:
+    return BrowserProfile(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        provider_name=row.provider_name,
+        provider_ref=row.provider_ref,
+        allowed_origins=tuple(row.allowed_origins),
+        status=BrowserProfileStatus(row.status),
+        generation=row.generation,
+        encryption_key_version=row.encryption_key_version,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+        last_used_at=row.last_used_at,
+    )
+
+
+class PostgresBrowserProfileRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _values(profile: BrowserProfile) -> dict[str, Any]:
+        return {
+            "id": profile.id,
+            "tenant_id": profile.tenant_id,
+            "principal_id": profile.principal_id,
+            "provider_name": profile.provider_name,
+            "provider_ref": profile.provider_ref,
+            "allowed_origins": list(profile.allowed_origins),
+            "status": profile.status.value,
+            "generation": profile.generation,
+            "encryption_key_version": profile.encryption_key_version,
+            "created_at": profile.created_at,
+            "updated_at": profile.updated_at,
+            "last_used_at": profile.last_used_at,
+        }
+
+    async def create(self, profile: BrowserProfile) -> BrowserProfile:
+        statement = (
+            pg_insert(BrowserProfileRow)
+            .values(**self._values(profile))
+            .on_conflict_do_nothing(index_elements=[BrowserProfileRow.id])
+        )
+        if not _rowcount(await self._session.execute(statement)):
+            raise ConflictError("browser profile already exists")
+        return profile.model_copy(deep=True)
+
+    async def get(self, profile_id: UUID, principal: Principal) -> BrowserProfile:
+        row = (
+            await self._session.scalars(
+                select(BrowserProfileRow).where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser profile not found")
+        return _browser_profile_to_domain(row)
+
+    @asynccontextmanager
+    async def authentication_admission(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        timeout_seconds: float,
+    ) -> AsyncIterator[BrowserProfile]:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise ValueError("authentication lock timeout must be positive and finite")
+        timeout_milliseconds = max(1, math.ceil(timeout_seconds * 1000))
+        await self._session.execute(
+            select(
+                func.set_config(
+                    "lock_timeout",
+                    f"{timeout_milliseconds}ms",
+                    True,
+                )
+            )
+        )
+        try:
+            row = (
+                await self._session.scalars(
+                    select(BrowserProfileRow)
+                    .where(
+                        BrowserProfileRow.id == profile_id,
+                        BrowserProfileRow.tenant_id == principal.tenant_id,
+                        BrowserProfileRow.principal_id == principal.principal_id,
+                    )
+                    .with_for_update()
+                )
+            ).one_or_none()
+        except DBAPIError as exc:
+            if _sqlstate(exc) == "55P03":
+                raise ConflictError("browser authentication admission is busy") from exc
+            raise
+        if row is None:
+            raise NotFoundError("browser profile not found")
+        yield _browser_profile_to_domain(row)
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserProfile]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
+        statement = select(BrowserProfileRow).where(
+            BrowserProfileRow.tenant_id == principal.tenant_id,
+            BrowserProfileRow.principal_id == principal.principal_id,
+        )
+        if after_created_at is not None and after_id is not None:
+            statement = statement.where(
+                or_(
+                    BrowserProfileRow.created_at > after_created_at,
+                    and_(
+                        BrowserProfileRow.created_at == after_created_at,
+                        BrowserProfileRow.id > after_id,
+                    ),
+                )
+            )
+        statement = statement.order_by(BrowserProfileRow.created_at, BrowserProfileRow.id)
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
+        return [_browser_profile_to_domain(row) for row in rows]
+
+    async def bind(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        expected_generation: int,
+        provisioning: BrowserProfileProvisioning,
+        updated_at: datetime,
+    ) -> BrowserProfile:
+        statement = (
+            update(BrowserProfileRow)
+            .where(
+                BrowserProfileRow.id == profile_id,
+                BrowserProfileRow.tenant_id == principal.tenant_id,
+                BrowserProfileRow.principal_id == principal.principal_id,
+                BrowserProfileRow.generation == expected_generation,
+                BrowserProfileRow.status == BrowserProfileStatus.PROVISIONING.value,
+                BrowserProfileRow.updated_at <= updated_at,
+            )
+            .values(
+                provider_name=provisioning.provider_name,
+                provider_ref=provisioning.provider_ref,
+                encryption_key_version=provisioning.encryption_key_version,
+                status=BrowserProfileStatus.AUTHENTICATION_REQUIRED.value,
+                generation=BrowserProfileRow.generation + 1,
+                updated_at=updated_at,
+            )
+            .returning(BrowserProfileRow)
+        )
+        try:
+            async with self._session.begin_nested():
+                row = (await self._session.scalars(statement)).one_or_none()
+        except IntegrityError as exc:
+            if _constraint_name(exc) == "uq_browser_profiles_provider_ref":
+                raise ConflictError("browser provider reference is already bound") from exc
+            raise
+        if row is not None:
+            return _browser_profile_to_domain(row)
+        current = await self.get(profile_id, principal)
+        if current.generation != expected_generation:
+            raise ConcurrencyConflict("browser profile generation changed")
+        if updated_at < current.updated_at:
+            raise ConflictError("browser profile update time moved backwards")
+        raise ConflictError("browser profile is not awaiting a provider binding")
+
+    async def transition(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        expected_generation: int,
+        status: BrowserProfileStatus,
+        updated_at: datetime,
+    ) -> BrowserProfile:
+        current = await self.get(profile_id, principal)
+        if current.generation != expected_generation:
+            raise ConcurrencyConflict("browser profile generation changed")
+        if current.status is status:
+            return current
+        if status not in ALLOWED_BROWSER_PROFILE_TRANSITIONS[current.status]:
+            raise ConflictError("browser profile transition is not allowed")
+        if updated_at < current.updated_at:
+            raise ConflictError("browser profile update time moved backwards")
+        row = (
+            await self._session.scalars(
+                update(BrowserProfileRow)
+                .where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                    BrowserProfileRow.generation == expected_generation,
+                    BrowserProfileRow.status == current.status.value,
+                )
+                .values(
+                    status=status.value,
+                    generation=BrowserProfileRow.generation + 1,
+                    updated_at=updated_at,
+                )
+                .returning(BrowserProfileRow)
+            )
+        ).one_or_none()
+        if row is None:
+            raise ConcurrencyConflict("browser profile generation changed")
+        return _browser_profile_to_domain(row)
+
+    async def delete(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+        *,
+        expected_generation: int,
+    ) -> None:
+        deleted = _rowcount(
+            await self._session.execute(
+                delete(BrowserProfileRow).where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                    BrowserProfileRow.generation == expected_generation,
+                    BrowserProfileRow.status == BrowserProfileStatus.REVOKED.value,
+                )
+            )
+        )
+        if deleted:
+            return
+        try:
+            current = await self.get(profile_id, principal)
+        except NotFoundError:
+            return
+        if current.generation != expected_generation:
+            raise ConcurrencyConflict("browser profile generation changed")
+        raise ConflictError("browser profile must be revoked before deletion")
+
+
+def _browser_grant_to_domain(row: BrowserGrantRow) -> BrowserGrant:
+    return BrowserGrant(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        profile_id=row.profile_id,
+        profile_generation=row.profile_generation,
+        agent_version=row.agent_version,
+        policy_version=row.policy_version,
+        allowed_origins=tuple(row.allowed_origins),
+        action_kinds=tuple(BrowserActionKind(value) for value in row.action_kinds),
+        element_roles=tuple(row.element_roles),
+        element_names=tuple(row.element_names),
+        purpose=row.purpose,
+        starts_at=row.starts_at,
+        expires_at=row.expires_at,
+        approved_by=row.approved_by,
+        revoked_at=row.revoked_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+class PostgresBrowserGrantRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @staticmethod
+    def _values(grant: BrowserGrant) -> dict[str, Any]:
+        return {
+            "id": grant.id,
+            "tenant_id": grant.tenant_id,
+            "principal_id": grant.principal_id,
+            "profile_id": grant.profile_id,
+            "profile_generation": grant.profile_generation,
+            "agent_version": grant.agent_version,
+            "policy_version": grant.policy_version,
+            "allowed_origins": list(grant.allowed_origins),
+            "action_kinds": [kind.value for kind in grant.action_kinds],
+            "element_roles": list(grant.element_roles),
+            "element_names": list(grant.element_names),
+            "purpose": grant.purpose,
+            "starts_at": grant.starts_at,
+            "expires_at": grant.expires_at,
+            "approved_by": grant.approved_by,
+            "revoked_at": grant.revoked_at,
+            "created_at": grant.created_at,
+            "updated_at": grant.updated_at,
+        }
+
+    async def create(self, grant: BrowserGrant) -> BrowserGrant:
+        statement = (
+            pg_insert(BrowserGrantRow)
+            .values(**self._values(grant))
+            .on_conflict_do_nothing(index_elements=[BrowserGrantRow.id])
+        )
+        if not _rowcount(await self._session.execute(statement)):
+            raise ConflictError("browser grant already exists")
+        return grant.model_copy(deep=True)
+
+    async def get(self, grant_id: UUID, principal: Principal) -> BrowserGrant:
+        row = (
+            await self._session.scalars(
+                select(BrowserGrantRow).where(
+                    BrowserGrantRow.id == grant_id,
+                    BrowserGrantRow.tenant_id == principal.tenant_id,
+                    BrowserGrantRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser grant not found")
+        return _browser_grant_to_domain(row)
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        profile_id: UUID | None = None,
+        limit: int | None = None,
+        after_created_at: datetime | None = None,
+        after_id: UUID | None = None,
+    ) -> list[BrowserGrant]:
+        if (after_created_at is None) != (after_id is None):
+            raise ValueError("pagination cursor components must be provided together")
+        statement = select(BrowserGrantRow).where(
+            BrowserGrantRow.tenant_id == principal.tenant_id,
+            BrowserGrantRow.principal_id == principal.principal_id,
+        )
+        if profile_id is not None:
+            statement = statement.where(BrowserGrantRow.profile_id == profile_id)
+        if after_created_at is not None and after_id is not None:
+            statement = statement.where(
+                or_(
+                    BrowserGrantRow.created_at > after_created_at,
+                    and_(
+                        BrowserGrantRow.created_at == after_created_at,
+                        BrowserGrantRow.id > after_id,
+                    ),
+                )
+            )
+        statement = statement.order_by(BrowserGrantRow.created_at, BrowserGrantRow.id)
+        if limit is not None:
+            statement = statement.limit(limit)
+        rows = (await self._session.scalars(statement)).all()
+        return [_browser_grant_to_domain(row) for row in rows]
+
+    async def revoke(
+        self,
+        grant_id: UUID,
+        principal: Principal,
+        *,
+        revoked_at: datetime,
+    ) -> BrowserGrant:
+        row = (
+            await self._session.scalars(
+                update(BrowserGrantRow)
+                .where(
+                    BrowserGrantRow.id == grant_id,
+                    BrowserGrantRow.tenant_id == principal.tenant_id,
+                    BrowserGrantRow.principal_id == principal.principal_id,
+                    BrowserGrantRow.revoked_at.is_(None),
+                    BrowserGrantRow.created_at <= revoked_at,
+                    BrowserGrantRow.updated_at <= revoked_at,
+                )
+                .values(revoked_at=revoked_at, updated_at=revoked_at)
+                .returning(BrowserGrantRow)
+            )
+        ).one_or_none()
+        if row is not None:
+            return _browser_grant_to_domain(row)
+        current = await self.get(grant_id, principal)
+        if current.revoked_at is not None:
+            return current
+        raise ConflictError("browser grant revocation time is invalid")
+
+    async def delete(self, grant_id: UUID, principal: Principal) -> None:
+        await self._session.execute(
+            delete(BrowserGrantRow).where(
+                BrowserGrantRow.id == grant_id,
+                BrowserGrantRow.tenant_id == principal.tenant_id,
+                BrowserGrantRow.principal_id == principal.principal_id,
+            )
+        )
+
+
+def _browser_authentication_to_domain(
+    row: BrowserAuthenticationRow,
+) -> BrowserAuthenticationRecord:
+    return BrowserAuthenticationRecord(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        profile_id=row.profile_id,
+        status=BrowserAuthenticationStatus(row.status),
+        expires_at=row.expires_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+class PostgresBrowserAuthenticationRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def create(
+        self, authentication: BrowserAuthenticationRecord
+    ) -> BrowserAuthenticationRecord:
+        values = {
+            "id": authentication.id,
+            "tenant_id": authentication.tenant_id,
+            "principal_id": authentication.principal_id,
+            "profile_id": authentication.profile_id,
+            "status": authentication.status.value,
+            "expires_at": authentication.expires_at,
+            "created_at": authentication.created_at,
+            "updated_at": authentication.updated_at,
+        }
+        inserted = _rowcount(
+            await self._session.execute(
+                pg_insert(BrowserAuthenticationRow)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=[BrowserAuthenticationRow.id])
+            )
+        )
+        if not inserted:
+            raise ConflictError("browser authentication already exists")
+        return authentication.model_copy(deep=True)
+
+    async def get(
+        self, authentication_id: UUID, principal: Principal
+    ) -> BrowserAuthenticationRecord:
+        row = (
+            await self._session.scalars(
+                select(BrowserAuthenticationRow).where(
+                    BrowserAuthenticationRow.id == authentication_id,
+                    BrowserAuthenticationRow.tenant_id == principal.tenant_id,
+                    BrowserAuthenticationRow.principal_id == principal.principal_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser authentication not found")
+        return _browser_authentication_to_domain(row)
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        profile_id: UUID | None = None,
+    ) -> list[BrowserAuthenticationRecord]:
+        statement = select(BrowserAuthenticationRow).where(
+            BrowserAuthenticationRow.tenant_id == principal.tenant_id,
+            BrowserAuthenticationRow.principal_id == principal.principal_id,
+        )
+        if profile_id is not None:
+            statement = statement.where(BrowserAuthenticationRow.profile_id == profile_id)
+        rows = (
+            await self._session.scalars(
+                statement.order_by(
+                    BrowserAuthenticationRow.created_at,
+                    BrowserAuthenticationRow.id,
+                )
+            )
+        ).all()
+        return [_browser_authentication_to_domain(row) for row in rows]
+
+    async def transition(
+        self,
+        authentication_id: UUID,
+        principal: Principal,
+        *,
+        expected_status: BrowserAuthenticationStatus,
+        status: BrowserAuthenticationStatus,
+        updated_at: datetime,
+    ) -> BrowserAuthenticationRecord:
+        allowed = ALLOWED_BROWSER_AUTHENTICATION_TRANSITIONS[expected_status]
+        if status is not expected_status and status not in allowed:
+            raise ConflictError("browser authentication transition is not allowed")
+        row = (
+            await self._session.scalars(
+                update(BrowserAuthenticationRow)
+                .where(
+                    BrowserAuthenticationRow.id == authentication_id,
+                    BrowserAuthenticationRow.tenant_id == principal.tenant_id,
+                    BrowserAuthenticationRow.principal_id == principal.principal_id,
+                    BrowserAuthenticationRow.status == expected_status.value,
+                    BrowserAuthenticationRow.updated_at <= updated_at,
+                )
+                .values(status=status.value, updated_at=updated_at)
+                .returning(BrowserAuthenticationRow)
+            )
+        ).one_or_none()
+        if row is not None:
+            return _browser_authentication_to_domain(row)
+        current = await self.get(authentication_id, principal)
+        if current.status is expected_status and updated_at < current.updated_at:
+            raise ConflictError("browser authentication update time moved backwards")
+        raise ConflictError("browser authentication status changed")
+
+
 class PostgresProcessEventRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -1434,6 +1968,14 @@ class PostgresProcessEventRepository:
         if stored.model_dump(exclude={"created_at"}) != event.model_dump(exclude={"created_at"}):
             raise ConflictError("process event derivation identifies different content")
         return stored
+
+    async def get_by_derivation(self, derivation_key: str) -> ProcessEvent | None:
+        row = (
+            await self._session.scalars(
+                select(ProcessEventRow).where(ProcessEventRow.derivation_key == derivation_key)
+            )
+        ).one_or_none()
+        return None if row is None else self._to_domain(row)
 
     async def list(self, event_type: str | None = None) -> list[ProcessEvent]:
         statement = select(ProcessEventRow)

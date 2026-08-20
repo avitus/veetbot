@@ -9,6 +9,9 @@ from typing import Protocol, Self
 from agent_core.domain.agents import Principal
 from agent_core.domain.persistence import WorkerLease
 from agent_core.domain.runs import Run, RunCheckpoint
+from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
+from agent_core.ports.browser_grants import BrowserGrantRepository
+from agent_core.ports.browser_profiles import BrowserProfileRepository
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
@@ -33,6 +36,12 @@ from agent_core.ports.repositories import (
     TrajectoryProjectionRepository,
     UsageRepository,
 )
+from agent_core.ports.schedules import (
+    ScheduleAdmissionController,
+    ScheduleIdempotencyRepository,
+    ScheduleOccurrenceRepository,
+    ScheduleRepository,
+)
 from agent_core.ports.skills import SkillRepository
 
 
@@ -40,6 +49,9 @@ class RepositoryUnitOfWork(Protocol):
     agents: AgentRepository
     approvals: ApprovalRepository
     policy_profiles: PolicyProfileRepository
+    browser_profiles: BrowserProfileRepository
+    browser_grants: BrowserGrantRepository
+    browser_authentications: BrowserAuthenticationRepository
     process_events: ProcessEventRepository
     sessions: SessionRepository
     session_deletions: SessionDeletionRepository
@@ -61,6 +73,10 @@ class RepositoryUnitOfWork(Protocol):
     traces: TraceStore
     knowledge: KnowledgeStore
     evaluations: CapabilityEvaluationRepository
+    schedules: ScheduleRepository
+    schedule_occurrences: ScheduleOccurrenceRepository
+    schedule_idempotency: ScheduleIdempotencyRepository
+    schedule_admission: ScheduleAdmissionController
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None:
@@ -83,8 +99,45 @@ class UnitOfWorkFactory(Protocol):
     def is_open(self) -> bool: ...
 
 
+class ScheduleUnitOfWork(Protocol):
+    """Least-privilege repository surface used by scheduler components."""
+
+    agents: AgentRepository
+    process_events: ProcessEventRepository
+    sessions: SessionRepository
+    runs: RunRepository
+    events: EventRepository
+    history: SessionHistoryRepository
+    checkpoints: CheckpointRepository
+    schedules: ScheduleRepository
+    schedule_occurrences: ScheduleOccurrenceRepository
+    schedule_admission: ScheduleAdmissionController
+    queue: RunQueue | None
+
+    def on_rollback(self, callback: TransactionCallback) -> None: ...
+
+    async def __aenter__(self) -> Self: ...
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> bool | None: ...
+
+
+class ScheduleUnitOfWorkFactory(Protocol):
+    def __call__(self) -> ScheduleUnitOfWork: ...
+
+    def is_open(self) -> bool: ...
+
+
 type CheckpointSeeder = Callable[
     [RepositoryUnitOfWork, Run, int | None, WorkerLease | None, Principal],
+    Awaitable[RunCheckpoint],
+]
+type ScheduleCheckpointSeeder = Callable[
+    [ScheduleUnitOfWork, Run, int | None, WorkerLease | None, Principal],
     Awaitable[RunCheckpoint],
 ]
 

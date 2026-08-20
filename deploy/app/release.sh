@@ -5,6 +5,7 @@ export LC_ALL=C
 RELEASE_ID="${1:-}"
 DEPLOY_ROOT="${VEETBOT_ROOT:-/opt/veetbot}"
 ENV_FILE="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
+SCHEDULE_ENV_FILE="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
 KEEP_RELEASES="${VEETBOT_KEEP_RELEASES:-5}"
@@ -13,7 +14,7 @@ HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
-UNITS=(veetbot-maintenance veetbot-worker veetbot-api)
+UNITS=(veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api)
 
 fail() {
   printf 'release failed: %s\n' "$*" >&2
@@ -42,6 +43,7 @@ STAGE="$RELEASES_DIR/$RELEASE_ID"
 CURRENT="$DEPLOY_ROOT/current"
 RELEASE_IMAGE="agent-core-sandbox:$RELEASE_ID"
 PRODUCTION_IMAGE="agent-core-sandbox:production"
+PROFILE_RELEASE_IMAGE="veetbot-browser-profile-service:$RELEASE_ID"
 PREVIOUS_RELEASE=""
 PROMOTED=0
 HEALTH_HEADERS=""
@@ -97,9 +99,13 @@ for required in \
   alembic.ini \
   docker-compose.yml \
   deploy/docker-compose.production.yml \
+  deploy/browser-profile-service.Dockerfile \
+  deploy/veetbot-schedule.env.example \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
+  deploy/systemd/veetbot-async-worker.service \
   deploy/systemd/veetbot-maintenance.service \
+  deploy/systemd/veetbot-schedule.service \
   execution/sandbox.Dockerfile \
   scripts/check_production_deployment.py; do
   [[ -f "$STAGE/$required" ]] || fail "staged release is missing $required"
@@ -116,17 +122,60 @@ cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
 uv sync --frozen --no-dev
 docker build -f execution/sandbox.Dockerfile -t "$RELEASE_IMAGE" .
+docker build -f deploy/browser-profile-service.Dockerfile -t "$PROFILE_RELEASE_IMAGE" .
 
 set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
 [[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
+[[ "${BROWSER_PROFILE_SERVICE_AUTH_FILE:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE must be an absolute path"
+[[ -f "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]] || fail \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE must name an existing regular file"
+[[ ! -L "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]] || fail \
+  "BROWSER_PROFILE_SERVICE_AUTH_FILE must not be a symlink"
+[[ "${BROWSER_PROFILE_SESSION_SECRET_FILE:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE must be an absolute path"
+[[ -f "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]] || fail \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE must name an existing regular file"
+[[ ! -L "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]] || fail \
+  "BROWSER_PROFILE_SESSION_SECRET_FILE must not be a symlink"
+[[ "${BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must be an absolute path"
+[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]] || fail \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must name an existing regular file"
+[[ ! -L "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]] || fail \
+  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must not be a symlink"
+[[ "${BROWSER_PROFILE_CEREMONY_BASE_URL:-}" =~ ^https://[^/?#[:space:]]+/?$ ]] || fail \
+  "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin"
+[[ "${BROWSER_PROFILE_KEY_DIR:-}" = /* ]] || fail \
+  "BROWSER_PROFILE_KEY_DIR must be an absolute path"
+[[ -d "$BROWSER_PROFILE_KEY_DIR" ]] || fail \
+  "BROWSER_PROFILE_KEY_DIR must name an existing directory"
+[[ ! -L "$BROWSER_PROFILE_KEY_DIR" ]] || fail \
+  "BROWSER_PROFILE_KEY_DIR must not be a symlink"
+[[ "${AGENT_SCHEDULE_API_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SCHEDULE_API_ENABLED must be 0 or 1"
+[[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_SCHEDULE_WORKER_ENABLED must be 0 or 1"
+[[ "${AGENT_SCHEDULE_API_ENABLED:-0}" == "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" ]] || fail \
+  "schedule API and worker flags must be enabled or disabled together"
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  [[ "$SCHEDULE_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \
+    "VEETBOT_SCHEDULE_ENV_FILE must be an absolute path without whitespace"
+  [[ -f "$SCHEDULE_ENV_FILE" ]] || fail \
+    "schedule worker environment does not exist: $SCHEDULE_ENV_FILE"
+  [[ ! -L "$SCHEDULE_ENV_FILE" ]] || fail \
+    "schedule worker environment must not be a symlink"
+  UNITS=(veetbot-schedule "${UNITS[@]}")
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
+export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
   --project-name "$COMPOSE_PROJECT_NAME" \
   -f docker-compose.yml -f deploy/docker-compose.production.yml \
-  up -d postgres
+  up -d --wait --wait-timeout "$HEALTH_TIMEOUT_SECS" postgres browser-profile-service
 
 export VEETBOT_RELEASE_ID="$RELEASE_ID"
 export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
@@ -135,7 +184,19 @@ export AGENT_SANDBOX_IMAGE="$RELEASE_IMAGE"
 
 sudo install -d -m 0755 "$SYSTEMD_DIR"
 sudo install -m 0644 "$STAGE/deploy/systemd/"*.service "$SYSTEMD_DIR/"
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  awk -v environment_file="$SCHEDULE_ENV_FILE" '
+    /^EnvironmentFile=/ { print "EnvironmentFile=" environment_file; next }
+    { print }
+  ' "$STAGE/deploy/systemd/veetbot-schedule.service" \
+    >"$STAGE/.veetbot-schedule.service"
+  sudo install -m 0644 "$STAGE/.veetbot-schedule.service" \
+    "$SYSTEMD_DIR/veetbot-schedule.service"
+fi
 sudo systemctl daemon-reload
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "0" ]]; then
+  sudo systemctl disable --now veetbot-schedule >/dev/null 2>&1 || true
+fi
 
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"
 rm -f -- "$NEXT_CURRENT"
@@ -209,5 +270,5 @@ trap - EXIT
 printf 'Released %s successfully.\n' "$RELEASE_ID"
 if [[ -n "$PREVIOUS_RELEASE" && "$PREVIOUS_RELEASE" != "$STAGE" ]]; then
   printf 'Manual rollback target: %s\n' "$PREVIOUS_RELEASE"
-  printf 'Rollback requires repointing current, retagging that release image, and restarting all three units.\n'
+  printf 'Rollback requires repointing current, retagging that release image, and restarting all enabled units.\n'
 fi

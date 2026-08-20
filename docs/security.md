@@ -94,6 +94,31 @@ Milestone 3 hardens the real provider and export boundaries:
 Later controls remain requirements of their owning milestones and are not
 claimed as implemented here.
 
+## Milestone 11 scheduling controls
+
+Scheduled task management is default-off at both its HTTP and worker entry
+points. Production release validation requires both flags to be Boolean and to
+change together. The schedule role is a separate least-privilege process with
+PostgreSQL access but no API bearer token, provider key, tool credential,
+sandbox access, or object-store credential.
+
+Schedules retain a principal identity and requested scope subset, never a
+credential. Materialization resolves configured authority again, verifies the
+pinned agent and policy, applies finite per-run and tenant admission limits,
+and fails closed before creating a session or run. The occurrence, session,
+run, checkpoint, and seed events share one transaction; PostgreSQL uniqueness,
+row locks, row-level security, and principal predicates prevent duplicate or
+cross-principal materialization. Credential-shaped instructions are rejected
+without logging the matched value.
+
+Interactive and asynchronous workers claim disjoint reserved priority classes.
+Misfires coalesce in bounded time, one schedule cannot overlap its active run,
+terminal accounting is idempotent, and repeated failures pause future firing.
+PostgreSQL notification only reduces latency: bounded durable scans remain the
+correctness path. Occurrence links provide offline result recovery, while
+session erasure clears content links and retains an explicit non-content audit
+marker.
+
 ## Production delivery controls
 
 The production delivery path is privileged supply-chain code. CircleCI packages

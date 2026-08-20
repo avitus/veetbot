@@ -5,14 +5,15 @@ import logging
 import unicodedata
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
+from datetime import datetime
 from typing import Annotated, Literal, Protocol, cast
 from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, Header, Query, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.auth import Authenticator
@@ -23,13 +24,29 @@ from agent_core.application.errors import SessionMessageCursorError
 from agent_core.application.services import (
     ApprovalService,
     ArtifactService,
+    BrowserGrantService,
+    BrowserProfileService,
     RunService,
+    ScheduleService,
     SessionService,
 )
 from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.browser import (
+    BrowserActionKind,
+    BrowserAuthenticationView,
+    BrowserGrantView,
+    BrowserProfileView,
+    normalize_browser_origin,
+)
 from agent_core.domain.errors import AgentCoreError
+from agent_core.domain.schedules import (
+    ScheduleDefinition,
+    ScheduleOccurrence,
+    ScheduleRecord,
+    ScheduleState,
+)
 from agent_core.domain.views import (
     ApprovalFilters,
     ApprovalView,
@@ -93,6 +110,15 @@ class ApplicationServices(Protocol):
     @property
     def artifacts(self) -> ArtifactService: ...
 
+    @property
+    def browser_profiles(self) -> BrowserProfileService: ...
+
+    @property
+    def browser_grants(self) -> BrowserGrantService: ...
+
+    @property
+    def schedules(self) -> ScheduleService: ...
+
 
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -116,6 +142,98 @@ class ResolveApprovalRequest(BaseModel):
 
     decision: ApprovalResolutionType
     reason: str | None = Field(default=None, max_length=APPROVAL_REASON_MAX_LENGTH)
+
+
+class CreateBrowserProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    allowed_origins: tuple[str, ...] = Field(min_length=1, max_length=64)
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _normalize_origins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(normalize_browser_origin(origin) for origin in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("browser origins must be unique")
+        return normalized
+
+
+class BeginBrowserAuthenticationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    login_url: str = Field(min_length=1, max_length=4096)
+
+
+class CreateBrowserGrantRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: UUID
+    allowed_origins: tuple[str, ...] = Field(min_length=1, max_length=64)
+    action_kinds: tuple[BrowserActionKind, ...] = Field(min_length=1, max_length=6)
+    element_roles: tuple[str, ...] = Field(default=(), max_length=64)
+    element_names: tuple[str, ...] = Field(default=(), max_length=64)
+    purpose: str | None = Field(default=None, min_length=1, max_length=255)
+    starts_at: datetime
+    expires_at: datetime
+
+    @field_validator("allowed_origins")
+    @classmethod
+    def _normalize_origins(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        normalized = tuple(normalize_browser_origin(origin) for origin in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("browser origins must be unique")
+        return normalized
+
+    @model_validator(mode="after")
+    def _ordered_window(self) -> "CreateBrowserGrantRequest":
+        if self.expires_at <= self.starts_at:
+            raise ValueError("expires_at must be after starts_at")
+        return self
+
+
+class UpdateScheduleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+    definition: ScheduleDefinition
+
+
+class ExpectedScheduleRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+
+
+class ScheduleListItem(BaseModel):
+    id: UUID
+    state: ScheduleState
+    pause_reason: str | None
+    current_revision: int
+    next_fire_at: object | None
+    title: str
+    instruction_preview: str
+    cadence: dict[str, object]
+    created_at: object
+    updated_at: object
+
+
+def _schedule_summary(record: ScheduleRecord) -> ScheduleListItem:
+    instruction = record.revision.instruction
+    preview = instruction if len(instruction) <= 200 else f"{instruction[:199]}…"
+    return ScheduleListItem(
+        id=record.schedule.id,
+        state=record.schedule.state,
+        pause_reason=(
+            None if record.schedule.pause_reason is None else record.schedule.pause_reason.value
+        ),
+        current_revision=record.schedule.current_revision,
+        next_fire_at=record.schedule.next_fire_at,
+        title=record.revision.title,
+        instruction_preview=preview,
+        cadence=record.revision.cadence.model_dump(mode="json"),
+        created_at=record.schedule.created_at,
+        updated_at=record.schedule.updated_at,
+    )
 
 
 def _request_id(request: Request) -> str:
@@ -501,6 +619,328 @@ def create_app(
                 **private_cache_headers,
             },
         )
+
+    @app.post(
+        "/v1/browser-profiles",
+        status_code=201,
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def create_browser_profile(
+        body: CreateBrowserProfileRequest,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserProfileView:
+        return await services.browser_profiles.create(
+            authenticated,
+            body.allowed_origins,
+            idempotency_key,
+        )
+
+    @app.get(
+        "/v1/browser-profiles",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def list_browser_profiles(
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserProfileView]:
+        try:
+            return await services.browser_profiles.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("browser profile cursor is malformed") from exc
+
+    @app.get(
+        "/v1/browser-profiles/{profile_id}",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def get_browser_profile(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> BrowserProfileView:
+        return await services.browser_profiles.get(authenticated, profile_id)
+
+    @app.post(
+        "/v1/browser-profiles/{profile_id}/revoke",
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def revoke_browser_profile(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+    ) -> BrowserProfileView:
+        return await services.browser_profiles.revoke(authenticated, profile_id)
+
+    @app.delete(
+        "/v1/browser-profiles/{profile_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def delete_browser_profile(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+    ) -> Response:
+        await services.browser_profiles.delete(authenticated, profile_id)
+        return Response(status_code=204)
+
+    @app.post(
+        "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
+        status_code=201,
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def begin_browser_authentication(
+        profile_id: UUID,
+        body: BeginBrowserAuthenticationRequest,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+    ) -> BrowserAuthenticationView:
+        return await services.browser_profiles.begin_authentication(
+            authenticated,
+            profile_id,
+            login_url=body.login_url,
+        )
+
+    @app.get(
+        "/v1/browser-profiles/{profile_id}/authentication-ceremonies",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def list_browser_authentications(
+        profile_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> list[BrowserAuthenticationView]:
+        return await services.browser_profiles.list_authentications(
+            authenticated,
+            profile_id,
+        )
+
+    @app.get(
+        "/v1/browser-authentication-ceremonies/{authentication_id}",
+        openapi_extra={"required_scope": "browser.profile.read"},
+    )
+    async def get_browser_authentication(
+        authentication_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.read")],
+    ) -> BrowserAuthenticationView:
+        return await services.browser_profiles.authentication_status(
+            authenticated,
+            authentication_id,
+        )
+
+    @app.post(
+        "/v1/browser-authentication-ceremonies/{authentication_id}/cancel",
+        openapi_extra={"required_scope": "browser.profile.write"},
+    )
+    async def cancel_browser_authentication(
+        authentication_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.profile.write")],
+    ) -> BrowserAuthenticationView:
+        return await services.browser_profiles.cancel_authentication(
+            authenticated,
+            authentication_id,
+        )
+
+    @app.post(
+        "/v1/browser-grants",
+        status_code=201,
+        openapi_extra={"required_scope": "browser.grant.write"},
+    )
+    async def create_browser_grant(
+        body: CreateBrowserGrantRequest,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(alias="Idempotency-Key", min_length=1, max_length=IDEMPOTENCY_KEY_MAX_LENGTH),
+        ],
+    ) -> BrowserGrantView:
+        return await services.browser_grants.create(
+            authenticated,
+            profile_id=body.profile_id,
+            allowed_origins=body.allowed_origins,
+            action_kinds=body.action_kinds,
+            element_roles=body.element_roles,
+            element_names=body.element_names,
+            purpose=body.purpose,
+            starts_at=body.starts_at,
+            expires_at=body.expires_at,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get(
+        "/v1/browser-grants",
+        openapi_extra={"required_scope": "browser.grant.read"},
+    )
+    async def list_browser_grants(
+        authenticated: Annotated[Principal, secured("browser.grant.read")],
+        profile_id: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[BrowserGrantView]:
+        try:
+            return await services.browser_grants.list(
+                authenticated,
+                profile_id=profile_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise MalformedRequestError("browser grant cursor is malformed") from exc
+
+    @app.get(
+        "/v1/browser-grants/{grant_id}",
+        openapi_extra={"required_scope": "browser.grant.read"},
+    )
+    async def get_browser_grant(
+        grant_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.grant.read")],
+    ) -> BrowserGrantView:
+        return await services.browser_grants.get(authenticated, grant_id)
+
+    @app.post(
+        "/v1/browser-grants/{grant_id}/revoke",
+        openapi_extra={"required_scope": "browser.grant.write"},
+    )
+    async def revoke_browser_grant(
+        grant_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+    ) -> BrowserGrantView:
+        return await services.browser_grants.revoke(authenticated, grant_id)
+
+    @app.delete(
+        "/v1/browser-grants/{grant_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "browser.grant.write"},
+    )
+    async def delete_browser_grant(
+        grant_id: UUID,
+        authenticated: Annotated[Principal, secured("browser.grant.write")],
+    ) -> Response:
+        await services.browser_grants.delete(authenticated, grant_id)
+        return Response(status_code=204)
+
+    schedule_router = APIRouter()
+
+    @schedule_router.post(
+        "/v1/schedules",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def create_schedule(
+        body: ScheduleDefinition,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+            ),
+        ],
+    ) -> Response:
+        result = await services.schedules.create(authenticated, body, idempotency_key)
+        return JSONResponse(
+            status_code=200 if result.replayed else 201,
+            content=result.model_dump(mode="json", exclude={"replayed"}),
+        )
+
+    @schedule_router.get(
+        "/v1/schedules",
+        openapi_extra={"required_scope": "schedule.read"},
+    )
+    async def list_schedules(
+        authenticated: Annotated[Principal, secured("schedule.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[ScheduleListItem]:
+        try:
+            page = await services.schedules.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("schedule cursor is malformed") from exc
+        return Page(
+            items=[_schedule_summary(record) for record in page.items],
+            next_cursor=page.next_cursor,
+        )
+
+    @schedule_router.get(
+        "/v1/schedules/{schedule_id}",
+        openapi_extra={"required_scope": "schedule.read"},
+    )
+    async def get_schedule(
+        schedule_id: UUID,
+        authenticated: Annotated[Principal, secured("schedule.read")],
+    ) -> ScheduleRecord:
+        return await services.schedules.get(authenticated, schedule_id)
+
+    @schedule_router.patch(
+        "/v1/schedules/{schedule_id}",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def update_schedule(
+        schedule_id: UUID,
+        body: UpdateScheduleRequest,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleRecord:
+        return await services.schedules.update(
+            authenticated,
+            schedule_id,
+            body.expected_revision,
+            body.definition,
+        )
+
+    @schedule_router.post(
+        "/v1/schedules/{schedule_id}/pause",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def pause_schedule(
+        schedule_id: UUID,
+        body: ExpectedScheduleRevisionRequest,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleRecord:
+        return await services.schedules.pause(authenticated, schedule_id, body.expected_revision)
+
+    @schedule_router.post(
+        "/v1/schedules/{schedule_id}/resume",
+        openapi_extra={"required_scope": "schedule.write"},
+    )
+    async def resume_schedule(
+        schedule_id: UUID,
+        body: ExpectedScheduleRevisionRequest,
+        authenticated: Annotated[Principal, secured("schedule.write")],
+    ) -> ScheduleRecord:
+        return await services.schedules.resume(authenticated, schedule_id, body.expected_revision)
+
+    @schedule_router.delete(
+        "/v1/schedules/{schedule_id}",
+        openapi_extra={"required_scope": "schedule.cancel"},
+    )
+    async def cancel_schedule(
+        schedule_id: UUID,
+        expected_revision: Annotated[int, Query(ge=1)],
+        authenticated: Annotated[Principal, secured("schedule.cancel")],
+    ) -> ScheduleRecord:
+        return await services.schedules.cancel(authenticated, schedule_id, expected_revision)
+
+    @schedule_router.get(
+        "/v1/schedules/{schedule_id}/occurrences",
+        openapi_extra={"required_scope": "schedule.read"},
+    )
+    async def list_schedule_occurrences(
+        schedule_id: UUID,
+        authenticated: Annotated[Principal, secured("schedule.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[ScheduleOccurrence]:
+        try:
+            return await services.schedules.list_occurrences(
+                authenticated,
+                schedule_id,
+                limit=limit,
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise MalformedRequestError("schedule occurrence cursor is malformed") from exc
+
+    if settings.schedule_api_enabled:
+        app.include_router(schedule_router)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

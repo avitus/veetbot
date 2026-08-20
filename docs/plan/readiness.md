@@ -10,13 +10,13 @@ This document answers one question: can an implementer open this
 corpus and start writing code, and if so, how far can they get before
 the corpus runs out?
 
-The answer is that Milestones 0 through 5 are implementable from the
-documents alone and Milestones 6 through 10 are not implementable
-without design work that has not been done. The boundary is sharp and
-it falls in a useful place, because Section 21 forbids working on
-more than one milestone at a time and six milestones of runway is
-more than any first implementation will consume before the missing
-documents can be written.
+The original answer was that Milestones 0 through 5 were implementable from the
+documents alone and Milestones 6 through 10 were not. The historical findings
+below retain that answer because they explain why the missing specifications
+were written. The present answer is different: Milestones 0 through 9 are
+complete, Milestone 10's authorized tranches are specified and in progress, and
+the separately authorized Milestone 11 scheduling tranche is implementable from
+[scheduling.md](scheduling.md) and ADR-0059.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -34,7 +34,7 @@ requirements.
 ## What was checked, and how
 
 Every `#### Implement` bullet, every acceptance criterion, and every
-subsection heading under Milestones 0 through 10 in
+subsection heading under Milestones 0 through 11 in
 [engineering-plan.md](engineering-plan.md) was taken as a work item
 and traced to the document that designs it. An item counts as
 **covered** when some specification states its mechanism in enough
@@ -83,7 +83,8 @@ rather than smoothed.
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready | 17 | Nothing |
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
-| 10 | Self-authored skills tranche | Authorized | 6 | Nothing; other optional extensions remain deferred |
+| 10 | Memory maturation and self-authored skills | Authorized | 11 | Rollout evidence and final review remain; optional routing and subagents remain deferred |
+| 11 | Scheduled runs | Authorized | 23 | Persistence implementation is in progress; worker and HTTP boundary remain |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -104,10 +105,13 @@ the one that noticed build step 9 of the tool system had nothing
 observing it, and they are the reason the mock-server gap this table
 first named is gone, then three more with the authentication design
 that closed the other half of the same milestone.
-Its six at Milestone 10 are a different case: they are the authoring
-loop's gates, registered against a milestone whose own acceptance
-criteria still do not exist, which is why that row's verdict is
-unchanged. Milestone 3's eleven became fifteen the same way: two from
+Its six at Milestone 10 were a different case when first measured: they were
+the authoring loop's gates, registered against a milestone whose own acceptance
+criteria did not yet exist. The later authorization added five automatic-memory
+gates and an explicit completion contract. Milestone 11 follows the same
+discipline with twenty-three scheduling gates arriving with its detailed
+design, including explicit contract, migration, erasure, and isolation gates.
+Milestone 3's eleven became fifteen the same way: two from
 [model-gateway.md](model-gateway.md) and two from
 [event-log-and-persistence.md](event-log-and-persistence.md), each
 pair arriving with the design that closed one of this section's named
@@ -163,7 +167,7 @@ the half that a builder which never changes anything would also pass.
 Two things about this milestone are worth stating because they are
 easy to misread as problems.
 
-**Forty-one of one hundred and seventy-seven gates are green before
+**Forty-one of two hundred and twenty-three gates are green before
 Milestone 2 begins**, thirteen of them against a repository with no
 agent in it.
 That is not a sign that the gates are weak. It is the consequence of
@@ -215,7 +219,7 @@ specification, and recorded as
     and a repository constructed with a live session that never
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
-    `engineering-plan.md:1619` says *"Create Alembic migrations for at
+    `engineering-plan.md:1625` says *"Create Alembic migrations for at
     least these tables"* and `development-toolchain.md:183` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
@@ -239,7 +243,7 @@ ORM.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2501`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2507`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -259,7 +263,7 @@ Three items fell short, one of them completely.
 
 1.  **Provider response metadata is designed nowhere.**
     `provider_metadata` appears exactly once in the entire corpus, as
-    a `dict[str, Any]` field at `engineering-plan.md:1205`. No document
+    a `dict[str, Any]` field at `engineering-plan.md:1211`. No document
     states which keys go in it, whether the set is open or closed,
     whether it is persisted, or where. It is absent from the
     `model_calls` schema. A field of that shape with no key discipline
@@ -347,11 +351,11 @@ of thing that is written three different ways by three implementers,
 two of which are subtly wrong.
 
 **Principal scopes were half-designed.** The `Principal` model lived
-only at `engineering-plan.md:459`, the policy spec identified where
+only at `engineering-plan.md:465`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:564` named `ApprovalService` as one of
+`bootstrap-and-composition.md:575` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -443,7 +447,7 @@ the fewest of any milestone that adds work — and that number was the
 finding.
 
 Section 16 of the engineering plan, at
-`engineering-plan.md:1793-1998`, designs the API more thoroughly than
+`engineering-plan.md:1799-2004`, designs the API more thoroughly than
 a summary of this milestone's coverage would suggest. At the time of the
 Milestone 5 review it specified nine endpoints with methods, paths, and where
 relevant headers; ADR-0050 later added the authoritative session list and
@@ -459,8 +463,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1002-1003` and the resolve at
-`policy-and-approvals.md:1012`, and one reference in
+at `policy-and-approvals.md:1020-1021` and the resolve at
+`policy-and-approvals.md:1030`, and one reference in
 `runtime-loop.md:1180` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -486,7 +490,7 @@ Six things were visibly unsettled inside it.
     to the trace identifier the observability section requires.
 3.  **`Idempotency-Key` handling is named in two places and specified
     in neither.** It appears as a header at
-    `engineering-plan.md:1886` and as an implement bullet, and the
+    `engineering-plan.md:1892` and as an implement bullet, and the
     idempotency port the map schedules at Milestone 1 is a tool-call
     concern rather than an HTTP one. Whether these are the same
     mechanism is undecided.
@@ -542,7 +546,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3274-3351`
+Section 28 of the plan is not empty — `engineering-plan.md:3336-3413`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -561,7 +565,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1371`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3349` requires a container-escape attempt as
+    `engineering-plan.md:3411` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -723,7 +727,7 @@ What was missing was everything underneath it: no package format, no
 manifest schema, no types, no storage, no reference grammar, no
 context accounting, and no gates. The acceptance criterion *"A
 selected skill is version-pinned in the run"* at
-`engineering-plan.md:2747` had no design behind it — and no document
+`engineering-plan.md:2753` had no design behind it — and no document
 outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
 and remains the sharper of the two observations.
 
@@ -919,17 +923,21 @@ closed, so the verdict changes with it.
 
 ## Milestone 10: authorized workstreams in progress
 
-The project authorizes automatic memory formation and the independently
-deliverable self-authored-skills tranche. The six registered `gate.skill.*`
-entries and five automatic-memory gates form their delivery contracts.
-Scheduling, routing, and general-purpose subagents remain deferred directions.
+The project authorizes automatic memory formation, the independently
+deliverable self-authored-skills tranche, provider-neutral public-web access,
+and authenticated browser automation. The six registered `gate.skill.*`
+entries and eleven automatic-memory, inspection, and provider gates form the
+first two delivery contracts. Routing and general-purpose subagents remain
+deferred Milestone 10 directions. Scheduling moved to the separately authorized
+Milestone 11 on 2026-08-19.
 
 The readiness review originally found this milestone structurally unlike every
 other one in the plan. The repository owner explicitly authorized it on
-2026-08-17 and selected memory maturation as the first workstream. Eleven
-registry entries now belong to Milestone 10: six for skill authoring and five
-for automatic memory formation. Authorization permits implementation; it does
-not make the remaining work ready or complete.
+2026-08-17 and selected memory maturation as the first workstream. Thirty-four
+registry entries now belong to Milestone 10: six for skill authoring, eleven for
+automatic memory formation and governed provider assistance, seven for
+public-web access, and ten for authenticated browser automation. Authorization
+permits implementation; it does not make the remaining work ready or complete.
 
 When this review was written, it had no `#### Implement` heading and no
 `#### Acceptance criteria` heading. It opened with *"These are separate optional
@@ -941,7 +949,9 @@ heading but does have acceptance criteria. The 2026-08-17 authorization adds a
 memory-maturation implement subsection and five criteria; the other extensions
 retain the structure assessed here.
 
-All seven scheduling requirements are undesigned. Of six routing
+At the time of the original review, all seven scheduling requirements were
+undesigned. [scheduling.md](scheduling.md) and ADR-0059 supersede that verdict
+without rewriting the historical finding. Of six routing
 considerations, data residency and evaluation performance have no
 design; the other four are at least touched by the model gateway's
 routing section. Of nine subagent requirements, five had none when
@@ -952,7 +962,7 @@ rather than a full transcript — and two more were partial.
 That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
-Section 15 column at `engineering-plan.md:1674`, and the sibling join
+Section 15 column at `engineering-plan.md:1680`, and the sibling join
 at `runtime-loop.md:1140` reads it. Restricted context is
 `context-engine.md:282`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
@@ -968,10 +978,10 @@ plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:973`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
 `tool-system.md:931` and no input type for it exists anywhere, and
-the child budget is additive by `engineering-plan.md:553` while no
+the child budget is additive by `engineering-plan.md:559` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3258` and `engineering-plan.md:2952` and picked
+`engineering-plan.md:3320` and `engineering-plan.md:2952` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -991,15 +1001,28 @@ authorizes none.
 The historical verdict was that this was a direction rather than a milestone.
 The authorization and new memory-maturation acceptance criteria change that
 operational verdict: Milestone 10 is now active, but its verified gate ceiling
-remains Milestone 9 until all eleven Milestone 10 gates pass. The scheduling,
-routing, subagent, and skill-authoring work described below remains incomplete.
+remains Milestone 9 until all thirty-four Milestone 10 gates pass. Routing,
+subagent, and skill-authoring rollout work described below remains incomplete;
+scheduling is outside this milestone.
 
 The owner separately authorized provider-neutral public-web access on
 2026-08-18. [web-access.md](web-access.md) now covers its port, two tools,
 capability-level provider selection, fixed egress targets, credential handling,
-trust labels, bounds, failure vocabulary, and acceptance criteria. The tranche
-declares no formal hard gate, so it changes neither the 177-entry registry nor
-the Milestone 9 verified gate ceiling.
+trust labels, bounds, failure vocabulary, and acceptance criteria. Seven formal
+`gate.web.*` checks now cover that contract, taking the registry to 190 entries
+without changing the Milestone 9 verified gate ceiling.
+
+The owner separately authorized provider-neutral authenticated browser
+automation on 2026-08-19. [browser-automation.md](browser-automation.md) covers
+its threat model, provider port, read/write tool split, profile and login
+lifecycle, isolation, origin confinement, standing grants, uncertainty rules,
+scheduler handoff, delivery slices, and acceptance criteria. Ten formal
+`gate.browser.*` checks now cover that contract, taking the registry to 200
+entries without changing the Milestone 9 verified ceiling. All ten resolve to
+executable profile-lifecycle, authentication, grant, provider, policy, trust,
+revision, origin, and uncertainty checks.
+Milestone 11's later scheduling design raises the complete registry to 223
+without changing the Milestone 9 verified ceiling.
 
 Open question 4 below closes the remaining half of this, which was
 whether the missing criteria are an omission or a choice. They are a
@@ -1012,11 +1035,33 @@ criteria are a promise about a delivery, and a promise cannot be made
 about work that must not start until evidence arrives. What Milestone
 10 is missing is the heading, not the content the heading would hold.
 
+## Milestone 11: scheduled runs authorized and ready
+
+The scheduling entry condition is now true: Milestone 2's durable worker and
+queue, Milestone 4's policy and approvals, and Milestone 5's authenticated HTTP
+surface are complete. The owner authorized the work as Milestone 11 on
+2026-08-19 rather than changing Milestone 10's established completion contract.
+
+[scheduling.md](scheduling.md) closes every gap the original review named. It
+defines a versioned schedule and immutable occurrence, the recurrence and
+civil-time algorithm, the four-table schema, the atomic materialization
+transaction, a current-principal directory, exact schedule scopes, lifecycle
+and cancellation semantics, bounded misfires, no-overlap behavior, dedicated
+sessions, async priority and admission, the eight-route API, default-off
+deployment requirements, metrics, and twenty-three hard gates. ADR-0059 records why
+those mechanisms reuse PostgreSQL and the ordinary run path.
+
+The readiness verdict is therefore **Authorized**. There is no unnamed design
+choice between the corpus and the first red tests. The implementation is locally
+complete and production scheduling remains default-off pending hosted review.
+Because Milestone 10 is numerically earlier and incomplete, Milestone 11 does not
+by itself advance the verified gate ceiling past 9.
+
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3353-3506` for links to other documents returned
+`engineering-plan.md:3415-3573` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1108,7 +1153,7 @@ sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
 criterion, and 30.6's constraints are each carried forward rather
 than reinterpreted. Two citation errors are corrected in the process.
 One is this review's: the version-pinning criterion is at
-`engineering-plan.md:2747`, and the line this review first named was
+`engineering-plan.md:2753`, and the line this review first named was
 an MCP configuration bullet a few lines above it. A line-number
 citation into the plan is correct only until the plan is next edited,
 which is why every citation in this corpus is now recorded in
@@ -1236,8 +1281,8 @@ under the conflict it settles.
     Milestone 5 was an off-by-one against a list in which 5 is the
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2501` against
-    `model-gateway.md:1795` and `milestone-map.md:917`. The map
+    Milestone 3.** `engineering-plan.md:2507` against
+    `model-gateway.md:1795` and `milestone-map.md:1036`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1246,7 +1291,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3349` requires a test the harness's case set
+    `engineering-plan.md:3411` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

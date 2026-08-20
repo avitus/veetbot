@@ -237,6 +237,7 @@ async def test_error_code_vocabulary_is_closed(tmp_path: Path) -> None:
         "sandbox_execution_error",
         "artifact_storage_error",
         "concurrency_conflict",
+        "schedule_validation_error",
         "malformed_request",
         "unsupported_media_type",
         "payload_too_large",
@@ -329,6 +330,7 @@ def test_error_status_map_is_total_over_the_public_taxonomy() -> None:
         domain_errors.SandboxExecutionError,
         domain_errors.ArtifactStorageError,
         domain_errors.ConcurrencyConflict,
+        domain_errors.ScheduleValidationError,
     }
     assert public_types <= set(ERROR_STATUS_MAP)
     assert INTERNAL_ONLY_ERROR_TYPES.isdisjoint(ERROR_STATUS_MAP)
@@ -385,7 +387,7 @@ async def test_every_route_declares_exactly_one_scope_except_health(tmp_path: Pa
             composition.readiness_probe,
         )
     routes = [route for route in app.routes if isinstance(route, APIRoute)]
-    assert len(routes) == 17
+    assert len(routes) == 31
     for route in routes:
         declared = (route.openapi_extra or {}).get("required_scope")
         if route.path in {"/health/live", "/health/ready"}:

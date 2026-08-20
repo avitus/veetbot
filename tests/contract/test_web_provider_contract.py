@@ -18,7 +18,7 @@ from agent_core.ports.web import WebProvider
 ProviderFactory = Callable[[httpx.AsyncClient], WebProvider]
 
 
-def _provider_factories() -> tuple[tuple[str, ProviderFactory], ...]:
+def provider_factories() -> tuple[tuple[str, ProviderFactory], ...]:
     credentials = MappingCredentialResolver(
         {
             "tavily": "synthetic-tavily-credential",
@@ -37,7 +37,7 @@ def _provider_factories() -> tuple[tuple[str, ProviderFactory], ...]:
     )
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_search_contract(
     provider_name: str,
     factory: ProviderFactory,
@@ -118,7 +118,7 @@ async def test_web_provider_search_contract(
         }
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_fetch_contract(
     provider_name: str,
     factory: ProviderFactory,
@@ -175,7 +175,7 @@ async def test_web_provider_fetch_contract(
         }
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_never_exposes_upstream_error_text(
     provider_name: str,
     factory: ProviderFactory,
@@ -195,7 +195,7 @@ async def test_web_provider_never_exposes_upstream_error_text(
     assert raised.value.retryable is True
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_rejected_credential_is_a_stable_auth_failure(
     provider_name: str,
     factory: ProviderFactory,
@@ -214,7 +214,7 @@ async def test_web_provider_rejected_credential_is_a_stable_auth_failure(
     assert raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_bounds_oversized_responses(
     provider_name: str,
     factory: ProviderFactory,
@@ -234,7 +234,7 @@ async def test_web_provider_bounds_oversized_responses(
     assert raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_normalizes_permanent_rejections(
     provider_name: str,
     factory: ProviderFactory,
@@ -253,7 +253,7 @@ async def test_web_provider_normalizes_permanent_rejections(
     assert raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_normalizes_invalid_success_output(
     provider_name: str,
     factory: ProviderFactory,
@@ -275,7 +275,7 @@ async def test_web_provider_normalizes_invalid_success_output(
     assert raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_normalizes_transport_failures(
     provider_name: str,
     factory: ProviderFactory,
@@ -293,7 +293,7 @@ async def test_web_provider_normalizes_transport_failures(
     assert raised.value.retryable is True
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_maps_exclude_domains_and_every_recency(
     provider_name: str,
     factory: ProviderFactory,
@@ -332,7 +332,7 @@ async def test_web_provider_maps_exclude_domains_and_every_recency(
         assert [body["tbs"] for body in recency_values] == ["qdr:d", "qdr:w", "qdr:m", "qdr:y"]
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_rejects_unsuccessful_success_shaped_bodies(
     provider_name: str,
     factory: ProviderFactory,
@@ -365,7 +365,7 @@ async def test_web_provider_rejects_unsuccessful_success_shaped_bodies(
             assert fetch_raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_rejects_result_rows_that_fail_domain_validation(
     provider_name: str,
     factory: ProviderFactory,
@@ -389,7 +389,7 @@ async def test_web_provider_rejects_result_rows_that_fail_domain_validation(
     assert raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 @pytest.mark.parametrize(
     ("status", "reason_code", "retryable"),
     [
@@ -422,7 +422,7 @@ async def test_web_provider_status_taxonomy_is_stable(
     assert "upstream-private-diagnostic" not in str(raised.value)
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 @pytest.mark.parametrize("body", [b"not-json", b"[1,2]"])
 async def test_web_provider_rejects_undecodable_or_non_object_bodies(
     provider_name: str,
@@ -443,7 +443,7 @@ async def test_web_provider_rejects_undecodable_or_non_object_bodies(
     assert raised.value.retryable is False
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_defaults_and_truncates_result_fields(
     provider_name: str,
     factory: ProviderFactory,
@@ -474,7 +474,7 @@ async def test_web_provider_defaults_and_truncates_result_fields(
     assert results[1].title == "Untitled result"
 
 
-@pytest.mark.parametrize(("provider_name", "factory"), _provider_factories())
+@pytest.mark.parametrize(("provider_name", "factory"), provider_factories())
 async def test_web_provider_bounds_fetched_page_content(
     provider_name: str,
     factory: ProviderFactory,

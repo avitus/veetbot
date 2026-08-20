@@ -13,6 +13,8 @@ from typing import Any
 
 import yaml
 
+from agent_core.domain.security import SECRET_RULES
+
 
 @dataclass(frozen=True, slots=True)
 class Finding:
@@ -26,16 +28,6 @@ class Finding:
         return f"{self.path}:{self.line}: {self.rule}"
 
 
-SECRET_RULES: dict[str, re.Pattern[str]] = {
-    "provider_key": re.compile(r"\b(?:sk-ant-|sk-)[A-Za-z0-9_-]{12,}"),
-    "private_key": re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----"),
-    "bearer_literal": re.compile(r"Authorization\s*:\s*Bearer\s+[^\s<>{}\[\]]+", re.IGNORECASE),
-    "dsn_password": re.compile(r"[a-z][a-z0-9+.-]*://[^\s:/]+:[^\s@/]+@", re.IGNORECASE),
-    "assigned_secret": re.compile(
-        r"(?i)\b(?:[A-Z0-9_]*(?:secret|token|password|api_?key)[A-Z0-9_]*)\s*=\s*"
-        r"[\"'][^\"'\n]{13,}[\"']"
-    ),
-}
 PROVIDER_SDK_ROOTS = frozenset({"anthropic", "openai"})
 MCP_SDK_ROOTS = frozenset({"mcp"})
 MODULE_SCOPE_RESOURCE_FACTORIES = frozenset(
@@ -276,6 +268,19 @@ def architecture_errors(root: Path) -> list[str]:
         relative = path.relative_to(root)
         bindings = _import_bindings(module, path, tree)
         imported_roots = {imported.split(".", 1)[0] for imported in imports}
+        in_control_plane = module == "agent_core.browser_control_plane" or module.startswith(
+            "agent_core.browser_control_plane."
+        )
+        if not in_control_plane:
+            for imported in imports:
+                imports_control_plane = imported == "agent_core.browser_control_plane" or (
+                    imported.startswith("agent_core.browser_control_plane.")
+                )
+                if imports_control_plane:
+                    errors.append(
+                        f"{relative}: isolated profile service crosses process boundary via "
+                        f"{imported}"
+                    )
         if module.startswith("agent_core.domain"):
             for imported in imports:
                 top = imported.split(".")[0]
@@ -375,7 +380,10 @@ def architecture_errors(root: Path) -> list[str]:
             for mcp_sdk in sorted(imported_roots & MCP_SDK_ROOTS):
                 errors.append(f"{relative}: MCP SDK {mcp_sdk} crosses adapter boundary")
 
-        if module != "agent_core.bootstrap":
+        if module not in {
+            "agent_core.bootstrap",
+            "agent_core.browser_control_plane.main",
+        }:
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue

@@ -1,0 +1,43 @@
+# Canonical gate registry entries for provider-neutral public-web access.
+- id: gate.web.provider_contract
+  milestone: 10
+  kind: case
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Provider contract** — Tavily and Firecrawl both pass the complete shared search-and-fetch contract and normalize to the same domain shapes."
+  check: tests/gates/test_web_m10.py::test_provider_contract
+- id: gate.web.capability_routing
+  milestone: 10
+  kind: case
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Capability routing** — the recommended hybrid and both single-provider configurations bind the requested capabilities without changing either agent-visible tool schema."
+  check: tests/gates/test_web_m10.py::test_capability_routing
+- id: gate.web.default_off
+  milestone: 10
+  kind: case
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Default-off registration** — a disabled capability is absent from both the registry and the advertised default tool set."
+  check: tests/gates/test_web_m10.py::test_default_off_registration
+- id: gate.web.context_advertisement
+  milestone: 10
+  kind: case
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Context advertisement** — a web-enabled run advertises the selected web tools directly and does not invent or advertise an unavailable skill loader."
+  check: tests/gates/test_web_m10.py::test_context_advertisement
+- id: gate.web.invocation_trust
+  milestone: 10
+  kind: case
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Invocation trust** — a complete web invocation passes validation and policy, persists its invocation, and returns EXTERNAL_UNTRUSTED content to the next model step."
+  check: tests/gates/test_web_m10.py::test_invocation_trust
+- id: gate.web.failure_boundary
+  milestone: 10
+  kind: case
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Failure and secret boundary** — credential, rate-limit, transport, rejection, and invalid-output failures are stable and expose no credential or upstream text."
+  check: tests/gates/test_web_m10.py::test_failure_and_secret_boundary
+- id: gate.web.fetch_confinement
+  milestone: 10
+  kind: property
+  spec: docs/plan/web-access.md#hard-gates
+  statement: "**Fetch confinement and bounds** — non-public and non-HTTPS URLs fail before dispatch, provider responses are hard-bounded, and tool output stays within its byte ceiling."
+  check: tests/gates/test_web_m10.py::test_fetch_confinement_and_bounds

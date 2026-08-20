@@ -174,7 +174,7 @@ they do not look like tests.
 
 ### Where the declared gates land
 
-Fourteen specs, the milestone map, and one engineering-plan section declare
+Seventeen specs, the milestone map, and one engineering-plan section declare
 gates, and they declare them in prose. Sorting them by kind is what tells an
 implementer which harness facility each one needs, and it is the first
 concrete deliverable of this document.
@@ -194,21 +194,24 @@ restates a gate another spec owns.
 | Policy and approvals | 7 | 3 | 1 | 2 | 13 |
 | Event log and persistence | 9 | 2 | 0 | 3 | 14 |
 | Context engine | 2 | 3 | 1 | 0 | 6 |
-| Memory formation | 7 | 1 | 2 | 0 | 10 |
+| Memory formation | 11 | 2 | 2 | 1 | 16 |
 | Memory retrieval | 6 | 2 | 1 | 0 | 9 |
 | Evaluation harness | 3 | 0 | 0 | 8 | 11 |
 | HTTP API and streaming | 7 | 0 | 0 | 3 | 10 |
 | Sandbox and artifacts | 8 | 1 | 0 | 4 | 13 |
 | Skills | 12 | 1 | 1 | 2 | 16 |
 | Knowledge documents | 8 | 3 | 1 | 0 | 12 |
+| Web access | 6 | 1 | 0 | 0 | 7 |
+| Authenticated browser automation | 8 | 2 | 0 | 0 | 10 |
+| Scheduled runs | 16 | 4 | 1 | 2 | 23 |
 | Engineering plan | 0 | 0 | 0 | 2 | 2 |
 | Milestone map | 0 | 0 | 0 | 7 | 7 |
-| **Total** | **99** | **23** | **9** | **46** | **177** |
+| **Total** | **133** | **31** | **10** | **49** | **223** |
 
 The counts are the useful output, not the individual assignments:
-**seventy-eight of the hundred and seventy-seven owned registry entries are not case
+**ninety of the two hundred and twenty-three owned registry entries are not case
 gates**, and a harness that only runs cases would report a green build with
-those seventy-eight of the plan's stated invariants unchecked. Two of the
+those ninety of the plan's stated invariants unchecked. Two of the
 four kinds — property and structural — need no runtime at all and can be
 built in Milestone 0, before there is an agent to evaluate.
 

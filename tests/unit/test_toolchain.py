@@ -125,7 +125,7 @@ def test_apple_target_declares_phone_and_tablet_orientations() -> None:
     assert project.count(tablet) == 2
 
 
-def test_production_deployment_assets_preserve_process_boundaries() -> None:
+def test_production_environment_preserves_process_boundaries() -> None:
     deploy = ROOT / "deploy"
     environment = (deploy / "veetbot.env.example").read_text(encoding="utf-8")
     assert "DEPLOYMENT_MODE=production" in environment
@@ -139,6 +139,10 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "PGSSLMODE=disable" in environment
     assert "WEB_SEARCH_PROVIDER=disabled" in environment
     assert "WEB_FETCH_PROVIDER=disabled" in environment
+    assert "BROWSER_PROVIDER=disabled" in environment
+    assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
+    assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
+    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" in environment
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
     assert "FIRECRAWL_API_KEY=" in template_lines
@@ -149,27 +153,105 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     )
     assert set(configured_scopes) <= PLATFORM_SCOPES
 
+
+def test_production_compose_preserves_browser_profile_isolation() -> None:
+    deploy = ROOT / "deploy"
     production_compose = yaml.safe_load(
         (deploy / "docker-compose.production.yml").read_text(encoding="utf-8")
     )
-    assert production_compose == {"services": {"postgres": {"restart": "unless-stopped"}}}
+    profile_service = production_compose["services"]["browser-profile-service"]
+    assert profile_service["user"] == "65532:65532"
+    assert profile_service["read_only"] is True
+    assert profile_service["cap_drop"] == ["ALL"]
+    assert "no-new-privileges:true" in profile_service["security_opt"]
+    assert profile_service["networks"] == [
+        "browser-profile-private",
+        "browser-profile-egress",
+    ]
+    assert profile_service["ports"] == ["127.0.0.1:${BROWSER_PROFILE_PORT:-8081}:8080"]
+    assert profile_service["pids_limit"] == 256
+    assert profile_service["mem_limit"] == "1g"
+    assert profile_service["cpus"] == 2.0
+    assert profile_service["shm_size"] == "256m"
+    assert profile_service["environment"] == {
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": "/run/secrets/browser-profile-service-auth",
+        "BROWSER_PROFILE_SESSION_SECRET_FILE": "/run/secrets/browser-profile-session-secret",
+        "BROWSER_PROFILE_KEY_DIR": "/run/secrets/browser-profile-keys",
+        "BROWSER_PROFILE_MATERIAL_ROOT": "/var/lib/veetbot/browser-profiles",
+        "BROWSER_PROFILE_BIND_HOST": "0.0.0.0",  # noqa: S104 - boundary fixture
+        "BROWSER_PROFILE_BIND_PORT": "8080",
+        "BROWSER_PROFILE_CEREMONY_BASE_URL": "${BROWSER_PROFILE_CEREMONY_BASE_URL}",
+    }
+    mounts = profile_service["volumes"]
+    assert mounts == [
+        "${BROWSER_PROFILE_SERVICE_AUTH_FILE}:/run/secrets/browser-profile-service-auth:ro",
+        "${BROWSER_PROFILE_SESSION_SECRET_FILE}:/run/secrets/browser-profile-session-secret:ro",
+        "${BROWSER_PROFILE_KEY_DIR}:/run/secrets/browser-profile-keys:ro",
+        "browser-profile-material:/var/lib/veetbot/browser-profiles",
+    ]
+    assert not any("docker.sock" in mount for mount in mounts)
+    assert "postgres" not in profile_service.get("depends_on", {})
+    assert production_compose["networks"]["browser-profile-private"]["internal"] is True
+    assert production_compose["networks"]["browser-profile-egress"]["internal"] is False
+    assert "browser-profile-material" in production_compose["volumes"]
 
+
+def test_browser_profile_dockerfile_preserves_process_isolation() -> None:
+    deploy = ROOT / "deploy"
+    profile_dockerfile = (deploy / "browser-profile-service.Dockerfile").read_text(encoding="utf-8")
+    assert "USER 65532:65532" in profile_dockerfile
+    assert 'ENTRYPOINT ["browser-profile-service"]' in profile_dockerfile
+    assert "execution/sandbox.Dockerfile" not in profile_dockerfile
+    assert "uv sync --frozen --no-dev" in profile_dockerfile
+    assert "pip install --no-cache-dir /opt/veetbot" not in profile_dockerfile
+    assert "chmod 0700 /var/lib/veetbot/browser-profiles" in profile_dockerfile
+    assert "PLAYWRIGHT_BROWSERS_PATH=/ms-playwright" in profile_dockerfile
+    assert "playwright install --with-deps chromium" in profile_dockerfile
+
+
+def test_systemd_units_preserve_role_boundaries() -> None:
+    deploy = ROOT / "deploy"
     units = deploy / "systemd"
     api = (units / "veetbot-api.service").read_text(encoding="utf-8")
     worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
+    async_worker = (units / "veetbot-async-worker.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
+    scheduler = (units / "veetbot-schedule.service").read_text(encoding="utf-8")
+    schedule_environment = (deploy / "veetbot-schedule.env.example").read_text(encoding="utf-8")
     assert "agent api" in api
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
-    assert "agent worker --role worker" in worker
+    assert "agent worker --role interactive" in worker
     assert "SupplementaryGroups=docker" in worker
+    assert "agent worker --role async" in async_worker
+    assert "SupplementaryGroups=docker" in async_worker
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
+    assert "agent worker --role schedule" in scheduler
+    assert "SupplementaryGroups=docker" not in scheduler
+    assert "ReadWritePaths=" not in scheduler
+    assert "EnvironmentFile=/etc/veetbot/veetbot-schedule.env" in scheduler
+    assert "EnvironmentFile=/etc/veetbot/veetbot.env" not in scheduler
+    assert "UnsetEnvironment=" not in scheduler
+    assert "DATABASE_URL=" in schedule_environment
+    assert "AGENT_SCHEDULE_WORKER_ENABLED=1" in schedule_environment
+    assert not {
+        "AUTH_TOKEN",
+        "VEETBOT_OPENAI_KEY",
+        "ANTHROPIC_API_KEY",
+        "TAVILY_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+    } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
     assert all(
-        "EnvironmentFile=/etc/veetbot/veetbot.env" in unit for unit in (api, worker, maintenance)
+        "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
+        for unit in (api, worker, async_worker, maintenance)
     )
     assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
 
+
+def test_release_script_preserves_release_boundaries() -> None:
+    deploy = ROOT / "deploy"
     release = (deploy / "app" / "release.sh").read_text(encoding="utf-8")
     assert "flock -w" in release
     assert '"$STAGE/.venv/bin/alembic" upgrade head' in release
@@ -178,10 +260,26 @@ def test_production_deployment_assets_preserve_process_boundaries() -> None:
     assert "systemctl enable --now" in release
     assert "VEETBOT_KEEP_RELEASES:-5" in release
     assert '--project-name "$COMPOSE_PROJECT_NAME"' in release
+    assert "browser-profile-service.Dockerfile" in release
+    assert 'up -d --wait --wait-timeout "$HEALTH_TIMEOUT_SECS"' in release
+    assert '[[ -f "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]]' in release
+    assert '[[ -f "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]]' in release
+    assert '[[ -d "$BROWSER_PROFILE_KEY_DIR" ]]' in release
+    assert '[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]]' in release
+    assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
+    assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
+    assert "veetbot-async-worker" in release
+    assert "veetbot-schedule" in release
 
+
+def test_nginx_configuration_preserves_public_process_boundaries() -> None:
+    deploy = ROOT / "deploy"
     nginx = (ROOT / "nginx" / "veetbot.conf").read_text(encoding="utf-8")
     assert "server_name api.veetbot.com" in nginx
     assert "proxy_pass http://127.0.0.1:8000" in nginx
+    assert "server_name browser.veetbot.com" in nginx
+    assert "proxy_pass http://127.0.0.1:8081" in nginx
+    assert "/etc/letsencrypt/live/browser.veetbot.com/fullchain.pem" in nginx
     assert "proxy_buffering off" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
