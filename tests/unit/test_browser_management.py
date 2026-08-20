@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 from types import TracebackType
@@ -389,3 +390,67 @@ async def test_active_authentication_ceremony_is_not_replayed_without_launch_cap
             PROFILE_ID,
             login_url="https://example.org/login",
         )
+
+
+async def test_concurrent_authentication_requests_admit_only_one_ceremony() -> None:
+    class BlockingAuthenticationControlPlane(FakeAuthenticationControlPlane):
+        def __init__(self) -> None:
+            super().__init__()
+            self.begin_calls = 0
+            self.first_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def begin_authentication(
+            self,
+            profile_id: UUID,
+            owner: Principal,
+            provider_ref: str,
+            *,
+            login_url: str,
+        ) -> BrowserAuthenticationView:
+            self.begin_calls += 1
+            self.first_started.set()
+            await self.release.wait()
+            return await super().begin_authentication(
+                profile_id,
+                owner,
+                provider_ref,
+                login_url=login_url,
+            )
+
+    uow = FakeUnitOfWorkFactory()
+    authentication = BlockingAuthenticationControlPlane()
+    service = BrowserProfileManagementService(
+        uow_factory=cast(BrowserUnitOfWorkFactory, uow),
+        lifecycle=InMemoryBrowserProfileControlPlane(),
+        authentications=authentication,
+        clock=FixedClock(NOW),
+        ids=SequenceIdFactory([PROFILE_ID]),
+    )
+    subject = owner("browser.profile.write")
+    await service.create(subject, ("https://example.org",))
+
+    first = asyncio.create_task(
+        service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )
+    )
+    await authentication.first_started.wait()
+    second = asyncio.create_task(
+        service.begin_authentication(
+            subject,
+            PROFILE_ID,
+            login_url="https://example.org/login",
+        )
+    )
+    await asyncio.sleep(0)
+    calls_before_release = authentication.begin_calls
+    authentication.release.set()
+    results = await asyncio.gather(first, second, return_exceptions=True)
+
+    assert calls_before_release == 1
+    assert authentication.begin_calls == 1
+    assert sum(isinstance(result, BrowserAuthenticationView) for result in results) == 1
+    assert sum(isinstance(result, ConflictError) for result in results) == 1

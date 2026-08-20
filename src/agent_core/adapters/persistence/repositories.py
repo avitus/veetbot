@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Protocol
@@ -1475,6 +1476,27 @@ class PostgresBrowserProfileRepository:
         if row is None:
             raise NotFoundError("browser profile not found")
         return _browser_profile_to_domain(row)
+
+    @asynccontextmanager
+    async def authentication_admission(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+    ) -> AsyncIterator[BrowserProfile]:
+        row = (
+            await self._session.scalars(
+                select(BrowserProfileRow)
+                .where(
+                    BrowserProfileRow.id == profile_id,
+                    BrowserProfileRow.tenant_id == principal.tenant_id,
+                    BrowserProfileRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("browser profile not found")
+        yield _browser_profile_to_domain(row)
 
     async def list(
         self,

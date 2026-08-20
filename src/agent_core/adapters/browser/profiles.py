@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from uuid import UUID
+from weakref import WeakValueDictionary
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
@@ -29,6 +33,9 @@ def _owned(profile: BrowserProfile, principal: Principal) -> bool:
 class InMemoryBrowserProfileRepository:
     def __init__(self) -> None:
         self._profiles: dict[UUID, BrowserProfile] = {}
+        self._authentication_locks: WeakValueDictionary[tuple[str, str, UUID], asyncio.Lock] = (
+            WeakValueDictionary()
+        )
 
     async def create(self, profile: BrowserProfile) -> BrowserProfile:
         if profile.id in self._profiles:
@@ -41,6 +48,20 @@ class InMemoryBrowserProfileRepository:
         if profile is None or not _owned(profile, principal):
             raise NotFoundError("browser profile not found")
         return _copy(profile)
+
+    @asynccontextmanager
+    async def authentication_admission(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+    ) -> AsyncIterator[BrowserProfile]:
+        key = (principal.tenant_id, principal.principal_id, profile_id)
+        lock = self._authentication_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._authentication_locks[key] = lock
+        async with lock:
+            yield await self.get(profile_id, principal)
 
     async def list(
         self,

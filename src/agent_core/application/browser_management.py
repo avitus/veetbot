@@ -273,54 +273,62 @@ class BrowserProfileManagementService:
         login_url: str,
     ) -> BrowserAuthenticationView:
         require_scope(principal, "browser.profile.write")
-        async with self._uow_factory() as uow:
-            profile = await uow.browser_profiles.get(profile_id, principal)
-            if (
-                profile.status in {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}
-                or profile.provider_ref is None
-            ):
-                raise ConflictError("browser profile cannot authenticate in its current state")
-            existing = await uow.browser_authentications.list(
-                principal,
-                profile_id=profile_id,
-            )
-            active = next(
-                (
-                    record
-                    for record in reversed(existing)
-                    if record.status
-                    not in {
-                        BrowserAuthenticationStatus.READY,
-                        BrowserAuthenticationStatus.EXPIRED,
-                        BrowserAuthenticationStatus.CANCELLED,
-                    }
-                    and record.expires_at > self._clock.now()
-                ),
-                None,
-            )
-            if active is not None:
-                raise ConflictError("browser profile already has an active authentication")
-        launched = await self._authentications.begin_authentication(
-            profile_id,
-            principal,
-            profile.provider_ref,
-            login_url=login_url,
-        )
-        now = self._clock.now()
-        record = BrowserAuthenticationRecord(
-            id=launched.id,
-            tenant_id=principal.tenant_id,
-            principal_id=principal.principal_id,
-            profile_id=profile_id,
-            status=launched.status,
-            expires_at=launched.expires_at,
-            created_at=now,
-            updated_at=now,
-        )
+        launched: BrowserAuthenticationView | None = None
         try:
-            async with self._uow_factory() as uow:
+            async with (
+                self._uow_factory() as uow,
+                uow.browser_profiles.authentication_admission(
+                    profile_id,
+                    principal,
+                ) as profile,
+            ):
+                if (
+                    profile.status
+                    in {BrowserProfileStatus.PROVISIONING, BrowserProfileStatus.REVOKED}
+                    or profile.provider_ref is None
+                ):
+                    raise ConflictError("browser profile cannot authenticate in its current state")
+                existing = await uow.browser_authentications.list(
+                    principal,
+                    profile_id=profile_id,
+                )
+                active = next(
+                    (
+                        record
+                        for record in reversed(existing)
+                        if record.status
+                        not in {
+                            BrowserAuthenticationStatus.READY,
+                            BrowserAuthenticationStatus.EXPIRED,
+                            BrowserAuthenticationStatus.CANCELLED,
+                        }
+                        and record.expires_at > self._clock.now()
+                    ),
+                    None,
+                )
+                if active is not None:
+                    raise ConflictError("browser profile already has an active authentication")
+                launched = await self._authentications.begin_authentication(
+                    profile_id,
+                    principal,
+                    profile.provider_ref,
+                    login_url=login_url,
+                )
+                now = self._clock.now()
+                record = BrowserAuthenticationRecord(
+                    id=launched.id,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    profile_id=profile_id,
+                    status=launched.status,
+                    expires_at=launched.expires_at,
+                    created_at=now,
+                    updated_at=now,
+                )
                 await uow.browser_authentications.create(record)
         except Exception as original:
+            if launched is None:
+                raise
             try:
                 await self._authentications.cancel_authentication(launched.id, principal)
             except Exception as compensation:

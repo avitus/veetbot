@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -18,6 +19,14 @@ class BrowserProfileRepository(Protocol):
     async def create(self, profile: BrowserProfile) -> BrowserProfile: ...
 
     async def get(self, profile_id: UUID, principal: Principal) -> BrowserProfile: ...
+
+    def authentication_admission(
+        self,
+        profile_id: UUID,
+        principal: Principal,
+    ) -> AbstractAsyncContextManager[BrowserProfile]:
+        """Lock one owned profile until authentication admission finishes."""
+        ...
 
     async def list(
         self,
