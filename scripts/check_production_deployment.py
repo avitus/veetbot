@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 
 from agent_core.config import Settings, load_config_document, load_settings
 
@@ -41,7 +42,9 @@ def _browser_credential_failures(environment: Mapping[str, str]) -> list[str]:
 
     credential = environment.get("BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE", "").strip()
     service_auth = environment.get("BROWSER_PROFILE_SERVICE_AUTH_FILE", "").strip()
-    if credential and service_auth and credential == service_auth:
+    # Compare effective file identities: `..` aliases and symlinked parents
+    # reach the same file the loaders would open, so they conflict equally.
+    if credential and service_auth and Path(credential).resolve() == Path(service_auth).resolve():
         return [
             "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE and "
             "BROWSER_PROFILE_SERVICE_AUTH_FILE must name different files: the "

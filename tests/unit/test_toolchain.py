@@ -188,6 +188,30 @@ def test_deployment_validation_rejects_shared_browser_credential_path() -> None:
     assert production_check._browser_credential_failures({}) == []
 
 
+def test_deployment_validation_rejects_aliased_browser_credential_paths(
+    tmp_path: Path,
+) -> None:
+    # A `..` alias of the same file must be rejected like the literal path.
+    dotted = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": (
+            "/etc/veetbot/secrets/../secrets/browser-profile-service-auth"
+        ),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": "/etc/veetbot/secrets/browser-profile-service-auth",
+    }
+    assert production_check._browser_credential_failures(dotted)
+
+    # A symlinked parent directory reaching the same file must be rejected.
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "auth").write_text("credential\n", encoding="utf-8")
+    (tmp_path / "alias").symlink_to(real, target_is_directory=True)
+    symlinked = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": str(tmp_path / "alias" / "auth"),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": str(real / "auth"),
+    }
+    assert production_check._browser_credential_failures(symlinked)
+
+
 def test_production_compose_preserves_browser_profile_isolation() -> None:
     deploy = ROOT / "deploy"
     production_compose = yaml.safe_load(
