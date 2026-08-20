@@ -17,14 +17,10 @@ struct VeetbotApp: App {
     }
 
     var body: some Scene {
+        // AppKit derives window and split-view autosave keys from the content type.
+        // Keep WindowGroup's child as a stable name rather than an inline modifier chain.
         WindowGroup {
-            RootView(model: model)
-                .environmentObject(appearance)
-                .appTypography(appearance)
-                .tint(AppTheme.turquoise)
-#if os(macOS)
-                .frame(minWidth: 780, minHeight: 560)
-#endif
+            VeetbotSceneRoot(model: model, appearance: appearance)
         }
     }
 }
