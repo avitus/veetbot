@@ -105,6 +105,9 @@ jobs:
       - run:
           name: Native Apple client tests
           command: make test-apple
+      - run:
+          name: iPhone conversation navigation UI test
+          command: make test-apple-ui
 
   live:
     docker:

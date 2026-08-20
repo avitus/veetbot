@@ -95,6 +95,7 @@ def test_required_make_targets_exist() -> None:
         "test-integration",
         "test-live",
         "test-apple",
+        "test-apple-ui",
         "test-deploy",
         "production-check",
         "client-build",
@@ -419,6 +420,7 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make migrate test-integration" in commands["integration"]
     assert "make test-sandbox" in commands["sandbox"]
     assert "make test-apple" in commands["apple"]
+    assert "make test-apple-ui" in commands["apple"]
     assert "make test-live" in commands["live"]
     assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
     package_workspace = next(

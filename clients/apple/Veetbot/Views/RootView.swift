@@ -6,7 +6,6 @@ import AppKit
 
 public struct RootView: View {
     @ObservedObject var model: ChatViewModel
-    @State private var sidebarSelection: SessionSidebarDestination?
     #if !os(macOS)
     @State private var showingSettings = false
     #endif
@@ -74,7 +73,6 @@ public struct RootView: View {
             NavigationSplitView {
                 SessionSidebar(
                     model: model,
-                    selection: $sidebarSelection,
                     openSettings: presentSettings
                 )
             } detail: {
@@ -84,7 +82,6 @@ public struct RootView: View {
             NavigationView {
                 SessionSidebar(
                     model: model,
-                    selection: $sidebarSelection,
                     openSettings: presentSettings
                 )
                 ChatView(model: model)
@@ -112,7 +109,6 @@ enum SessionSidebarDestination: Hashable, Sendable {
 
 private struct SessionSidebar: View {
     @ObservedObject var model: ChatViewModel
-    @Binding var selection: SessionSidebarDestination?
     let openSettings: () -> Void
     @State private var deletionCandidate: SessionHistoryEntry?
     @State private var newConversationDestination =
@@ -161,19 +157,24 @@ private struct SessionSidebar: View {
     }
 
     @available(iOS 16.0, macOS 13.0, *)
+    @ViewBuilder
     private var modernList: some View {
-        List(selection: $selection) {
-            NavigationLink(value: newConversationDestination) {
+        #if os(macOS)
+        List {
+            Button {
+                activate(newConversationDestination)
+            } label: {
                 newConversationLabel
             }
+            .buttonStyle(.plain)
             .listRowBackground(AppTheme.brandGradient)
 
             Section("History") {
                 ForEach(model.history) { entry in
                     HStack(spacing: 8) {
-                        NavigationLink(
-                            value: SessionSidebarDestination.session(entry.sessionID)
-                        ) {
+                        Button {
+                            activate(.session(entry.sessionID))
+                        } label: {
                             historyLabel(entry)
                         }
                         .buttonStyle(.plain)
@@ -188,29 +189,59 @@ private struct SessionSidebar: View {
                 }
             }
         }
-        .onChange(of: selection) { destination in
-            guard let destination else { return }
-            activate(destination)
-        }
-    }
-
-    private var legacyList: some View {
+        #else
         List {
             NavigationLink {
-                LegacyChatDestination(model: model, entry: nil)
+                ChatDestination(model: model, entry: nil)
             } label: {
                 newConversationLabel
             }
+            .accessibilityIdentifier("sidebar.new-conversation")
             .listRowBackground(AppTheme.brandGradient)
 
             Section("History") {
                 ForEach(model.history) { entry in
                     HStack(spacing: 8) {
                         NavigationLink {
-                            LegacyChatDestination(model: model, entry: entry)
+                            ChatDestination(model: model, entry: entry)
                         } label: {
                             historyLabel(entry)
                         }
+                        .accessibilityIdentifier("sidebar.session.\(entry.sessionID.uuidString)")
+                        .buttonStyle(.plain)
+
+                        deleteButton(for: entry)
+                    }
+                    .listRowBackground(
+                        entry.sessionID == model.selectedSessionID
+                            ? AppTheme.turquoise.opacity(0.15)
+                            : Color.clear
+                    )
+                }
+            }
+        }
+        #endif
+    }
+
+    private var legacyList: some View {
+        List {
+            NavigationLink {
+                ChatDestination(model: model, entry: nil)
+            } label: {
+                newConversationLabel
+            }
+            .accessibilityIdentifier("sidebar.new-conversation")
+            .listRowBackground(AppTheme.brandGradient)
+
+            Section("History") {
+                ForEach(model.history) { entry in
+                    HStack(spacing: 8) {
+                        NavigationLink {
+                            ChatDestination(model: model, entry: entry)
+                        } label: {
+                            historyLabel(entry)
+                        }
+                        .accessibilityIdentifier("sidebar.session.\(entry.sessionID.uuidString)")
                         .buttonStyle(.plain)
 
                         deleteButton(for: entry)
@@ -273,7 +304,7 @@ private struct SessionSidebar: View {
     }
 }
 
-private struct LegacyChatDestination: View {
+private struct ChatDestination: View {
     @ObservedObject var model: ChatViewModel
     let entry: SessionHistoryEntry?
     @State private var hasActivated = false

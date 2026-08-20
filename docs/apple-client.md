@@ -18,12 +18,16 @@ compilation and transport/reducer tests:
 ```bash
 swift build --package-path clients/apple
 make test-apple
+make test-apple-ui
 ```
 
 `make test-apple` requires full Xcode and guarantees that Swift Testing suites
 execute; it fails instead of accepting the Command Line Tools behavior that can
-compile the bundle without running it. The same target runs in the required
-CircleCI Apple job.
+compile the bundle without running it. `make test-apple-ui` also requires full
+Xcode, selects an available iPhone simulator, and launches a debug-only,
+in-process fixture to verify that historical and new-conversation rows open the
+chat surface and that a selected transcript renders. Both targets run in the
+required CircleCI Apple job.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
 Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
@@ -98,6 +102,13 @@ pruning also clears the process-local artifact cache.
 Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
+
+On iPhone, sidebar rows push an activating chat destination before selecting a
+historical session or resetting to a new conversation. On macOS, where the
+split-view detail is already visible, those rows activate the detail directly.
+This platform-specific navigation prevents a compact-width tap from mutating an
+unbound sidebar value and prevents a macOS selection from leaving the visible
+detail stale.
 
 Deleting a row is an irreversible `Delete Everywhere` operation. The client
 first asks the server to delete the session and its associated conversation

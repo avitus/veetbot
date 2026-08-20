@@ -106,6 +106,7 @@ public struct ChatView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.selectedSessionID == nil ? "New conversation" : "Conversation")
                     .appFont(.headline)
+                    .accessibilityIdentifier("chat.heading")
                 if let status = state.runStatus {
                     Text(status.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
                         .appFont(.caption)
@@ -135,6 +136,7 @@ public struct ChatView: View {
                         .stroke(AppTheme.turquoise.opacity(0.42))
                 )
                 .accessibilityLabel("Message")
+                .accessibilityIdentifier("chat.composer")
             Button(action: submitDraft) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.title2)
