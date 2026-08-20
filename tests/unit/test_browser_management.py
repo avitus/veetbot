@@ -26,6 +26,7 @@ from agent_core.application.browser_management import (
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
+    ALLOWED_BROWSER_PROFILE_TRANSITIONS,
     BrowserActionKind,
     BrowserAuthenticationStatus,
     BrowserAuthenticationView,
@@ -116,6 +117,10 @@ class FakeAuthenticationControlPlane:
 
 def owner(*scopes: str) -> Principal:
     return principal().model_copy(update={"scopes": set(scopes)})
+
+
+def test_browser_profile_transition_table_is_total() -> None:
+    assert set(ALLOWED_BROWSER_PROFILE_TRANSITIONS) == set(BrowserProfileStatus)
 
 
 async def test_browser_creation_requires_exact_write_scopes() -> None:

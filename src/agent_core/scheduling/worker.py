@@ -115,7 +115,14 @@ class ScheduleWorker:
                 logger.exception("schedule worker scan failed")
             if self._stopping:
                 break
-            wait_seconds = await self.wait_seconds()
+            try:
+                wait_seconds = await self.wait_seconds()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("schedule worker wait calculation failed; using poll fallback")
+                await self._wait_or_stop(self._clock.sleep(self._fallback_poll))
+                continue
             if self._wait_for_wakeup is None:
                 await self._wait_or_stop(self._clock.sleep(wait_seconds))
                 continue

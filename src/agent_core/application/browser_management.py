@@ -404,9 +404,8 @@ class BrowserProfileManagementService:
         if target is None:
             return
         profile = await profiles.get(authentication.profile_id, principal)
-        if (
-            profile.status is target
-            or target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS[profile.status]
+        if profile.status is target or target not in ALLOWED_BROWSER_PROFILE_TRANSITIONS.get(
+            profile.status, frozenset()
         ):
             return
         await profiles.transition(

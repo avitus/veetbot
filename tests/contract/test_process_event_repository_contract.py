@@ -30,7 +30,7 @@ async def assert_process_event_repository_is_append_only_and_derivation_idempote
     assert stored is not None
     assert stored.payload["policy_version"] == "default@profile+hline"
     assert await repository.get_by_derivation("missing") is None
-    assert event in await repository.list("policy.profile.loaded")
+    assert await repository.list("policy.profile.loaded") == [event]
     with pytest.raises(ConflictError):
         await repository.append(event.model_copy(update={"payload": {"changed": True}}))
 

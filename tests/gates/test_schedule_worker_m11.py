@@ -128,6 +128,38 @@ async def test_schedule_worker_cancellation_cleans_up_child_waits() -> None:
     assert child_finished.is_set()
 
 
+async def test_schedule_worker_uses_poll_fallback_when_wait_calculation_fails() -> None:
+    slept: list[float] = []
+
+    async with build(settings=memory_settings(), storage="memory") as composition:
+        async with composition.uow_factory() as uow:
+
+            async def fail_next_fire_at():  # type: ignore[no-untyped-def]
+                raise RuntimeError("temporary schedule read failure")
+
+            uow.schedules.next_fire_at = fail_next_fire_at  # type: ignore[method-assign]
+
+        worker = ScheduleWorker(
+            uow_factory=composition.uow_factory,
+            materialize=lambda _schedule_id: _no_occurrence(),
+            clock=composition.clock,
+            scan_batch=1,
+            fallback_poll_seconds=30,
+            admission_backoff_seconds=5,
+        )
+        original_sleep = composition.clock.sleep
+
+        async def stop_after_sleep(seconds: float) -> None:
+            slept.append(seconds)
+            worker.stop()
+            await original_sleep(0)
+
+        composition.clock.sleep = stop_after_sleep  # type: ignore[method-assign]
+        await worker.run_forever()
+
+    assert slept == [30]
+
+
 async def _no_occurrence() -> ScheduleOccurrence | None:
     return None
 

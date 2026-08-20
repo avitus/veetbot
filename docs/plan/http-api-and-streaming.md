@@ -443,7 +443,7 @@ governs. There is no `skill.read`: nothing reads skills over the API in
 `skill.write` is not the only such scope, and the rest arrive a milestone
 earlier than this document does.
 [policy-and-approvals.md](policy-and-approvals.md) enumerates the whole
-closed vocabulary — these sixteen plus the six that
+closed vocabulary — these fifteen plus the seven that
 `ToolSpec.required_scopes` carries — states the grammar that lets an MCP
 server's operator-configured scopes exist outside a closed list, and
 specifies the subset test the pipeline runs. Nothing there changes what a
