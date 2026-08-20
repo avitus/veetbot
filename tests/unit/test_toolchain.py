@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import re
 import socket
 import subprocess
 import tomllib
@@ -143,6 +144,18 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" in environment
+    # The container requires the service-auth file to be owned by uid 65532,
+    # while the agent units read the control-plane credential as the veetbot
+    # user; both are mode 0600, so one file cannot serve both readers.
+    example_values = dict(
+        line.split("=", 1)
+        for line in environment.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert (
+        example_values["BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE"]
+        != example_values["BROWSER_PROFILE_SERVICE_AUTH_FILE"]
+    )
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
     assert "FIRECRAWL_API_KEY=" in template_lines
@@ -943,3 +956,34 @@ def test_required_files_include_the_status_split_surfaces(
     check_docs.check_required_files()
     assert "required file missing: docs/status/verification-history.yaml" in check_docs.errors
     assert "required file missing: docs/status/corpus-audit-log.md" in check_docs.errors
+
+
+def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
+    contract = ROOT / "deploy" / "sudoers" / "veetbot-deploy"
+    assert contract.is_file(), "deploy/sudoers/veetbot-deploy is the deploy account's sudo contract"
+
+    rules = [
+        line.strip()
+        for line in contract.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert rules
+    rule_pattern = re.compile(r"^\S+ ALL=\(root\) NOPASSWD: (/\S+)")
+    rule_binaries = set()
+    for rule in rules:
+        match = rule_pattern.match(rule)
+        assert match, f"rule must be root-only NOPASSWD with an absolute command path: {rule}"
+        rule_binaries.add(Path(match.group(1)).name)
+
+    used = set()
+    for script in ("deploy/app/release.sh", "deploy/nginx/deploy.sh"):
+        used.update(
+            re.findall(
+                r"\bsudo\s+([a-z][a-z0-9_.-]*)",
+                (ROOT / script).read_text(encoding="utf-8"),
+            )
+        )
+    assert used, "the contract exists because the deploy scripts invoke sudo"
+    assert used <= rule_binaries, (
+        f"sudo commands without a contract rule: {sorted(used - rule_binaries)}"
+    )
