@@ -17,8 +17,24 @@ SYSTEMCTL_FAIL_MARKER="$TEST_ROOT/systemctl-failed"
 INSTALL_FAIL_MARKER="$TEST_ROOT/install-failed"
 SYMLINK_FAIL_MARKER="$TEST_ROOT/symlink-failed"
 SOURCE_CONFIG="$TEST_ROOT/candidate.conf"
-mkdir -p "$BIN_DIR" "$DEPLOY_ROOT/shared" "$(dirname "$AVAILABLE")" "$(dirname "$ENABLED")"
+DOCS_ROOT="$DEPLOY_ROOT/docs"
+DOCS_SOURCE="$TEST_ROOT/docs-source"
+DOCS_ARCHIVE="$TEST_ROOT/veetbot-docs.tar.gz"
+DOCS_CHECKSUM="$DOCS_ARCHIVE.sha256"
+mkdir -p \
+  "$BIN_DIR" \
+  "$DEPLOY_ROOT/shared" \
+  "$DOCS_SOURCE" \
+  "$(dirname "$AVAILABLE")" \
+  "$(dirname "$ENABLED")"
 : >"$LOG_FILE"
+printf '<h1>Veetbot documentation</h1>\n' >"$DOCS_SOURCE/index.html"
+printf '20260810-152233-abcdef0\n' >"$DOCS_SOURCE/release.txt"
+tar -czf "$DOCS_ARCHIVE" -C "$DOCS_SOURCE" .
+(
+  cd "$(dirname "$DOCS_ARCHIVE")"
+  sha256sum "$(basename "$DOCS_ARCHIVE")" >"$(basename "$DOCS_CHECKSUM")"
+)
 
 write_stub() {
   local name="$1"
@@ -57,6 +73,14 @@ write_stub systemctl '
     exit 1
   fi
 '
+write_stub mv '
+  if [[ "${1:-}" == -Tf ]]; then
+    rm -f -- "$3"
+    /bin/mv -f "$2" "$3"
+  else
+    /bin/mv "$@"
+  fi
+'
 
 run_deploy() {
   PATH="$BIN_DIR:$PATH" \
@@ -64,12 +88,16 @@ run_deploy() {
   VEETBOT_NGINX_AVAILABLE="$AVAILABLE" \
   VEETBOT_NGINX_ENABLED="$ENABLED" \
   VEETBOT_NGINX_BACKUP_DIR="$BACKUPS" \
+  VEETBOT_DOCS_ROOT="$DOCS_ROOT" \
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_FAIL_MARKER="$FAIL_MARKER" \
   VEETBOT_TEST_SYSTEMCTL_FAIL_MARKER="$SYSTEMCTL_FAIL_MARKER" \
   VEETBOT_TEST_INSTALL_FAIL_MARKER="$INSTALL_FAIL_MARKER" \
   VEETBOT_TEST_SYMLINK_FAIL_MARKER="$SYMLINK_FAIL_MARKER" \
-    "$DEPLOY_SCRIPT" "${1:-$SOURCE_CONFIG}"
+    "$DEPLOY_SCRIPT" \
+      "${1:-$SOURCE_CONFIG}" \
+      "${2:-}" \
+      "${3:-}"
 }
 
 if run_deploy "$TEST_ROOT/missing.conf" >/dev/null 2>&1; then
@@ -88,11 +116,77 @@ mkdir -p "$DEPLOY_ROOT/releases/20260810-152233-abcdef0"
 printf 'VEETBOT_RELEASE_ID=20260810-152233-abcdef0\n' \
   >"$DEPLOY_ROOT/releases/20260810-152233-abcdef0/.release.env"
 ln -s "$DEPLOY_ROOT/releases/20260810-152233-abcdef0" "$DEPLOY_ROOT/current"
+VEETBOT_EXPECTED_RELEASE_ID=20260810-152233-abcdef0 run_deploy \
+  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+cmp -s \
+  "$DOCS_SOURCE/index.html" \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0/index.html"
+grep -Fqx \
+  '20260810-152233-abcdef0' \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0/release.txt"
+
 printf 'server { return 418; }\n' >"$SOURCE_CONFIG"
 VEETBOT_EXPECTED_RELEASE_ID=20260810-152244-bcdef01 run_deploy \
-  >"$TEST_ROOT/stale.out"
+  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$DOCS_CHECKSUM" >"$TEST_ROOT/stale.out"
 grep -Fq 'Skipping stale Nginx deployment' "$TEST_ROOT/stale.out"
 grep -Fq 'return 204' "$AVAILABLE"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
+next_release_id=20260810-152244-bcdef01
+mkdir -p "$DEPLOY_ROOT/releases/$next_release_id"
+printf 'VEETBOT_RELEASE_ID=%s\n' "$next_release_id" \
+  >"$DEPLOY_ROOT/releases/$next_release_id/.release.env"
+ln -sfn "$DEPLOY_ROOT/releases/$next_release_id" "$DEPLOY_ROOT/current"
+
+UNSAFE_DOCS_SOURCE="$TEST_ROOT/unsafe-docs-source"
+UNSAFE_DOCS_ARCHIVE="$TEST_ROOT/unsafe-docs.tar.gz"
+UNSAFE_DOCS_CHECKSUM="$UNSAFE_DOCS_ARCHIVE.sha256"
+mkdir -p "$UNSAFE_DOCS_SOURCE"
+printf '<h1>Unsafe documentation</h1>\n' >"$UNSAFE_DOCS_SOURCE/index.html"
+ln -s /etc/passwd "$UNSAFE_DOCS_SOURCE/external-link"
+tar -czf "$UNSAFE_DOCS_ARCHIVE" -C "$UNSAFE_DOCS_SOURCE" .
+(
+  cd "$(dirname "$UNSAFE_DOCS_ARCHIVE")"
+  sha256sum "$(basename "$UNSAFE_DOCS_ARCHIVE")" \
+    >"$(basename "$UNSAFE_DOCS_CHECKSUM")"
+)
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "$UNSAFE_DOCS_ARCHIVE" "$UNSAFE_DOCS_CHECKSUM" \
+  >/dev/null 2>&1; then
+  printf 'documentation archive with a symlink unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
+NEXT_DOCS_SOURCE="$TEST_ROOT/next-docs-source"
+NEXT_DOCS_ARCHIVE="$TEST_ROOT/next-docs.tar.gz"
+NEXT_DOCS_CHECKSUM="$NEXT_DOCS_ARCHIVE.sha256"
+mkdir -p "$NEXT_DOCS_SOURCE"
+printf '<h1>Next documentation</h1>\n' >"$NEXT_DOCS_SOURCE/index.html"
+printf '%s\n' "$next_release_id" >"$NEXT_DOCS_SOURCE/release.txt"
+tar -czf "$NEXT_DOCS_ARCHIVE" -C "$NEXT_DOCS_SOURCE" .
+(
+  cd "$(dirname "$NEXT_DOCS_ARCHIVE")"
+  sha256sum "$(basename "$NEXT_DOCS_ARCHIVE")" \
+    >"$(basename "$NEXT_DOCS_CHECKSUM")"
+)
+printf 'server { return 200; }\n' >"$AVAILABLE"
+printf 'server { return 503; }\n' >"$SOURCE_CONFIG"
+rm -f -- "$FAIL_MARKER"
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" \
+  VEETBOT_TEST_NGINX_FAIL_ONCE=1 run_deploy \
+    "$SOURCE_CONFIG" "$NEXT_DOCS_ARCHIVE" "$NEXT_DOCS_CHECKSUM" \
+    >/dev/null 2>&1; then
+  printf 'failed Nginx validation published documentation unexpectedly\n' >&2
+  exit 1
+fi
+grep -Fq 'return 200' "$AVAILABLE"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
 
 printf 'server { return 200; }\n' >"$AVAILABLE"
 printf 'server { return 503; }\n' >"$SOURCE_CONFIG"

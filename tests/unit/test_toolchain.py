@@ -351,16 +351,22 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     deploy = ROOT / "deploy"
     nginx = (ROOT / "nginx" / "veetbot.conf").read_text(encoding="utf-8")
     assert "server_name api.veetbot.com" in nginx
+    assert "server_name docs.veetbot.com" in nginx
     assert "proxy_pass http://127.0.0.1:8000" in nginx
     assert "server_name browser.veetbot.com" in nginx
     assert "proxy_pass http://127.0.0.1:8081" in nginx
     assert "/etc/letsencrypt/live/browser.veetbot.com/fullchain.pem" in nginx
     assert "proxy_buffering off" in nginx
+    assert "root /opt/veetbot/docs/current" in nginx
+    assert "try_files $uri $uri/ =404" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
     assert "rollback" in nginx_deploy
     assert "flock -w" in nginx_deploy
     assert "VEETBOT_EXPECTED_RELEASE_ID" in nginx_deploy
+    assert "VEETBOT_DOCS_ROOT" in nginx_deploy
+    assert 'sha256sum "$DOCS_ARCHIVE"' in nginx_deploy
+    assert 'mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"' in nginx_deploy
 
 
 def test_production_preflight_normalizes_missing_executable(
@@ -461,9 +467,7 @@ def test_ci_has_the_required_partitions() -> None:
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = (
-            "cimg/base:stable"
-            if name in {"package-release", "deploy-app", "deploy-nginx"}
-            else "cimg/python:3.12"
+            "cimg/base:stable" if name in {"deploy-app", "deploy-nginx"} else "cimg/python:3.12"
         )
         assert job["docker"][0]["image"] == expected_image
 
@@ -497,12 +501,19 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple-ui" in commands["apple"]
     assert "make test-live" in commands["live"]
     assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
+    assert any(
+        "uv run --frozen --only-group docs mkdocs build --strict" in command
+        and "veetbot-docs.tar.gz" in command
+        for command in commands["package-release"]
+    )
     package_workspace = next(
         step["persist_to_workspace"]
         for step in jobs["package-release"]["steps"]
         if isinstance(step, dict) and "persist_to_workspace" in step
     )
     assert "release-id" in package_workspace["paths"]
+    assert "veetbot-docs.tar.gz" in package_workspace["paths"]
+    assert "veetbot-docs.tar.gz.sha256" in package_workspace["paths"]
     assert any("deploy/app/release.sh" in command for command in commands["deploy-app"])
     assert any(
         "X-Veetbot-Release" not in command and "x-veetbot-release" in command
@@ -515,8 +526,16 @@ def test_ci_has_the_required_partitions() -> None:
     )
     assert any("deploy/nginx/deploy.sh" in command for command in commands["deploy-nginx"])
     assert any(
+        "veetbot-docs.tar.gz" in command and "veetbot-docs.tar.gz.sha256" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
         "VEETBOT_EXPECTED_RELEASE_ID" in command
         and '[[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]' in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "https://docs.veetbot.com" in command and "documentation did not report release" in command
         for command in commands["deploy-nginx"]
     )
     assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
@@ -569,6 +588,13 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_mkdocs_site_has_its_public_origin() -> None:
+    config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+
+    assert config["site_url"] == "https://docs.veetbot.com/"
+    assert config["theme"]["font"] is False
 
 
 def test_repository_contract_requires_red_green_tdd_evidence() -> None:

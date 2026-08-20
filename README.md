@@ -41,7 +41,9 @@ have separately authorized workstreams in progress.
 - **Clients** — a dependency-free downloadable terminal client and a native
   SwiftUI client for iOS and macOS.
 - **Production deployment** — CircleCI-driven atomic releases to
-  `api.veetbot.com` with systemd, Nginx, gVisor, and production validation.
+  `api.veetbot.com` with systemd, Nginx, gVisor, and production validation,
+  plus the release-matched static documentation site at
+  [`docs.veetbot.com`](https://docs.veetbot.com/).
 
 ### In progress (Milestones 10 and 11)
 

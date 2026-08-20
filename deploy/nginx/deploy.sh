@@ -2,13 +2,17 @@
 set -Eeuo pipefail
 
 SOURCE_CONFIG="${1:-}"
+DOCS_ARCHIVE="${2:-}"
+DOCS_CHECKSUM="${3:-}"
 DEPLOY_ROOT="${VEETBOT_ROOT:-/opt/veetbot}"
 AVAILABLE="${VEETBOT_NGINX_AVAILABLE:-/etc/nginx/sites-available/veetbot}"
 ENABLED="${VEETBOT_NGINX_ENABLED:-/etc/nginx/sites-enabled/veetbot}"
 BACKUP_DIR="${VEETBOT_NGINX_BACKUP_DIR:-/etc/nginx/veetbot-backups}"
+DOCS_ROOT="${VEETBOT_DOCS_ROOT:-$DEPLOY_ROOT/docs}"
 NGINX_SERVICE="${VEETBOT_NGINX_SERVICE:-nginx}"
 LOCK_WAIT_SECS="${VEETBOT_DEPLOY_LOCK_WAIT_SECS:-900}"
 EXPECTED_RELEASE_ID="${VEETBOT_EXPECTED_RELEASE_ID:-}"
+KEEP_DOCS_RELEASES="${VEETBOT_KEEP_DOCS_RELEASES:-5}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
 
 fail() {
@@ -26,10 +30,24 @@ fail() {
   "VEETBOT_NGINX_ENABLED must be a non-root absolute path"
 [[ "$BACKUP_DIR" = /* && "$BACKUP_DIR" != / ]] || fail \
   "VEETBOT_NGINX_BACKUP_DIR must be a non-root absolute path"
+[[ "$DOCS_ROOT" = /* && "$DOCS_ROOT" != / ]] || fail \
+  "VEETBOT_DOCS_ROOT must be a non-root absolute path"
+[[ "$DOCS_ROOT" != "$DEPLOY_ROOT" ]] || fail \
+  "VEETBOT_DOCS_ROOT must not replace VEETBOT_ROOT"
 [[ "$LOCK_WAIT_SECS" =~ ^[1-9][0-9]*$ ]] || fail \
   "VEETBOT_DEPLOY_LOCK_WAIT_SECS must be a positive integer"
+[[ "$KEEP_DOCS_RELEASES" =~ ^[1-9][0-9]*$ ]] || fail \
+  "VEETBOT_KEEP_DOCS_RELEASES must be a positive integer"
 if [[ -n "$EXPECTED_RELEASE_ID" && ! "$EXPECTED_RELEASE_ID" =~ $RELEASE_PATTERN ]]; then
   fail "VEETBOT_EXPECTED_RELEASE_ID is malformed"
+fi
+if [[ -n "$DOCS_ARCHIVE" || -n "$DOCS_CHECKSUM" ]]; then
+  [[ -n "$DOCS_ARCHIVE" && -f "$DOCS_ARCHIVE" ]] || fail \
+    "pass the documentation archive as the second argument"
+  [[ -n "$DOCS_CHECKSUM" && -f "$DOCS_CHECKSUM" ]] || fail \
+    "pass the documentation checksum as the third argument"
+  [[ -n "$EXPECTED_RELEASE_ID" ]] || fail \
+    "VEETBOT_EXPECTED_RELEASE_ID is required when publishing documentation"
 fi
 [[ -d "$DEPLOY_ROOT/shared" ]] || fail \
   "deployment shared directory does not exist: $DEPLOY_ROOT/shared"
@@ -53,6 +71,10 @@ fi
 sudo install -d -m 0755 "$(dirname "$AVAILABLE")" "$(dirname "$ENABLED")" "$BACKUP_DIR"
 BACKUP=""
 ENABLED_TARGET=""
+DOCS_PREVIOUS_TARGET=""
+DOCS_PROMOTED=0
+DOCS_STAGE=""
+NEXT_DOCS_CURRENT=""
 if sudo test -f "$AVAILABLE"; then
   BACKUP="$BACKUP_DIR/veetbot.$(date -u +%Y%m%d-%H%M%S).$$.conf"
   sudo cp -a "$AVAILABLE" "$BACKUP"
@@ -61,6 +83,13 @@ if sudo test -L "$ENABLED"; then
   ENABLED_TARGET="$(sudo readlink "$ENABLED")"
 elif sudo test -e "$ENABLED"; then
   fail "refusing to replace a non-symlink enabled site: $ENABLED"
+fi
+if [[ -n "$DOCS_ARCHIVE" ]]; then
+  if [[ -L "$DOCS_ROOT/current" ]]; then
+    DOCS_PREVIOUS_TARGET="$(readlink "$DOCS_ROOT/current")"
+  elif [[ -e "$DOCS_ROOT/current" ]]; then
+    fail "refusing to replace a non-symlink documentation release: $DOCS_ROOT/current"
+  fi
 fi
 
 rollback() {
@@ -74,6 +103,13 @@ rollback() {
   else
     sudo rm -f -- "$ENABLED"
   fi
+  if (( DOCS_PROMOTED == 1 )); then
+    if [[ -n "$DOCS_PREVIOUS_TARGET" ]]; then
+      ln -sfn "$DOCS_PREVIOUS_TARGET" "$DOCS_ROOT/current"
+    else
+      rm -f -- "$DOCS_ROOT/current"
+    fi
+  fi
 }
 
 ROLLBACK_PENDING=1
@@ -84,6 +120,12 @@ rollback_on_exit() {
   if (( status != 0 && ROLLBACK_PENDING == 1 )); then
     set +e
     rollback
+    if [[ -n "$DOCS_STAGE" ]]; then
+      rm -rf -- "$DOCS_STAGE"
+    fi
+    if [[ -n "$NEXT_DOCS_CURRENT" ]]; then
+      rm -f -- "$NEXT_DOCS_CURRENT"
+    fi
     sudo nginx -t || true
     if (( RELOAD_ATTEMPTED == 1 )); then
       sudo systemctl reload "$NGINX_SERVICE" || true
@@ -92,6 +134,61 @@ rollback_on_exit() {
   exit "$status"
 }
 trap rollback_on_exit EXIT
+
+if [[ -n "$DOCS_ARCHIVE" ]]; then
+  [[ "$(awk 'END { print NR }' "$DOCS_CHECKSUM")" == 1 ]] || fail \
+    "documentation checksum must contain exactly one entry"
+  read -r EXPECTED_DIGEST EXPECTED_ARCHIVE EXTRA <"$DOCS_CHECKSUM" || fail \
+    "documentation checksum is unreadable"
+  [[ "$EXPECTED_DIGEST" =~ ^[0-9a-f]{64}$ ]] || fail \
+    "documentation checksum must contain a lowercase SHA-256 digest"
+  [[ "$EXPECTED_ARCHIVE" == "$(basename "$DOCS_ARCHIVE")" && -z "${EXTRA:-}" ]] || fail \
+    "documentation checksum must name exactly $(basename "$DOCS_ARCHIVE")"
+  ACTUAL_DIGEST="$(sha256sum "$DOCS_ARCHIVE" | awk '{print $1}')"
+  [[ "$ACTUAL_DIGEST" == "$EXPECTED_DIGEST" ]] || fail \
+    "documentation archive checksum verification failed"
+
+  while IFS= read -r member; do
+    normalized="${member#./}"
+    if [[ "$normalized" == /* \
+      || "$normalized" == ".." \
+      || "$normalized" == ../* \
+      || "$normalized" == */../* \
+      || "$normalized" == */.. ]]; then
+      fail "documentation archive contains an unsafe path: $member"
+    fi
+  done < <(tar -tzf "$DOCS_ARCHIVE")
+  while IFS= read -r member_details; do
+    member_type="${member_details:0:1}"
+    if [[ "$member_type" != - && "$member_type" != d ]]; then
+      fail "documentation archive contains a non-file entry"
+    fi
+  done < <(tar -tvzf "$DOCS_ARCHIVE")
+
+  DOCS_RELEASE="$DOCS_ROOT/releases/$EXPECTED_RELEASE_ID"
+  install -d -m 0755 "$DOCS_ROOT/releases"
+  if [[ -e "$DOCS_RELEASE" ]]; then
+    [[ -d "$DOCS_RELEASE" \
+      && -f "$DOCS_RELEASE/index.html" \
+      && -f "$DOCS_RELEASE/.artifact-sha256" \
+      && "$(<"$DOCS_RELEASE/.artifact-sha256")" == "$EXPECTED_DIGEST" ]] || fail \
+      "existing documentation release is incomplete or has a different checksum"
+  else
+    DOCS_STAGE="$DOCS_ROOT/.staging-$EXPECTED_RELEASE_ID-$$"
+    mkdir -m 0755 "$DOCS_STAGE"
+    tar --no-same-owner --no-same-permissions -xzf "$DOCS_ARCHIVE" -C "$DOCS_STAGE"
+    [[ -f "$DOCS_STAGE/index.html" ]] || fail \
+      "documentation archive does not contain index.html"
+    printf '%s\n' "$EXPECTED_DIGEST" >"$DOCS_STAGE/.artifact-sha256"
+    mv "$DOCS_STAGE" "$DOCS_RELEASE"
+    DOCS_STAGE=""
+  fi
+
+  NEXT_DOCS_CURRENT="$DOCS_ROOT/.current-$EXPECTED_RELEASE_ID-$$"
+  ln -s "$DOCS_RELEASE" "$NEXT_DOCS_CURRENT"
+  mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"
+  DOCS_PROMOTED=1
+fi
 
 sudo install -m 0644 "$SOURCE_CONFIG" "$AVAILABLE"
 sudo ln -sfn "$AVAILABLE" "$ENABLED"
@@ -107,7 +204,27 @@ fi
 ROLLBACK_PENDING=0
 trap - EXIT
 
+if [[ -n "$DOCS_ARCHIVE" ]]; then
+  retained=0
+  pruned=0
+  while IFS= read -r candidate; do
+    candidate_name="$(basename "$candidate")"
+    [[ "$candidate_name" =~ $RELEASE_PATTERN ]] || continue
+    retained=$((retained + 1))
+    if (( retained > KEEP_DOCS_RELEASES )) && [[ "$candidate" != "$DOCS_RELEASE" ]]; then
+      rm -rf -- "$candidate"
+      pruned=$((pruned + 1))
+    fi
+  done < <(find "$DOCS_ROOT/releases" -mindepth 1 -maxdepth 1 -type d -print | sort -r)
+fi
+
 printf 'Nginx configuration installed, validated, and reloaded.\n'
+if [[ -n "$DOCS_ARCHIVE" ]]; then
+  printf 'Documentation release published: %s\n' "$DOCS_RELEASE"
+  if (( pruned > 0 )); then
+    printf 'Pruned %s superseded documentation release(s).\n' "$pruned"
+  fi
+fi
 if [[ -n "$BACKUP" ]]; then
   printf 'Previous configuration backup: %s\n' "$BACKUP"
 fi

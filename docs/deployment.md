@@ -7,7 +7,9 @@ title: Production Deployment
 Veetbot deploys to one Ubuntu Droplet at `api.veetbot.com`. PostgreSQL, the API,
 the durable worker, the maintenance worker, Docker with gVisor, and Nginx share
 that host. CircleCI packages the tested `main` commit and promotes an immutable
-release below `/opt/veetbot/releases`.
+release below `/opt/veetbot/releases`. The same pipeline publishes the complete
+MkDocs site at `docs.veetbot.com` from a checksummed artifact tied to that
+release.
 
 The flow adapts the useful deployment invariants from
 [avitus/mankunku](https://github.com/avitus/mankunku) to Veetbot's Python and
@@ -90,12 +92,17 @@ sudo useradd --system --create-home --shell /bin/bash veetbot
 sudo usermod -aG docker veetbot
 sudo mkdir -p \
   /opt/veetbot/releases \
+  /opt/veetbot/docs/releases \
   /opt/veetbot/shared/uv-cache \
   /etc/veetbot \
   /var/lib/veetbot/artifacts
 sudo chown -R veetbot:veetbot /opt/veetbot /var/lib/veetbot
 sudo chmod 0700 /var/lib/veetbot/artifacts
 ```
+
+The deploy account owns `/opt/veetbot/docs`. Nginx receives read-only access
+through the ordinary directory modes; no application process writes or serves
+the site.
 
 The deploy key must log in as this account, so the account needs an executable
 shell. Restrict that key in `authorized_keys` to the CircleCI source and disable
@@ -217,13 +224,26 @@ naming an existing version. The environment variables that point at these
 paths are in `deploy/veetbot.env.example`; add them to
 `/etc/veetbot/veetbot.env` alongside the other values.
 
-The committed Nginx virtual host expects existing Let's Encrypt certificates
-at `/etc/letsencrypt/live/api.veetbot.com/` **and**
-`/etc/letsencrypt/live/browser.veetbot.com/`; the browser origin needs its DNS
-record and certificate before the first Nginx deployment or `nginx -t` fails.
-Issue or renew both certificates before deploying. The Nginx installer changes
-only Veetbot's `sites-available` and `sites-enabled` entries; it preserves
-other virtual hosts.
+The committed Nginx virtual hosts expect Let's Encrypt certificates at
+`/etc/letsencrypt/live/api.veetbot.com/`,
+`/etc/letsencrypt/live/browser.veetbot.com/`, and
+`/etc/letsencrypt/live/docs.veetbot.com/`. The Nginx installer changes only
+Veetbot's `sites-available` and `sites-enabled` entries; it preserves other
+virtual hosts.
+
+Before merging the documentation-hosting change to `main`:
+
+1. Add a DigitalOcean DNS `A` record for `docs.veetbot.com` with the same target
+   as `api.veetbot.com`, and wait for public resolution.
+2. Provision the dedicated certificate at the exact path above. Prefer
+   Certbot's DigitalOcean DNS plugin so issuance and renewal do not depend on a
+   temporary HTTP virtual host. Keep its API token in a root-owned `0600`
+   credentials file outside the repository and CircleCI.
+3. Run `sudo nginx -t` without changing the existing production site.
+
+The deployment deliberately does not bootstrap around a missing certificate:
+strict Nginx validation must fail rather than publish a plaintext or
+misidentified documentation endpoint.
 
 ## CircleCI setup
 
@@ -251,6 +271,7 @@ Create a restricted CircleCI context named `veetbot-production` with:
 | `DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH known-hosts record verified out of band |
 | `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
 | `PRODUCTION_URL` | Optional public origin; defaults to `https://api.veetbot.com` |
+| `DOCS_URL` | Optional docs origin; defaults to `https://docs.veetbot.com` |
 
 Obtain the public host-key record from the server or provider console and verify
 its fingerprint through a second trusted channel before placing it in the
@@ -265,13 +286,15 @@ use to the repository and protected `main` branch.
 An ordinary branch or pull request runs verification only. On `main`, after all
 four required verification lanes pass:
 
-- `package-release` archives the exact tested commit and records its SHA-256;
+- `package-release` archives the exact tested commit, builds MkDocs in strict
+  mode, and records both artifacts' SHA-256 values;
 - `deploy-app` stages the archive, verifies the checksum, and executes the
   locked server release; and
 - `deploy-nginx` follows a successful application release, takes the same host
-  lock, and reconciles the versioned virtual host. If a newer pipeline has
-  already promoted another application release, the older proxy job detects the
-  release-identity mismatch and exits without overwriting the newer config.
+  lock, atomically promotes `/opt/veetbot/docs/current`, and reconciles the
+  versioned virtual hosts. If a newer pipeline has already promoted another
+  application release, the older proxy job detects the release-identity
+  mismatch and exits without overwriting the newer site or config.
 
 Both deployment jobs use CircleCI's shared production serial group in addition
 to the server lock. The release ID is created with the packaged artifact and
@@ -284,8 +307,9 @@ reload failure restores the prior file. So does a failure while installing the
 candidate file or activating its symlink. `deploy/app/release.sh` requires the
 local readiness header to identify the staged release and the authenticated
 session-index route to respond successfully; after it returns, CircleCI polls
-the public readiness endpoint for that exact identity. A public probe failure
-is therefore a post-promotion CircleCI failure boundary.
+the public readiness endpoint for that exact identity. The Nginx job then
+requires `https://docs.veetbot.com/release.txt` to return the same identity. A
+public probe failure is therefore a post-promotion CircleCI failure boundary.
 
 The manual and nightly `live-model` workflows remain tests; they do not deploy.
 
@@ -296,7 +320,9 @@ After the first successful pipeline, verify the active revision and services:
 ```bash
 curl --fail --show-error --dump-header - --output /dev/null \
   https://api.veetbot.com/health/ready
+curl --fail --show-error https://docs.veetbot.com/release.txt
 ssh veetbot@api.veetbot.com 'readlink -f /opt/veetbot/current'
+ssh veetbot@api.veetbot.com 'readlink -f /opt/veetbot/docs/current'
 ssh veetbot@api.veetbot.com \
   'systemctl is-active veetbot-api veetbot-worker veetbot-maintenance'
 ```
