@@ -8,6 +8,8 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
+from pathlib import Path
 
 from agent_core.config import Settings, load_config_document, load_settings
 
@@ -28,6 +30,38 @@ def _run(*command: str, timeout: float = 30.0) -> subprocess.CompletedProcess[st
             exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout
         )
         return subprocess.CompletedProcess(command, 124, stdout or "", f"timed out: {exc}")
+
+
+def _same_credential_file(credential: str, service_auth: str) -> bool:
+    try:
+        # samefile compares inode identity, catching hard links whose
+        # resolved paths differ.
+        return Path(credential).samefile(service_auth)
+    except OSError:
+        # Files that do not exist yet still conflict through `..` aliases
+        # and symlinked parents.
+        return Path(credential).resolve() == Path(service_auth).resolve()
+
+
+def _browser_credential_failures(environment: Mapping[str, str]) -> list[str]:
+    """Reject the shared-path browser credential misconfiguration.
+
+    The profile service requires its auth file to be owned by uid 65532 while
+    the agent units read the control-plane credential as the service account;
+    both readers require mode 0600, so one file can never serve both.
+    """
+
+    credential = environment.get("BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE", "").strip()
+    service_auth = environment.get("BROWSER_PROFILE_SERVICE_AUTH_FILE", "").strip()
+    if credential and service_auth and _same_credential_file(credential, service_auth):
+        return [
+            "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE and "
+            "BROWSER_PROFILE_SERVICE_AUTH_FILE must name different files: the "
+            "containerized profile service owns its auth file as uid 65532 while "
+            "the agent units read the credential as the service account, and a "
+            "0600 file cannot serve both readers"
+        ]
+    return []
 
 
 def _model_policy_failures(settings: Settings) -> list[str]:
@@ -70,6 +104,7 @@ def main() -> int:
         if settings.release_id is None:
             failures.append("VEETBOT_RELEASE_ID must identify the staged release")
         failures.extend(_model_policy_failures(settings))
+    failures.extend(_browser_credential_failures(os.environ))
 
     available: dict[str, bool] = {}
     for executable in ("docker", "runsc", "uv"):

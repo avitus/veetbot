@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import json
+import os
 import re
 import socket
 import subprocess
@@ -166,6 +167,66 @@ def test_production_environment_preserves_process_boundaries() -> None:
         if line.startswith("AUTH_SCOPES=")
     )
     assert set(configured_scopes) <= PLATFORM_SCOPES
+
+
+def test_deployment_validation_rejects_shared_browser_credential_path() -> None:
+    shared_path = "/etc/veetbot/secrets/browser-profile-service-auth"
+    shared = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": shared_path,
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": shared_path,
+    }
+    failures = production_check._browser_credential_failures(shared)
+    assert failures
+    assert "different files" in failures[0]
+
+    distinct = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": (
+            "/etc/veetbot/secrets/browser-control-plane-credential"
+        ),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": shared_path,
+    }
+    assert production_check._browser_credential_failures(distinct) == []
+    assert production_check._browser_credential_failures({}) == []
+
+
+def test_deployment_validation_rejects_aliased_browser_credential_paths(
+    tmp_path: Path,
+) -> None:
+    # A `..` alias of the same file must be rejected like the literal path.
+    dotted = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": (
+            "/etc/veetbot/secrets/../secrets/browser-profile-service-auth"
+        ),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": "/etc/veetbot/secrets/browser-profile-service-auth",
+    }
+    assert production_check._browser_credential_failures(dotted)
+
+    # A symlinked parent directory reaching the same file must be rejected.
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "auth").write_text("credential\n", encoding="utf-8")
+    (tmp_path / "alias").symlink_to(real, target_is_directory=True)
+    symlinked = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": str(tmp_path / "alias" / "auth"),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": str(real / "auth"),
+    }
+    assert production_check._browser_credential_failures(symlinked)
+
+
+def test_deployment_validation_rejects_hard_linked_browser_credential_paths(
+    tmp_path: Path,
+) -> None:
+    # Hard links share an inode but resolve to distinct paths, so identity
+    # must be compared with samefile when both files exist.
+    original = tmp_path / "browser-profile-service-auth"
+    original.write_text("credential\n", encoding="utf-8")
+    linked = tmp_path / "browser-control-plane-credential"
+    os.link(original, linked)
+    hard_linked = {
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE": str(linked),
+        "BROWSER_PROFILE_SERVICE_AUTH_FILE": str(original),
+    }
+    assert production_check._browser_credential_failures(hard_linked)
 
 
 def test_production_compose_preserves_browser_profile_isolation() -> None:
