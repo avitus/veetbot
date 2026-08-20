@@ -958,6 +958,46 @@ def test_required_files_include_the_status_split_surfaces(
     assert "required file missing: docs/status/corpus-audit-log.md" in check_docs.errors
 
 
+_SUDOERS_RULE = re.compile(r"^(\S+) (\S+)=\((\S+)\) NOPASSWD: (/\S+)( .+)?$")
+
+
+def _sudoers_rule_violations(rules: list[str]) -> list[str]:
+    """Reject any sudoers rule wider than the deploy contract permits."""
+
+    violations = []
+    for rule in rules:
+        match = _SUDOERS_RULE.match(rule)
+        if match is None:
+            violations.append(f"not a NOPASSWD rule with an absolute command path: {rule}")
+            continue
+        subject, host, runas, _path, arguments = match.groups()
+        if subject != "deploy":
+            violations.append(f"subject must be the documented deploy placeholder: {rule}")
+        if host != "ALL":
+            violations.append(f"host must be ALL: {rule}")
+        if runas != "root":
+            violations.append(f"run-as target must be root only: {rule}")
+        if arguments is None:
+            violations.append(f"command must constrain its arguments: {rule}")
+        if "," in rule:
+            violations.append(f"one rule per command specification: {rule}")
+    return violations
+
+
+def test_sudoers_contract_rejects_widened_rules() -> None:
+    for widened in (
+        "ALL ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload",
+        "%admin ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload",
+        "deploy ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload",
+        "deploy ALL=(root) NOPASSWD: /usr/bin/systemctl",
+        "deploy ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload, /bin/sh",
+        "deploy ALL=(root) NOPASSWD: systemctl daemon-reload",
+        "deploy ALL=(root) PASSWD: /usr/bin/systemctl daemon-reload",
+        "deploy ALL=(root) NOPASSWD: ALL",
+    ):
+        assert _sudoers_rule_violations([widened]), widened
+
+
 def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     contract = ROOT / "deploy" / "sudoers" / "veetbot-deploy"
     assert contract.is_file(), "deploy/sudoers/veetbot-deploy is the deploy account's sudo contract"
@@ -968,12 +1008,33 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
         if line.strip() and not line.strip().startswith("#")
     ]
     assert rules
-    rule_pattern = re.compile(r"^\S+ ALL=\(root\) NOPASSWD: (/\S+)")
-    rule_binaries = set()
+    assert _sudoers_rule_violations(rules) == []
+    specs = set()
     for rule in rules:
-        match = rule_pattern.match(rule)
-        assert match, f"rule must be root-only NOPASSWD with an absolute command path: {rule}"
-        rule_binaries.add(Path(match.group(1)).name)
+        match = _SUDOERS_RULE.match(rule)
+        assert match is not None
+        specs.add(f"{match.group(4)}{match.group(5) or ''}")
+
+    # systemctl argv is deterministic, so its rules are exact — never globbed.
+    assert all("*" not in spec for spec in specs if spec.startswith("/usr/bin/systemctl")), (
+        "systemctl rules must name exact units and arguments"
+    )
+
+    # The exact unit lists come from release.sh itself, so a UNITS change
+    # fails this test until the contract names the new argv.
+    release_text = (ROOT / "deploy" / "app" / "release.sh").read_text(encoding="utf-8")
+    units_match = re.search(r"^UNITS=\(([^)]*)\)", release_text, re.MULTILINE)
+    assert units_match is not None
+    units = units_match.group(1).split()
+    scheduled_units = ["veetbot-schedule", *units]
+    for argv in (units, scheduled_units):
+        assert f"/usr/bin/systemctl enable --now {' '.join(argv)}" in specs
+        assert f"/usr/bin/systemctl restart {' '.join(argv)}" in specs
+    for unit in scheduled_units:
+        assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
+        assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
+    assert "/usr/bin/systemctl daemon-reload" in specs
+    assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
 
     used = set()
     for script in ("deploy/app/release.sh", "deploy/nginx/deploy.sh"):
@@ -984,6 +1045,7 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
             )
         )
     assert used, "the contract exists because the deploy scripts invoke sudo"
+    rule_binaries = {Path(spec.split()[0]).name for spec in specs}
     assert used <= rule_binaries, (
         f"sudo commands without a contract rule: {sorted(used - rule_binaries)}"
     )
