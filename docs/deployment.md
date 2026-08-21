@@ -129,7 +129,7 @@ service receives Docker access at application runtime and owns sandbox
 lifecycle. The separate deploy identity retains delivery-time Docker access
 because the audited release contract builds and tags both images, reconciles the
 browser-profile service, and prunes release images. That trusted operator
-boundary is the explicit tradeoff in ADR-0062 decision 1; it is never an
+boundary is the explicit tradeoff in ADR-0067 decision 1; it is never an
 application systemd identity. Consequently neither an application process nor
 an application-launched container can modify the documentation release. On a
 single host, workers reach the service at `/run/veetbot/execution.sock`. On a
@@ -496,6 +496,11 @@ Nginx backups are independent. To recover one, copy the selected file from
 `sudo nginx -t`, and reload Nginx.
 
 ## Accepted limitations
+
+Milestone 15 ([operational-hardening.md](plan/operational-hardening.md),
+ADR-0065) specifies the backup, restore rehearsal, alerting, firewall,
+rollback, and watchdog controls that shrink this list to the residual single
+failure domain; until that milestone lands, the limitations below stand.
 
 This is still a single-server failure domain with no required cloud firewall,
 off-host database, backup, restore rehearsal, monitoring, load balancer, rolling

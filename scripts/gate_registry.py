@@ -13,13 +13,18 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule)\.[a-z0-9]+(?:_[a-z0-9]+)*$"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops)"
+    r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
     r"^\s*(?:\d+\s+)?(gate\.[a-z0-9_.]+)\s+"
     r"(case|property|corpus|structural)\s+(\d+)(?:\s|$)",
     re.MULTILINE,
 )
+# The highest milestone the corpus authorizes; Milestones 12 through 15 were
+# authorized on 2026-08-20 (ADR-0061). The census reports a zero row for each
+# authorized milestone whose specification has not yet declared gates.
+MAX_MILESTONE = 15
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -41,6 +46,10 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "web-access.md": (7, 0),
     "browser-automation.md": (10, 0),
     "scheduling.md": (23, 0),
+    "notifications-and-devices.md": (20, 0),
+    "subagents-and-delegation.md": (21, 0),
+    "inbound-surfaces.md": (21, 0),
+    "operational-hardening.md": (16, 0),
     "milestone-map.md": (7, 0),
 }
 
@@ -240,7 +249,7 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
             errors.append(f"invalid gate identifier: {gate_id}")
         if entry.kind not in {"case", "property", "corpus", "structural"}:
             errors.append(f"{gate_id} has invalid kind {entry.kind}")
-        if entry.milestone < 0 or entry.milestone > 11:
+        if entry.milestone < 0 or entry.milestone > MAX_MILESTONE:
             errors.append(f"{gate_id} has invalid milestone {entry.milestone}")
         mapped = expected.get(gate_id)
         if mapped is not None and mapped != (entry.kind, entry.milestone):
@@ -315,7 +324,7 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
     counts = Counter(entry.milestone for entry in entries)
     cumulative = 0
     derived: dict[int, tuple[int, int]] = {}
-    for milestone in range(12):
+    for milestone in range(MAX_MILESTONE + 1):
         cumulative += counts[milestone]
         derived[milestone] = (counts[milestone], cumulative)
     if written != derived:

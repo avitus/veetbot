@@ -31,7 +31,7 @@ The system prompt never contains secrets. Tools obtain credentials from a
 server-side resolver after authorization; the model receives only references or
 capabilities.
 
-## Controls implemented through Milestone 3
+## Controls implemented through Milestone 3 (foundation)
 
 Milestone 0 establishes two executable controls before provider or tool code
 exists:
@@ -91,8 +91,40 @@ Milestone 3 hardens the real provider and export boundaries:
   path is exercised on loopback at zero cost; remote credentialed smoke tests
   remain explicitly opt-in.
 
-Later controls remain requirements of their owning milestones and are not
-claimed as implemented here.
+## Controls implemented in Milestones 4 through 10
+
+Each control below is owned by the detailed-design document the routing table
+in `AGENTS.md` names; this page summarizes, it does not restate.
+
+- Authorization is deterministic: the policy engine evaluates an exact scope
+  vocabulary and frozen hardline rules before any tool executes; consequential
+  actions require a durable approval that survives worker restart; unknown
+  tools and missing scopes are denied before execution; cross-tenant approval
+  access is rejected (Milestone 4).
+- The HTTP boundary refuses to start in production without configured
+  authentication, scopes every route, keeps secrets out of error envelopes,
+  replays only persisted events, and makes duplicate submissions idempotent
+  (Milestone 5).
+- Model-generated code runs only in the container sandbox with CPU, memory,
+  process, time, and no-network limits; environment passthrough is fail-closed
+  and credential-scrubbed; artifacts are tenant-authorized and checksummed
+  (Milestone 6).
+- Trust labels travel with every context item; compaction preserves provenance
+  and the runtime never persists private reasoning (Milestone 7).
+- Skills are version-pinned at session open and MCP output is external and
+  untrusted; the runtime has no direct MCP SDK dependency; skill authoring is
+  default-off, confined to trusted turns, and reviewed in a confined child run
+  that cannot alter its completed parent (Milestones 8 and 10A).
+- External content cannot write memory directly; formation accepts sources
+  only from the owning principal's user events; secrets and injection-shaped
+  candidates are rejected; provider-assisted extraction is evidence-gated and
+  falls back deterministically; retrieval respects tenant and scope (Milestones
+  9 and 10).
+- Web and browser content is external-untrusted; egress targets are fixed by
+  configuration, never by model arguments; `browser.act` is an external write
+  under approval or an exact revocable standing grant; the model never enters
+  credentials; profile material is encrypted outside PostgreSQL in a separately
+  deployed least-privilege process (Milestone 10).
 
 ## Milestone 11 scheduling controls
 
@@ -121,6 +153,12 @@ marker.
 
 ## Production delivery controls
 
+Milestone 15 ([operational-hardening.md](plan/operational-hardening.md))
+adds the backup, escrow, alerting, firewall, rollback, and watchdog controls
+and states that content erased through the deletion contract can persist in
+encrypted backups for up to thirty-five days; those controls are requirements
+of that milestone and are not claimed as implemented here.
+
 The production delivery path is privileged supply-chain code. CircleCI packages
 the exact tested commit with `git archive`, records a SHA-256 checksum, and
 connects only with a Veetbot-specific project deploy key and a context-provided
@@ -135,7 +173,7 @@ socket. A separate `veetbot-exec` systemd service owns gVisor sandbox lifecycle,
 loads no application environment file, and accepts the existing
 `ExecutionEnvironment` operations over a group-restricted Unix socket. The
 separate `veetbot-deploy` identity owns immutable application and documentation
-releases. ADR-0062 records this production correction to the older host topology.
+releases. ADR-0067 records this production correction to the older host topology.
 
 The committed-file secret scanner covers `.circleci/`, `deploy/`, `nginx/`, and
 `scripts/` in addition to application, client, test, migration, evaluation, and

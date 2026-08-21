@@ -7,6 +7,8 @@ project:
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 9
   active_milestone: 11
+  # Milestones 12 through 15 were authorized in order on 2026-08-20
+  # (ADR-0061); each begins with its detailed-design document and ADR.
   authorized_milestones:
     - 0
     - 1
@@ -20,6 +22,10 @@ project:
     - 9
     - 10
     - 11
+    - 12
+    - 13
+    - 14
+    - 15
 
 milestones:
   "0":
@@ -78,8 +84,73 @@ milestones:
     deferred_scope:
       - arbitrary cron and monthly recurrence
       - dependency graphs and workflow DAGs
-      - push, email, mobile, and webhook notifications
+      - email and webhook notifications
       - continuous-session recurrence
+  "12":
+    title: Notifications and device identity
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/notifications-and-devices.md
+    adr: docs/adr/0062-milestone-12-notifications-and-device-identity.md
+    gates_registered: 20
+    authorized_scope:
+      - device registry with registration, refresh, revocation, and deletion
+      - durable notification outbox written with the triggering event
+      - least-privilege notify dispatcher role and APNs transport
+      - approval, user-input, run-failure, and schedule-outcome triggers
+      - content-free payloads, device and notification routes, offline inbox
+      - Apple client registration, token upload, revocation, and deep links
+    deferred_scope:
+      - inbound surfaces, pairing, device-scoped tools, presence routing
+      - actionable lock-screen approvals
+      - email and webhook transports
+  "13":
+    title: General-purpose subagents and delegation
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/subagents-and-delegation.md
+    adr: docs/adr/0063-milestone-13-subagents-and-delegation.md
+    gates_registered: 21
+    authorized_scope:
+      - delegate.run as a suspending control tool with a structured brief
+      - dedicated child session and child run materialized in one transaction
+      - derived child limits, scope and tool intersection, additive usage
+      - parent suspension, join, cancellation and deadline propagation
+      - capability scenario and two-arm case as the activation evidence
+    deferred_scope:
+      - handoffs, role-named agents, delegation deeper than one level
+      - model routing changes
+  "14":
+    title: Inbound surfaces and pairing
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/inbound-surfaces.md
+    adr: docs/adr/0064-milestone-14-inbound-surfaces-and-pairing.md
+    gates_registered: 21
+    authorized_scope:
+      - surface registry and a Telegram long-polling inbound adapter
+      - pairing ceremony with one-time codes, lockout, and revocation
+      - session-key resolver and ordinary run creation via the shared submit
+      - replies, notifications, approvals, and questions over the chat
+      - least-privilege surface role, rate limits, default-off flags
+    deferred_scope:
+      - Slack and email adapters, group and thread chats, webhook delivery
+      - device-scoped tools, presence routing, hand-off, media intake
+  "15":
+    title: Operational hardening
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/operational-hardening.md
+    adr: docs/adr/0065-milestone-15-operational-hardening.md
+    gates_registered: 16
+    authorized_scope:
+      - encrypted off-host daily backup with manifest and restore rehearsal
+      - host health check with deduplicated alerts through the outbox
+      - cloud and host firewall, SSH hardening, proxy rate limits
+      - one-command code rollback and pre-migration dump
+    deferred_scope:
+      - high availability, off-host database, load balancer, rolling deploys
+      - Kubernetes, microservices, a second queue
 
 # Evidence for completed milestones 0 through 9 lives in
 # docs/status/verification-history.yaml; an in-progress milestone's
@@ -352,13 +423,16 @@ verification:
           coverage boundaries are accepted, implemented, and backed by passing
           intended-production-model evidence.
     remaining:
+      - Run every hosted CI lane and complete the GitHub CodeRabbit review on
+        the same final head, resolving every finding and conversation.
+    activation_pending:
+      # Tenant activation is not a completion condition (ADR-0061); it is
+      # roadmap item B1 and stays default-off until the evidence rule passes.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
-        Clopper-Pearson lower bound, and zero additional policy failures.
-      - Run every hosted CI lane and complete the GitHub CodeRabbit review on
-        the same final head, resolving every finding and conversation.
-      - Implement separately gated routing and subagent extensions.
+        Clopper-Pearson lower bound, and zero additional policy failures before
+        enabling skill authoring for a tenant.
   milestone_11:
     recorded_at: 2026-08-19T20:49:16Z
     status: in_progress
@@ -573,13 +647,21 @@ readiness:
     access, and authenticated browser automation, with 38 registered gates
     across the four workstreams. The owner separately authorized Milestone
     11 scheduled runs, whose detailed design and 23 registered gates are
-    locally implemented. Model routing and general-purpose subagents remain
-    deferred. Every plan subject has a design document, no milestone
-    carries a named gap, and the gate registry, its census, and the
-    milestone map are reconciled by make docs-check. The corpus audit
-    passes and their findings are preserved in the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    locally implemented. On 2026-08-20 the owner authorized Milestones 12
+    through 15 in order (ADR-0061). Milestone 12 is specified by
+    notifications-and-devices.md with twenty registered gates, Milestone
+    13 by subagents-and-delegation.md with twenty-one, Milestone 14 by
+    inbound-surfaces.md with twenty-one, and Milestone 15 by
+    operational-hardening.md with sixteen; every authorized milestone has a
+    design document and the census reports no zero row.
+    Model routing remains deferred
+    on the plan's roadmap. Every plan subject through Milestone 11 has a
+    design document, no milestone carries a named gap, and the gate
+    registry, its census, and the milestone map are reconciled by make
+    docs-check. The corpus audit passes and their findings are preserved in
+    the audit log.
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-20T03:56:09Z
-last_reviewed_commit: ca0eaae
+last_updated: 2026-08-21T04:00:00Z
+last_reviewed_commit: ce71aba

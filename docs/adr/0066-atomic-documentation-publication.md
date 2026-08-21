@@ -1,4 +1,4 @@
-# ADR-0061: Atomic publication of the documentation site
+# ADR-0066: Atomic publication of the documentation site
 
 - **Status:** Accepted
 - **Date:** 2026-08-19

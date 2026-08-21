@@ -975,7 +975,10 @@ context, exactly as the model gateway labels any model output. A child cannot
 raise its own trust by claiming to be the platform, and the parent cannot
 inherit the child's authorizations: Section 26 requires a restricted tool set
 and a child budget, and the registry resolves the child's set through
-`specs_for_session` with the child's principal, not the parent's.
+`specs_for_session` with the child's principal, not the parent's. The brief
+that is `delegate.run`'s input, the derivation of the child's limits, the
+ledger, and the join are specified by
+[subagents-and-delegation.md](subagents-and-delegation.md) at Milestone 13.
 
 ## MCP
 

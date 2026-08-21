@@ -1,9 +1,23 @@
 # ADR-0046: Host-native DigitalOcean production topology
 
-- **Status:** Accepted
-- **Date:** 2026-08-07
+- **Status:** Accepted; decision 4 superseded by ADR-0048 (Nginx, not Caddy,
+  terminates TLS on the host); decision 7 remains the current production
+  posture until Milestone 15 (ADR-0065, authorized by ADR-0061, not yet
+  implemented) lands the controls it declined
+- **Date:** 2026-08-07; amended 2026-08-20
 
-> **Updated by ADR-0062:** the host-native single-Droplet decision remains, but
+## Amendments
+
+- 2026-08-10, ADR-0048: Nginx, not Caddy, is the reverse proxy and TLS
+  terminator on this host (decision 4).
+- 2026-08-20, ADR-0065 (proposed): Milestone 15 *specifies* the encrypted
+  off-host backup and restore rehearsal, the health check and alert channels,
+  the cloud and host firewall, proxy rate limits, scripted rollback, and worker
+  watchdogs that decision 7 declined at launch. Until that milestone completes
+  with deployment evidence, decision 7 and the first two consequences below
+  remain the production posture; none of those controls exists yet.
+
+> **Updated by ADR-0067:** the host-native single-Droplet decision remains, but
 > the worker-owned Docker adapter, Docker-group membership, and three-unit count
 > are superseded by the credential-free execution service.
 

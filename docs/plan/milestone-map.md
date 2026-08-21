@@ -165,7 +165,8 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge, web, browser, schedule
+      knowledge, web, browser, schedule, device, notify, delegate,
+      surface, ops
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -215,6 +216,36 @@ origin-confined governance story.
 `api` because occurrence identity, civil-time behavior, authority refresh, and
 lifecycle are one control-plane subject whose gates cross all three. The
 ordinary run remains owned by those existing areas after materialization.
+
+`device` is the eighteenth and `notify` the nineteenth, both declared by
+[notifications-and-devices.md](notifications-and-devices.md) at Milestone 12.
+They are two areas rather than one because device identity is the half of that
+milestone Milestone 14's Surfaces reuse and deserves its own census line, while
+`notify` owns the outbox, the content-free payload, dispatch, and the push
+transport as one delivery story. Neither is folded into `api` or `event`: a
+device has no session, and the outbox is a sibling write in the triggering
+transaction rather than a new event type.
+
+`delegate` is the twentieth, declared by
+[subagents-and-delegation.md](subagents-and-delegation.md) at Milestone 13. It
+owns the brief, materialization, the child-run suspension and join, derived
+limits, subset scopes and tools, untrusted results, the ledger, and the
+activation evidence as one delegation story; the child itself remains an
+ordinary run owned by `runtime`, `tool`, and `event` after materialization.
+
+`surface` is the twenty-first, declared by
+[inbound-surfaces.md](inbound-surfaces.md) at Milestone 14. It owns pairing,
+the session-key resolver, the ingress transaction, the trust and attribution
+rules for a paired sender, the reply path, and the surface role's confinement
+as one inbound-channel story; the run a paired message creates remains an
+ordinary run owned by the existing areas.
+
+`ops` is the twenty-second, declared by
+[operational-hardening.md](operational-hardening.md) at Milestone 15. It is
+`ops` rather than `deploy` because ADR-0048 deliberately says the delivery
+jobs add no milestone gate; the subject is the operational lifecycle — backup,
+restore, watch, harden, roll back — and it is one spec owning one area, as
+`sandbox` was.
 
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
@@ -274,9 +305,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 17 subject specifications declare 221 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 230
-declarations, 227 registry entries once the 3 aliases are subtracted.
+The 21 subject specifications declare 299 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 308
+declarations, 305 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -926,6 +957,166 @@ example. Gates 17 and 18 are structural because they inspect contract coverage
 and declared schema. The remaining sixteen are boundary cases over the
 application, PostgreSQL, queue, and API seams.
 
+### Notifications and devices, twenty gates
+
+Twenty gates, all new, in the eighteenth and nineteenth areas and all at
+Milestone 12. Six `device` gates cover registration identity, live-token
+uniqueness, revocation, lifecycle audit, schema, and isolation; fourteen
+`notify` gates cover enqueue atomicity, the closed trigger catalog,
+deduplication, content-free payloads, single delivery, bounded retry,
+staleness, token invalidation, the APNs adapter, port contracts, the offline
+inbox, default-off confinement, and the migration pair.
+
+```text
+#   id                                  kind         M
+--  ----------------------------------  -----------  --
+1   gate.device.register_idempotent     case         12
+2   gate.device.token_unique            case         12
+3   gate.device.revoke_immediate        case         12
+4   gate.device.lifecycle_audited       case         12
+5   gate.device.persistence_schema      structural   12
+6   gate.device.persistence_isolated    case         12
+7   gate.notify.enqueue_atomic          case         12
+8   gate.notify.trigger_catalog         case         12
+9   gate.notify.dedupe                  property     12
+10  gate.notify.content_free            corpus       12
+11  gate.notify.dispatch_once           case         12
+12  gate.notify.retry_bounded           case         12
+13  gate.notify.stale_suppressed        case         12
+14  gate.notify.token_revoked_on_410    case         12
+15  gate.notify.apns_auth               case         12
+16  gate.notify.port_contracts          structural   12
+17  gate.notify.offline_inbox           case         12
+18  gate.notify.default_off             case         12
+19  gate.notify.migration_clean         case         12
+20  gate.notify.migration_stepwise      case         12
+```
+
+Gate 9 is a property because repeated triggers are a family of interleavings,
+not one example; gate 10 is a corpus because secret-shaped and content-bearing
+inputs are a family; gates 5 and 16 are structural because they inspect
+declared schema and contract coverage. The remaining sixteen are boundary cases
+over the terminal writer, the scheduler, the dispatcher, the transport, the
+API, and PostgreSQL.
+
+### Subagents and delegation, twenty-one gates
+
+Twenty-one gates, all new, in the twentieth area and all at Milestone 13. They
+cover the brief, atomic materialization, the dedicated session, the child-run
+suspension, subset tools and scopes, derived limits, additive usage, depth,
+fan-out, untrusted results, the single join, child failure, cancellation,
+prefix stability, the separate trace, artifact references, schema, migration,
+default-off, and the outcome evidence the gate for multi-agent work requires.
+
+```text
+#   id                                         kind         M
+--  -----------------------------------------  -----------  --
+1   gate.delegate.brief_schema                 case         13
+2   gate.delegate.materialize_atomic           case         13
+3   gate.delegate.dedicated_session            case         13
+4   gate.delegate.parent_suspends              case         13
+5   gate.delegate.tools_subset                 case         13
+6   gate.delegate.scopes_intersected           case         13
+7   gate.delegate.limits_derived               property     13
+8   gate.delegate.usage_additive               case         13
+9   gate.delegate.depth_one                    case         13
+10  gate.delegate.fanout_capped                case         13
+11  gate.delegate.result_untrusted             case         13
+12  gate.delegate.join_once                    case         13
+13  gate.delegate.child_failure_is_tool_error  case         13
+14  gate.delegate.cancel_propagates            case         13
+15  gate.delegate.prefix_stable                case         13
+16  gate.delegate.trace_separate               case         13
+17  gate.delegate.artifact_refs                case         13
+18  gate.delegate.persistence_schema           structural   13
+19  gate.delegate.migration_stepwise           case         13
+20  gate.delegate.default_off                  case         13
+21  gate.delegate.changes_outcome              case         13
+```
+
+Gate 7 is a property because limit derivation is a claim over generated
+parents and briefs; gate 18 is structural because it inspects declared schema.
+The remaining nineteen are boundary cases over the tool pipeline, the terminal
+writer, the queue, PostgreSQL, and the evaluation harness.
+
+### Inbound surfaces, twenty-one gates
+
+Twenty-one gates, all new, in the twenty-first area and all at Milestone 14.
+They cover the default-deny before any run, the pairing ceremony and lockout,
+ordinary submission, inbound idempotency, ingress atomicity, the session key,
+input routing, revocation, the scope ceiling, the bot token, replies,
+approvals and questions, rate limits, default-off, transport confinement,
+schema, isolation, contracts, and the migration pair.
+
+```text
+#   id                                         kind         M
+--  -----------------------------------------  -----------  --
+1   gate.surface.unpaired_denied               case         14
+2   gate.surface.pairing_ceremony              case         14
+3   gate.surface.pairing_lockout               case         14
+4   gate.surface.paired_submits_ordinary_run   case         14
+5   gate.surface.inbound_idempotent            case         14
+6   gate.surface.ingest_atomic                 case         14
+7   gate.surface.session_key_stable            case         14
+8   gate.surface.input_routing                 case         14
+9   gate.surface.revocation_immediate          case         14
+10  gate.surface.scope_ceiling                 case         14
+11  gate.surface.no_token_leak                 corpus       14
+12  gate.surface.reply_chunked_redacted        case         14
+13  gate.surface.approval_roundtrip            case         14
+14  gate.surface.rate_limited                  case         14
+15  gate.surface.default_off                   case         14
+16  gate.surface.transport_confined            structural   14
+17  gate.surface.persistence_schema            structural   14
+18  gate.surface.persistence_isolated          case         14
+19  gate.surface.repository_contract           structural   14
+20  gate.surface.migration_clean               case         14
+21  gate.surface.migration_stepwise            case         14
+```
+
+Gate 11 is a corpus because a token can leak through a family of surfaces;
+gates 16, 17, and 19 are structural because they inspect the transport's
+declared confinement, the schema, and contract coverage. The remaining
+seventeen are boundary cases over the ingress transaction, the submission
+path, the outbox, and PostgreSQL.
+
+### Operational hardening, sixteen gates
+
+Sixteen gates, all new, in the twenty-second area and all at Milestone 15.
+They cover the declared backup set, the round trip, the restore rehearsal and
+its corruption detection, client-side encryption, retention, production
+refusal, the health-check signal list, alert deduplication and payload
+closure, the dead-database fallback, rollback promotion and schema-drift
+refusal, unit and sudoers reconciliation, the minimal public boundary, and the
+worker watchdog.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.ops.backup_set_complete                    structural   15
+2   gate.ops.backup_roundtrip                       case         15
+3   gate.ops.restore_rehearsal_passes               case         15
+4   gate.ops.restore_rehearsal_detects_corruption   case         15
+5   gate.ops.backup_encrypted_offhost               case         15
+6   gate.ops.backup_retention_policy                property     15
+7   gate.ops.rehearsal_never_touches_production     case         15
+8   gate.ops.healthcheck_signals                    case         15
+9   gate.ops.alert_enqueued_deduped                 case         15
+10  gate.ops.alert_payload_closed                   structural   15
+11  gate.ops.db_down_fallback                       case         15
+12  gate.ops.rollback_promotes_previous             case         15
+13  gate.ops.rollback_refuses_schema_drift          case         15
+14  gate.ops.units_and_sudoers_reconciled           structural   15
+15  gate.ops.public_boundary_minimal                structural   15
+16  gate.ops.worker_watchdog                        case         15
+```
+
+Gate 6 is a property because retention is a claim over generated listings;
+gates 1, 10, 14, and 15 are structural because they inspect a manifest, a
+schema, unit and sudoers files, and firewall and proxy declarations. The
+remaining eleven are boundary cases over the scripts, a throwaway database,
+the outbox, and the release tree.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -989,6 +1180,18 @@ milestone  new gates  cumulative  the earliest of them
 11                23         227  recurrence, occurrence atomicity,
                                   authority refresh, offline results,
                                   contracts, migration, erasure, isolation
+12                20         247  device identity, the outbox, content-
+                                  free payloads, dispatch, the APNs
+                                  transport, the offline inbox
+13                21         268  the brief, materialization, the
+                                  child-run suspension and join, derived
+                                  limits, the ledger, the evidence
+14                21         289  pairing, the session key, ingress
+                                  atomicity, the scope ceiling, replies,
+                                  the surface role's confinement
+15                16         305  the declared backup set, the
+                                  rehearsal, alerts, rollback, the
+                                  public boundary, the watchdog
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1009,18 +1212,23 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred and twenty-seven gates are green before
+2.  **Forty-one of three hundred and five gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred and twenty-seven, which is every
-registry entry, at Milestone 11. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and five, which is every
+registry entry, at Milestone 15. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
-`gate.browser.*`, and all twenty-three Milestone 11 gates are
-`gate.schedule.*`. Routing and subagents remain deferred and add none.
+`gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
+Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
+Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
+`gate.surface.*`, and Milestone 15's sixteen are `gate.ops.*`. Every
+authorized milestone now has a specification that declares its gates; the
+roadmap's items add none until the owner authorizes one and a specification
+lands for it. Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1280,7 +1488,10 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     specifications that had gates to declare, not by the column —
     [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
     [skills.md](skills.md) for Milestones 8 and 10. The decision
-    stands for the next milestone that shows a zero.
+    stands for the next milestone that shows a zero. Milestones 12
+    through 15 each showed one on the day they were authorized and
+    each closed it the way the decision implies, with a specification
+    that had gates to declare.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

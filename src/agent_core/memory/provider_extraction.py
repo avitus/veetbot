@@ -19,6 +19,7 @@ from agent_core.config import ConfigurationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope, ProcessEvent
 from agent_core.domain.memory import (
+    SENSITIVITY_ORDER,
     BeliefType,
     MemoryCandidate,
     MemoryRecord,
@@ -119,6 +120,15 @@ _SUBJECT_VALUE_CLAIM_KINDS = frozenset(
 _EXPLANATION_STYLE_CUE_TOKENS = frozenset(
     {"best", "better", "for", "me", "prefer", "preferred", "prefers", "work", "works"}
 )
+# The deterministic extractor pins these claim kinds to SENSITIVE; a provider
+# guess may raise a claim's sensitivity but never lower it below this floor,
+# because an inferred belief is flagged for review only at SENSITIVE or above.
+_SENSITIVITY_FLOORS: dict[MemoryClaimKind, Sensitivity] = {
+    MemoryClaimKind.RELATIONSHIP: Sensitivity.SENSITIVE,
+    MemoryClaimKind.HOME_LOCATION: Sensitivity.SENSITIVE,
+    MemoryClaimKind.OCCUPATION: Sensitivity.SENSITIVE,
+    MemoryClaimKind.ACCESSIBILITY_TOOL: Sensitivity.SENSITIVE,
+}
 _DURATION_TOKENS = frozenset(
     {
         "one",
@@ -362,6 +372,11 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
     else:  # pragma: no cover - exhaustive enum guard.
         raise ValueError(f"unsupported semantic claim kind: {kind}")
 
+    sensitivity = claim.sensitivity_guess
+    floor = _SENSITIVITY_FLOORS.get(kind)
+    if floor is not None and SENSITIVITY_ORDER[sensitivity] < SENSITIVITY_ORDER[floor]:
+        sensitivity = floor
+
     return MemoryCandidate(
         belief_type=belief_type,
         subject=subject,
@@ -371,7 +386,7 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
         model_confidence=claim.model_confidence,
         proposed_scope=scope,
         proposed_portability=claim.proposed_portability,
-        sensitivity_guess=claim.sensitivity_guess,
+        sensitivity_guess=sensitivity,
         valid_from=claim.valid_from,
         expires_hint=claim.expires_hint,
     )
@@ -686,20 +701,23 @@ class ProviderAssistedCandidateExtractor:
                 raise ValueError("memory extraction model exceeded its recorded budget")
             source_text_by_sequence = _source_text_by_sequence(events, principal)
             grounded: list[MemoryCandidate] = []
-            render_failure_count = 0
+            # One malformed claim must not discard the rest of the batch, and a
+            # batch of them must not become a batch of log lines.
+            render_failures: list[str] = []
             for claim in batch.candidates:
                 if not self._claim_is_grounded(claim, source_text_by_sequence):
                     continue
                 try:
                     grounded.append(_render_claim(claim, scope))
                 except ValueError:
-                    render_failure_count += 1
-            if render_failure_count:
+                    render_failures.append(claim.claim_kind.value)
+            if render_failures:
                 logger.warning(
                     "memory_provider_claim_render_failed",
                     extra={
                         "job_id": str(job_id),
-                        "rejected_candidate_count": render_failure_count,
+                        "rejected_candidate_count": len(render_failures),
+                        "rejected_claim_kinds": sorted(set(render_failures)),
                     },
                 )
         except asyncio.CancelledError:
@@ -785,6 +803,9 @@ class ProviderAssistedCandidateExtractor:
         quote = claim.evidence_quote
         if not quote.strip():
             return False
+        # Every required field must be supported by one episode that holds the
+        # quote; tokens are never combined across episodes, so a short quote
+        # repeated in several episodes cannot split the evidence between them.
         return any(
             quote in source and ProviderAssistedCandidateExtractor._claim_fits_source(claim, source)
             for source in cited
@@ -844,7 +865,8 @@ class ProviderAssistedCandidateExtractor:
                 and claim.quantity == 1
                 and grounding_tokens(claim.subject) <= source_tokens
             )
-            if not implicit_single_relation and not quantity_markers & source_tokens:
+            quote_tokens = grounding_tokens(claim.evidence_quote)
+            if not implicit_single_relation and not quantity_markers & quote_tokens:
                 return False
         return True
 

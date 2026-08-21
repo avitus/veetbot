@@ -1,0 +1,37 @@
+# Canonical gate registry entries for Milestone 12 device identity.
+- id: gate.device.register_idempotent
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Device registration is idempotent and principal-scoped.** Re-registering the same client device identity for the same principal updates one row in place; the same identity under another principal is a distinct row; a cross-principal read returns not found."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.token_unique
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**One live token belongs to one active device.** A token re-registered from a new installation moves to the new row and the old row's token is nulled; two active devices never hold the same token."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.revoke_immediate
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Revocation takes effect before the next claim.** Revoking a device clears its token, appends device.revoked, and a row claimed by the next dispatch targets no revoked device."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.lifecycle_audited
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Device lifecycle is audited once and content-free.** Register, token update, revoke, invalidation, and delete each append exactly one process event with a stable derivation key and a token fingerprint, never the token."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.persistence_schema
+  milestone: 12
+  kind: structural
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**The device and notification schema encodes its trust boundaries.** Metadata inspection proves keys, the partial unique token index, the provider-specific push-field constraints, the dispatch and listing indexes, and row-level security on all three tables."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.device.persistence_isolated
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Device and notification persistence is principal isolated.** Row-level security and repository predicates prevent cross-tenant and cross-principal reads and mutations of devices, outbox rows, and deliveries."
+  check: tests/gates/pending.py::pending_gate

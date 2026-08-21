@@ -1990,3 +1990,261 @@ async def test_evaluation_mode_cannot_bypass_an_active_evidence_gate(tmp_path: P
             memory_provider_evaluation_mode=True,
         ):
             pass
+
+
+@pytest.mark.parametrize(
+    ("claim_kind", "subject", "value", "guess", "expected"),
+    [
+        ("relationship", "wife", None, "internal", "sensitive"),
+        ("relationship", "wife", None, "restricted", "restricted"),
+        ("home_location", "home", "Lisbon", "public", "sensitive"),
+        ("home_location", "home", "Lisbon", "restricted", "restricted"),
+        ("occupation", "occupation", "nurse", "internal", "sensitive"),
+        ("occupation", "occupation", "nurse", "sensitive", "sensitive"),
+        ("accessibility_tool", "accessibility", "screen reader", "public", "sensitive"),
+        ("accessibility_tool", "accessibility", "screen reader", "restricted", "restricted"),
+        ("hobby", "hobby", "hiking", "internal", "internal"),
+    ],
+)
+def test_provider_claim_sensitivity_is_clamped_to_the_claim_kind_floor(
+    claim_kind: str,
+    subject: str,
+    value: str | None,
+    guess: str,
+    expected: str,
+) -> None:
+    """A provider cannot lower a relationship, home, occupation, or accessibility
+    claim below the deterministic extractor's SENSITIVE floor and bypass review."""
+    from agent_core.memory.provider_extraction import (
+        MemoryClaimKind,
+        _render_claim,
+        _SemanticClaim,
+    )
+
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind(claim_kind),
+        subject=subject,
+        value=value,
+        context=None,
+        quantity=None,
+        evidence_quote="quote",
+        polarity=Polarity("assert"),
+        source_event_ids=[1],
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity(guess),
+        valid_from=None,
+        expires_hint=None,
+    )
+    candidate = _render_claim(claim, "project-a")
+    assert candidate.sensitivity_guess.value == expected
+
+
+@pytest.mark.parametrize(
+    ("quantity", "quote", "grounded"),
+    [
+        (2, "three cats", False),
+        (3, "three cats", True),
+        (2, "two dogs and three cats", True),
+    ],
+)
+async def test_provider_quantity_grounding_is_scoped_to_the_evidence_quote(
+    quantity: int,
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A count is grounded only when the evidence quote itself states it, so a
+    quantity borrowed from elsewhere in the episode cannot render a false count."""
+    from agent_core.memory.provider_extraction import (
+        MemoryClaimKind,
+        _SemanticClaim,
+        _source_text_by_sequence,
+    )
+
+    _clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "I have two dogs and three cats.")
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind("pet_ownership"),
+        subject="cats",
+        value="cats",
+        context=None,
+        quantity=quantity,
+        evidence_quote=quote,
+        polarity=Polarity("assert"),
+        source_event_ids=[source],
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity("internal"),
+        valid_from=None,
+        expires_hint=None,
+    )
+    events = await session_events(factory)
+    assert (
+        ProviderAssistedCandidateExtractor._claim_is_grounded(
+            claim, _source_text_by_sequence(events, principal())
+        )
+        is grounded
+    )
+
+
+async def test_provider_render_failure_is_isolated_to_the_malformed_claim() -> None:
+    """One claim that grounds but cannot render must not discard the rest of the
+    grounded batch or force the whole call onto the deterministic fallback."""
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "I live in Lisbon and I prefer bullet points for answers.")
+    base = {
+        "polarity": "assert",
+        "source_event_ids": [source],
+        "model_confidence": 0.9,
+        "proposed_portability": "contextual",
+        "sensitivity_guess": "sensitive",
+        "valid_from": None,
+        "expires_hint": None,
+    }
+    response = json.dumps(
+        {
+            "candidates": [
+                {  # grounds (value and blank context pass) but cannot render
+                    **base,
+                    "claim_kind": "explanation_style",
+                    "subject": "answer style",
+                    "value": "bullet points",
+                    "context": "   ",
+                    "quantity": None,
+                    "evidence_quote": "I prefer bullet points",
+                },
+                {
+                    **base,
+                    "claim_kind": "home_location",
+                    "subject": "home",
+                    "value": "Lisbon",
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": "I live in Lisbon",
+                },
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(9_400, 9_500)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert any(candidate.statement == "User lives in Lisbon." for candidate in candidates)
+    async with factory() as uow:
+        completed = await uow.process_events.list("memory.provider_extraction.completed")
+    assert completed and completed[0].payload["grounded_candidate_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("quote", "grounded"),
+    [
+        ("I have a sister", False),
+        ("Anna lives in Lisbon", True),
+    ],
+)
+async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A claim cannot borrow its value from a cited episode other than the one
+    its evidence quote comes from."""
+    from agent_core.memory.provider_extraction import (
+        MemoryClaimKind,
+        _SemanticClaim,
+        _source_text_by_sequence,
+    )
+
+    _clock, factory, _service, _retriever = await formation_stack()
+    first = await user_event(factory, "I have a sister.")
+    second = await user_event(factory, "My friend Anna lives in Lisbon.")
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind("home_location"),
+        subject="home",
+        value="Lisbon",
+        context=None,
+        quantity=None,
+        evidence_quote=quote,
+        polarity=Polarity("assert"),
+        source_event_ids=[first, second],
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity("sensitive"),
+        valid_from=None,
+        expires_hint=None,
+    )
+    events = await session_events(factory)
+    assert (
+        ProviderAssistedCandidateExtractor._claim_is_grounded(
+            claim, _source_text_by_sequence(events, principal())
+        )
+        is grounded
+    )
+
+
+@pytest.mark.parametrize(
+    ("episodes", "quote", "grounded"),
+    [
+        (("I prefer concise answers.", "I use NASA data."), "I", False),
+        (("I prefer concise answers for NASA data.", "I use NASA data."), "I", True),
+    ],
+)
+async def test_provider_grounding_requires_one_episode_to_carry_every_field(
+    episodes: tuple[str, ...],
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A short quote repeated across episodes cannot let one episode supply the
+    value and another the context; a single quoted episode must carry them all."""
+    from agent_core.memory.provider_extraction import (
+        MemoryClaimKind,
+        _SemanticClaim,
+        _source_text_by_sequence,
+    )
+
+    _clock, factory, _service, _retriever = await formation_stack()
+    sources = [await user_event(factory, text) for text in episodes]
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind("user_preference"),
+        subject="answers",
+        value="concise",
+        context="NASA",
+        quantity=None,
+        evidence_quote=quote,
+        polarity=Polarity("assert"),
+        source_event_ids=sources,
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity("internal"),
+        valid_from=None,
+        expires_hint=None,
+    )
+    events = await session_events(factory)
+    assert (
+        ProviderAssistedCandidateExtractor._claim_is_grounded(
+            claim, _source_text_by_sequence(events, principal())
+        )
+        is grounded
+    )

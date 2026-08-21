@@ -1,4 +1,4 @@
-# ADR-0062: Credential-free production execution service
+# ADR-0067: Credential-free production execution service
 
 - **Status:** Accepted
 - **Date:** 2026-08-21

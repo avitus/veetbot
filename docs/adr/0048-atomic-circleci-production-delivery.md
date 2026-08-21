@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-10
 
-> **Updated by ADR-0062:** delivery also installs, starts, verifies, and restarts
+> **Updated by ADR-0067:** delivery also installs, starts, verifies, and restarts
 > the credential-free execution service; references to three systemd processes
 > are superseded.
 
