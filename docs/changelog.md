@@ -4,6 +4,32 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-20 — Roadmap: Milestones 12 through 15 authorized and the Milestone 10 completion contract amended
+
+- Added ADR-0061. Milestone 10 now completes on construction — all registered
+  gates, the cumulative registry, hosted CI on the final head, and a clean
+  final review — while tenant activation of self-authored skills stays
+  evidence-gated and default-off as roadmap item B1; ADR-0057's provider
+  extractor evidence already passed on the intended production model.
+- Authorized Milestones 12 through 15 in order: notifications and device
+  identity (Apple push to the native client, the Section 29 device registry),
+  general-purpose subagents through `delegate.run` (activation gated on
+  evaluation evidence), inbound surfaces and pairing (first channel Telegram),
+  and operational hardening (encrypted off-host backup, restore rehearsal,
+  health alerts, firewall, rollback). Each begins with its detailed-design
+  document and ADR, which declare its gates.
+- Added Section 21's Milestone 12–15 requirements and acceptance criteria and a
+  "Roadmap beyond Milestone 15" subsection that ranks every remaining deferral
+  with its entry condition, as Section 24 requires; Section 27.6 now places a
+  child run in a dedicated child session always.
+- Raised the gate-registry and documentation-check milestone bound from 11 to
+  15 as one `MAX_MILESTONE` constant; the milestone-map census reports a zero
+  row for each authorized milestone until its specification declares gates.
+- Corrected stale figures (thirty-eight Milestone 10 gates, 204 and 227
+  cumulative), retitled the architecture and security pages past Milestone 3
+  with summaries through Milestone 11, amended ADR-0046's Caddy decision as
+  superseded by ADR-0048, and updated the client page's route reference.
+
 ## 2026-08-20 — Inspectable formation evaluation and semantic provider claims
 
 - Replaced free-form provider-authored memory statements with a closed semantic

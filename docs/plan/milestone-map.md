@@ -989,6 +989,14 @@ milestone  new gates  cumulative  the earliest of them
 11                23         227  recurrence, occurrence atomicity,
                                   authority refresh, offline results,
                                   contracts, migration, erasure, isolation
+12                 0         227  notifications and device identity:
+                                  authorized, specification pending
+13                 0         227  subagents and delegation: authorized,
+                                  specification pending
+14                 0         227  inbound surfaces and pairing:
+                                  authorized, specification pending
+15                 0         227  operational hardening: authorized,
+                                  specification pending
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1020,7 +1028,11 @@ The cumulative column reaches two hundred and twenty-seven, which is every
 registry entry, at Milestone 11. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, and all twenty-three Milestone 11 gates are
-`gate.schedule.*`. Routing and subagents remain deferred and add none.
+`gate.schedule.*`. Milestones 12 through 15 — notifications and device
+identity, subagents and delegation, inbound surfaces and pairing, and
+operational hardening — were authorized on 2026-08-20 (ADR-0061) and report
+zero until each one's specification declares its gates; Decision 9 below is
+the rule those zeros close under. Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1280,7 +1292,9 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     specifications that had gates to declare, not by the column —
     [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
     [skills.md](skills.md) for Milestones 8 and 10. The decision
-    stands for the next milestone that shows a zero.
+    stands for the next milestone that shows a zero — and Milestones
+    12 through 15 are those milestones: each row reads zero until its
+    specification lands with gates to declare.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

@@ -6277,3 +6277,84 @@ replay handoffs while remaining small and predictable per connection.
 bound configurable in a later milestone.
 
 **Reversal cost:** cheap; reconnect semantics do not depend on the number.
+
+## Roadmap authorization and the Milestone 10 completion amendment (ADR-0061)
+
+The owner made the substantive decisions live on 2026-08-20 — direction,
+the activation split, the four milestones and their order, the first channels,
+and full milestone treatment for operational hardening — so this section
+records only the mechanical choices made while writing them into the corpus.
+
+### The registry bound is one named constant
+
+**Decided:** `scripts/gate_registry.py` now carries `MAX_MILESTONE = 15`, and
+the entry bound, the census loop, and `scripts/check_docs.py`'s project-state,
+plan-heading, and current-milestone checks all read it.
+
+**Why:** three literals (`> 11`, `range(12)`, `0..10`) had drifted apart
+already — the docs check still bounded `current_milestone` at 10 while the
+registry admitted 11 — and the next milestone would have needed four edits.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### Zero census rows for authorized, unspecified milestones
+
+**Decided:** the milestone map's census carries a `0 / 227` row for each of
+Milestones 12 through 15 with the note "authorized, specification pending".
+
+**Why:** the census check derives a row for every milestone up to the bound and
+compares it to the written table, and Decision 9 of the map already says a zero
+is reported rather than filled. The alternative — keeping the census loop at 12
+until the first specification lands — would have made the bound lie.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; each row is replaced when its specification lands.
+
+### `active_milestone` stays 11 until Milestone 12's specification exists
+
+**Decided:** `project-state.yaml` records Milestones 12 through 15 as
+`authorized` with their design document paths under
+`documents_required_before_coding_reaches_them`, and leaves `active_milestone`
+at 11.
+
+**Why:** "active" has meant the milestone whose implementation is in progress;
+Milestone 12 has no specification yet, and the plan's own rule is that the
+design document lands first. The authorization is recorded; activity is not
+claimed.
+
+**Question for you:** flip `active_milestone` to 12 when
+`notifications-and-devices.md` merges, or earlier if you want the state file to
+lead.
+
+**Reversal cost:** cheap.
+
+### Milestone 11 is listed as implementable from the corpus
+
+**Decided:** `readiness.implementable_from_corpus` now includes 11.
+
+**Why:** the readiness review's Milestone 11 verdict already says "no unnamed
+design choice between the corpus and the first red tests", which is the
+definition that list encodes; the omission was an oversight from when the
+scheduling design was new.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### The plan's new milestone sections name their design documents without linking
+
+**Decided:** Milestones 12 through 15 name `notifications-and-devices.md`,
+`subagents-and-delegation.md`, `inbound-surfaces.md`, and
+`operational-hardening.md` in code spans, not Markdown links.
+
+**Why:** the strict MkDocs build rejects a link to a file that does not exist,
+and each document is the first deliverable of its milestone. The links are
+added in the pull request that adds the document.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+

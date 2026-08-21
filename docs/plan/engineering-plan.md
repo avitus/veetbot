@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.3"
+version: "2.4"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -54,6 +54,13 @@ Version 2.3 (build-sequencing pass):
 - Milestone 3 is rescoped to model adapters (OpenAI, Anthropic, OpenAI-compatible); the chat_completions adapter and a minimal trajectory export move here, adding a no-cost local live-test path.
 - Cheap data-model decisions (reasoning event, usage token classes, prompt-stability, event versioning) are pulled into Milestones 1-2; programmatic orchestration and credential scrubbing into Milestone 6.
 - Self-improving skills and inbound messaging surfaces are kept deliberately late.
+
+Version 2.4 (roadmap pass, 2026-08-20):
+
+- Section 21 gains Milestones 12 through 15 — notifications and device identity, general-purpose subagents and delegation, inbound surfaces and pairing, and operational hardening — authorized by the repository owner in that order, each specified by a detailed-design document that declares its gates before implementation begins.
+- Section 21 gains a roadmap subsection that converts every remaining deferral into a ranked, owner-visible backlog item, as Section 24 requires.
+- Milestone 10's completion is construction-scoped: tenant activation of self-authored skills and of provider-assisted memory extraction stays evidence-gated and is tracked on the roadmap rather than as a completion condition (ADR-0061).
+- Section 27.6 settles the child-run placement question: a child run always belongs to a dedicated child session.
 
 ## 1. Mission
 
@@ -2351,7 +2358,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - two hundred and twenty-six gate declarations, comprising two hundred and seventeen across seventeen detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to two hundred and twenty-three registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 11; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the two hundred and twenty-three registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - two hundred and thirty gate declarations, comprising two hundred and twenty-one across seventeen detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to two hundred and twenty-seven registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 15; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the two hundred and twenty-seven registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -2361,7 +2368,7 @@ Design in early - cheap now, expensive to retrofit. Data-model and builder shape
 
 Fast-follow once a dependency lands - high leverage, low marginal cost. The OpenAI-compatible chat_completions adapter arrives with the first real adapters (Milestone 3), not later: it is the simplest API, rides the same normalized protocol, and - pointed at a local Ollama or vLLM - gives a free live-test path that does not burn provider credits. Trajectory export is a thin projection over the event log, so it lands right after durable events (Milestone 3) and immediately turns dev and test runs into eval fixtures. Programmatic tool orchestration lands right after the sandbox (Milestone 6).
 
-Keep late - deliberately deferred. Self-improving skills stay behind the static-skill substrate and evaluation evidence (after Milestone 8); inbound messaging surfaces and pairing stay a post-0.1 concern (Milestone 10 and beyond); LLM-assisted approval stays an optional secondary signal added after the deterministic gate is solid. Pulling these forward would trade discipline for shine.
+Keep late - deliberately deferred. Self-improving skills stay behind the static-skill substrate and evaluation evidence (after Milestone 8); inbound messaging surfaces and pairing stay a post-0.1 concern (device identity at Milestone 12, pairing at Milestone 14); LLM-assisted approval stays an optional secondary signal added after the deterministic gate is solid. Pulling these forward would trade discipline for shine.
 
 | **Addition**                                   | **Earliest** | **Why here**                                     | **Key dependency**     |
 |---|---|---|---|
@@ -2379,8 +2386,8 @@ Keep late - deliberately deferred. Self-improving skills stay behind the static-
 | LLM-assisted approval (secondary)              | after M6     | Optional signal, not needed for correctness      | model gateway          |
 | Self-improving skills                          | after M8 \*  | Gated by eval evidence; carries risk             | skills, sandbox, evals |
 | Memory surface + injection-scan + external     | M9           | The memory milestone                             | memory store           |
-| Additive fan-out usage (activation)            | M10          | Activates with subagents                         | subagents              |
-| Inbound surfaces + pairing                     | M10+ \*      | New surface area; v0.1 is API/CLI                | multi-device core      |
+| Additive fan-out usage (activation)            | M13          | Activates with subagents                         | subagents              |
+| Inbound surfaces + pairing                     | M12, M14 \*  | New surface area; v0.1 is API/CLI                | multi-device core      |
 
 \* Self-improving skills and inbound surfaces are the two additions kept deliberately late; everything marked M1-M3 is either a cheap data-model decision or a high-leverage fast-follow that is cheaper to do early than to bolt on. The single most consequential move is bringing the OpenAI-compatible adapter into Milestone 3, which also buys a no-cost local live-test path.
 
@@ -2846,7 +2853,7 @@ routing nor general-purpose subagents. Scheduling moved to its own Milestone 11
 when the owner authorized it on 2026-08-19, so it no longer shares Milestone
 10's completion contract.
 
-A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill.manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document.
+A fourth extension lands here. [skills.md](skills.md) and ADR-0030 place Section 30's authoring loop at this milestone and specify it - `skill.manage` as a capability tool with four operations, the `skill.write` scope, confinement to trusted turns, an approval carrying a diff, `expected_revision` for the concurrent edit, the background review's four restrictions, and rollback as an `AgentSpec` edit - and register six hard gates against it, the first this plan has at Milestone 10. Section 30.5's evidence gate still decides whether authoring is enabled, using the quantitative rollout threshold defined by that document. ADR-0061 (2026-08-20) separates construction from tenant activation: Milestone 10 completes when its registered gates and the cumulative registry pass, hosted CI passes on the final head, and the final review is clean; enabling authoring for a tenant, and the provider-assisted extractor's version-bound evidence, stay governed by [skills.md](skills.md#rollout-evidence) and ADR-0057 and are tracked as roadmap item B1 rather than as completion conditions.
 
 #### Self-authored skills (authorized tranche)
 
@@ -2929,10 +2936,11 @@ Provider routing may then consider:
 - Availability
 - Evaluation performance
 
-#### Subagents — deferred
+#### Subagents — authorized as Milestone 13
 
-This section is design-only. Milestone 10 does not authorize general-purpose
-subagents or `delegate.run`.
+Milestone 10 does not include general-purpose subagents or `delegate.run`. The
+owner authorized them as Milestone 13 on 2026-08-20; that milestone carries the
+requirements and the evidence gate below forward unchanged.
 
 Represent subagents as a special tool:
 
@@ -3023,9 +3031,239 @@ Acceptance criteria:
 - No raw token, cookie, key, or credential is persisted or logged as schedule,
   revision, occurrence, event, session, or run state.
 
-Arbitrary cron, monthly rules, dependency graphs, workflow DAGs, push
-notifications, and continuous-session recurrence remain later extensions. They
-are not alternate implementations of Milestone 11.
+Arbitrary cron, monthly rules, dependency graphs, workflow DAGs, and
+continuous-session recurrence remain later extensions (roadmap item B5). They
+are not alternate implementations of Milestone 11. Push delivery of schedule
+outcomes is Milestone 12's contract, not this one's.
+
+### Milestone 12: Notifications and device identity
+
+The owner authorized this milestone on 2026-08-20 as the first of the roadmap
+milestones (ADR-0061). It lands the first half of the work Section 29.8
+deferred, now that concrete use cases exist: a scheduled run finishes, an
+approval waits, or a run asks a question, and the agent has no way to tell the
+user. The detailed design is `notifications-and-devices.md` and its ADR; both
+are written before implementation begins and the design declares this
+milestone's gates. Until that specification lands, this section states the
+requirement and the design states nothing.
+
+Implement:
+
+- A `Device` registry: register, refresh, revoke, and delete a device for a
+  principal, with a client-minted installation identity and an optional push
+  token; device lifecycle is audited as process events.
+- A durable notification outbox written in the same transaction as the event
+  that triggers it, claimed with row locks, retried on a bounded schedule, and
+  settled as delivered, superseded, expired, or failed.
+- One push transport, Apple Push Notification service, authenticated with a
+  file-mounted key, selecting sandbox or production per device, behind a port
+  that a fake transport satisfies under the same contract.
+- A least-privilege dispatcher role that holds the push key and the database
+  credential and nothing else.
+- Exactly these triggers: an approval is requested, a run waits for user
+  input, a run fails, a scheduled occurrence's run reaches a terminal state, and
+  a scheduled occurrence is missed or skipped.
+- Content-free payloads: kind, identifiers, a closed-enum status, the tool name,
+  and a templated title; never message text, arguments, approval summaries,
+  question text, schedule instructions, reasoning, or tracebacks.
+- Device and notification routes with exact scopes, an offline notification
+  inbox, default-off activation flags, and registration, token upload,
+  revocation, and deep-link handling in the native Apple client, which remains
+  a transport-only client of the versioned API.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- Exactly the named triggers enqueue one durable notification, in the
+  transaction that records the triggering event; no other transition does.
+- No injected crash leaves an event without its outbox row or an outbox row
+  without its event, and an enqueue failure never alters a run's terminal state.
+- A principal can register, list, refresh, revoke, and delete devices; another
+  principal's device is indistinguishable from a missing one.
+- A revoked device, an invalidated token, or a muted kind receives nothing from
+  the next dispatch onward; a token the provider rejects as unregistered is
+  invalidated once and audited once.
+- Two dispatchers never deliver one notification twice to one device; transient
+  failures retry on the declared bounded schedule; expired and stale
+  notifications are never sent.
+- No payload, log line, delivery record, or device view contains message
+  content, secrets, the push key, or a full device token.
+- A client offline for every event can later enumerate every notification and
+  its delivery outcome.
+- Everything is default-off; only the dispatcher role loads the push key.
+
+Inbound surfaces, pairing, device-scoped tools, presence-based tool exposure,
+hand-off, actionable approve-or-deny buttons, and email or webhook transports
+are not part of this milestone.
+
+### Milestone 13: General-purpose subagents and delegation
+
+The owner authorized this milestone on 2026-08-20 (ADR-0061). It implements
+the `delegate.run` control tool this section designs under Milestone 10, with
+every child-run property listed there and the gate for multi-agent work
+honoured as written: construction is authorized now, and tenant activation
+requires evaluation evidence that a single agent fails where delegation
+succeeds. The detailed design is `subagents-and-delegation.md` and its ADR.
+
+Implement:
+
+- `delegate.run` as a suspending control tool whose input is a validated
+  structured brief: objective, success condition, optional context and
+  artifact references, an explicit allowed tool subset, optional limits, and a
+  return shape.
+- Materialization of a dedicated child session and a child run in one
+  transaction, with `parent_run_id`, scopes intersected with the parent's,
+  limits derived from the parent's remaining budget, and a deadline no later
+  than the parent's.
+- Parent suspension while children run, re-entry of each child's concise result
+  as an external-untrusted tool result with artifact references, and resumption
+  through the single terminal writer.
+- Cancellation and deadline propagation from parent to children; a failed or
+  cancelled child is a tool error, not a parent failure.
+- Depth and fan-out caps, per-tenant admission, additive usage accounting, and
+  a default-off flag that leaves the tool unregistered.
+- The evaluation evidence the gate for multi-agent work requires: a capability
+  scenario admitted from a real failed trajectory and a deterministic two-arm
+  case whose delegating arm improves the outcome without adding policy
+  failures.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- Each of the nine child-run properties this section lists under Milestone 10
+  holds: parent identity, explicit objective, restricted context, restricted
+  tool set, child budget, child deadline, separate trace, concise result, and
+  artifact references rather than a transcript.
+- A child run is never inserted into its parent's session; the parent's
+  one-active-run constraint is never contended.
+- The child's tool set is a subset of the parent's pinned set and never
+  includes `delegate.run` or `skill.manage`; the child's scopes are a subset of
+  the parent's.
+- The parent remains suspended until every child is terminal, resumes exactly
+  once, and its usage after the join equals its own plus its children's.
+- Cancelling the parent cancels every non-terminal child; a child can never
+  alter a completed parent's outcome or event history.
+- Child results enter the parent labelled external and untrusted, and injecting
+  them does not change the parent's stable prefix.
+- The feature is default-off; tenant activation requires the recorded
+  capability-scenario delta.
+
+Handoffs, role-named agents, delegation deeper than one level, and any change
+to model routing are not part of this milestone.
+
+### Milestone 14: Inbound surfaces and pairing
+
+The owner authorized this milestone on 2026-08-20 (ADR-0061). It lands the
+second half of the work Section 29.8 deferred: a Surface, which Section 29.4
+defines as a device with an empty capability set, through which a paired sender
+can reach the agent from a messaging channel. The first channel is a Telegram
+bot. The detailed design is `inbound-surfaces.md` and its ADR.
+
+Implement:
+
+- A Surface registry on the Milestone 12 device registry, an inbound transport
+  port with a Telegram long-polling adapter, and a least-privilege surface role
+  that holds the bot token and the database credential and nothing else.
+- The pairing ceremony Section 29.4 and ADR-0017 require: a one-time code
+  minted by an authenticated principal, presented by the sender, bound to the
+  surface and sender, with expiry, attempt limits, lockout, and revocation.
+- The session-key resolver: a unique external key per surface and chat that
+  maps to one session, rotated explicitly or after idle time and never reused.
+- Ordinary run creation for a paired message through the same submission path
+  the HTTP API uses, with origin attributed on the write.
+- Replies and Milestone 12 notifications delivered back to the chat, redacted
+  and chunked; approvals and clarifying questions resolved through the existing
+  services by deterministic commands or a plain reply.
+- Per-sender rate limits, per-tenant ceilings, default-off flags at both the
+  API and the worker.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- Pairing is required before any run: an unpaired sender creates no session,
+  run, event, or stored content.
+- A paired message creates an ordinary durable run bound to the paired
+  principal with scopes no wider than the pairing grants and the principal
+  currently holds; the policy engine is never told that a surface exists.
+- Process restarts and duplicate polls never double-submit and never lose a
+  committed update.
+- The session key is stable across messages, rotatable, and never reused;
+  revocation takes effect before the sender's next message.
+- No bot token, bearer token, or credential appears in any event, log, span,
+  receipt, export, or reply.
+- Replies are chunked and redacted; failures expose reason codes only.
+- Approval and clarifying-question notifications reach the chat and resolve
+  through the existing approval and input services.
+- Everything is default-off; production activation requires both flags.
+
+Slack and email adapters, group and thread chats, webhook delivery,
+device-scoped tools, presence routing, hand-off, and media intake are not part
+of this milestone; the port is designed so each is additive.
+
+### Milestone 15: Operational hardening
+
+The owner authorized this milestone on 2026-08-20 (ADR-0061). It converts the
+single-Droplet deployment's accepted "loss of the host may be unrecoverable"
+into "recoverable within the backup window", and it makes the owner aware when
+production degrades. Section 2.6's exclusions stand: no Kubernetes,
+microservices, load balancer, rolling deployment, or second queue. The detailed
+design is `operational-hardening.md` and its ADR.
+
+Implement:
+
+- A scripted, encrypted, off-host daily backup of the database, the artifact
+  store, and the browser-profile ciphertext, with a manifest that records the
+  release, the schema revision, and checksums; secrets are never in the set.
+- A restore rehearsal that restores into a throwaway database, asserts the
+  schema revision, probes the data, and records a verdict — automatically on
+  the host and at least once by the owner from the off-host copy.
+- A host health check on a closed signal list that delivers deduplicated
+  alerts through the Milestone 12 outbox, plus an independent channel for the
+  states that take the outbox down with them.
+- Cloud and host firewall, SSH hardening, reverse-proxy rate limits, and
+  loopback-only structural proofs.
+- One-command rollback to the previous retained release that verifies the
+  release identity and never downgrades the schema, plus a pre-migration local
+  dump in the release path.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- A daily encrypted backup reaches off-host storage with a manifest; plaintext
+  staging never survives a run; no secret file is ever included.
+- The most recent backup restores to the expected schema revision and passes
+  the probe, and corrupted or wrong-revision dumps are rejected.
+- The health check delivers deduplicated alerts and recoveries; a simulated
+  database outage alerts through the independent channel.
+- Rollback verifies the release identity, refuses to cross a schema boundary
+  without an explicit override, and never downgrades.
+- Inbound traffic is limited to the reverse proxy and SSH; every other
+  listener is loopback-only.
+- Backup, health check, and watchdog behaviour are default-off and activate
+  only with explicit flags and their own environment files.
+
+### Roadmap beyond Milestone 15
+
+Section 24 requires deferred work to become documented issues or a roadmap
+section; this is that section. Each item enters the plan only when the owner
+authorizes it and a specification with gates to declare exists for it, under
+the same rule the milestone map states for a zero-gate milestone. Order is the
+owner's current ranking, not a schedule.
+
+| # | Item | Entry condition |
+|---|---|---|
+| B1 | Tenant activation of self-authored skills and of provider-assisted memory extraction | The rollout evidence rule in Section 30.5 and `skills.md`; ADR-0057's version-bound evidence |
+| B2 | Dynamic model routing and a second provider adapter (this section, Milestone 10) | An ADR; data residency and evaluation-performance inputs still undesigned |
+| B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
+| B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
+| B5 | Scheduling extensions: monthly rules, arbitrary cron, continuous-session recurrence, dependency graphs | A separate ADR; not alternate implementations of Milestone 11 |
+| B6 | Memory residue: expiration sweep, session history and artifacts as retrieval sources, an external memory provider, the persona surface, `pgvector`, a temporal entity graph | Evaluation evidence for each, per Milestone 9's entry gate |
+| B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
+| B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
+| B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
+| B10 | S3-compatible artifact storage | An operational need to scale past one host |
+| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers |
+| B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 
 ## 22. Security baseline
 
@@ -3317,7 +3555,7 @@ Decide deliberately whether a session may have more than one in-flight run.
 
 ### 27.6 Subagents and child runs
 
-Subagents (Section 21, Milestone 10) are child runs, not turns. A child run has its own run row with parent_run_id set, its own lease, budget, deadline, checkpoint, and trace, and it belongs to the parent’s session or a dedicated child session per policy. The parent turn does not complete until its child runs reach a terminal state. Child runs never write to the parent’s conversation directly; they return a concise result the parent incorporates.
+Subagents (Section 21, Milestone 13) are child runs, not turns. A child run has its own run row with parent_run_id set, its own lease, budget, deadline, checkpoint, and trace, and it always belongs to a dedicated child session, so the parent session’s one-active-run constraint (27.5) is never contended. The parent turn does not complete until its child runs reach a terminal state. Child runs never write to the parent’s conversation directly; they return a concise result the parent incorporates.
 
 ### 27.7 Idempotency of submission and input
 
@@ -3416,7 +3654,7 @@ Make the strength of the boundary a configured choice with a safe default:
 
 The agent must be usable from many devices - phone, laptop, desktop, web - while behaving as one continuous assistant. This is largely a consequence of the existing architecture: because PostgreSQL is the source of truth and devices are clients of the API, the durable state is already shared. This section makes the split explicit, identifies every component that must be cloud-shared (not only memory), introduces the Device concept for capabilities that are inherently local to one machine, and defines the cross-device flows. Recorded as ADR-0011.
 
-Section 29.8 defers this section's own subject, so it is audited rather than expanded. [multi-device-and-surfaces.md](multi-device-and-surfaces.md) and ADR-0034 check the seam instead of building behind it: the eight places the corpus already holds a device-shaped hole and needs no edit at all, the five where it does not - a third registration source at attach, device lifecycle events with no session to be charged to, a fourth suspension kind for a hand-off, no client attributed on a write, and `NotificationService` as a port name with no mechanism behind it - the placement of 29.6's four items under the rule that a port lives in the module named for the capability it abstracts, per-device scopes as an intersection stamped on the run at submission rather than a second evaluation path, and a Surface as this section's `Device` model with an empty capability set and one genuinely new mechanism, the session-key resolver. That document declares no gates and changes no requirement below. 29.1 through 29.3 stand as written, and 29.4's eight bullets, 29.5's four flows, 29.6's model and ports, 29.7's four security notes, and 29.8's scope for 0.1 are carried forward rather than reinterpreted. Two conflicts with later specifications are named there and resolved in the specifications' favour: 29.5's "queue or reject" for a second device on a busy session is reject, which [runtime-loop.md](runtime-loop.md) settled against ADR-0004's partial unique index, and 29.4's presence-based exposure yields to the pinned prefix, which [tool-system.md](tool-system.md) states as advertisement is pinned and availability is resolved at call time. The 0.1 obligation 29.8 states is already discharged: reads and writes are principal-scoped and served from the core, and a second client attaching and replaying is a hard gate at Milestone 5.
+Section 29.8 defers this section's own subject, so it is audited rather than expanded. [multi-device-and-surfaces.md](multi-device-and-surfaces.md) and ADR-0034 check the seam instead of building behind it: the eight places the corpus already holds a device-shaped hole and needs no edit at all, the five where it does not - a third registration source at attach, device lifecycle events with no session to be charged to, a fourth suspension kind for a hand-off, no client attributed on a write, and `NotificationService` as a port name with no mechanism behind it - the placement of 29.6's four items under the rule that a port lives in the module named for the capability it abstracts, per-device scopes as an intersection stamped on the run at submission rather than a second evaluation path, and a Surface as this section's `Device` model with an empty capability set and one genuinely new mechanism, the session-key resolver. That document declares no gates and changes no requirement below. 29.1 through 29.3 stand as written, and 29.4's eight bullets, 29.5's four flows, 29.6's model and ports, 29.7's four security notes, and 29.8's scope for 0.1 are carried forward rather than reinterpreted. Two conflicts with later specifications are named there and resolved in the specifications' favour: 29.5's "queue or reject" for a second device on a busy session is reject, which [runtime-loop.md](runtime-loop.md) settled against ADR-0004's partial unique index, and 29.4's presence-based exposure yields to the pinned prefix, which [tool-system.md](tool-system.md) states as advertisement is pinned and availability is resolved at call time. The 0.1 obligation 29.8 states is already discharged: reads and writes are principal-scoped and served from the core, and a second client attaching and replaying is a hard gate at Milestone 5. Milestones 12 and 14 land the two halves 29.8 deferred — device identity with notifications, then inbound Surfaces with pairing — each under a specification that declares its own gates; until those specifications land, this paragraph stands as written.
 
 ### 29.1 Principle: one shared core, many thin clients
 

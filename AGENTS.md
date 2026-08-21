@@ -87,10 +87,10 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state).
 - Do not begin later milestones speculatively.
-- Milestones 0 through 9 are complete. Milestones 10 and 11 have separate contracts.
-  Milestone 10 covers automatic memory, self-authored skills,
-  provider-neutral web access, and authenticated browser automation; routing,
-  general-purpose subagents, and other extensions remain unauthorized.
+- Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
+  12 through 15 — notifications and device identity, subagents and delegation,
+  inbound surfaces and pairing, operational hardening — are authorized in that
+  order (ADR-0061); model routing and the plan's roadmap items are not.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or
   a note in the relevant doc).
