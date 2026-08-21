@@ -1,0 +1,27 @@
+[Unit]
+Description=Veetbot credential-free sandbox execution service
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+Before=veetbot-worker.service veetbot-async-worker.service
+
+[Service]
+Type=simple
+User=veetbot-exec
+Group=veetbot
+SupplementaryGroups=docker
+WorkingDirectory=/opt/veetbot/current
+ExecStart=/opt/veetbot/current/.venv/bin/agent execution-service --socket /run/veetbot/execution.sock --runtime runsc
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RuntimeDirectory=veetbot
+RuntimeDirectoryMode=0750
+ReadWritePaths=/run/veetbot /var/run/docker.sock
+UMask=0007
+
+[Install]
+WantedBy=multi-user.target

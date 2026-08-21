@@ -130,6 +130,13 @@ site is its only public HTTP entry point. The server serializes releases with
 promotion, and requires the health probe to report the same release identity
 locally and through the public TLS endpoint.
 
+Application services run without Docker-group membership or a container-runtime
+socket. A separate `veetbot-exec` systemd service owns gVisor sandbox lifecycle,
+loads no application environment file, and accepts the existing
+`ExecutionEnvironment` operations over a group-restricted Unix socket. The
+separate `veetbot-deploy` identity owns immutable application and documentation
+releases. ADR-0062 records this production correction to the older host topology.
+
 The committed-file secret scanner covers `.circleci/`, `deploy/`, `nginx/`, and
 `scripts/` in addition to application, client, test, migration, evaluation, and
 documentation sources. Production bearer tokens, provider keys, and database

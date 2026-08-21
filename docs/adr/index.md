@@ -70,3 +70,4 @@ implementation without one.
 - [ADR-0059 — Milestone 11 scheduled runs (Proposed)](0059-milestone-11-scheduled-runs.md)
 - [ADR-0060 — Reading lanes and the state-file split](0060-reading-lanes-and-state-file-split.md)
 - [ADR-0061 — Atomic publication of the documentation site](0061-atomic-documentation-publication.md)
+- [ADR-0062 — Credential-free production execution service](0062-credential-free-execution-service.md)

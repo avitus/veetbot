@@ -21,11 +21,40 @@ DOCS_ROOT="$DEPLOY_ROOT/docs"
 DOCS_SOURCE="$TEST_ROOT/docs-source"
 DOCS_ARCHIVE="$TEST_ROOT/veetbot-docs.tar.gz"
 DOCS_CHECKSUM="$DOCS_ARCHIVE.sha256"
-GNU_MV="${VEETBOT_TEST_GNU_MV:-$(command -v gmv || command -v mv)}"
-if ! "$GNU_MV" --version 2>/dev/null | grep -Fq 'GNU coreutils'; then
-  printf 'nginx deployment tests require GNU mv (install coreutils on macOS)\n' >&2
-  exit 1
+GNU_MV="${VEETBOT_TEST_GNU_MV:-$(command -v gmv || command -v mv || true)}"
+GNU_SHA256SUM="${VEETBOT_TEST_GNU_SHA256SUM:-$(
+  command -v gsha256sum || command -v sha256sum || true
+)}"
+GNU_TAR="${VEETBOT_TEST_GNU_TAR:-$(command -v gtar || command -v tar || true)}"
+GNU_FIND="${VEETBOT_TEST_GNU_FIND:-$(command -v gfind || command -v find || true)}"
+HOMEBREW_PREFIX="${HOMEBREW_PREFIX:-$(brew --prefix 2>/dev/null || true)}"
+GNU_FLOCK="${VEETBOT_TEST_GNU_FLOCK:-$(command -v flock || true)}"
+if [[ -z "$GNU_FLOCK" && -n "$HOMEBREW_PREFIX" ]]; then
+  GNU_FLOCK="$HOMEBREW_PREFIX/opt/util-linux/bin/flock"
 fi
+
+require_tool() {
+  local path="$1"
+  local version_marker="$2"
+  local name="$3"
+  if [[ ! -x "$path" ]] \
+    || ! "$path" --version 2>/dev/null | grep -Fq "$version_marker"; then
+    printf 'nginx deployment tests require %s; see docs/deployment.md\n' "$name" >&2
+    exit 1
+  fi
+}
+
+require_tool "$GNU_MV" 'GNU coreutils' 'GNU mv'
+require_tool "$GNU_SHA256SUM" 'GNU coreutils' 'GNU sha256sum'
+require_tool "$GNU_TAR" 'GNU tar' 'GNU tar'
+require_tool "$GNU_FIND" 'GNU findutils' 'GNU find'
+require_tool "$GNU_FLOCK" 'util-linux' 'util-linux flock'
+export \
+  VEETBOT_TEST_GNU_MV="$GNU_MV" \
+  VEETBOT_TEST_GNU_SHA256SUM="$GNU_SHA256SUM" \
+  VEETBOT_TEST_GNU_TAR="$GNU_TAR" \
+  VEETBOT_TEST_GNU_FIND="$GNU_FIND" \
+  VEETBOT_TEST_GNU_FLOCK="$GNU_FLOCK"
 mkdir -p \
   "$BIN_DIR" \
   "$DEPLOY_ROOT/shared" \
@@ -35,10 +64,10 @@ mkdir -p \
 : >"$LOG_FILE"
 printf '<h1>Veetbot documentation</h1>\n' >"$DOCS_SOURCE/index.html"
 printf '20260810-152233-abcdef0\n' >"$DOCS_SOURCE/release.txt"
-tar -czf "$DOCS_ARCHIVE" -C "$DOCS_SOURCE" .
+"$GNU_TAR" -czf "$DOCS_ARCHIVE" -C "$DOCS_SOURCE" .
 (
   cd "$(dirname "$DOCS_ARCHIVE")"
-  sha256sum "$(basename "$DOCS_ARCHIVE")" >"$(basename "$DOCS_CHECKSUM")"
+  "$GNU_SHA256SUM" "$(basename "$DOCS_ARCHIVE")" >"$(basename "$DOCS_CHECKSUM")"
 )
 
 write_stub() {
@@ -63,7 +92,6 @@ write_stub sudo '
   fi
   "$@"
 '
-write_stub flock 'exit 0'
 write_stub nginx '
   printf "nginx %s\n" "$*" >>"$VEETBOT_TEST_LOG"
   if [[ "${VEETBOT_TEST_NGINX_FAIL_ONCE:-0}" == 1 && ! -e "$VEETBOT_TEST_FAIL_MARKER" ]]; then
@@ -81,6 +109,19 @@ write_stub systemctl '
 write_stub mv '
   "$VEETBOT_TEST_GNU_MV" "$@"
 '
+write_stub sha256sum '
+  "$VEETBOT_TEST_GNU_SHA256SUM" "$@"
+'
+write_stub tar '
+  "$VEETBOT_TEST_GNU_TAR" "$@"
+'
+write_stub find '
+  "$VEETBOT_TEST_GNU_FIND" "$@"
+'
+write_stub flock '
+  "$VEETBOT_TEST_GNU_FLOCK" "$@"
+'
+export PATH="$BIN_DIR:$PATH"
 
 run_deploy() {
   PATH="$BIN_DIR:$PATH" \
@@ -95,6 +136,10 @@ run_deploy() {
   VEETBOT_TEST_INSTALL_FAIL_MARKER="$INSTALL_FAIL_MARKER" \
   VEETBOT_TEST_SYMLINK_FAIL_MARKER="$SYMLINK_FAIL_MARKER" \
   VEETBOT_TEST_GNU_MV="$GNU_MV" \
+  VEETBOT_TEST_GNU_SHA256SUM="$GNU_SHA256SUM" \
+  VEETBOT_TEST_GNU_TAR="$GNU_TAR" \
+  VEETBOT_TEST_GNU_FIND="$GNU_FIND" \
+  VEETBOT_TEST_GNU_FLOCK="$GNU_FLOCK" \
     "$DEPLOY_SCRIPT" \
       "${1:-$SOURCE_CONFIG}" \
       "${2:-}" \

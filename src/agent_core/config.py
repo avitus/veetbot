@@ -92,6 +92,7 @@ class Settings:
     auth_scopes: frozenset[str] = frozenset()
     sandbox_image: str = "agent-core-sandbox:dev"
     sandbox_passthrough: tuple[str, ...] = ()
+    execution_service_socket: Path | None = None
     release_id: str | None = None
     web_search_provider: WebProviderKind = WebProviderKind.DISABLED
     web_fetch_provider: WebProviderKind = WebProviderKind.DISABLED
@@ -607,6 +608,15 @@ def validate_settings(settings: Settings, *, require_auth_token: bool = True) ->
             "startup refuses docker and fake unless DEPLOYMENT_MODE=development "
             "and AUTH_MODE=dev"
         )
+    if (
+        settings.deployment_mode is DeploymentMode.PRODUCTION
+        and settings.sandbox in {SandboxMechanism.GVISOR, SandboxMechanism.MICROVM}
+        and settings.execution_service_socket is None
+    ):
+        raise ConfigurationError(
+            "production sandboxing requires AGENT_EXECUTION_SERVICE_SOCKET so application "
+            "processes never access the container runtime"
+        )
     if settings.deployment_mode is DeploymentMode.PRODUCTION and settings.auth_mode is AuthMode.DEV:
         raise ConfigurationError(
             "unsafe authentication configuration: DEPLOYMENT_MODE=production refuses AUTH_MODE=dev"
@@ -775,6 +785,10 @@ def _load_settings(
         for name in values.get("AGENT_SANDBOX_PASSTHROUGH", "").split(",")
         if name.strip()
     )
+    raw_execution_socket = values.get("AGENT_EXECUTION_SERVICE_SOCKET", "").strip()
+    execution_service_socket = Path(raw_execution_socket) if raw_execution_socket else None
+    if execution_service_socket is not None and not execution_service_socket.is_absolute():
+        raise ConfigurationError("AGENT_EXECUTION_SERVICE_SOCKET must be an absolute path")
     release_id = values.get("VEETBOT_RELEASE_ID", "").strip() or None
     web_search_provider = _parse_enum(
         WebProviderKind,
@@ -859,6 +873,7 @@ def _load_settings(
         auth_scopes=auth_scopes,
         sandbox_image=sandbox_image,
         sandbox_passthrough=sandbox_passthrough,
+        execution_service_socket=execution_service_socket,
         release_id=release_id,
         web_search_provider=web_search_provider,
         web_fetch_provider=web_fetch_provider,

@@ -13,9 +13,16 @@ release.
 
 The production deployment scripts require the Ubuntu GNU userland: Bash, GNU
 coreutils (including `mv -T` and `sha256sum`), GNU tar and findutils, and
-util-linux `flock`. Local macOS deployment-script tests require Homebrew
-coreutils so `gmv -Tf` exercises the same atomic replacement command as the
-production host; the test harness stubs privileged Nginx and systemd operations.
+util-linux `flock`. Local macOS deployment-script tests require the matching
+Homebrew tools:
+
+```bash
+brew install coreutils gnu-tar findutils util-linux
+```
+
+The harness maps `gmv`, `gsha256sum`, `gtar`, `gfind`, and the Homebrew
+util-linux `flock` into the production command names during both fixture
+creation and deployment. Privileged Nginx and systemd operations remain stubbed.
 
 The flow adapts the useful deployment invariants from
 [avitus/mankunku](https://github.com/avitus/mankunku) to Veetbot's Python and
@@ -55,7 +62,7 @@ Each release is named `YYYYMMDD-HHMMSS-<7-character-commit>`. The server:
 5. ensures the local PostgreSQL service is running;
 6. applies `alembic upgrade head` and runs the production preflight;
 7. switches `/opt/veetbot/current`, tags the sandbox image as `production`, and
-   restarts all three systemd units;
+   restarts the credential-free execution service and all application units;
 8. requires the local readiness probe to return
    `X-Veetbot-Release: <release-id>`, makes an authenticated request to the
    authoritative session index, and requires every process to run from the
@@ -91,26 +98,39 @@ Confirm port 8000 is free, choose a free loopback PostgreSQL port, and record al
 existing Docker containers. Reuse the existing Docker and Nginx installations;
 do not replace services used by other applications on the Droplet.
 
-Create the service/deploy account and persistent paths:
+Create separate deployment, application, and sandbox-execution identities plus
+the persistent paths:
 
 ```bash
-sudo useradd --system --create-home --shell /bin/bash veetbot
-sudo usermod -aG docker veetbot
+sudo useradd --system --create-home --shell /bin/bash veetbot-deploy
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin veetbot
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin veetbot-exec
+sudo usermod -g veetbot veetbot-exec
+sudo usermod -aG veetbot veetbot-deploy
+sudo usermod -aG docker veetbot-deploy
+sudo usermod -aG docker veetbot-exec
 sudo mkdir -p \
   /opt/veetbot/releases \
   /opt/veetbot/docs/releases \
   /opt/veetbot/shared/uv-cache \
   /etc/veetbot \
   /var/lib/veetbot/artifacts
-sudo chown -R veetbot:veetbot /opt/veetbot /var/lib/veetbot
+sudo chown -R veetbot-deploy:veetbot /opt/veetbot
+sudo chown -R veetbot:veetbot /var/lib/veetbot
 sudo chmod 0700 /var/lib/veetbot/artifacts
 ```
 
-The deploy account owns `/opt/veetbot/docs`. Nginx receives read-only access
-through the ordinary directory modes; no application process writes or serves
-the site.
+The `veetbot-deploy` account owns `/opt/veetbot`, including the documentation
+releases. Nginx and the application group receive read-only traversal through
+the ordinary directory modes. The API and worker identities are not members of
+the Docker group and their units expose no Docker socket; application services
+have no Docker-socket access. Only the credential-free `veetbot-exec` execution
+service owns sandbox lifecycle and receives Docker access. Consequently neither
+an application process nor an application-launched container can modify the
+documentation release. On a multi-host deployment, move that execution service
+to the dedicated sandbox host described by ADR-0008 without changing the port.
 
-The deploy key must log in as this account, so the account needs an executable
+The deploy key must log in as `veetbot-deploy`, so that account needs an executable
 shell. Restrict that key in `authorized_keys` to the CircleCI source and disable
 port, agent, and X11 forwarding. Install the committed sudo contract
 `deploy/sudoers/veetbot-deploy` as `/etc/sudoers.d/veetbot-deploy` with mode
@@ -199,8 +219,9 @@ read-only. Provision them once:
 umask 077
 sudo install -d -m 0711 /etc/veetbot/secrets
 
-# One token, two files: the container refuses secrets it does not own
-# (uid 65532), and the agent units read their copy as the veetbot user.
+# One token, two source files: the container refuses secrets it does not own
+# (uid 65532), while systemd copies the deploy-owned control credential into
+# each application unit's private credential directory.
 credential="$(openssl rand -hex 32)"
 printf '%s\n' "$credential" | sudo tee /etc/veetbot/secrets/browser-profile-service-auth >/dev/null
 printf '%s\n' "$credential" | sudo tee /etc/veetbot/secrets/browser-control-plane-credential >/dev/null
@@ -215,7 +236,8 @@ printf 'v1\n' | sudo tee /etc/veetbot/secrets/browser-profile-keys/current >/dev
 sudo chown 65532:65532 /etc/veetbot/secrets/browser-profile-service-auth \
   /etc/veetbot/secrets/browser-profile-session-secret
 sudo chown -R 65532:65532 /etc/veetbot/secrets/browser-profile-keys
-sudo chown veetbot:veetbot /etc/veetbot/secrets/browser-control-plane-credential
+sudo chown veetbot-deploy:veetbot-deploy \
+  /etc/veetbot/secrets/browser-control-plane-credential
 sudo chmod 0600 /etc/veetbot/secrets/browser-profile-service-auth \
   /etc/veetbot/secrets/browser-profile-session-secret \
   /etc/veetbot/secrets/browser-control-plane-credential \
@@ -226,9 +248,11 @@ sudo chmod 0600 /etc/veetbot/secrets/browser-profile-service-auth \
 The service's fail-closed loader rejects any secret file with group or other
 permission bits, a wrong owner, a symlink, or multi-line content; key files
 must be base64 of exactly 32 bytes named `<version>.key`, with `current`
-naming an existing version. The environment variables that point at these
-paths are in `deploy/veetbot.env.example`; add them to
-`/etc/veetbot/veetbot.env` alongside the other values.
+naming an existing version. The profile-service mount paths are in
+`deploy/veetbot.env.example`. The application control credential is deliberately
+absent from that shared environment: the checked-in application units use
+systemd `LoadCredential`, while the deployment preflight reads the protected
+source as `veetbot-deploy`.
 
 The committed Nginx virtual hosts expect Let's Encrypt certificates at
 `/etc/letsencrypt/live/api.veetbot.com/`,
@@ -273,7 +297,7 @@ Create a restricted CircleCI context named `veetbot-production` with:
 | Variable | Value |
 | --- | --- |
 | `DEPLOY_HOST` | SSH hostname or IP for the Droplet |
-| `DEPLOY_USER` | Dedicated deploy account, normally `veetbot` |
+| `DEPLOY_USER` | Dedicated deploy account, normally `veetbot-deploy` |
 | `DEPLOY_KNOWN_HOSTS` | Pinned OpenSSH known-hosts record verified out of band |
 | `DEPLOY_PORT` | Optional SSH port; defaults to `22` |
 | `PRODUCTION_URL` | Optional public origin; defaults to `https://api.veetbot.com` |
@@ -329,16 +353,22 @@ After the first successful pipeline, verify the active revision and services:
 curl --fail --show-error --dump-header - --output /dev/null \
   https://api.veetbot.com/health/ready
 curl --fail --show-error https://docs.veetbot.com/release.txt
-ssh veetbot@api.veetbot.com 'readlink -f /opt/veetbot/current'
-ssh veetbot@api.veetbot.com 'readlink -f /opt/veetbot/docs/current'
-ssh veetbot@api.veetbot.com \
-  'systemctl is-active veetbot-api veetbot-worker veetbot-maintenance'
+ssh veetbot-deploy@api.veetbot.com '
+  set -eu
+  app_release="$(readlink -f /opt/veetbot/current)"
+  . "$app_release/.release.env"
+  docs_release="$(readlink -f /opt/veetbot/docs/current)"
+  test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"
+  printf "%s\n" "$docs_release"
+'
+ssh veetbot-deploy@api.veetbot.com \
+  'systemctl is-active veetbot-execution veetbot-api veetbot-worker veetbot-async-worker veetbot-maintenance'
 ```
 
 Then make an authenticated API request, submit a run, confirm the worker
 completes it with a real provider, and run one generated-code task through
-`runsc`. Reboot once and confirm PostgreSQL, Nginx, and all three application
-units return.
+`runsc`. Reboot once and confirm PostgreSQL, Nginx, the execution service, and
+all application units return.
 
 ## Manual rollback
 
@@ -363,7 +393,8 @@ test -f "$target/.release.env"
 ln -s "$target" "/opt/veetbot/.rollback-$target_id"
 mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
-sudo systemctl restart veetbot-maintenance veetbot-worker veetbot-api
+sudo systemctl restart \
+  veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 curl --fail --show-error --dump-header - --output /dev/null \
   http://127.0.0.1:8000/health/ready
 ```

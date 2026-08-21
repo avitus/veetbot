@@ -145,18 +145,16 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
-    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" in environment
-    # The container requires the service-auth file to be owned by uid 65532,
-    # while the agent units read the control-plane credential as the veetbot
-    # user; both are mode 0600, so one file cannot serve both readers.
+    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" not in environment
+    assert "AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock" in environment
     example_values = dict(
         line.split("=", 1)
         for line in environment.splitlines()
         if "=" in line and not line.startswith("#")
     )
-    assert (
-        example_values["BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE"]
-        != example_values["BROWSER_PROFILE_SERVICE_AUTH_FILE"]
+    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" not in example_values
+    assert example_values["BROWSER_PROFILE_SERVICE_AUTH_FILE"].endswith(
+        "browser-profile-service-auth"
     )
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
@@ -290,6 +288,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     api = (units / "veetbot-api.service").read_text(encoding="utf-8")
     worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
     async_worker = (units / "veetbot-async-worker.service").read_text(encoding="utf-8")
+    execution = (units / "veetbot-execution.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
     scheduler = (units / "veetbot-schedule.service").read_text(encoding="utf-8")
     schedule_environment = (deploy / "veetbot-schedule.env.example").read_text(encoding="utf-8")
@@ -297,9 +296,18 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
     assert "agent worker --role interactive" in worker
-    assert "SupplementaryGroups=docker" in worker
+    assert "SupplementaryGroups=docker" not in worker
+    assert "/var/run/docker.sock" not in worker
     assert "agent worker --role async" in async_worker
-    assert "SupplementaryGroups=docker" in async_worker
+    assert "SupplementaryGroups=docker" not in async_worker
+    assert "/var/run/docker.sock" not in async_worker
+    assert "agent execution-service" in execution
+    assert "User=veetbot-exec" in execution
+    assert "SupplementaryGroups=docker" in execution
+    assert "/var/run/docker.sock" in execution
+    assert "EnvironmentFile=" not in execution
+    assert "veetbot-execution.service" in worker
+    assert "veetbot-execution.service" in async_worker
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
     assert "agent worker --role schedule" in scheduler
@@ -323,6 +331,48 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         for unit in (api, worker, async_worker, maintenance)
     )
     assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
+    credential_source = (
+        "LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential"
+    )
+    credential_environment = (
+        "Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane"
+    )
+    assert all(
+        credential_source in unit and credential_environment in unit
+        for unit in (api, worker, async_worker, maintenance)
+    )
+    assert credential_source not in execution
+
+
+def test_deployment_accounts_and_documentation_are_separated() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    normalized = " ".join(deployment.split())
+
+    assert "useradd --system --create-home --shell /bin/bash veetbot-deploy" in deployment
+    assert "useradd --system --no-create-home --shell /usr/sbin/nologin veetbot" in deployment
+    assert "useradd --system --no-create-home --shell /usr/sbin/nologin veetbot-exec" in deployment
+    assert "usermod -aG docker veetbot-deploy" in deployment
+    assert "usermod -aG docker veetbot-exec" in deployment
+    assert "usermod -aG docker veetbot\n" not in deployment
+    assert "chown -R veetbot-deploy:veetbot /opt/veetbot" in deployment
+    assert "application services have no Docker-socket access" in normalized
+
+
+def test_nginx_deployment_test_exercises_declared_gnu_toolchain() -> None:
+    harness = (ROOT / "deploy" / "nginx" / "deploy.test.sh").read_text(encoding="utf-8")
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+
+    for command in ("MV", "SHA256SUM", "TAR", "FIND", "FLOCK"):
+        assert f"GNU_{command}=" in harness
+        assert f"VEETBOT_TEST_GNU_{command}" in harness
+    assert "brew install coreutils gnu-tar findutils util-linux" in deployment
+
+
+def test_documentation_verification_reads_the_resolved_release_identity() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+
+    assert 'docs_release="$(readlink -f /opt/veetbot/docs/current)"' in deployment
+    assert 'test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"' in deployment
 
 
 def test_release_script_preserves_release_boundaries() -> None:
@@ -340,7 +390,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert '[[ -f "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]]' in release
     assert '[[ -f "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]]' in release
     assert '[[ -d "$BROWSER_PROFILE_KEY_DIR" ]]' in release
-    assert '[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]]' in release
+    assert '[[ -f "$BROWSER_CONTROL_CREDENTIAL_FILE" ]]' in release
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
     assert "veetbot-async-worker" in release

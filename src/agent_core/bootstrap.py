@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from functools import partial
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal, Self, cast
@@ -52,6 +53,7 @@ from agent_core.adapters.execution.docker import (
     resolve_local_image_digest,
 )
 from agent_core.adapters.execution.fake import FakeExecutionEnvironment, fake_image_digest
+from agent_core.adapters.execution.service import ExecutionServiceClient, ExecutionServiceServer
 from agent_core.adapters.identity import (
     ConfiguredSchedulePrincipalDirectory,
     StaticPrincipalResolver,
@@ -789,6 +791,25 @@ def _validate_schedule_role(settings: Settings) -> Principal:
     )
 
 
+async def serve_execution_service(socket_path: Path, runtime: str = "runsc") -> None:
+    """Run the credential-free production execution-service composition."""
+
+    environment = DockerExecutionEnvironment(
+        SystemClock(),
+        RandomIdFactory(),
+        runtime=runtime,
+    )
+    server = ExecutionServiceServer(
+        environment,
+        socket_path,
+        resolve_image_digest=resolve_local_image_digest,
+    )
+    try:
+        await server.serve_forever()
+    finally:
+        await server.close()
+
+
 @asynccontextmanager
 async def build_schedule_worker(
     *,
@@ -981,20 +1002,21 @@ async def _compose(
             passthrough_names=settings.sandbox_passthrough,
         )
     elif settings.sandbox.value in {"docker", "gvisor"}:
-        sandbox_image_digest = await resolve_local_image_digest(settings.sandbox_image)
-        logger.info(
-            "sandbox_image_resolved",
-            extra={
-                "sandbox_mechanism": settings.sandbox.value,
-                "sandbox_image_digest": sandbox_image_digest,
-            },
-        )
-        docker_environment = DockerExecutionEnvironment(
-            clock, ids, runtime="runsc" if settings.sandbox.value == "gvisor" else None
-        )
+        execution_environment: ExecutionServiceClient | DockerExecutionEnvironment
+        if settings.execution_service_socket is not None:
+            execution_environment = ExecutionServiceClient(settings.execution_service_socket)
+            image_resolver = partial(
+                execution_environment.resolve_image_digest,
+                settings.sandbox_image,
+            )
+        else:
+            execution_environment = DockerExecutionEnvironment(
+                clock, ids, runtime="runsc" if settings.sandbox.value == "gvisor" else None
+            )
+            image_resolver = partial(resolve_local_image_digest, settings.sandbox_image)
         sandbox_manager = SandboxManager(
-            docker_environment,
-            image_digest=sandbox_image_digest,
+            execution_environment,
+            resolve_image_digest=image_resolver,
             limits=sandbox_limits,
             egress=egress,
             parent_environment=os.environ,

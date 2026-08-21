@@ -35,11 +35,11 @@ printf '%s\n' \
   'AUTH_PRINCIPAL_ID=test' \
   'AUTH_SCOPES=session.read' \
   'SANDBOX_MECHANISM=gvisor' \
+  'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   'AGENT_ARTIFACT_ROOT=/tmp' \
   'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' \
   "BROWSER_PROFILE_SERVICE_AUTH_FILE=$PROFILE_AUTH_FILE" \
   "BROWSER_PROFILE_SESSION_SECRET_FILE=$PROFILE_SESSION_FILE" \
-  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=$PROFILE_AUTH_FILE" \
   'BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.test' \
   "BROWSER_PROFILE_KEY_DIR=$PROFILE_KEY_DIR" >"$ENV_FILE"
 
@@ -135,6 +135,7 @@ make_stage() {
     veetbot-api \
     veetbot-worker \
     veetbot-async-worker \
+    veetbot-execution \
     veetbot-maintenance \
     veetbot-schedule; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
@@ -160,6 +161,7 @@ run_release() {
   VEETBOT_ROOT="$DEPLOY_ROOT" \
   VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
   VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
+  VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE="$PROFILE_AUTH_FILE" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
@@ -202,7 +204,7 @@ grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
 grep -Fq \
-  'systemctl restart veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
 grep -Fq 'systemctl disable --now veetbot-schedule' "$LOG_FILE"
 grep -Fq 'curl session-index' "$LOG_FILE"
@@ -325,7 +327,7 @@ VEETBOT_TEST_ENV_FILE="$schedule_env" \
 grep -Fxq "EnvironmentFile=$schedule_worker_env" \
   "$SYSTEMD_DIR/veetbot-schedule.service"
 grep -Fq \
-  'systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
 
 printf 'release script tests passed\n'

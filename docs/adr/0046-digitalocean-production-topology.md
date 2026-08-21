@@ -3,6 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-08-07
 
+> **Updated by ADR-0062:** the host-native single-Droplet decision remains, but
+> the worker-owned Docker adapter, Docker-group membership, and three-unit count
+> are superseded by the credential-free execution service.
+
 ## Context
 
 Milestones 0 through 9 implement the application and its gates, but they do not
