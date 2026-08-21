@@ -87,7 +87,7 @@ rather than smoothed.
 | 11 | Scheduled runs | Authorized | 23 | Implemented locally; hosted CI and the final review remain |
 | 12 | Notifications and device identity | Authorized | 20 | Nothing in the corpus; the Apple push key and capability are owner actions outside it |
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
-| 14 | Inbound surfaces and pairing | Authorized, specification pending | 0 | `inbound-surfaces.md` and its ADR, after Milestone 12's device registry |
+| 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized, specification pending | 0 | `operational-hardening.md` and its ADR |
 
 The gate column is the count of registry entries whose `milestone`
@@ -468,8 +468,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1028-1029` and the resolve at
-`policy-and-approvals.md:1038`, and one reference in
+at `policy-and-approvals.md:1030-1031` and the resolve at
+`policy-and-approvals.md:1040`, and one reference in
 `runtime-loop.md:1182` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -551,7 +551,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3579-3656`
+Section 28 of the plan is not empty — `engineering-plan.md:3580-3657`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -570,7 +570,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1374`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3654` requires a container-escape attempt as
+    `engineering-plan.md:3655` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -987,7 +987,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:566` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3563` and `engineering-plan.md:2963` and picked
+`engineering-plan.md:3564` and `engineering-plan.md:2963` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1111,33 +1111,43 @@ choice between the corpus and the first red tests. What remains outside the
 corpus is the owner's failed trajectory for the capability scenario, and the
 verified ceiling, which advances in order.
 
-## Milestones 14 and 15: authorized, specifications pending
+## Milestone 14: inbound surfaces and pairing, authorized and specified
 
-The owner authorized these with Milestones 12 and 13 on 2026-08-20
-(ADR-0061): Milestone 14, inbound surfaces and pairing; Milestone 15,
-operational hardening. The engineering plan states each one's requirement and
-acceptance criteria today. Neither has a detailed-design document yet, so each
-verdict is **Authorized, specification pending**: the named document and its
-ADR are what stand between the milestone and its first red test, and the
-milestone map's census reports a zero row for each until that document
-declares its gates (Decision 9 of the map).
+[inbound-surfaces.md](inbound-surfaces.md) gives pairing its home and
+endpoint, builds the session-key resolver the seam audit called the one
+genuinely new mechanism in Section 29, and attributes the origin on the write.
+A Surface is a Milestone 12 device with an empty capability set; a
+least-privilege `surface` role polls Telegram and holds the bot token and
+nothing else; an unknown sender is rejected before any content is stored; a
+paired sender's message becomes an ordinary run through the submission
+function the HTTP API uses, as a `USER` message for the bound principal with
+scopes intersected fresh; replies, approvals, and questions travel the
+Milestone 12 outbox back to the chat. The document states the trust rule the
+audit left open and bounds it to the owner's own pairing, leaving a
+third-party label to the roadmap. Twenty-one hard gates in the `surface`
+area; ADR-0064 records the decisions.
 
-What the corpus already supplies is not nothing. Milestone 14 lands the
-second half [multi-device-and-surfaces.md](multi-device-and-surfaces.md)
-audited: of the five gaps it names, Milestone 12 takes device lifecycle events
-and the `NotificationService` port, leaving the third registration source, the
-hand-off suspension kind, and client attribution on a write to Milestone 14 and
-the roadmap; pairing is designed in ADR-0017, and the session-key resolver is
-the one genuinely new mechanism. Milestone 15 starts from the accepted
-limitations `docs/deployment.md` and ADR-0046 state. The
-`documents_required_before_coding_reaches_them` list in the project state
-names the four documents.
+The readiness verdict is therefore **Authorized**: there is no unnamed design
+choice between the corpus and the first red tests. What remains outside the
+corpus is the owner's bot and its private token file, and Milestone 12
+landing first.
+
+## Milestone 15: authorized, specification pending
+
+The owner authorized operational hardening with Milestones 12 through 14 on
+2026-08-20 (ADR-0061). The engineering plan states its requirement and
+acceptance criteria today; no detailed-design document exists yet, so the
+verdict is **Authorized, specification pending**: `operational-hardening.md`
+and its ADR are what stand between the milestone and its first red test, and
+the milestone map's census reports a zero row until that document declares
+its gates (Decision 9 of the map). It starts from the accepted limitations
+`docs/deployment.md` and ADR-0046 state.
 
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3658-3816` for links to other documents returned
+`engineering-plan.md:3659-3817` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1358,7 +1368,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2514` against
-    `model-gateway.md:1795` and `milestone-map.md:1153`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1203`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1367,7 +1377,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3654` requires a test the harness's case set
+    `engineering-plan.md:3655` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

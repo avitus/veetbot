@@ -65,6 +65,7 @@ def test_milestone_tokens_present() -> None:
         "scheduling.md",
         "notifications-and-devices.md",
         "subagents-and-delegation.md",
+        "inbound-surfaces.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -93,7 +94,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 268
+    assert len(entries) == 289
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -136,6 +137,7 @@ def test_census_is_derived() -> None:
         11: 23,
         12: 20,
         13: 21,
+        14: 21,
     }
 
 
@@ -318,3 +320,16 @@ def test_delegation_has_complete_milestone_13_gate_area() -> None:
         for entry in delegate_entries
     )
     assert all(GATE_ID.fullmatch(entry.id) for entry in delegate_entries)
+
+
+def test_surfaces_have_complete_milestone_14_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    surface_entries = [entry for entry in entries if entry.id.startswith("gate.surface.")]
+
+    assert len(surface_entries) == 21
+    assert all(entry.milestone == 14 for entry in surface_entries)
+    assert all(
+        entry.spec == "docs/plan/inbound-surfaces.md#hard-gates" for entry in surface_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in surface_entries)

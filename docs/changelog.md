@@ -4,6 +4,25 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-21 — Milestone 14 specified: inbound surfaces and pairing
+
+- Added `docs/plan/inbound-surfaces.md` and proposed ADR-0064: a Surface as a
+  Milestone 12 device with an empty capability set; a Telegram long-polling
+  transport in a least-privilege `surface` role that holds only the bot token
+  and the database credential; the ADR-0017 pairing ceremony given a home and
+  an endpoint; the session-key resolver with its rotation rules; one ingress
+  transaction per update with the receipt as the idempotency boundary and
+  default-deny before any content is stored; a paired message as an ordinary
+  run through the submission function the HTTP API uses; origin attributed on
+  the write; replies, approvals, and questions through the Milestone 12
+  outbox, redacted and chunked; two scopes, six routes, two flags, and
+  twenty-one hard gates.
+- Registered the twenty-one gates in the new `surface` area; the registry
+  grammar, declaring-spec census, milestone map, readiness review, current
+  milestone, project state, HTTP and policy forward-looking subsections, the
+  seam audit's "what Milestone 14 settles" note, the review log, and the
+  changelog follow.
+
 ## 2026-08-21 — Milestone 13 specified: general-purpose subagents and delegation
 
 - Added `docs/plan/subagents-and-delegation.md` and proposed ADR-0063:

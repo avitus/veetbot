@@ -11,7 +11,9 @@ title: Current Milestone
   gates are registered and implementation may begin. Milestone 13 —
   subagents and delegation — is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
-  gates and follows Milestone 12.
+  gates and follows Milestone 12. Milestone 14 — inbound surfaces and
+  pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
+  twenty-one gates and follows Milestone 13.
 - **Verified gate ceiling:** Milestone 9 (166 gates).
 - **Authorized workstreams:** Milestone 10's four tranches (automatic memory,
   self-authored skills, public-web access, authenticated browser automation),
@@ -24,9 +26,9 @@ title: Current Milestone
 - **Project status:** Milestones 0 through 9 are complete. Milestones 10 and
   11 are implemented locally; every registered gate passes (227 cumulative),
   and hosted CI plus the final CodeRabbit review remain for both. Milestones
-  12 and 13 are authorized and specified with twenty and twenty-one registered
-  gates. Milestones 14 and 15 are authorized and unspecified: each starts with
-  its detailed-design document and ADR, which declare the milestone's gates.
+  12, 13, and 14 are authorized and specified with twenty, twenty-one, and
+  twenty-one registered gates. Milestone 15 is authorized and unspecified: it
+  starts with its detailed-design document and ADR, which declare its gates.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -53,8 +55,10 @@ does implementation begin. Milestone 12's
 [notifications-and-devices.md](notifications-and-devices.md) and ADR-0062 have
 landed with twenty `gate.device.*` and `gate.notify.*` entries, and
 Milestone 13's [subagents-and-delegation.md](subagents-and-delegation.md) and
-ADR-0063 with twenty-one `gate.delegate.*` entries; the census reports a zero
-row for each of 14 and 15 until its specification declares gates.
+ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
+[inbound-surfaces.md](inbound-surfaces.md) and ADR-0064 with twenty-one
+`gate.surface.*` entries; the census reports a zero row for Milestone 15
+until its specification declares gates.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -101,10 +105,12 @@ entries plus the acceptance criteria in the engineering plan and the
 [notifications-and-devices design](notifications-and-devices.md); Milestone
 13's is its twenty-one `gate.delegate.*` entries plus the plan's acceptance
 criteria and the [delegation design](subagents-and-delegation.md), with tenant
-activation gated on the capability-scenario evidence. Milestones 14 and 15 each
-own one gate area declared by their design document: surfaces and operations.
-Their acceptance criteria are in the engineering plan today; their gates exist
-only once the specification that declares them lands.
+activation gated on the capability-scenario evidence; Milestone 14's is its
+twenty-one `gate.surface.*` entries plus the plan's acceptance criteria and
+the [inbound-surfaces design](inbound-surfaces.md). Milestone 15 owns one
+gate area declared by its design document: operations. Its acceptance criteria
+are in the engineering plan today; its gates exist only once the specification
+that declares them lands.
 
 ## Completion rule
 

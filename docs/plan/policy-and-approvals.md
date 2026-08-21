@@ -321,8 +321,10 @@ for the device and notification routes in
 [notifications-and-devices.md](notifications-and-devices.md), making the
 executable vocabulary twenty-five strings when that code lands, and
 Milestone 13 will add `run.delegate` for the `delegate.run` control tool in
-[subagents-and-delegation.md](subagents-and-delegation.md); until then the
-twenty-two-string count above stands.
+[subagents-and-delegation.md](subagents-and-delegation.md), and Milestone 14
+`surface.read` and `surface.write` for the pairing routes in
+[inbound-surfaces.md](inbound-surfaces.md); until then the twenty-two-string
+count above stands.
 
 ### The grammar, and the contributor a closed list cannot hold
 

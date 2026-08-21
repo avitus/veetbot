@@ -471,6 +471,23 @@ GET    /v1/notifications                            notification.read
 Device views never carry a push token; the notification inbox is the durable
 offline record of every enqueued notification and its delivery outcomes.
 
+### The Milestone 14 surface extension
+
+[inbound-surfaces.md](inbound-surfaces.md) adds six pairing and surface routes
+and two exact scopes, `surface.read` and `surface.write`, mounted only when
+`AGENT_SURFACE_API_ENABLED` is set; a paired message itself enters through the
+same submission function `POST /v1/sessions/{id}/messages` uses, not through a
+new route.
+
+```text
+GET    /v1/surfaces                                  surface.read
+GET    /v1/surfaces/{surface_id}                     surface.read
+POST   /v1/surfaces/{surface_id}/pairing-codes       surface.write
+GET    /v1/surfaces/{surface_id}/pairings            surface.read
+POST   /v1/surfaces/pairings/{pairing_id}/revoke     surface.write
+DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
+```
+
 ### Tenancy is a repository argument, never a filter applied afterwards
 
 Every repository method that reads a tenant-scoped resource takes the
