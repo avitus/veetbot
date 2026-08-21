@@ -476,3 +476,32 @@ rather than by editing anything now.
     appropriate)"* and does not define appropriate. A sender
     allowlisted by the principal but who is not the principal is a
     third position, and the two labels have no name for it.
+
+## What Milestone 12 settles
+
+[notifications-and-devices.md](notifications-and-devices.md) lands the first
+half of what this document audited, without changing the audit. The `Device`
+table exists before the device channel does, which is the incremental order
+open question 3 asked about; device lifecycle is audited as process events,
+the second way out named under the lifecycle-events gap; and `NotificationService`
+is two ports — a durable `NotificationOutbox` and a `PushTransport` — with the
+live-event broadcaster left as the third, existing thing, which answers open
+question 4. The third registration source, the hand-off suspension kind, and
+client attribution on a write remain open for Milestone 14 and the roadmap.
+This document still declares no gates; the twenty that cover Milestone 12 are
+declared by the notifications document.
+
+## What Milestone 14 settles
+
+[inbound-surfaces.md](inbound-surfaces.md) lands the second half: the
+session-key resolver gets its unique `(surface, external_key)` and its rotation
+rule for a chat that outlives an `agent_version`; pairing gets its home and its
+endpoint; the origin of a paired message is attributed on the write rather than
+on a session or run column, as the attribution finding concluded; and the
+trust question is answered for the one sender this milestone serves — the
+principal pairing their own account, whose message is `USER` for that
+principal — while a third-party sender's label stays open on the roadmap. The
+third registration source and the hand-off suspension kind remain open for the
+device channel. This document still declares no gates; the twenty-one that
+cover Milestone 14 are declared by the surfaces document.
+

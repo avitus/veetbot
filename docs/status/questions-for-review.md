@@ -6277,3 +6277,368 @@ replay handoffs while remaining small and predictable per connection.
 bound configurable in a later milestone.
 
 **Reversal cost:** cheap; reconnect semantics do not depend on the number.
+
+## Roadmap authorization and the Milestone 10 completion amendment (ADR-0061)
+
+The owner made the substantive decisions live on 2026-08-20 — direction,
+the activation split, the four milestones and their order, the first channels,
+and full milestone treatment for operational hardening — so this section
+records only the mechanical choices made while writing them into the corpus.
+
+### The registry bound is one named constant
+
+**Decided:** `scripts/gate_registry.py` now carries `MAX_MILESTONE = 15`, and
+the entry bound, the census loop, and `scripts/check_docs.py`'s project-state,
+plan-heading, and current-milestone checks all read it.
+
+**Why:** three literals (`> 11`, `range(12)`, `0..10`) had drifted apart
+already — the docs check still bounded `current_milestone` at 10 while the
+registry admitted 11 — and the next milestone would have needed four edits.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### Zero census rows for authorized, unspecified milestones
+
+**Decided:** the milestone map's census carries a `0 / 227` row for each of
+Milestones 12 through 15 with the note "authorized, specification pending".
+
+**Why:** the census check derives a row for every milestone up to the bound and
+compares it to the written table, and Decision 9 of the map already says a zero
+is reported rather than filled. The alternative — keeping the census loop at 12
+until the first specification lands — would have made the bound lie.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; each row is replaced when its specification lands.
+
+### `active_milestone` stays 11 until Milestone 12's specification exists
+
+**Decided:** `project-state.yaml` records Milestones 12 through 15 as
+`authorized` with their design document paths under
+`documents_required_before_coding_reaches_them`, and leaves `active_milestone`
+at 11.
+
+**Why:** "active" has meant the milestone whose implementation is in progress;
+Milestone 12 has no specification yet, and the plan's own rule is that the
+design document lands first. The authorization is recorded; activity is not
+claimed.
+
+**Question for you:** flip `active_milestone` to 12 when
+`notifications-and-devices.md` merges, or earlier if you want the state file to
+lead.
+
+**Reversal cost:** cheap.
+
+### Milestone 11 is listed as implementable from the corpus
+
+**Decided:** `readiness.implementable_from_corpus` now includes 11.
+
+**Why:** the readiness review's Milestone 11 verdict already says "no unnamed
+design choice between the corpus and the first red tests", which is the
+definition that list encodes; the omission was an oversight from when the
+scheduling design was new.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### The plan's new milestone sections name their design documents without linking
+
+**Decided:** Milestones 12 through 15 name `notifications-and-devices.md`,
+`subagents-and-delegation.md`, `inbound-surfaces.md`, and
+`operational-hardening.md` in code spans, not Markdown links.
+
+**Why:** the strict MkDocs build rejects a link to a file that does not exist,
+and each document is the first deliverable of its milestone. The links are
+added in the pull request that adds the document.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+## Milestone 12 notifications and devices (ADR-0062)
+
+The owner chose the milestone, the order, and the first transport. These are
+the design choices the specification made beneath that, each with its
+alternative.
+
+### `NotificationService` becomes two ports and the broadcaster stays
+
+**Decided:** `NotificationOutbox` and `PushTransport` in two new port modules;
+the name `NotificationService` is retired; `LiveEventBroadcaster` is unchanged.
+
+**Why:** the seam audit's warning was that delivering to an open connection and
+to a device that has none are different durability problems; one façade would
+hide the split again.
+
+**Question for you:** none unless you want the old name kept as an alias.
+
+**Reversal cost:** cheap before implementation, moderate after.
+
+### Two gate areas, `device` and `notify`
+
+**Decided:** six `gate.device.*` and fourteen `gate.notify.*`, one declaring
+specification.
+
+**Why:** device identity is the half Milestone 14's Surfaces reuse; giving it
+its own census line keeps that reuse visible. The alternative is one `notify`
+area of twenty, which is what `browser` did for profiles and grants.
+
+**Question for you:** confirm or collapse to one area before code lands.
+
+**Reversal cost:** cheap; it is a rename in the registry and the map.
+
+### Device lifecycle is audited as process events
+
+**Decided:** `device.registered`, `device.push_token_updated`, `device.revoked`,
+`device.push_token_invalidated`, `device.deleted` through the existing
+process-event repository.
+
+**Why:** a device has no session, and `scheduling.md` already took this way out
+for schedules; a `device_events` table would only be worth it for a
+principal-facing device-history route nobody has asked for.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### Preferences are per-device `muted_kinds`
+
+**Decided:** a JSON array column on the device row; no preferences table.
+
+**Why:** the only preference anyone has named is "phone loud, laptop quiet".
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; a preferences table is additive.
+
+### The dispatcher is a new `notify` role, not a maintenance sweep
+
+**Decided:** `agent worker --role notify` with its own unit and environment
+file holding only the database URL and the APNs settings.
+
+**Why:** the maintenance role reads the environment file every role reads; the
+push key should live only where it is used.
+
+**Question for you:** none.
+
+**Reversal cost:** moderate; it is a systemd unit and a release-validation rule.
+
+### Scope names `device.read`, `device.write`, `notification.read`
+
+**Decided:** resource-action pairs on the registry and inbox routes.
+
+**Why:** ADR-0034 objected to a `device.` namespace for scopes granted *to* a
+device; these govern routes, in the same coexistence `browser.*` tools and
+`browser.profile.*` scopes already have. `client.*` is the alternative.
+
+**Question for you:** confirm the names before the scope vocabulary grows.
+
+**Reversal cost:** cheap before code, moderate after.
+
+### Email stays a later transport; `run.completed` stays out of the set
+
+**Decided:** APNs only; no interactive completion kind; `capabilities` and
+`granted_scopes` columns deferred; lock-screen approve/deny out of scope.
+
+**Why:** each is additive on the ports and models this milestone lands, and
+each is on the roadmap with its own entry condition.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+## Milestone 13 subagents and delegation (ADR-0063)
+
+### The objective is a structured brief
+
+**Decided:** objective, success condition, optional context and artifact
+references, an explicit allowed-tool subset, optional limits, and a return
+shape; validated by the ordinary schema validator before policy.
+
+**Why:** the child seeds from the brief and nothing else, so the stop rule has
+to travel with it; this closes the "carrier and no schema" partial.
+
+**Question for you:** confirm the field list before code; a plain string is the
+alternative and is strictly less.
+
+**Reversal cost:** cheap before implementation, moderate after.
+
+### A dedicated child session always
+
+**Decided:** the Section 27.6 "or the parent's session per policy" branch is
+deleted (ADR-0061, decision 7); the one-active-run index is untouched.
+
+**Why:** only this branch is implementable as the schema stands, and the index
+predicate is what keeps one active run per session true.
+
+**Question for you:** none.
+
+**Reversal cost:** expensive after; it is a schema invariant.
+
+### Starting caps: three per call, eight per parent, depth one, async priority
+
+**Decided:** as stated, from the versioned limits file.
+
+**Why:** runaway cost is the primary risk and the capability scenario will
+show whether the numbers are too tight.
+
+**Question for you:** whether children of an interactive parent may take
+interactive priority; the conservative start is no.
+
+**Reversal cost:** cheap; configuration.
+
+### Activation needs the owner's failed trajectory
+
+**Decided:** construction is authorized; tenant activation waits for a
+capability scenario admitted from a real redacted failed long-research
+trajectory and for case 32.
+
+**Why:** the plan's gate names evidence; the evidence is cheap once the tool
+exists and impossible before.
+
+**Question for you:** supply the trajectory, or accept that the milestone is
+buildable but not activatable until one exists.
+
+**Reversal cost:** none; it is the plan's rule.
+
+### One gate area, `delegate`
+
+**Decided:** twenty-one gates in one area.
+
+**Why:** delegation is one story; nothing in it is reused by a later milestone
+the way device identity is.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+## Milestone 14 inbound surfaces and pairing (ADR-0064)
+
+### Long polling rather than a webhook
+
+**Decided:** the surface role polls `getUpdates`, holds a per-surface advisory
+lock, and resumes from the last committed update; no public route is added.
+
+**Why:** the API is loopback-only behind Nginx and a webhook would couple
+inbound delivery to API availability for no benefit at this scale.
+
+**Question for you:** none unless the deployment gains a second host.
+
+**Reversal cost:** cheap; a webhook is a second implementation of the port.
+
+### A paired sender's message is USER for the bound principal
+
+**Decided:** pairing is authentication; the owner's own pairing yields `USER`;
+pairing anyone else to the owner's principal needs explicit approval and is
+bounded by `granted_scopes`; no new trust level.
+
+**Why:** the seam audit's caution is about third parties, and this milestone
+has none; adding a label with no sender to carry it would be speculative.
+
+**Question for you:** confirm before pairing any non-owner sender.
+
+**Reversal cost:** moderate; a label is a closed-vocabulary change.
+
+### Session rotation: `/new`, twenty-four hours idle, closed session, stale agent version
+
+**Decided:** as stated; a rotated key is never reused.
+
+**Why:** the seam audit asked what happens when a thread outlives an
+`agent_version`; rotation on idle plus drift answers it without surprising a
+mid-conversation sender.
+
+**Question for you:** the idle period.
+
+**Reversal cost:** cheap; configuration.
+
+### Approvals by text command, not inline keyboard
+
+**Decided:** `/approve <id>` and `/deny <id>` through the existing approval
+service; a plain reply answers a waiting question.
+
+**Why:** same authority, no second resolution entry point.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; additive.
+
+### Attribution on the write, not on a column
+
+**Decided:** origin on the seed message and the queued run, the receipt as the
+reverse map, the surface in session metadata.
+
+**Why:** a session may be continued from the Apple client; it is not owned by a
+channel.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; a column is additive.
+
+## Milestone 15 operational hardening (ADR-0065)
+
+### Object storage plus provider snapshots, `age` with an owner-held identity
+
+**Decided:** daily encrypted backups to S3-compatible object storage in another
+region via `rclone`, provider weekly snapshots as a complement, `age` X25519
+with the private identity only off-host.
+
+**Why:** snapshots alone are crash-consistent, include secrets under the
+provider's keys, and cannot restore one database; the host not being able to
+read its own backups is the point.
+
+**Question for you:** whether a root-only copy of the identity should also
+live on the host to allow nightly off-host rehearsals.
+
+**Reversal cost:** cheap.
+
+### Secrets are escrowed manually, not backed up
+
+**Decided:** environment files, the browser keyring, and certificates are
+excluded from the automated set; `make secret-escrow` and a staleness signal.
+
+**Why:** a bucket compromise must not be a live-credential compromise.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### Alerts through the outbox, dead states through a free external pair
+
+**Decided:** `ops_alert` via the Milestone 12 outbox for degraded states; an
+external uptime check and a dead-man's switch for the database, disk, or host
+being down; no OTLP exporter.
+
+**Why:** the outbox is durable and already reaches the phone; nothing that
+depends on the database can report the database being down.
+
+**Question for you:** the uptime and dead-man providers; whether to add
+Telegram routing once Milestone 14 exists.
+
+**Reversal cost:** cheap.
+
+### Rollback is code-only; migrations are forward-only
+
+**Decided:** as stated; a pre-migration dump in the release path.
+
+**Why:** the persistence design already says a schema rollback is a restore.
+
+**Question for you:** none.
+
+**Reversal cost:** none; it is the standing rule.
+
+### The backup tranche could lead
+
+**Decided:** recorded as an open question, not reordered; Milestone 15 follows
+14 as the owner chose.
+
+**Why:** the tranche has no dependency on Milestones 12 through 14 and the
+risk is live.
+
+**Question for you:** pull the backup and restore slice ahead, or keep the
+order.
+
+**Reversal cost:** cheap; it is sequencing.
+

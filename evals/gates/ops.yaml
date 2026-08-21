@@ -1,0 +1,97 @@
+# Canonical gate registry entries for Milestone 15 operational hardening.
+- id: gate.ops.backup_set_complete
+  milestone: 15
+  kind: structural
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**The backup set is exactly the declared set.** The manifest names the database dump, the artifact archive, and the browser-profile ciphertext and nothing else; nothing under the secrets directories, the certificate store, or the release tree enters the archive."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.backup_roundtrip
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**A backup round-trips.** Against a seeded compose PostgreSQL, backup.sh emits a custom-format dump that passes pg_restore --list, names alembic_version, and a manifest whose hashes verify."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.restore_rehearsal_passes
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**The restore rehearsal passes on a good backup.** Restoring into a fresh database yields alembic current equal to head and to the manifest, count bands and the artifact hash hold, the verdict is passed, and the throwaway database is torn down."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.restore_rehearsal_detects_corruption
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**The rehearsal detects corruption.** A truncated dump, flipped bytes, and a wrong alembic_version each fail with a distinct reason and no passing verdict."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.backup_encrypted_offhost
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Backups are encrypted before they leave the host, and retained ones too.** With a recipient the uploaded object is an age envelope and plaintext staging is removed; a retained pre-release backup is an age envelope under the protected path with no plaintext beside it; without a recipient the upload fails closed."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.backup_retention_policy
+  milestone: 15
+  kind: property
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Retention keeps seven daily and four weekly.** Over generated object listings the retention function keeps exactly that set, never deletes the newest object, and the lifecycle rules match."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.rehearsal_never_touches_production
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**The rehearsal never touches production.** It refuses the production compose project name, port, and database URL, and the stub log shows no teardown against the production project."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.healthcheck_signals
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**The health check reports every declared signal.** From a seeded database and host fixture the probe reports each signal as a typed field with its threshold taken from versioned configuration."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.alert_enqueued_deduped
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Alerts are enqueued once per cool-down and recover once.** Repeated failing evaluations inside the cool-down enqueue one ops_alert under the tenant- and episode-scoped key; after it a second; a cleared signal enqueues one ops_recovered under the episode recovery key; a signal that fails again after recovering opens a new episode and a new alert."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.alert_payload_closed
+  milestone: 15
+  kind: structural
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Alert payloads are closed.** Alert bodies match a closed schema with table-sourced reason codes, and the secret-pattern families find nothing in generated payloads."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.db_down_fallback
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**A dead database still raises an alarm.** With the database unreachable the health check exits non-zero inside its timeout, logs, and pings the dead-man failure address rather than hanging."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.rollback_promotes_previous
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Rollback promotes the previous release.** With releases A then B, rollback promotes A, retags, restarts the unit list, verifies the release header as A, keeps B, and refuses when there is no previous release or the target is current."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.rollback_refuses_schema_drift
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Rollback refuses schema drift without the override.** A database revision ahead of the target's heads exits non-zero naming both; with the override it proceeds; no path ever invokes a downgrade."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.units_and_sudoers_reconciled
+  milestone: 15
+  kind: structural
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Units and the sudoers contract reconcile.** Every systemd unit in the deployment tree is in the release unit list, the schedule conditional, or a declared host-unit list; the rollback unit list equals the release unit list; the sudoers contract covers rollback and the timer installation."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.public_boundary_minimal
+  milestone: 15
+  kind: structural
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**The public boundary is minimal.** Every published container port and the API bind are loopback; the firewall rules admit only the three inbound ports; the proxy declares rate limits on both TLS server blocks."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.ops.worker_watchdog
+  milestone: 15
+  kind: case
+  spec: docs/plan/operational-hardening.md#hard-gates
+  statement: "**Workers run under a watchdog.** Each worker role's loop emits a keepalive per iteration and is stopped when the loop stalls under a fake clock; the unit files declare the notify type and the watchdog interval."
+  check: tests/gates/pending.py::pending_gate

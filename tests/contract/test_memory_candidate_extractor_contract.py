@@ -59,8 +59,8 @@ class _StructuredRouter:
 
 def _evidence() -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
-        extractor_version="provider-assisted-v1",
-        formation_policy_version="formation@3",
+        extractor_version="provider-assisted-v2",
+        formation_policy_version="formation@4",
         model_policy="fake",
         provider="fake",
         model="scripted",
@@ -69,9 +69,14 @@ def _evidence() -> ProviderExtractionEvaluationEvidence:
         build_ref="contract-test",
         corpus_sha256="a" * 64,
         sample_count=20,
+        positive_case_count=20,
+        minimum_supported_case_count=16,
+        deterministic_supported_case_count=10,
+        provider_supported_case_count=16,
         deterministic_supported_candidates=10,
-        provider_supported_candidates=11,
-        fabricated_candidates=0,
+        provider_supported_candidates=16,
+        deterministic_fabricated_candidates=0,
+        provider_fabricated_candidates=0,
         deterministic_policy_failures=0,
         provider_policy_failures=0,
         evaluated_at=NOW,

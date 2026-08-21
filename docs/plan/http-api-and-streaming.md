@@ -449,6 +449,45 @@ server's operator-configured scopes exist outside a closed list, and
 specifies the subset test the pipeline runs. Nothing there changes what a
 route requires; the table above is the API's half of one namespace.
 
+### The Milestone 12 device and notification extension
+
+[notifications-and-devices.md](notifications-and-devices.md) adds seven
+application routes and three exact scopes in the same form, mounted on a
+feature-flagged router and absent from the OpenAPI document until
+`AGENT_NOTIFICATION_API_ENABLED` is set. They extend the closed vocabulary when
+that milestone's code lands; the enumerated block above and the twenty-two
+count remain the executable vocabulary until then.
+
+```text
+POST   /v1/devices                                  device.write
+GET    /v1/devices                                  device.read
+GET    /v1/devices/{device_id}                      device.read
+POST   /v1/devices/{device_id}/revoke               device.write
+DELETE /v1/devices/{device_id}                      device.write
+POST   /v1/devices/{device_id}/test-notification    device.write
+GET    /v1/notifications                            notification.read
+```
+
+Device views never carry a push token; the notification inbox is the durable
+offline record of every enqueued notification and its delivery outcomes.
+
+### The Milestone 14 surface extension
+
+[inbound-surfaces.md](inbound-surfaces.md) adds six pairing and surface routes
+and two exact scopes, `surface.read` and `surface.write`, mounted only when
+`AGENT_SURFACE_API_ENABLED` is set; a paired message itself enters through the
+same submission function `POST /v1/sessions/{id}/messages` uses, not through a
+new route.
+
+```text
+GET    /v1/surfaces                                  surface.read
+GET    /v1/surfaces/{surface_id}                     surface.read
+POST   /v1/surfaces/{surface_id}/pairing-codes       surface.write
+GET    /v1/surfaces/{surface_id}/pairings            surface.read
+POST   /v1/surfaces/pairings/{pairing_id}/revoke     surface.write
+DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
+```
+
 ### Tenancy is a repository argument, never a filter applied afterwards
 
 Every repository method that reads a tenant-scoped resource takes the

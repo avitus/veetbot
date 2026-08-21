@@ -22,8 +22,7 @@ Read, in this order, before starting an assignment:
 6. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
 7. Existing code and tests related to the assignment
 
-Additionally, read `docs/plan/milestone-map.md` whenever the change could move
-a gate, and `docs/plan/readiness.md` before concluding anything is undesigned.
+Also read `docs/plan/milestone-map.md` when a gate could move, and `docs/plan/readiness.md` before calling anything undesigned.
 
 ## Reading lanes
 
@@ -69,6 +68,10 @@ validates the floor, and no trailer means lane A.
 | Public-web search and page extraction | `web-access.md` |
 | Authenticated browser automation | `browser-automation.md` |
 | Scheduled runs and recurrence | `scheduling.md` |
+| Notifications, device identity, push delivery | `notifications-and-devices.md` |
+| Subagents, delegation, child runs | `subagents-and-delegation.md` |
+| Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
+| Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -87,13 +90,12 @@ validates the floor, and no trailer means lane A.
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state).
 - Do not begin later milestones speculatively.
-- Milestones 0 through 9 are complete. Milestones 10 and 11 have separate contracts.
-  Milestone 10 covers automatic memory, self-authored skills,
-  provider-neutral web access, and authenticated browser automation; routing,
-  general-purpose subagents, and other extensions remain unauthorized.
+- Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
+  12 through 15 — notifications and device identity, subagents and delegation,
+  inbound surfaces and pairing, operational hardening — are authorized in that
+  order (ADR-0061); model routing and the plan's roadmap items are not.
 - Avoid unrelated refactors.
-- Do not introduce a major dependency without documenting the decision (an ADR or
-  a note in the relevant doc).
+- Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active
   acceptance criteria.
 
@@ -139,8 +141,7 @@ failure, and retry coverage.
 ## Pull request review gate
 
 GitHub mergeability does not make a PR ready under this contract. Use only the
-CodeRabbit GitHub PR integration; never run local CodeRabbit CLI reviews (the
-local service is continually rate-limited and is not authoritative). Loop:
+CodeRabbit GitHub PR integration, never the local CLI (rate-limited, not authoritative). Loop:
 
 1. Wait for CodeRabbit to finish reviewing the current head commit.
 2. Address every CodeRabbit comment of any severity or placement — inline,
@@ -195,5 +196,4 @@ End every coding assignment with a report covering:
 
 ## Do not
 
-- Do not start implementation work during a documentation-only assignment, and
-  do not edit `archive/` or the generated `site/` and `dist/` outputs.
+- No implementation work in a documentation-only assignment; never edit `archive/`, `site/`, or `dist/`.

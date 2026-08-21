@@ -19,7 +19,7 @@
     {
       "id": "relationship-wife-001",
       "episodes": ["My wife and I go hiking most weekends."],
-      "expected": [{"belief_type": "relationship", "subjects": ["wife", "spouse"], "statements": ["User has a wife.", "User has a spouse."]}]
+      "expected": [{"belief_type": "relationship", "subjects": ["wife", "spouse"], "statements": ["User has a wife.", "User has a spouse."]}, {"belief_type": "user_model_attr", "subjects": ["hobby"], "statements": ["User goes hiking."]}]
     },
     {
       "id": "relationship-husband-001",

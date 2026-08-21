@@ -4,6 +4,132 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-21 — Milestone 15 specified: operational hardening
+
+- Added `docs/plan/operational-hardening.md` and proposed ADR-0065: a
+  declared, encrypted, off-host daily backup of the database, artifact store,
+  and browser-profile ciphertext with a manifest and manual secret escrow; a
+  restore rehearsal with a five-part verdict on the host, in CI, and by the
+  owner from the off-host copy; a host health check on a closed signal list
+  delivering deduplicated alerts through the Milestone 12 outbox with a
+  dead-man's switch and an external uptime check for dead states; cloud and
+  host firewall, SSH hardening, proxy rate limits, and a loopback-only
+  structural gate; a code-only rollback that refuses to cross a schema
+  boundary without an override and never downgrades; worker watchdogs; and
+  sixteen hard gates.
+- Registered the sixteen gates in the new `ops` area; amended ADR-0046 with an
+  amendments section; added forward-looking pointers on the deployment and
+  security pages; every authorized milestone now has a design document and
+  the census reports no zero row.
+
+## 2026-08-21 — Milestone 14 specified: inbound surfaces and pairing
+
+- Added `docs/plan/inbound-surfaces.md` and proposed ADR-0064: a Surface as a
+  Milestone 12 device with an empty capability set; a Telegram long-polling
+  transport in a least-privilege `surface` role that holds only the bot token
+  and the database credential; the ADR-0017 pairing ceremony given a home and
+  an endpoint; the session-key resolver with its rotation rules; one ingress
+  transaction per update with the receipt as the idempotency boundary and
+  default-deny before any content is stored; a paired message as an ordinary
+  run through the submission function the HTTP API uses; origin attributed on
+  the write; notifications through the Milestone 12 outbox and replies through
+  a separate surface-reply outbox, redacted and chunked; two scopes, six
+  routes, two flags, and twenty-one hard gates.
+- Registered the twenty-one gates in the new `surface` area; the registry
+  grammar, declaring-spec census, milestone map, readiness review, current
+  milestone, project state, HTTP and policy forward-looking subsections, the
+  seam audit's "what Milestone 14 settles" note, the review log, and the
+  changelog follow.
+
+## 2026-08-21 — Milestone 13 specified: general-purpose subagents and delegation
+
+- Added `docs/plan/subagents-and-delegation.md` and proposed ADR-0063:
+  `delegate.run` as a suspending control tool with a structured brief; a
+  dedicated child session and child run materialized in one transaction with
+  intersected scopes, subset tools, derived limits, and a bounded deadline;
+  the `CHILD_RUN` suspension and a join that completes the parent's
+  invocation once through a `requeue_after_child` edge in the single terminal
+  writer; additive usage with cost reserved at materialization; depth and
+  fan-out caps; a `delegations` ledger carrying the separate trace and
+  artifact references; cancellation cascading downward only; a default-off
+  flag; and the capability-scenario and case-32 evidence the plan's gate for
+  multi-agent work requires before tenant activation.
+- Registered twenty-one Milestone 13 gates in the new `delegate` area; the
+  registry grammar, declaring-spec census, milestone map, readiness review,
+  current milestone, project state, and cross-document pointers in the tool
+  system, run loop, evaluation harness, and policy designs follow.
+
+## 2026-08-21 — Milestone 12 specified: notifications and device identity
+
+- Added `docs/plan/notifications-and-devices.md` and proposed ADR-0062: a
+  `Device` registry with a client-minted installation identity and per-device
+  muted kinds; a durable notification outbox written in the triggering
+  transaction through a savepoint-wrapped hook on the single terminal writer
+  and the scheduling accountant and materializer; exactly five trigger
+  transitions; a content-free payload; claim-lease dispatch with staleness
+  checks, a closed retry schedule, and token invalidation; an APNs adapter
+  behind a `PushTransport` port; a least-privilege `notify` role; three scopes
+  and seven routes including an offline inbox; and the Apple client's
+  registration and deep-link duties.
+- Registered twenty Milestone 12 gates in two new areas, `device` and
+  `notify`; the registry grammar, declaring-spec census, milestone map,
+  readiness review, current milestone, and project state follow.
+- Noted what Milestone 12 settles in the Section 29 seam audit and added the
+  forward-looking route and scope subsections to the HTTP and policy designs.
+
+## 2026-08-20 — Roadmap: Milestones 12 through 15 authorized and the Milestone 10 completion contract amended
+
+- Added ADR-0061. Milestone 10 now completes on construction — all registered
+  gates, the cumulative registry, hosted CI on the final head, and a clean
+  final review — while tenant activation of self-authored skills stays
+  evidence-gated and default-off as roadmap item B1; ADR-0057's provider
+  extractor evidence already passed on the intended production model.
+- Authorized Milestones 12 through 15 in order: notifications and device
+  identity (Apple push to the native client, the Section 29 device registry),
+  general-purpose subagents through `delegate.run` (activation gated on
+  evaluation evidence), inbound surfaces and pairing (first channel Telegram),
+  and operational hardening (encrypted off-host backup, restore rehearsal,
+  health alerts, firewall, rollback). Each begins with its detailed-design
+  document and ADR, which declare its gates.
+- Added Section 21's Milestone 12–15 requirements and acceptance criteria and a
+  "Roadmap beyond Milestone 15" subsection that ranks every remaining deferral
+  with its entry condition, as Section 24 requires; Section 27.6 now places a
+  child run in a dedicated child session always.
+- Raised the gate-registry and documentation-check milestone bound from 11 to
+  15 as one `MAX_MILESTONE` constant; the milestone-map census reports a zero
+  row for each authorized milestone until its specification declares gates.
+- Corrected stale figures (thirty-eight Milestone 10 gates, 204 and 227
+  cumulative), retitled the architecture and security pages past Milestone 3
+  with summaries through Milestone 11, amended ADR-0046's Caddy decision as
+  superseded by ADR-0048, and updated the client page's route reference.
+
+## 2026-08-20 — Inspectable formation evaluation and semantic provider claims
+
+- Replaced free-form provider-authored memory statements with a closed semantic
+  claim schema, exact evidence quotes, and deterministic local rendering under
+  the new `formation@4` and `provider-assisted-v2` activation boundary.
+- Rechecked secret, injection, and transient markers against authoritative cited
+  source text so provider paraphrasing cannot remove a formation safety signal.
+- Made paired evaluation failures return per-case arm beliefs, consolidation and
+  provider-audit counts, and fallback-versus-provider attribution while retaining
+  the rule that only a passing run publishes activation evidence.
+- Added symmetric fabrication reporting and a sixteen-of-twenty positive-case
+  coverage floor, with a non-zero CLI exit for failed gates.
+- Removed annotation siblings from JSON Schema references so OpenAI strict
+  structured output accepts the semantic-claim schema, with recursive regression
+  coverage for the provider request boundary.
+- Normalized source-grounded specialized values from either semantic slot,
+  rejected cue-only explanation styles, and retained deterministic metadata when
+  an otherwise identical provider claim would weaken the fallback candidate.
+- Labeled the explicit hiking hobby in the wife relationship evaluation case and
+  canonicalized irregular base verbs so `go hiking` renders as `goes hiking`.
+- Rejected duration-only language-study values such as `three years` instead of
+  allowing a grounded time phrase to become a fabricated language memory.
+- Accepted ADR-0057 after the version-bound OpenAI `gpt-5.6-sol` evaluation
+  supported 18 of 20 positive cases and 19 candidates versus 9 deterministic
+  candidates, with zero fabrication and zero policy failures in both arms, and
+  bundled the passing schema-v2 evidence for exact-tuple startup activation.
+
 ## 2026-08-20 — Deployment provisioning contract hardening
 
 - Split the browser control-plane credential to its own example path: the

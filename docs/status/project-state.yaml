@@ -7,6 +7,8 @@ project:
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 9
   active_milestone: 11
+  # Milestones 12 through 15 were authorized in order on 2026-08-20
+  # (ADR-0061); each begins with its detailed-design document and ADR.
   authorized_milestones:
     - 0
     - 1
@@ -20,6 +22,10 @@ project:
     - 9
     - 10
     - 11
+    - 12
+    - 13
+    - 14
+    - 15
 
 milestones:
   "0":
@@ -78,8 +84,73 @@ milestones:
     deferred_scope:
       - arbitrary cron and monthly recurrence
       - dependency graphs and workflow DAGs
-      - push, email, mobile, and webhook notifications
+      - email and webhook notifications
       - continuous-session recurrence
+  "12":
+    title: Notifications and device identity
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/notifications-and-devices.md
+    adr: docs/adr/0062-milestone-12-notifications-and-device-identity.md
+    gates_registered: 20
+    authorized_scope:
+      - device registry with registration, refresh, revocation, and deletion
+      - durable notification outbox written with the triggering event
+      - least-privilege notify dispatcher role and APNs transport
+      - approval, user-input, run-failure, and schedule-outcome triggers
+      - content-free payloads, device and notification routes, offline inbox
+      - Apple client registration, token upload, revocation, and deep links
+    deferred_scope:
+      - inbound surfaces, pairing, device-scoped tools, presence routing
+      - actionable lock-screen approvals
+      - email and webhook transports
+  "13":
+    title: General-purpose subagents and delegation
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/subagents-and-delegation.md
+    adr: docs/adr/0063-milestone-13-subagents-and-delegation.md
+    gates_registered: 21
+    authorized_scope:
+      - delegate.run as a suspending control tool with a structured brief
+      - dedicated child session and child run materialized in one transaction
+      - derived child limits, scope and tool intersection, additive usage
+      - parent suspension, join, cancellation and deadline propagation
+      - capability scenario and two-arm case as the activation evidence
+    deferred_scope:
+      - handoffs, role-named agents, delegation deeper than one level
+      - model routing changes
+  "14":
+    title: Inbound surfaces and pairing
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/inbound-surfaces.md
+    adr: docs/adr/0064-milestone-14-inbound-surfaces-and-pairing.md
+    gates_registered: 21
+    authorized_scope:
+      - surface registry and a Telegram long-polling inbound adapter
+      - pairing ceremony with one-time codes, lockout, and revocation
+      - session-key resolver and ordinary run creation via the shared submit
+      - replies, notifications, approvals, and questions over the chat
+      - least-privilege surface role, rate limits, default-off flags
+    deferred_scope:
+      - Slack and email adapters, group and thread chats, webhook delivery
+      - device-scoped tools, presence routing, hand-off, media intake
+  "15":
+    title: Operational hardening
+    status: authorized
+    authorized_on: 2026-08-20
+    design: docs/plan/operational-hardening.md
+    adr: docs/adr/0065-milestone-15-operational-hardening.md
+    gates_registered: 16
+    authorized_scope:
+      - encrypted off-host daily backup with manifest and restore rehearsal
+      - host health check with deduplicated alerts through the outbox
+      - cloud and host firewall, SSH hardening, proxy rate limits
+      - one-command code rollback and pre-migration dump
+    deferred_scope:
+      - high availability, off-host database, load balancer, rolling deploys
+      - Kubernetes, microservices, a second queue
 
 # Evidence for completed milestones 0 through 9 lives in
 # docs/status/verification-history.yaml; an in-progress milestone's
@@ -121,12 +192,10 @@ verification:
           unsupported named entity, falls back on malformed output, and rejects
           output beyond its dedicated budget. The existing memory formation,
           source-integrity, injection, candidate-cap, and no-policy-regression
-          gates remain unchanged. Pending owner acceptance, the implementation
-          provisionally applies ADR-0057's stricter composition boundary without
-          claiming architectural acceptance: the reference extractor remains
-          covered directly, while normal composition requires exact activation
-          evidence. No provider credential was available for a live smoke test in
-          this worktree.
+          gates remain unchanged. Accepted ADR-0057 now owns the stricter
+          composition boundary: the reference extractor remains covered directly,
+          while normal composition requires exact activation evidence and the
+          balanced OpenAI/default tuple has passing release-bundled evidence.
       - check: Milestone 10A skill-authoring gates
         outcome: passed_locally
         detail: >-
@@ -285,11 +354,10 @@ verification:
           ceiling, temporal-hint preservation, transactional replacement,
           formation-scan index, hybrid extractor reference implementation,
           content-free model-usage audit, deterministic fallback, and formation@3
-          policy boundary are approved and implemented. ADR-0051 remains the
-          accepted architecture. The implementation enforces proposed ADR-0057's
-          stricter evidence gate while owner review is pending; ADR-0057 would
-          supersede ADR-0051's unconditional routed-policy activation and provider
-          budget only if accepted.
+          policy boundary are approved and implemented. ADR-0051 remains accepted
+          architecture for the automatic-memory lifecycle, while accepted ADR-0057
+          supersedes its unconditional routed-policy activation and provider budget
+          with the stricter version-bound evidence gate.
       - check: proposed ADR-0052
         outcome: owner_review_requested
         detail: >-
@@ -308,23 +376,63 @@ verification:
         detail: >-
           The configurable CLI run wait with its positive-value boundary and
           300-second default is approved and implemented.
-      - check: proposed ADR-0057
-        outcome: owner_review_requested
+      - check: intended-production-model memory evaluation
+        outcome: failed_gate
+        detail: >-
+          The checked-in 24-case corpus ran against the balanced policy resolved
+          to OpenAI gpt-5.6-sol. Both arms supported zero labeled candidates. The
+          provider arm committed two unsupported beliefs, including one protected
+          secret case, and therefore published no activation artifact. Diagnosis
+          identified an under-specified free-form candidate schema, statement-only
+          safety checks that lost source hazards after paraphrasing, asymmetric
+          evaluator diagnostics, and an aggregate lift threshold without a
+          positive-case coverage floor.
+      - check: formation@4 evaluation-pipeline regression suite
+        outcome: passed
+        detail: >-
+          Regression coverage now proves canonical local rendering from closed
+          semantic provider claims, exact evidence-quote grounding, authoritative
+          source hazard rechecks, symmetric arm scoring and fabrication reporting,
+          inspectable failed-run diagnostics, non-zero failed CLI status, and a
+          sixteen-of-twenty positive-case publication floor. The final repository
+          check passed formatting, lint, type checking, 853 static tests, 324
+          contract tests, deployment-script tests, and strict documentation and
+          227-entry gate-registry reconciliation. After Docker became available,
+          all 10 real-container sandbox security tests passed and the unrestricted
+          repository suite completed with 1,182 passed and 94 explicitly skipped.
+      - check: formation@4 intended-production-model activation evaluation
+        outcome: passed
+        detail: >-
+          The version-bound 24-case evaluation at immutable build
+          7de9a98f550e60130f7f7131d78ca537e720685b resolved the balanced policy to
+          OpenAI gpt-5.6-sol and the default compiled policy to
+          default@8905b6f85895+hb03f69cf. The provider arm completely supported
+          18 of 20 positive cases and 19 candidates versus 9 deterministic
+          candidates, with zero fabrication and zero policy failures in both
+          arms. The protected question, transient, secret, and injection cases
+          remained empty. Schema-v2 evidence for corpus hash
+          b10ae25558d3236b9a0a47cad59d4b89ff6824085cba79656cc90740bc7d8c43 is
+          bundled under the provider-memory release-evidence trust boundary.
+      - check: accepted ADR-0057
+        outcome: approved_and_implemented
         detail: >-
           The dedicated maintenance placement, exact evidence binding, fixed
           provider budget, user-episode selection, deterministic safety authority,
           content-free call audit, non-production evaluation mode, fallback, and
-          formation@3 version boundary are recorded for owner review.
+          formation@4 semantic-claim, source-safety, diagnostic, and positive-case
+          coverage boundaries are accepted, implemented, and backed by passing
+          intended-production-model evidence.
     remaining:
-      - Run a labeled live-provider formation evaluation and activate the
-        restricted extractor only when its version-bound evidence passes ADR-0057.
+      - Run every hosted CI lane and complete the GitHub CodeRabbit review on
+        the same final head, resolving every finding and conversation.
+    activation_pending:
+      # Tenant activation is not a completion condition (ADR-0061); it is
+      # roadmap item B1 and stays default-off until the evidence rule passes.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
-        Clopper-Pearson lower bound, and zero additional policy failures.
-      - Run every hosted CI lane and complete the GitHub CodeRabbit review on
-        the same final head, resolving every finding and conversation.
-      - Implement separately gated routing and subagent extensions.
+        Clopper-Pearson lower bound, and zero additional policy failures before
+        enabling skill authoring for a tenant.
   milestone_11:
     recorded_at: 2026-08-19T20:49:16Z
     status: in_progress
@@ -536,16 +644,24 @@ readiness:
     Milestones 0 through 9 are complete and implementable from the corpus.
     Milestone 10 is in progress for the four authorized tranches: automatic
     memory formation, self-authored skills, provider-neutral public-web
-    access, and authenticated browser automation, with 34 registered gates
+    access, and authenticated browser automation, with 38 registered gates
     across the four workstreams. The owner separately authorized Milestone
     11 scheduled runs, whose detailed design and 23 registered gates are
-    locally implemented. Model routing and general-purpose subagents remain
-    deferred. Every plan subject has a design document, no milestone
-    carries a named gap, and the gate registry, its census, and the
-    milestone map are reconciled by make docs-check. The corpus audit
-    passes and their findings are preserved in the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    locally implemented. On 2026-08-20 the owner authorized Milestones 12
+    through 15 in order (ADR-0061). Milestone 12 is specified by
+    notifications-and-devices.md with twenty registered gates, Milestone
+    13 by subagents-and-delegation.md with twenty-one, Milestone 14 by
+    inbound-surfaces.md with twenty-one, and Milestone 15 by
+    operational-hardening.md with sixteen; every authorized milestone has a
+    design document and the census reports no zero row.
+    Model routing remains deferred
+    on the plan's roadmap. Every plan subject through Milestone 11 has a
+    design document, no milestone carries a named gap, and the gate
+    registry, its census, and the milestone map are reconciled by make
+    docs-check. The corpus audit passes and their findings are preserved in
+    the audit log.
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-20T03:56:09Z
-last_reviewed_commit: ca0eaae
+last_updated: 2026-08-21T04:00:00Z
+last_reviewed_commit: ce71aba

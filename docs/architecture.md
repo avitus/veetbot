@@ -10,7 +10,7 @@ layout and dependency rules are defined by the
 by the [bootstrap specification](plan/bootstrap-and-composition.md), and
 recorded by [ADR-0001](adr/0001-modular-monolith.md).
 
-## Implemented through Milestone 3
+## Implemented through Milestone 3 (foundation)
 
 Milestone 0 supplies the repository foundation, Milestone 1 adds the first
 complete provider-neutral vertical slice, and Milestone 2 makes that slice
@@ -77,8 +77,43 @@ boundaries before those packages fill in.
 
 The in-memory tier still claims no durability, recovery, or cross-repository
 transaction. PostgreSQL supplies those guarantees for the normal CLI and worker
-roles. Milestone 3's local trajectory byte store is a narrow bridge to the
-general artifact store owned by Milestone 6; it does not claim sandbox, upload,
-streaming-object-store, or general artifact behavior. No policy engine,
-long-term memory, skill, MCP, HTTP API, or sandbox execution behavior is claimed
-as implemented by this page.
+roles.
+
+## Implemented in Milestones 4 through 11
+
+The same boundaries hold as the package map filled in; each addition is owned
+by the detailed-design document the routing table in `AGENTS.md` names.
+
+- `agent_core.policy` owns deterministic policy loading and evaluation, the
+  exact scope vocabulary, and the hardline rules; approvals pause a durable run
+  and resume it through the single terminal writer (Milestone 4).
+- `agent_core.api` is the FastAPI boundary: sessions, messages, runs, approvals,
+  artifacts, the SSE stream with `Last-Event-ID` replay, session history and
+  deletion, schedules, and the browser profile, authentication, and grant
+  routes — every route behind an exact scope (Milestones 5 and 10–11).
+- `agent_core.adapters.execution` and `agent_core.execution` supply the
+  container-backed sandbox, resource limits, egress policy, the in-sandbox RPC
+  bridge, and credential scrubbing; `agent_core.adapters.artifacts` owns the
+  content-addressed artifact store (Milestone 6).
+- `agent_core.context` grew budgeting, history selection, compaction with
+  provenance, structured working state, and trust labelling over a byte-stable
+  prefix (Milestone 7).
+- `agent_core.skills` and `agent_core.mcp` own the static skill substrate,
+  the version-pinned catalog, `skill.load`, and MCP as a boundary adapter with
+  namespaced servers and untrusted output (Milestone 8); `skill.manage`
+  authoring and its confined background-review child run are Milestone 10A.
+- `agent_core.memory` and `agent_core.knowledge` own formation, consolidation,
+  hybrid retrieval with recall traces, governed inspection and deletion,
+  document ingestion, and passage retrieval; provider-assisted extraction is
+  evidence-gated (Milestones 9 and 10).
+- `agent_core.adapters.web` and `agent_core.adapters.browser`, with
+  `agent_core.browser_control_plane` as a separately deployed secret-bearing
+  process, supply provider-neutral public-web search and fetch and
+  authenticated browser automation, all external-untrusted (Milestone 10).
+- `agent_core.scheduling` owns recurrence, civil time, atomic occurrence
+  materialization into ordinary runs, admission, and the least-privilege
+  schedule worker role (Milestone 11).
+
+Milestones 12 through 15 — notifications and device identity, subagents and
+delegation, inbound surfaces and pairing, operational hardening — are
+authorized and add nothing to this page until their implementations land.

@@ -1,0 +1,87 @@
+# Canonical gate registry entries for Milestone 12 notifications.
+- id: gate.notify.enqueue_atomic
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Enqueue is atomic with its trigger.** A crash injected after every write in finalize, accounting, and materialization leaves no outbox row without its event or partial row; the only committed event without an outbox row is one whose enqueue failed inside its savepoint, audited in the same transaction, and that failure never changes the run's terminal state."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.trigger_catalog
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Exactly the five transitions enqueue, and one named producer besides.** Approval requested, waiting for user, run failed, scheduled run accounted, and scheduled occurrence skipped each enqueue one row; interactive completion, cancellation, tool lifecycle events, message deltas, and surface replies enqueue nothing; the Milestone 15 health check is the only non-transition producer and enqueues only the two ops kinds."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.dedupe
+  milestone: 12
+  kind: property
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Repeated triggers deduplicate.** Generated repeats of one transition produce exactly one outbox row per deduplication key."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.content_free
+  milestone: 12
+  kind: corpus
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Payloads are content-free.** A corpus of approvals, questions, failures, and schedule instructions carrying secrets, arguments, message text, and reasoning yields payloads with only the closed key set and a templated title."
+  check: tests/gates/pending.py::pending_gate
+  corpus: tests/corpora/notification_content
+  minimum_members: 12
+- id: gate.notify.dispatch_once
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Concurrent dispatch is safe and replay is bounded.** Two dispatchers racing on one pending row deliver it to each target once under the claim lease and write one delivery row per attempt; a crash between a transport accept and the ledger write re-sends under the same collapse identifier and records a further attempt — at-least-once, never a lost or unrecorded send."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.retry_bounded
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Retry is bounded and expiry is honoured.** Transient outcomes follow the declared backoff and stop at the ceiling as failed; a row past its expiry is settled expired and never sent."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.stale_suppressed
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Stale notifications are suppressed.** A resolved or expired approval, an answered question, a run no longer waiting, or a deleted session settles superseded with no transport call, and session erasure deletes pending rows in the same transaction."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.token_revoked_on_410
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**An unregistered token is invalidated once.** Unregistered and BadDeviceToken invalidate the device's token, append the invalidation event, and remove the device from the next targets; a 5xx or 429 does neither."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.apns_auth
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**The APNs adapter authenticates and addresses correctly.** Against a fake server the adapter signs ES256 provider tokens from the configured key file, re-mints inside the window, sends the required headers, selects the host per device environment, and never logs the key or a token."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.port_contracts
+  milestone: 12
+  kind: structural
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Every notification port has executable adapter contracts.** The device registry, the outbox, and the push transport each have a named shared contract exercised by every registered adapter."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.offline_inbox
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**A client can read every notification while offline.** With no transport configured, every enqueued kind is later returned by the inbox with its status and delivery outcomes through stable pagination."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.default_off
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Notifications are default-off and credential-confined.** With both flags off no route mounts, no row is written, and no dispatcher builds; release validation requires the flags to change together; only the notify role loads the push key."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.migration_clean
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**Notifications migrate cleanly from an empty database.** The migration chain reaches head and exactly matches the declared SQLAlchemy metadata."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.notify.migration_stepwise
+  milestone: 12
+  kind: case
+  spec: docs/plan/notifications-and-devices.md#hard-gates
+  statement: "**The notification migration is reversible at its boundary.** Upgrade, downgrade, and re-upgrade from the immediate predecessor leave a valid schema."
+  check: tests/gates/pending.py::pending_gate
