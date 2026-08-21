@@ -85,6 +85,7 @@ test-apple-ui:
 
 test-deploy:
 	deploy/app/release.test.sh
+	deploy/app/rollback.test.sh
 	deploy/nginx/deploy.test.sh
 
 production-check:

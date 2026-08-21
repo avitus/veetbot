@@ -392,20 +392,39 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     manual = deployment.partition("## Manual rollback")[2].partition("## Accepted limitations")[0]
     app_precondition = 'grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"'
     docs_precondition = 'test "$(cat "$docs_target/release.txt")" = "$target_id"'
-    app_switch = 'mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current'
-    docs_switch = 'mv -Tf "/opt/veetbot/docs/.rollback-$target_id" /opt/veetbot/docs/current'
+    image_validation = 'docker image inspect "agent-core-sandbox:$target_id"'
+    image_tag = 'docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production'
+    app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
+    docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/docs/current'
 
     assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
     assert 'test -d "$docs_target"' in manual
     assert 'test -f "$docs_target/release.txt"' in manual
     assert app_precondition in manual
     assert docs_precondition in manual
-    assert 'ln -s "$docs_target" "/opt/veetbot/docs/.rollback-$target_id"' in manual
+    assert image_validation in manual
+    assert image_tag in manual
+    assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
+    assert manual.index(image_validation) < manual.index(app_switch)
+    assert manual.index(image_validation) < manual.index(docs_switch)
+    assert manual.index(image_tag) < manual.index(app_switch)
+    assert manual.index(image_tag) < manual.index(docs_switch)
     assert manual.index(app_precondition) < manual.index(app_switch)
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+
+
+def test_manual_rollback_has_failure_injection_coverage() -> None:
+    harness = (ROOT / "deploy" / "app" / "rollback.test.sh").read_text(encoding="utf-8")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert "VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE" in harness
+    assert "application pointer was not restored" in harness
+    assert "documentation pointer was not restored" in harness
+    assert "production image tag was not restored" in harness
+    assert "deploy/app/rollback.test.sh" in makefile
 
 
 def test_release_script_preserves_release_boundaries() -> None:

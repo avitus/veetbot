@@ -402,23 +402,67 @@ grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"
 test -d "$docs_target"
 test -f "$docs_target/release.txt"
 test "$(cat "$docs_target/release.txt")" = "$target_id"
-ln -s "$target" "/opt/veetbot/.rollback-$target_id"
-ln -s "$docs_target" "/opt/veetbot/docs/.rollback-$target_id"
-mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current
-mv -Tf "/opt/veetbot/docs/.rollback-$target_id" /opt/veetbot/docs/current
+test -L /opt/veetbot/current
+test -L /opt/veetbot/docs/current
+previous_target="$(readlink -f /opt/veetbot/current)"
+previous_docs_target="$(readlink -f /opt/veetbot/docs/current)"
+docker image inspect "agent-core-sandbox:$target_id" >/dev/null
+previous_production_image="$(
+  docker image inspect --format '{{.Id}}' agent-core-sandbox:production
+)"
+test -n "$previous_production_image"
+
+app_next="/opt/veetbot/.rollback-$target_id-$$"
+docs_next="/opt/veetbot/docs/.rollback-$target_id-$$"
+app_restore="/opt/veetbot/.rollback-restore-$$"
+docs_restore="/opt/veetbot/docs/.rollback-restore-$$"
+ln -s "$target" "$app_next"
+ln -s "$docs_target" "$docs_next"
+
+rollback_pending=0
+rollback_on_exit() {
+  status=$?
+  trap - EXIT
+  if test "$status" -ne 0 && test "$rollback_pending" -eq 1; then
+    set +e
+    rm -f -- "$app_restore" "$docs_restore"
+    ln -s "$previous_target" "$app_restore"
+    ln -s "$previous_docs_target" "$docs_restore"
+    mv -Tf "$app_restore" /opt/veetbot/current
+    mv -Tf "$docs_restore" /opt/veetbot/docs/current
+    docker tag "$previous_production_image" agent-core-sandbox:production
+    sudo systemctl restart \
+      veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+  fi
+  rm -f -- "$app_next" "$docs_next" "$app_restore" "$docs_restore"
+  exit "$status"
+}
+trap rollback_on_exit EXIT
+
+rollback_pending=1
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
+mv -Tf "$app_next" /opt/veetbot/current
+app_next=""
+mv -Tf "$docs_next" /opt/veetbot/docs/current
+docs_next=""
 sudo systemctl restart \
   veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 curl --fail --show-error --dump-header - --output /dev/null \
   http://127.0.0.1:8000/health/ready
 test "$(cat /opt/veetbot/docs/current/release.txt)" = "$target_id"
+rollback_pending=0
+trap - EXIT
 ```
 
 The returned `X-Veetbot-Release` must equal `target_id`, and each unit's
 `MainPID` working directory must resolve to `target`. The matching documentation
 release is a precondition, so a missing or mismatched `release.txt` fails before
-either symlink changes. If the older release image was pruned, rebuild it from
-that retained source tree before switching.
+either symlink changes. Image validation and tagging also precede both pointer
+switches. If the second switch, service restart, or readiness check fails, the
+exit trap restores both previous pointers and the previous production image tag,
+then restarts the previous release; `deploy/app/rollback.test.sh` failure-injects
+the second switch to verify that recovery. If the older release image was
+pruned, rebuild it from that retained source tree before switching.
 
 Nginx backups are independent. To recover one, copy the selected file from
 `/etc/nginx/veetbot-backups` to `/etc/nginx/sites-available/veetbot`, run
