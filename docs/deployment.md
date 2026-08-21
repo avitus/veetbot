@@ -416,6 +416,7 @@ app_next="/opt/veetbot/.rollback-$target_id-$$"
 docs_next="/opt/veetbot/docs/.rollback-$target_id-$$"
 app_restore="/opt/veetbot/.rollback-restore-$$"
 docs_restore="/opt/veetbot/docs/.rollback-restore-$$"
+health_headers=""
 ln -s "$target" "$app_next"
 ln -s "$docs_target" "$docs_next"
 
@@ -434,6 +435,9 @@ rollback_on_exit() {
     sudo systemctl restart \
       veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
   fi
+  if test -n "$health_headers"; then
+    rm -f -- "$health_headers"
+  fi
   rm -f -- "$app_next" "$docs_next" "$app_restore" "$docs_restore"
   exit "$status"
 }
@@ -447,8 +451,20 @@ mv -Tf "$docs_next" /opt/veetbot/docs/current
 docs_next=""
 sudo systemctl restart \
   veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
-curl --fail --show-error --dump-header - --output /dev/null \
+health_headers="$(mktemp /opt/veetbot/shared/rollback-health.XXXXXX)"
+curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+  --dump-header "$health_headers" --output /dev/null \
   http://127.0.0.1:8000/health/ready
+awk -F ': *' -v expected="$target_id" '
+  BEGIN { IGNORECASE = 1 }
+  tolower($1) == "x-veetbot-release" {
+    sub(/\r$/, "", $2)
+    if ($2 == expected) found = 1
+  }
+  END { exit found ? 0 : 1 }
+' "$health_headers"
+rm -f -- "$health_headers"
+health_headers=""
 test "$(cat /opt/veetbot/docs/current/release.txt)" = "$target_id"
 rollback_pending=0
 trap - EXIT

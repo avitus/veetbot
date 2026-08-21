@@ -105,7 +105,21 @@ write_stub sudo '
 write_stub systemctl '
   printf "systemctl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
 '
-write_stub curl 'printf "curl %s\n" "$*" >>"$VEETBOT_TEST_LOG"'
+write_stub curl '
+  printf "curl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  headers=""
+  while (($#)); do
+    if [[ "$1" == --dump-header ]]; then
+      headers="$2"
+      shift 2
+    else
+      shift
+    fi
+  done
+  [[ -n "$headers" ]]
+  printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
+    "$VEETBOT_TEST_READY_RELEASE" >"$headers"
+'
 
 awk '
   /^## Manual rollback$/ { in_section = 1; next }
@@ -125,6 +139,7 @@ run_rollback() {
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_DOCKER_STATE="$DOCKER_STATE" \
   VEETBOT_TEST_TARGET_ID="$TARGET_ID" \
+  VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$TARGET_ID}" \
   VEETBOT_TEST_DOCS_CURRENT="$DOCS_ROOT/current" \
   VEETBOT_TEST_FAIL_MARKER="$FAIL_MARKER" \
     "$RUNBOOK"
@@ -150,6 +165,16 @@ fi
 grep -Fq 'docker tag previous-image-id agent-core-sandbox:production' "$LOG_FILE"
 
 rm -f -- "$FAIL_MARKER"
+: >"$LOG_FILE"
+if VEETBOT_TEST_READY_RELEASE=20260810-152244-bbbbbbb run_rollback \
+  >"$TEST_ROOT/mismatched.out" 2>&1; then
+  printf 'rollback with a mismatched readiness identity unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(cat "$DOCKER_STATE")" == previous-image-id ]]
+
 : >"$LOG_FILE"
 run_rollback
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$TARGET_ID" ]]
