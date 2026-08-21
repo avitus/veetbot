@@ -69,6 +69,7 @@ validates the floor, and no trailer means lane A.
 | Public-web search and page extraction | `web-access.md` |
 | Authenticated browser automation | `browser-automation.md` |
 | Scheduled runs and recurrence | `scheduling.md` |
+| Notifications, device identity, push delivery | `notifications-and-devices.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -195,5 +196,4 @@ End every coding assignment with a report covering:
 
 ## Do not
 
-- Do not start implementation work during a documentation-only assignment, and
-  do not edit `archive/` or the generated `site/` and `dist/` outputs.
+- Do not start implementation work during a documentation-only assignment, or edit `archive/`, `site/`, or `dist/`.

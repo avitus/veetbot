@@ -85,7 +85,7 @@ rather than smoothed.
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
 | 10 | Memory maturation, self-authored skills, web access, browser automation | Authorized | 38 | Hosted CI and the final review remain; tenant activation is roadmap item B1 (ADR-0061) |
 | 11 | Scheduled runs | Authorized | 23 | Implemented locally; hosted CI and the final review remain |
-| 12 | Notifications and device identity | Authorized, specification pending | 0 | `notifications-and-devices.md` and its ADR |
+| 12 | Notifications and device identity | Authorized | 20 | Nothing in the corpus; the Apple push key and capability are owner actions outside it |
 | 13 | General-purpose subagents and delegation | Authorized, specification pending | 0 | `subagents-and-delegation.md` and its ADR, plus the activation evidence the gate for multi-agent work requires |
 | 14 | Inbound surfaces and pairing | Authorized, specification pending | 0 | `inbound-surfaces.md` and its ADR, after Milestone 12's device registry |
 | 15 | Operational hardening | Authorized, specification pending | 0 | `operational-hardening.md` and its ADR |
@@ -468,8 +468,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1020-1021` and the resolve at
-`policy-and-approvals.md:1030`, and one reference in
+at `policy-and-approvals.md:1026-1027` and the resolve at
+`policy-and-approvals.md:1036`, and one reference in
 `runtime-loop.md:1180` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -1065,10 +1065,32 @@ complete and production scheduling remains default-off pending hosted review.
 Because Milestone 10 is numerically earlier and incomplete, Milestone 11 does not
 by itself advance the verified gate ceiling past 9.
 
-## Milestones 12 through 15: authorized, specifications pending
+## Milestone 12: notifications and device identity, authorized and specified
 
-The owner authorized four further milestones on 2026-08-20, in order, and
-ADR-0061 records why and how: Milestone 12, notifications and device identity;
+[notifications-and-devices.md](notifications-and-devices.md) closes the half
+of Section 29 it was written for. It defines the `Device` registry with a
+client-minted installation identity, per-device muted kinds, and a live-token
+uniqueness rule; the durable outbox written in the triggering transaction
+through a savepoint-wrapped hook on the single terminal writer and the
+scheduling accountant and materializer; the closed five-trigger catalog; the
+content-free payload; claim-lease dispatch with staleness checks, a closed
+retry schedule, and token invalidation; the APNs adapter behind a
+`PushTransport` port a fake satisfies; the `notify` role and its credential
+confinement; three scopes and seven routes including the offline inbox; the
+Apple client's registration and deep-link duties; process-event lifecycle
+audit; and twenty hard gates across the `device` and `notify` areas. ADR-0062
+records why two ports replace the `NotificationService` name, why the
+broadcaster stays, and why the push key lives in one role.
+
+The readiness verdict is therefore **Authorized**: there is no unnamed design
+choice between the corpus and the first red tests. What remains outside the
+corpus is the owner's Apple Developer work — an APNs key and the push
+capability on the bundle identifier — and the verified ceiling, which cannot
+pass 11 until Milestones 10 and 11 close.
+
+## Milestones 13 through 15: authorized, specifications pending
+
+The owner authorized these with Milestone 12 on 2026-08-20 (ADR-0061):
 Milestone 13, general-purpose subagents and delegation; Milestone 14, inbound
 surfaces and pairing; Milestone 15, operational hardening. The engineering plan
 states each one's requirement and acceptance criteria today. None has a
@@ -1077,14 +1099,13 @@ pending**: the named document and its ADR are what stand between the milestone
 and its first red test, and the milestone map's census reports a zero row for
 each until that document declares its gates (Decision 9 of the map).
 
-What the corpus already supplies is not nothing. Milestone 12 and 14 land the
-two halves [multi-device-and-surfaces.md](multi-device-and-surfaces.md)
-audited: eight of Section 29's thirteen seams are already cut, the five gaps it
-names — a third registration source, device lifecycle events with no session,
-a fourth suspension kind, no client attributed on a write, and
-`NotificationService` as a port name with nothing behind it — are the work,
-pairing is designed in ADR-0017, and the session-key resolver is the one
-genuinely new mechanism. Milestone 13 starts from the child-run properties the
+What the corpus already supplies is not nothing. Milestone 14 lands the
+second half [multi-device-and-surfaces.md](multi-device-and-surfaces.md)
+audited: of the five gaps it names, Milestone 12 takes device lifecycle events
+and the `NotificationService` port, leaving the third registration source, the
+hand-off suspension kind, and client attribution on a write to Milestone 14 and
+the roadmap; pairing is designed in ADR-0017, and the session-key resolver is
+the one genuinely new mechanism. Milestone 13 starts from the child-run properties the
 plan lists under Milestone 10, from the confined review child run Milestone 10A
 already builds, and from the two partial and two absent items this review
 records above, with the recorded child-session conflict resolved in the
@@ -1318,7 +1339,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2514` against
-    `model-gateway.md:1795` and `milestone-map.md:1052`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1105`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

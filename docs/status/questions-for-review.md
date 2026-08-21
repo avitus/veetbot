@@ -6358,3 +6358,95 @@ added in the pull request that adds the document.
 
 **Reversal cost:** cheap.
 
+## Milestone 12 notifications and devices (ADR-0062)
+
+The owner chose the milestone, the order, and the first transport. These are
+the design choices the specification made beneath that, each with its
+alternative.
+
+### `NotificationService` becomes two ports and the broadcaster stays
+
+**Decided:** `NotificationOutbox` and `PushTransport` in two new port modules;
+the name `NotificationService` is retired; `LiveEventBroadcaster` is unchanged.
+
+**Why:** the seam audit's warning was that delivering to an open connection and
+to a device that has none are different durability problems; one façade would
+hide the split again.
+
+**Question for you:** none unless you want the old name kept as an alias.
+
+**Reversal cost:** cheap before implementation, moderate after.
+
+### Two gate areas, `device` and `notify`
+
+**Decided:** six `gate.device.*` and fourteen `gate.notify.*`, one declaring
+specification.
+
+**Why:** device identity is the half Milestone 14's Surfaces reuse; giving it
+its own census line keeps that reuse visible. The alternative is one `notify`
+area of twenty, which is what `browser` did for profiles and grants.
+
+**Question for you:** confirm or collapse to one area before code lands.
+
+**Reversal cost:** cheap; it is a rename in the registry and the map.
+
+### Device lifecycle is audited as process events
+
+**Decided:** `device.registered`, `device.push_token_updated`, `device.revoked`,
+`device.push_token_invalidated`, `device.deleted` through the existing
+process-event repository.
+
+**Why:** a device has no session, and `scheduling.md` already took this way out
+for schedules; a `device_events` table would only be worth it for a
+principal-facing device-history route nobody has asked for.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### Preferences are per-device `muted_kinds`
+
+**Decided:** a JSON array column on the device row; no preferences table.
+
+**Why:** the only preference anyone has named is "phone loud, laptop quiet".
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; a preferences table is additive.
+
+### The dispatcher is a new `notify` role, not a maintenance sweep
+
+**Decided:** `agent worker --role notify` with its own unit and environment
+file holding only the database URL and the APNs settings.
+
+**Why:** the maintenance role reads the environment file every role reads; the
+push key should live only where it is used.
+
+**Question for you:** none.
+
+**Reversal cost:** moderate; it is a systemd unit and a release-validation rule.
+
+### Scope names `device.read`, `device.write`, `notification.read`
+
+**Decided:** resource-action pairs on the registry and inbox routes.
+
+**Why:** ADR-0034 objected to a `device.` namespace for scopes granted *to* a
+device; these govern routes, in the same coexistence `browser.*` tools and
+`browser.profile.*` scopes already have. `client.*` is the alternative.
+
+**Question for you:** confirm the names before the scope vocabulary grows.
+
+**Reversal cost:** cheap before code, moderate after.
+
+### Email stays a later transport; `run.completed` stays out of the set
+
+**Decided:** APNs only; no interactive completion kind; `capabilities` and
+`granted_scopes` columns deferred; lock-screen approve/deny out of scope.
+
+**Why:** each is additive on the ports and models this milestone lands, and
+each is on the roadmap with its own entry condition.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+

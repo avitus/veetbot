@@ -13,7 +13,8 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule)\.[a-z0-9]+(?:_[a-z0-9]+)*$"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify)"
+    r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
     r"^\s*(?:\d+\s+)?(gate\.[a-z0-9_.]+)\s+"
@@ -45,6 +46,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "web-access.md": (7, 0),
     "browser-automation.md": (10, 0),
     "scheduling.md": (23, 0),
+    "notifications-and-devices.md": (20, 0),
     "milestone-map.md": (7, 0),
 }
 
