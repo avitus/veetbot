@@ -398,6 +398,13 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/docs/current'
+    required_units = (
+        "veetbot-execution",
+        "veetbot-maintenance",
+        "veetbot-worker",
+        "veetbot-async-worker",
+        "veetbot-api",
+    )
 
     assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
     assert 'test -d "$docs_target"' in manual
@@ -411,6 +418,10 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
+    unit_validation_start = manual.index("for unit in \\")
+    unit_validation = manual[unit_validation_start : manual.index("done", unit_validation_start)]
+    for unit in required_units:
+        assert f"  {unit}" in unit_validation
     assert manual.index(image_validation) < manual.index(app_switch)
     assert manual.index(image_validation) < manual.index(docs_switch)
     assert manual.index(image_tag) < manual.index(app_switch)
@@ -419,6 +430,10 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    restart_position = manual.rindex("sudo systemctl restart")
+    validation_position = manual.index(unit_process_validation)
+    assert manual.index(app_switch) < restart_position < validation_position
+    assert manual.index(docs_switch) < restart_position < validation_position
     assert manual.index(unit_process_validation) < manual.rindex("rollback_pending=0")
 
 
