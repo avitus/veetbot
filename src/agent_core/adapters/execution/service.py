@@ -8,7 +8,6 @@ import dataclasses
 import json
 import logging
 import os
-import socket
 import stat
 import struct
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -211,6 +210,33 @@ def _raise_remote(frame: Mapping[str, object]) -> None:
     message = str(frame.get("message", "execution service request failed"))
     exception_type = _REMOTE_ERRORS.get(error_type, ExecutionUnavailable)
     raise exception_type(message)
+
+
+def _require[T](payload: Mapping[str, object], key: str, expected: type[T]) -> T:
+    value = payload.get(key)
+    if not isinstance(value, expected):
+        raise ExecutionRejected(f"execution service request field {key} is invalid")
+    return value
+
+
+def _require_nonnegative_int(payload: Mapping[str, object], key: str) -> int:
+    value = payload.get(key)
+    if type(value) is not int or value < 0:
+        raise ExecutionRejected(f"execution service request field {key} is invalid")
+    return value
+
+
+def _require_live_leases(payload: Mapping[str, object]) -> frozenset[tuple[UUID, int]]:
+    value = payload.get("live_leases")
+    if not isinstance(value, frozenset) or not all(
+        isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], UUID)
+        and type(item[1]) is int
+        for item in value
+    ):
+        raise ExecutionRejected("execution service request field live_leases is invalid")
+    return cast(frozenset[tuple[UUID, int]], value)
 
 
 class ExecutionServiceWorkspace:
@@ -591,50 +617,58 @@ class ExecutionServiceServer:
         callback: _RemoteCallback,
     ) -> object:
         if operation == "resolve_image_digest":
-            return await self._resolve_image_digest(cast(str, payload["reference"]))
+            return await self._resolve_image_digest(_require(payload, "reference", str))
         if operation == "provision":
             return await self._environment.provision(
-                cast(EnvironmentSpec, payload["specification"])
+                _require(payload, "specification", EnvironmentSpec)
             )
-        environment = cast(EnvironmentHandle, payload.get("environment"))
         if operation == "execute":
             return await self._environment.execute(
-                environment, cast(ExecutionCommand, payload["command"])
+                _require(payload, "environment", EnvironmentHandle),
+                _require(payload, "command", ExecutionCommand),
             )
         if operation == "execute_with_bridge":
             return await self._environment.execute_with_bridge(
-                environment,
-                cast(ExecutionCommand, payload["command"]),
-                cast(BridgeEndpoint, payload["endpoint"]),
+                _require(payload, "environment", EnvironmentHandle),
+                _require(payload, "command", ExecutionCommand),
+                _require(payload, "endpoint", BridgeEndpoint),
                 _RemoteBridgeHandler(callback),
             )
         if operation == "destroy":
-            await self._environment.destroy(environment)
+            await self._environment.destroy(_require(payload, "environment", EnvironmentHandle))
             return None
-        if operation.startswith("workspace_"):
-            workspace = self._environment.workspace(environment)
-            path = cast(str, payload["path"])
-            if operation == "workspace_read_bounded":
-                return await workspace.read_bounded(path, cast(int, payload["maximum_bytes"]))
-            if operation == "workspace_write":
-                await workspace.write(path, cast(bytes, payload["data"]))
-                return None
-            if operation == "workspace_stream":
-                maximum_bytes = cast(int, payload["maximum_bytes"])
-                async for chunk in workspace.stream(path, maximum_bytes):
-                    for offset in range(0, len(chunk), _STREAM_CHUNK_BYTES):
-                        await callback.send_stream_chunk(
-                            chunk[offset : offset + _STREAM_CHUNK_BYTES]
-                        )
-                return None
-            if operation == "workspace_listdir":
-                return tuple(
-                    await workspace.listdir(path, recursive=cast(bool, payload["recursive"]))
-                )
-            if operation == "workspace_provenance":
-                return await workspace.provenance(path)
+        if operation == "workspace_read_bounded":
+            environment = _require(payload, "environment", EnvironmentHandle)
+            path = _require(payload, "path", str)
+            maximum_bytes = _require_nonnegative_int(payload, "maximum_bytes")
+            return await self._environment.workspace(environment).read_bounded(path, maximum_bytes)
+        if operation == "workspace_write":
+            environment = _require(payload, "environment", EnvironmentHandle)
+            path = _require(payload, "path", str)
+            data = _require(payload, "data", bytes)
+            await self._environment.workspace(environment).write(path, data)
+            return None
+        if operation == "workspace_stream":
+            environment = _require(payload, "environment", EnvironmentHandle)
+            path = _require(payload, "path", str)
+            maximum_bytes = _require_nonnegative_int(payload, "maximum_bytes")
+            async for chunk in self._environment.workspace(environment).stream(path, maximum_bytes):
+                for offset in range(0, len(chunk), _STREAM_CHUNK_BYTES):
+                    await callback.send_stream_chunk(chunk[offset : offset + _STREAM_CHUNK_BYTES])
+            return None
+        if operation == "workspace_listdir":
+            environment = _require(payload, "environment", EnvironmentHandle)
+            path = _require(payload, "path", str)
+            recursive = _require(payload, "recursive", bool)
+            return tuple(
+                await self._environment.workspace(environment).listdir(path, recursive=recursive)
+            )
+        if operation == "workspace_provenance":
+            environment = _require(payload, "environment", EnvironmentHandle)
+            path = _require(payload, "path", str)
+            return await self._environment.workspace(environment).provenance(path)
         if operation == "reap":
-            live_leases = cast(frozenset[tuple[object, int]], payload["live_leases"])
+            live_leases = _require_live_leases(payload)
 
             async def is_live(run_id: UUID, lease_epoch: int) -> bool:
                 return cast(
@@ -644,13 +678,3 @@ class ExecutionServiceServer:
 
             return await self._environment.reap(live_leases, is_live)
         raise ExecutionRejected(f"unknown execution service operation: {operation}")
-
-
-def unix_peer_credentials(writer: asyncio.StreamWriter) -> tuple[int, int, int] | None:
-    """Return Linux peer pid/uid/gid when the platform exposes SO_PEERCRED."""
-
-    transport_socket = writer.get_extra_info("socket")
-    if transport_socket is None or not hasattr(socket, "SO_PEERCRED"):
-        return None
-    raw = transport_socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-    return cast(tuple[int, int, int], struct.unpack("3i", raw))

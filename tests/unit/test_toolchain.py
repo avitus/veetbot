@@ -305,7 +305,8 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
     assert "SupplementaryGroups=docker" in execution
-    assert "/var/run/docker.sock" in execution
+    assert "/run/docker.sock" in execution
+    assert "/var/run/docker.sock" not in execution
     assert "EnvironmentFile=" not in execution
     assert "veetbot-execution.service" in worker
     assert "veetbot-execution.service" in async_worker

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 import tempfile
-from collections.abc import AsyncIterator, Iterator, Mapping
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping
+from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import cast
@@ -322,7 +324,7 @@ async def test_execution_service_socket_exchange_has_a_deadline(
         await writer.wait_closed()
 
     server = await asyncio.start_unix_server(hang, path=str(socket_path))
-    monkeypatch.setattr(service_adapter, "_REQUEST_TIMEOUT_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(service_adapter, "_REQUEST_TIMEOUT_SECONDS", 0.01)
     try:
         with pytest.raises(ExecutionUnavailable, match="timed out"):
             await asyncio.wait_for(
@@ -487,3 +489,172 @@ async def test_execution_service_composition_closes_server_and_runtime(
         "server-closed",
         "runtime-closed",
     ]
+
+
+@pytest.mark.asyncio
+async def test_execution_service_signal_runs_graceful_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = asyncio.Event()
+    blocked = asyncio.Event()
+    handlers: dict[signal.Signals, object] = {}
+    removed: list[signal.Signals] = []
+    events: list[str] = []
+
+    class Runtime:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def close(self) -> None:
+            events.append("runtime-closed")
+
+    class Server:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        async def serve_forever(self) -> None:
+            started.set()
+            await blocked.wait()
+
+        async def close(self) -> None:
+            events.append("server-closed")
+
+    loop = asyncio.get_running_loop()
+
+    def add_signal_handler(
+        signal_number: signal.Signals,
+        callback: object,
+        *_args: object,
+    ) -> None:
+        handlers[signal_number] = callback
+
+    def remove_signal_handler(signal_number: signal.Signals) -> bool:
+        removed.append(signal_number)
+        return True
+
+    monkeypatch.setattr(bootstrap, "DockerExecutionEnvironment", Runtime)
+    monkeypatch.setattr(bootstrap, "ExecutionServiceServer", Server)
+    monkeypatch.setattr(loop, "add_signal_handler", add_signal_handler)
+    monkeypatch.setattr(loop, "remove_signal_handler", remove_signal_handler)
+
+    serving = asyncio.create_task(bootstrap.serve_execution_service(tmp_path / "execution.sock"))
+    await started.wait()
+    try:
+        assert set(handlers) == {signal.SIGINT, signal.SIGTERM}
+        callback = cast(Callable[[], None], handlers[signal.SIGTERM])
+        callback()
+        await asyncio.wait_for(serving, timeout=0.2)
+    finally:
+        if not serving.done():
+            serving.cancel()
+            with suppress(asyncio.CancelledError):
+                await serving
+
+    assert events == ["server-closed", "runtime-closed"]
+    assert set(removed) == {signal.SIGINT, signal.SIGTERM}
+
+
+@pytest.mark.parametrize(
+    ("operation", "payload", "field"),
+    [
+        ("resolve_image_digest", {"reference": 7}, "reference"),
+        ("provision", {"specification": "invalid"}, "specification"),
+        (
+            "execute",
+            {"environment": "invalid", "command": _command()},
+            "environment",
+        ),
+        (
+            "execute",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=109), 1, NOW, NOW
+                ),
+                "command": "invalid",
+            },
+            "command",
+        ),
+        (
+            "execute_with_bridge",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=110), 1, NOW, NOW
+                ),
+                "command": _command(),
+                "endpoint": "invalid",
+            },
+            "endpoint",
+        ),
+        (
+            "workspace_read_bounded",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=111), 1, NOW, NOW
+                ),
+                "path": 7,
+                "maximum_bytes": 10,
+            },
+            "path",
+        ),
+        (
+            "workspace_write",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=112), 1, NOW, NOW
+                ),
+                "path": "result.txt",
+                "data": "invalid",
+            },
+            "data",
+        ),
+        (
+            "workspace_stream",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=113), 1, NOW, NOW
+                ),
+                "path": "result.txt",
+                "maximum_bytes": "invalid",
+            },
+            "maximum_bytes",
+        ),
+        (
+            "workspace_listdir",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=114), 1, NOW, NOW
+                ),
+                "path": ".",
+                "recursive": 1,
+            },
+            "recursive",
+        ),
+        (
+            "workspace_provenance",
+            {
+                "environment": EnvironmentHandle(
+                    "environment", "tenant-a", UUID(int=115), 1, NOW, NOW
+                )
+            },
+            "path",
+        ),
+        ("reap", {"live_leases": []}, "live_leases"),
+        ("reap", {"live_leases": frozenset({("invalid", 1)})}, "live_leases"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_execution_service_rejects_malformed_operation_payloads(
+    execution_service: tuple[ExecutionServiceClient, FakeExecutionEnvironment],
+    operation: str,
+    payload: dict[str, object],
+    field: str,
+) -> None:
+    client, _environment = execution_service
+
+    with pytest.raises(ExecutionRejected, match=rf"field {field} is invalid"):
+        await client._call(operation, payload)
+
+
+def test_execution_service_has_no_unused_peer_credential_api() -> None:
+    assert not hasattr(service_adapter, "unix_peer_credentials")

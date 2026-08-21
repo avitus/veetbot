@@ -125,10 +125,15 @@ releases. Nginx and the application group receive read-only traversal through
 the ordinary directory modes. The API and worker identities are not members of
 the Docker group and their units expose no Docker socket; application services
 have no Docker-socket access. Only the credential-free `veetbot-exec` execution
-service owns sandbox lifecycle and receives Docker access. Consequently neither
-an application process nor an application-launched container can modify the
-documentation release. On a multi-host deployment, move that execution service
-to the dedicated sandbox host described by ADR-0008 without changing the port.
+service receives Docker access at application runtime and owns sandbox
+lifecycle. The separate deploy identity retains delivery-time Docker access
+because the audited release contract builds and tags both images, reconciles the
+browser-profile service, and prunes release images. That trusted operator
+boundary is the explicit tradeoff in ADR-0062 decision 1; it is never an
+application systemd identity. Consequently neither an application process nor
+an application-launched container can modify the documentation release. On a
+multi-host deployment, move that execution service to the dedicated sandbox
+host described by ADR-0008 without changing the port.
 
 The deploy key must log in as `veetbot-deploy`, so that account needs an executable
 shell. Restrict that key in `authorized_keys` to the CircleCI source and disable

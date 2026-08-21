@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import signal
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -808,9 +809,31 @@ async def serve_execution_service(socket_path: Path) -> None:
         socket_path,
         resolve_image_digest=resolve_local_image_digest,
     )
+    loop = asyncio.get_running_loop()
+    serving = asyncio.create_task(server.serve_forever())
+    signal_shutdown = False
+    installed_handlers: list[signal.Signals] = []
+
+    def request_shutdown() -> None:
+        nonlocal signal_shutdown
+        signal_shutdown = True
+        serving.cancel()
+
+    for signal_number in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(signal_number, request_shutdown)
+        except NotImplementedError:
+            continue
+        installed_handlers.append(signal_number)
     try:
-        await server.serve_forever()
+        try:
+            await serving
+        except asyncio.CancelledError:
+            if not signal_shutdown:
+                raise
     finally:
+        for signal_number in installed_handlers:
+            loop.remove_signal_handler(signal_number)
         try:
             await server.close()
         finally:

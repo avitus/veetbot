@@ -20,7 +20,7 @@ ProtectHome=true
 ProtectSystem=strict
 RuntimeDirectory=veetbot
 RuntimeDirectoryMode=0750
-ReadWritePaths=/run/veetbot /var/run/docker.sock
+ReadWritePaths=/run/veetbot /run/docker.sock
 UMask=0007
 
 [Install]
