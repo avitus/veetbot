@@ -19,6 +19,7 @@ from agent_core.config import ConfigurationError
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope, ProcessEvent
 from agent_core.domain.memory import (
+    SENSITIVITY_ORDER,
     BeliefType,
     MemoryCandidate,
     MemoryRecord,
@@ -121,6 +122,15 @@ _SUBJECT_VALUE_CLAIM_KINDS = frozenset(
 _EXPLANATION_STYLE_CUE_TOKENS = frozenset(
     {"best", "better", "for", "me", "prefer", "preferred", "prefers", "work", "works"}
 )
+# The deterministic extractor pins these claim kinds to SENSITIVE; a provider
+# guess may raise a claim's sensitivity but never lower it below this floor,
+# because an inferred belief is flagged for review only at SENSITIVE or above.
+_SENSITIVITY_FLOORS: dict[MemoryClaimKind, Sensitivity] = {
+    MemoryClaimKind.RELATIONSHIP: Sensitivity.SENSITIVE,
+    MemoryClaimKind.HOME_LOCATION: Sensitivity.SENSITIVE,
+    MemoryClaimKind.OCCUPATION: Sensitivity.SENSITIVE,
+    MemoryClaimKind.ACCESSIBILITY_TOOL: Sensitivity.SENSITIVE,
+}
 _DURATION_TOKENS = frozenset(
     {
         "one",
@@ -338,6 +348,11 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
     else:  # pragma: no cover - exhaustive enum guard.
         raise ValueError(f"unsupported semantic claim kind: {kind}")
 
+    sensitivity = claim.sensitivity_guess
+    floor = _SENSITIVITY_FLOORS.get(kind)
+    if floor is not None and SENSITIVITY_ORDER[sensitivity] < SENSITIVITY_ORDER[floor]:
+        sensitivity = floor
+
     return MemoryCandidate(
         belief_type=belief_type,
         subject=subject,
@@ -347,7 +362,7 @@ def _render_claim(claim: _SemanticClaim, scope: str) -> MemoryCandidate:
         model_confidence=claim.model_confidence,
         proposed_scope=scope,
         proposed_portability=claim.proposed_portability,
-        sensitivity_guess=claim.sensitivity_guess,
+        sensitivity_guess=sensitivity,
         valid_from=claim.valid_from,
         expires_hint=claim.expires_hint,
     )
@@ -788,7 +803,7 @@ class ProviderAssistedCandidateExtractor:
                 and claim.quantity == 1
                 and grounding_tokens(claim.subject) <= source_tokens
             )
-            if not implicit_single_relation and not quantity_markers & source_tokens:
+            if not implicit_single_relation and not quantity_markers & grounding_tokens(quote):
                 return False
         return True
 

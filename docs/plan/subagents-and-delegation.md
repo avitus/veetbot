@@ -120,10 +120,13 @@ This yields four load-bearing invariants:
 
 ## The brief
 
-The plan's "explicit objective" requirement had a carrier and no schema. The
-objective is a structured brief, because the child seeds from the brief and
-from nothing else (context-engine.md:278), so everything the child needs to
-stop correctly has to be in it:
+The plan's "explicit objective" requirement had a carrier and no schema. One
+`delegate.run` call carries an ordered list of briefs, one child per brief,
+because independent parallel work — the first of the gate's five reasons — is
+exactly fan-out from one invocation, and a parent that suspends on the call
+cannot fan out any other way. Each brief is structured, because the child
+seeds from its brief and from nothing else (context-engine.md:278), so
+everything the child needs to stop correctly has to be in it:
 
 ```python
 class DelegationReturn(StrEnum):
@@ -146,16 +149,25 @@ class DelegationBrief(BaseModel):
     context_refs: list[UUID]            # artifact ids, at most 8
     allowed_tools: list[str]            # 1..16 registry names
     limits: DelegationLimits | None
+
+
+class DelegationRequest(BaseModel):
+    briefs: list[DelegationBrief]       # 1..max_children_per_call, ordered
     return_shape: DelegationReturn      # default SUMMARY
 ```
+
+`DelegationRequest` is the tool's input; each brief becomes exactly one child,
+in order, and the result carries one `ChildOutcome` per brief in the same
+order.
 
 `allowed_tools` must be a subset of the parent's pinned tool set minus
 `delegate.run` and `skill.manage`, resolved against the registry view the
 parent was advertised. `context_refs` name artifacts the parent's principal can
-read; the child receives read access to exactly those. The brief is validated
-by the ordinary schema validator before policy, like every other tool input,
-and a brief that fails validation is a tool validation error with a stable
-reason code under `delegation.*`, not a child.
+read; the child receives read access to exactly those. The request is validated by the ordinary schema validator before policy, like
+every other tool input, and a request in which any brief fails validation — or
+whose brief count exceeds the per-call cap — is a tool validation error with a
+stable reason code under `delegation.*`, and no child is created for any of
+its briefs.
 
 The `ToolSpec` for `delegate.run` is `kind = CONTROL`, `side_effect = NONE` (its
 effect is a run-state transition, which is what the control kind means),
@@ -171,12 +183,14 @@ background-review child run (skills.md:1086) and the scheduling materializer's
 one-transaction session-plus-run creation ([scheduling.md](scheduling.md#materialization-transaction)).
 In one unit of work, `DelegationMaterializer` does the following:
 
-1. Validates the brief against the parent: tools are a subset, depth is zero
-   (the parent is not itself a delegated run), the per-call and per-parent
-   fan-out caps hold, and the tenant's active-children cap holds.
-2. Derives the child's limits and deadline (below) and reserves the sum of the
-   children's `max_cost` against the parent's remaining cost.
-3. Creates the child `Session` with metadata
+1. Validates every brief against the parent: tools are a subset, depth is
+   zero (the parent is not itself a delegated run), the number of briefs is
+   within the per-call cap, the per-parent live-children cap holds for all of
+   them together, and the tenant's active-children cap holds.
+2. Derives each child's limits and deadline (below) and reserves the sum of
+   the children's `max_cost` against the parent's remaining cost; if the sum
+   cannot be reserved, no child is created.
+3. For each brief, in order, creates the child `Session` with metadata
    `{"run_kind": "delegated", "parent_run_id", "parent_session_id",
    "delegation_id"}` and a title derived from the objective's first line, and
    appends `session.created`.
@@ -190,10 +204,11 @@ In one unit of work, `DelegationMaterializer` does the following:
    sequence.
 6. Appends `run.queued` with `parent_run_id`, `run_kind`, and `delegation_id`,
    and seeds the child's checkpoint through the injected checkpoint seeder.
-7. Inserts the `delegations` row and marks the parent's `tool_invocations` row
-   `RUNNING` with `suspended_kind = child_run` and `suspended_ref` equal to the
-   delegation identifier (the nullable columns tool-system.md:960-963 already
-   declares).
+7. Inserts one `delegations` row carrying every child and marks the parent's
+   `tool_invocations` row `RUNNING` with `suspended_kind = child_run` and
+   `suspended_ref` equal to the delegation identifier (the nullable columns
+   tool-system.md:960-963 already declares). Steps 3 through 6 repeat per
+   brief inside the one transaction.
 8. Commits, then dispatches the child through the existing run dispatcher.
 
 A crash before commit leaves no child, no ledger row, and an unsuspended
@@ -274,20 +289,22 @@ child.max_cost         = min(requested or default, parent.remaining_cost - reser
 child.deadline_at      = min(parent.deadline_at, now + (requested or default wall_seconds))
 ```
 
-Defaults come from a `delegation:` block in the versioned limits file beside
-the `scheduling:` block, and every value must be positive: a parent with
-nothing remaining cannot delegate. At materialization the materializer
-reserves the sum of the children's `max_cost` against the parent's remaining
-cost, so three children cannot each be granted the whole remainder. At the
+The rule is applied per brief, in order, against what remains after the
+briefs before it have been reserved. Defaults come from a `delegation:` block
+in the versioned limits file beside the `scheduling:` block, and every value
+must be positive: a parent with nothing remaining cannot delegate. At
+materialization the materializer reserves the sum of the children's `max_cost`
+against the parent's remaining cost before creating any child, so three
+children cannot each be granted the whole remainder. At the
 join, the parent's usage is debited by each child's terminal usage through the
 existing usage-recording path, and the parent may fail on budget while
 suspended if the children's actual spend exceeds what remains — the behaviour
 [runtime-loop.md](runtime-loop.md) already describes for the child-run join
 wake.
 
-Caps are closed and configured: children per `delegate.run` call (default
-three), live children per parent run (default eight), depth (one), and live
-delegated runs per tenant, checked under the tenant admission pattern the
+Caps are closed and configured: briefs per `delegate.run` call (default
+three), live children per parent run (default eight, counted across calls),
+depth (one), and live delegated runs per tenant, checked under the tenant admission pattern the
 scheduling materializer uses so two parents racing for the last tenant slot
 serialize before either creates a child.
 
@@ -547,10 +564,12 @@ summary.
 
 ## Hard gates
 
-1. **The brief is validated before anything exists.** A brief missing its
-   objective, success condition, or allowed tools, or exceeding any cap, is
+1. **The request is validated before anything exists.** A request with no
+   briefs, more briefs than the per-call cap, or any brief missing its
+   objective, success condition, or allowed tools or exceeding a cap, is
    rejected with a stable reason and creates no child, session, ledger row, or
-   suspension. Registered as `gate.delegate.brief_schema`, case. **M13.**
+   suspension for any of its briefs. Registered as
+   `gate.delegate.brief_schema`, case. **M13.**
 2. **Materialization is atomic across a crash.** Inject a crash after every
    write. Before commit, no child session, run, seed, ledger row, or suspended
    invocation survives; after commit, a retry with the same invocation
@@ -585,10 +604,11 @@ summary.
 9. **Delegation is one level deep.** A child's advertised tools never include
    `delegate.run`, and a forged call from a child is denied before
    materialization. Registered as `gate.delegate.depth_one`, case. **M13.**
-10. **Fan-out is capped.** The request that would exceed children per call,
-    live children per parent, or live delegated runs per tenant is rejected
-    with a stable reason and no rows; two parents racing for the last tenant
-    slot serialize. Registered as `gate.delegate.fanout_capped`, case.
+10. **Fan-out is capped.** A request whose brief count exceeds the per-call
+    cap, or whose briefs would exceed live children per parent or live
+    delegated runs per tenant, is rejected whole with a stable reason and no
+    rows for any brief; two parents racing for the last tenant slot
+    serialize. Registered as `gate.delegate.fanout_capped`, case.
     **M13.**
 11. **A child's result is external and untrusted.** The re-entered result item
     carries `EXTERNAL_UNTRUSTED`, and a child result instructing the parent to

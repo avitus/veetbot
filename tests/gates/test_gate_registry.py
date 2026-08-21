@@ -170,12 +170,12 @@ def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
 
 
 _GATE_TABLE_DERIVED = {
-    "subject_specs": 17,
-    "subject_gates": 217,
+    "subject_specs": 21,
+    "subject_gates": 299,
     "plan_gates": 2,
     "map_gates": 7,
-    "declarations": 226,
-    "entries": 223,
+    "declarations": 308,
+    "entries": 305,
     "aliases": 3,
 }
 
@@ -189,19 +189,19 @@ def test_gate_table_arithmetic_reports_stale_digits() -> None:
         "```text\n"
     )
     assert gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED) == [
-        "gate table intro says 15 subject specs; registry derives 17",
-        "gate table intro says 178 subject gates; registry derives 217",
-        "gate table intro says 187 declarations; registry derives 226",
-        "gate table intro says 184 entries; registry derives 223",
+        "gate table intro says 15 subject specs; registry derives 21",
+        "gate table intro says 178 subject gates; registry derives 299",
+        "gate table intro says 187 declarations; registry derives 308",
+        "gate table intro says 184 entries; registry derives 305",
     ]
 
 
 def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
     shifted = (
         "## The gate table\n\n"
-        "The 17 subject specifications declare 217 gates, the engineering plan\n"
-        "declares 3 more, and this document declares 6 over the corpus: 226\n"
-        "declarations, 223 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 21 subject specifications declare 299 gates, the engineering plan\n"
+        "declares 3 more, and this document declares 6 over the corpus: 308\n"
+        "declarations, 305 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED) == [
@@ -213,9 +213,9 @@ def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
 def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
     reconciled = (
         "## The gate table\n\n"
-        "The 17 subject specifications declare 217 gates, the engineering plan\n"
-        "declares 2 more, and this document declares 7 over the corpus: 226\n"
-        "declarations, 223 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 21 subject specifications declare 299 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 308\n"
+        "declarations, 305 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(reconciled, _GATE_TABLE_DERIVED) == []

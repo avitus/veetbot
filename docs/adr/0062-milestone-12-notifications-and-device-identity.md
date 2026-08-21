@@ -38,9 +38,13 @@ was already partly superseded once by ADR-0050 for local history.
    in a savepoint, so an enqueue failure never changes a run's terminal state
    (the rule ADR-0051 set for the memory hook). No interactive request path
    talks to a transport.
-3. **Exactly five triggers.** Approval requested, waiting for user input, run
-   failed, scheduled run accounted, and scheduled occurrence missed or skipped.
-   Interactive `run.completed` is not in the closed set.
+3. **Exactly five triggers, and one named producer besides.** Approval
+   requested, waiting for user input, run failed, scheduled run accounted, and
+   scheduled occurrence missed or skipped. Interactive `run.completed` is not
+   in the closed set, and a Milestone 14 surface reply is a separate outbox
+   class. The closed kind set also carries Milestone 15's `ops_alert` and
+   `ops_recovered`, enqueued only by the host health check through the outbox
+   port, with four ops-only payload fields that are null for every other kind.
 4. **Payloads are content-free.** A closed model: kind, identifiers, a closed
    status, the registry tool name, and a templated title. No message, argument,
    approval summary, question, schedule instruction, reasoning, or traceback

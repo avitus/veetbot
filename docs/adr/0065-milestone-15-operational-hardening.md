@@ -43,10 +43,12 @@ and the memory store is the owner's own.
    rehearses its own staging copy before upload; CI rehearses the scripts
    against synthetic data; the owner rehearses the off-host copy monthly with
    the escrowed key and records it. "Passed" is a five-part verdict.
-5. **A pre-migration local dump in the release path.**
+5. **A pre-migration local dump in the release path, encrypted and
+   retained under a protected path.** Two most recent kept; no plaintext
+   survives the step.
 6. **Degraded states alert through the outbox; dead states through an
    independent channel.** A closed signal list with versioned thresholds; an
-   `ops.alert` kind with deduplication and cool-down delivered by the `notify`
+   `ops_alert` kind with deduplication and cool-down delivered by the `notify`
    role; an external uptime check with certificate-expiry alerting and a
    dead-man's switch for the states that take the outbox down.
 7. **OpenTelemetry stays local.** No exporter; journal with persistent storage
@@ -59,8 +61,9 @@ and the memory store is the owner's own.
    boundary without an explicit override, and never downgrades; crossing a
    boundary is a restore plus a rollback.
 10. **Worker roles run under a systemd watchdog.**
-11. **ADR-0046 is amended in place**: decision 4 superseded by ADR-0048,
-    decision 7 superseded by this decision; ADR-0048 is untouched.
+11. **ADR-0046 is amended in place**: decision 4 superseded by ADR-0048;
+    decision 7 remains the production posture until Milestone 15 completes,
+    when this decision supersedes it; ADR-0048 is untouched.
 12. **One gate area, `ops`, sixteen gates**, named `ops` rather than `deploy`
     because ADR-0048 deliberately says delivery jobs add no milestone gate and
     the subject here is the operational lifecycle.
@@ -72,7 +75,7 @@ and the memory store is the owner's own.
   dark.
 - Two timers, two environment files, two feature flags, a rollback script, a
   firewall rules file and apply script, proxy rate limits, watchdog lines in
-  the worker units, a notify helper, an `ops.alert` notification kind, and a
+  the worker units, a notify helper, an `ops_alert` notification kind, and a
   CI rehearsal job are added; `release.sh` gains a pre-migration dump and the
   unit list grows.
 - The security page states that erased content can persist in backups for up

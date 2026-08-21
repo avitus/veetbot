@@ -3,13 +3,13 @@
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
-  statement: "**Enqueue is atomic with its trigger.** A crash injected after every write in finalize, accounting, and materialization leaves no event without its outbox row or row without its event, and an enqueue that raises never changes the run's terminal state."
+  statement: "**Enqueue is atomic with its trigger.** A crash injected after every write in finalize, accounting, and materialization leaves no outbox row without its event or partial row; the only committed event without an outbox row is one whose enqueue failed inside its savepoint, audited in the same transaction, and that failure never changes the run's terminal state."
   check: tests/gates/pending.py::pending_gate
 - id: gate.notify.trigger_catalog
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
-  statement: "**Exactly the five triggers enqueue.** Approval requested, waiting for user, run failed, scheduled run accounted, and scheduled occurrence skipped each enqueue one row; interactive completion, cancellation, tool lifecycle events, and message deltas enqueue nothing."
+  statement: "**Exactly the five transitions enqueue, and one named producer besides.** Approval requested, waiting for user, run failed, scheduled run accounted, and scheduled occurrence skipped each enqueue one row; interactive completion, cancellation, tool lifecycle events, message deltas, and surface replies enqueue nothing; the Milestone 15 health check is the only non-transition producer and enqueues only the two ops kinds."
   check: tests/gates/pending.py::pending_gate
 - id: gate.notify.dedupe
   milestone: 12
@@ -29,7 +29,7 @@
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
-  statement: "**Two dispatchers deliver once.** Two dispatchers racing on one pending row deliver it to each target once and write one delivery row per attempt."
+  statement: "**Concurrent dispatch is safe and replay is bounded.** Two dispatchers racing on one pending row deliver it to each target once under the claim lease and write one delivery row per attempt; a crash between a transport accept and the ledger write re-sends under the same collapse identifier and records a further attempt — at-least-once, never a lost or unrecorded send."
   check: tests/gates/pending.py::pending_gate
 - id: gate.notify.retry_bounded
   milestone: 12

@@ -59,9 +59,11 @@ be reached from a phone without the native client.
 9. **Attribution on the write.** Origin on the seed message and the queued
    run, the receipt as the reverse map, the surface in session metadata; no
    session or run column, because a session is not owned by a channel.
-10. **Replies and notifications through the Milestone 12 outbox.** Redacted
-    with the secret-rule families, chunked to Telegram's limit with per-chunk
-    receipts; approvals by `/approve` and `/deny` through the existing service;
+10. **Notifications through the Milestone 12 outbox; replies through a
+    separate surface-reply outbox.** A reply is not a notification and never
+    enters Milestone 12's closed trigger catalog; both are redacted with the
+    secret-rule families and chunked to Telegram's limit with per-chunk
+    progress; approvals by `/approve` and `/deny` through the existing service;
     questions by a plain reply through the existing input rule; inline
     keyboards deferred.
 11. **Two scopes, six routes, two flags, default-off.** `surface.read`,
@@ -73,11 +75,11 @@ be reached from a phone without the native client.
 
 - The owner can message the agent from a phone and receive replies,
   approvals, and questions there; an unknown sender reaches nothing.
-- Five tables, two scopes, six routes, one role, one unit, one environment
+- Six tables, two scopes, six routes, one role, one unit, one environment
   file, a `surfaces:` limits block, a `telegram_bot_token` secret-rule family,
   and one transport adapter are added; the public run submission body becomes
-  a shared application function.
-- The Milestone 12 outbox gains a single-target form if it lacks one.
+  a shared application function. The Milestone 12 outbox and its trigger
+  catalog are unchanged.
 - The owner must create the bot and place its token in a private file on the
   host.
 

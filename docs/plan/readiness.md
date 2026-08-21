@@ -551,7 +551,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3581-3658`
+Section 28 of the plan is not empty — `engineering-plan.md:3587-3664`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -570,7 +570,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1374`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3656` requires a container-escape attempt as
+    `engineering-plan.md:3662` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -987,7 +987,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:566` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3565` and `engineering-plan.md:2963` and picked
+`engineering-plan.md:3571` and `engineering-plan.md:2963` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1121,8 +1121,8 @@ least-privilege `surface` role polls Telegram and holds the bot token and
 nothing else; an unknown sender is rejected before any content is stored; a
 paired sender's message becomes an ordinary run through the submission
 function the HTTP API uses, as a `USER` message for the bound principal with
-scopes intersected fresh; replies, approvals, and questions travel the
-Milestone 12 outbox back to the chat. The document states the trust rule the
+scopes intersected fresh; notifications travel the Milestone 12 outbox and
+replies a separate surface-reply outbox back to the chat. The document states the trust rule the
 audit left open and bounds it to the owner's own pairing, leaving a
 third-party label to the roadmap. Twenty-one hard gates in the `surface`
 area; ADR-0064 records the decisions.
@@ -1157,7 +1157,7 @@ escrow, and the first off-host rehearsal.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3660-3818` for links to other documents returned
+`engineering-plan.md:3666-3824` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1387,7 +1387,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3656` requires a test the harness's case set
+    `engineering-plan.md:3662` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

@@ -3,7 +3,7 @@
   milestone: 14
   kind: case
   spec: docs/plan/inbound-surfaces.md#hard-gates
-  statement: "**An unpaired sender creates nothing.** A message from an unknown sender creates no session, run, event, or stored content and receives one throttled notice."
+  statement: "**An unpaired sender creates nothing content-bearing.** A message from an unknown sender creates no session, run, message, or stored content; its only writes are the content-free receipt and the rejection audit event; it receives one throttled notice."
   check: tests/gates/pending.py::pending_gate
 - id: gate.surface.pairing_ceremony
   milestone: 14

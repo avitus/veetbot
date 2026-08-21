@@ -32,9 +32,9 @@ title: Changelog
   transaction per update with the receipt as the idempotency boundary and
   default-deny before any content is stored; a paired message as an ordinary
   run through the submission function the HTTP API uses; origin attributed on
-  the write; replies, approvals, and questions through the Milestone 12
-  outbox, redacted and chunked; two scopes, six routes, two flags, and
-  twenty-one hard gates.
+  the write; notifications through the Milestone 12 outbox and replies through
+  a separate surface-reply outbox, redacted and chunked; two scopes, six
+  routes, two flags, and twenty-one hard gates.
 - Registered the twenty-one gates in the new `surface` area; the registry
   grammar, declaring-spec census, milestone map, readiness review, current
   milestone, project state, HTTP and policy forward-looking subsections, the

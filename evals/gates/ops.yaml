@@ -27,7 +27,7 @@
   milestone: 15
   kind: case
   spec: docs/plan/operational-hardening.md#hard-gates
-  statement: "**Backups are encrypted before they leave the host.** With a recipient the uploaded object is an age envelope and plaintext staging is removed; without one the upload fails closed."
+  statement: "**Backups are encrypted before they leave the host, and retained ones too.** With a recipient the uploaded object is an age envelope and plaintext staging is removed; a retained pre-release backup is an age envelope under the protected path with no plaintext beside it; without a recipient the upload fails closed."
   check: tests/gates/pending.py::pending_gate
 - id: gate.ops.backup_retention_policy
   milestone: 15
@@ -51,7 +51,7 @@
   milestone: 15
   kind: case
   spec: docs/plan/operational-hardening.md#hard-gates
-  statement: "**Alerts are enqueued once per cool-down and recover once.** Repeated failing evaluations inside the cool-down enqueue one ops.alert; after it a second; a cleared signal enqueues one recovery."
+  statement: "**Alerts are enqueued once per cool-down and recover once.** Repeated failing evaluations inside the cool-down enqueue one ops_alert; after it a second; a cleared signal enqueues one recovery."
   check: tests/gates/pending.py::pending_gate
 - id: gate.ops.alert_payload_closed
   milestone: 15

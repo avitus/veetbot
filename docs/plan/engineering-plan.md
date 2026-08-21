@@ -3079,16 +3079,20 @@ Acceptance criteria:
 - Every hard gate declared by the milestone's design document passes.
 - Exactly the named triggers enqueue one durable notification, in the
   transaction that records the triggering event; no other transition does.
-- No injected crash leaves an event without its outbox row or an outbox row
-  without its event, and an enqueue failure never alters a run's terminal state.
+- A crash at any write boundary leaves either both the triggering event and
+  its outbox row or neither; the only committed event without an outbox row
+  is one whose enqueue failed inside its savepoint, audited content-free in
+  the same transaction, and that failure never alters a run's terminal state.
 - A principal can register, list, refresh, revoke, and delete devices; another
   principal's device is indistinguishable from a missing one.
 - A revoked device, an invalidated token, or a muted kind receives nothing from
   the next dispatch onward; a token the provider rejects as unregistered is
   invalidated once and audited once.
-- Two dispatchers never deliver one notification twice to one device; transient
-  failures retry on the declared bounded schedule; expired and stale
-  notifications are never sent.
+- Two dispatchers never deliver one notification twice to one device under
+  the claim lease; delivery is at-least-once, so a replay after a crash
+  between transport accept and ledger write is recorded and coalesced on the
+  device; transient failures retry on the declared bounded schedule; expired
+  and stale notifications are never sent.
 - No payload, log line, delivery record, or device view contains message
   content, secrets, the push key, or a full device token.
 - A client offline for every event can later enumerate every notification and
@@ -3112,10 +3116,11 @@ design declares this milestone's twenty-one gates.
 
 Implement:
 
-- `delegate.run` as a suspending control tool whose input is a validated
-  structured brief: objective, success condition, optional context and
-  artifact references, an explicit allowed tool subset, optional limits, and a
-  return shape.
+- `delegate.run` as a suspending control tool whose input is an ordered,
+  per-call-bounded list of validated structured briefs — one child each —
+  every brief carrying objective, success condition, optional context and
+  artifact references, an explicit allowed tool subset, and optional limits,
+  with a return shape for the call.
 - Materialization of a dedicated child session and a child run in one
   transaction, with `parent_run_id`, scopes intersected with the parent's,
   limits derived from the parent's remaining budget, and a deadline no later
@@ -3177,9 +3182,10 @@ Implement:
   maps to one session, rotated explicitly or after idle time and never reused.
 - Ordinary run creation for a paired message through the same submission path
   the HTTP API uses, with origin attributed on the write.
-- Replies and Milestone 12 notifications delivered back to the chat, redacted
-  and chunked; approvals and clarifying questions resolved through the existing
-  services by deterministic commands or a plain reply.
+- Milestone 12 notifications and, through a separate surface-reply outbox,
+  the agent's replies delivered back to the chat, redacted and chunked;
+  approvals and clarifying questions resolved through the existing services
+  by deterministic commands or a plain reply.
 - Per-sender rate limits, per-tenant ceilings, default-off flags at both the
   API and the worker.
 

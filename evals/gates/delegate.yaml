@@ -3,7 +3,7 @@
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
-  statement: "**The brief is validated before anything exists.** A brief missing its objective, success condition, or allowed tools, or exceeding any cap, is rejected with a stable reason and creates no child, session, ledger row, or suspension."
+  statement: "**The request is validated before anything exists.** A request with no briefs, more briefs than the per-call cap, or any brief missing its objective, success condition, or allowed tools or exceeding a cap, is rejected with a stable reason and creates no child, session, ledger row, or suspension for any of its briefs."
   check: tests/gates/pending.py::pending_gate
 - id: gate.delegate.materialize_atomic
   milestone: 13
@@ -57,7 +57,7 @@
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
-  statement: "**Fan-out is capped.** A request exceeding children per call, live children per parent, or live delegated runs per tenant is rejected with a stable reason and no rows; two parents racing for the last tenant slot serialize."
+  statement: "**Fan-out is capped.** A request whose brief count exceeds the per-call cap, or whose briefs would exceed live children per parent or live delegated runs per tenant, is rejected whole with a stable reason and no rows for any brief; two parents racing for the last tenant slot serialize."
   check: tests/gates/pending.py::pending_gate
 - id: gate.delegate.result_untrusted
   milestone: 13

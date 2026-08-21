@@ -177,6 +177,8 @@ class NotificationKind(StrEnum):
     RUN_FAILED = "run_failed"
     SCHEDULE_RUN_FINISHED = "schedule_run_finished"
     SCHEDULE_OCCURRENCE_SKIPPED = "schedule_occurrence_skipped"
+    OPS_ALERT = "ops_alert"                  # Milestone 15 health check
+    OPS_RECOVERED = "ops_recovered"          # Milestone 15 health check
     TEST = "test"
 
 
@@ -265,12 +267,18 @@ class NotificationPayload(BaseModel):
     schedule_id: UUID | None
     occurrence_id: UUID | None
     notification_id: UUID
+    signal: str | None            # ops kinds only: a declared health signal
+    severity: str | None          # ops kinds only: warn | critical | recovered
+    reason_code: str | None       # ops kinds only: from the checked-in table
+    release_id: str | None        # ops kinds only
 ```
 
 `title` is chosen from a fixed template per kind — "Approval needed", "The
-agent has a question", "Run failed", "Scheduled run finished", "Scheduled run
-skipped", "Test notification" — and `status` is a closed-enum disposition or
-run status. `tool_name` is registry vocabulary (`domain.verb`), never user
+agent has a question", "Run failed", "Scheduled run finished", "Scheduled run skipped", "Production alert", "Production recovered", "Test
+notification" — and `status` is a closed-enum disposition or run status. The
+four ops fields are null for every kind but the two ops kinds, for which
+`signal` is one of the declared health signals, `severity` is closed, and
+`reason_code` comes from the checked-in table — never free text. `tool_name` is registry vocabulary (`domain.verb`), never user
 content. The model has no extra fields. What the payload never carries:
 message text, tool arguments, an approval's `action_summary`, question text, a
 failure `message`, a schedule's `title` or `instruction`, reasoning, or a
@@ -305,15 +313,24 @@ appends `run.failed`, `run.waiting_for_user`, `run.waiting_for_approval`, and
 `approval.requested`, and it does so inside one unit of work. The enqueue is an
 injected in-transaction callable on the executor, in the shape the checkpoint
 seeder already takes, invoked after the event append and wrapped in a
-savepoint: an enqueue failure is logged with a content-free reason and the
-terminal transaction commits unchanged. This is the rule ADR-0051 set for the
+savepoint: an enqueue failure rolls back to the savepoint, is recorded in
+the same transaction as a content-free `notification.enqueue_failed` process
+event carrying only identifiers and a reason code, and the terminal
+transaction commits unchanged. This is the rule ADR-0051 set for the
 memory-formation hook and the same reason — a notification must never be able
-to fail a run. The scheduling accountant and materializer own their own
+to fail a run. The only committed triggering event without an outbox row is
+therefore one whose enqueue failure is itself audited; there is no silent
+form. The scheduling accountant and materializer own their own
 transactions and take the outbox through the schedule unit of work.
 
 Interactive `run.completed`, `run.cancelled`, tool lifecycle events, and
 message deltas enqueue nothing. A principal who wants to know that an
-interactive run finished is, by construction, watching it.
+interactive run finished is, by construction, watching it. A surface reply
+(Milestone 14) is a separate outbox class, not a notification. The one
+producer that is not a run or schedule transition is Milestone 15's host
+health check, which enqueues only the `ops_alert` and `ops_recovered` kinds
+through the outbox port with its own deduplication keys (`ops.<signal>`) and
+cool-down; it adds no trigger to the five above.
 
 ## Dispatch
 
@@ -351,10 +368,13 @@ Retry follows a closed schedule in the versioned limits file: the attempt
 after a `RETRY` happens at +30 seconds, +2 minutes, +10 minutes, +1 hour, and
 then the row is `failed`. `expires_at` is the approval's own expiry where one
 exists and twenty-four hours for terminal notices, checked before every send.
-Two dispatchers are safe: the claim lease and the per-attempt delivery ledger
-make a double delivery to one device impossible, and the transport's
-collapse identifier (the `dedupe_key`) coalesces the rare duplicate on the
-device.
+Two dispatchers are safe under the claim lease, and the per-attempt delivery
+ledger records every send; delivery is nonetheless at-least-once, not
+exactly-once. If the transport accepts a push and the dispatcher stops before
+it writes the delivery row, the next claimant cannot distinguish that accepted
+send from no send and re-sends. The transport's collapse identifier (the
+`dedupe_key`) makes that replay invisible on the device as a best-effort
+reduction, not a guarantee, and the ledger shows the extra attempt.
 
 Wake-up is `LISTEN`/`NOTIFY` on a fixed channel after the enqueuing
 transaction commits, over a bounded poll, exactly as the schedule worker does.
@@ -728,17 +748,22 @@ content, tokens, or the key.
    cross-principal reads and mutations of devices, outbox rows, and
    deliveries. Registered as `gate.device.persistence_isolated`, case.
    **M12.**
-7. **Enqueue is atomic with its trigger.** Inject a crash after every write in
-   the terminal writer's finalize, the scheduling accountant, and the
-   materializer. No committed state holds an event without its outbox row or
-   an outbox row without its event, and an enqueue that raises never changes
-   the run's terminal state. Registered as `gate.notify.enqueue_atomic`, case.
+7. **Enqueue is atomic with its trigger.** Inject a crash after every write
+   in the terminal writer's finalize, the scheduling accountant, and the
+   materializer. No committed state holds an outbox row without its event or
+   a partially written row; the only committed event without an outbox row is
+   one whose enqueue failed inside its savepoint, and that failure is audited
+   as a content-free process event in the same transaction and never changes
+   the run's terminal state. Registered as `gate.notify.enqueue_atomic`,
+   case.
    **M12.**
-8. **Exactly the five triggers enqueue.** Approval requested, waiting for user,
-   run failed, scheduled run accounted, and scheduled occurrence skipped each
-   enqueue one row; interactive `run.completed`, `run.cancelled`, tool
-   lifecycle events, and message deltas enqueue nothing. Registered as
-   `gate.notify.trigger_catalog`, case. **M12.**
+8. **Exactly the five transitions enqueue, and one named producer besides.**
+   Approval requested, waiting for user, run failed, scheduled run accounted,
+   and scheduled occurrence skipped each enqueue one row; interactive
+   `run.completed`, `run.cancelled`, tool lifecycle events, message deltas,
+   and surface replies enqueue nothing; the Milestone 15 health check is the
+   only non-transition producer and enqueues only the two ops kinds.
+   Registered as `gate.notify.trigger_catalog`, case. **M12.**
 9. **Repeated triggers deduplicate.** Generated repeats — a retry after an
    unknown commit, a repeated hook invocation, two processes recording one
    transition — produce exactly one outbox row per deduplication key.
@@ -749,9 +774,13 @@ content, tokens, or the key.
     title; a structural walk finds no free-text field on the payload model
     beyond the title and the registry tool name. Registered as
     `gate.notify.content_free`, corpus. **M12.**
-11. **Two dispatchers deliver once.** Two dispatchers racing on one pending row
-    deliver it to each target once and write one delivery row per attempt.
-    Registered as `gate.notify.dispatch_once`, case. **M12.**
+11. **Concurrent dispatch is safe and replay is bounded.** Two dispatchers
+    racing on one pending row deliver it to each target once under the claim
+    lease and write one delivery row per attempt; a crash between a transport
+    accept and the ledger write re-sends on the next claim under the same
+    collapse identifier and records a further attempt — at-least-once, never
+    a lost or unrecorded send. Registered as `gate.notify.dispatch_once`,
+    case. **M12.**
 12. **Retry is bounded and expiry is honoured.** Transient outcomes follow the
     declared backoff schedule and stop at the ceiling as `failed`; a row past
     `expires_at` is settled `expired` and never sent. Registered as

@@ -36,10 +36,13 @@ deployment.
    deterministic two-arm case whose delegating arm improves the outcome with no
    added policy failure. This is ADR-0052's construction-versus-rollout split
    applied again.
-2. **The objective is a structured brief.** Objective, success condition,
-   optional inline context and artifact references, an explicit allowed-tool
-   subset, optional limits, and a return shape — because the child seeds from
-   the brief and nothing else. A plain string was rejected.
+2. **The input is an ordered list of structured briefs, one child each.**
+   Each brief carries objective, success condition, optional inline context and
+   artifact references, an explicit allowed-tool subset, and optional limits;
+   the request carries the briefs and a return shape — because the child
+   seeds from its brief and nothing else, and fan-out from one suspending
+   call is how independent parallel work happens. A plain string and a
+   one-child-per-call tool were both rejected.
 3. **A child always gets a dedicated session.** Section 27.6's "or the parent's
    session per policy" is deleted; the one-active-run index is neither widened
    nor contended. Child sessions appear in the session index with metadata and

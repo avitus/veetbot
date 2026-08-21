@@ -21,8 +21,8 @@ presence and a capability set, unified under one session-key resolver (DM per
 user, group per participant, thread shared)", and requires that "an unknown
 sender on a Surface is default-denied and must complete an explicit pairing
 step (one-time code, expiry, rate-limit, lockout) before any run is created on
-their behalf" (engineering-plan.md:3706-3707). Section 22 repeats the
-default-deny as a security-baseline item (engineering-plan.md:3324), ADR-0017
+their behalf" (engineering-plan.md:3712-3713). Section 22 repeats the
+default-deny as a security-baseline item (engineering-plan.md:3330), ADR-0017
 decided the pairing shape, and the seam audit found the rest: "Surfaces are
 Devices with an empty capability set", the session-key resolver is "the one
 genuinely new mechanism in Section 29", pairing "needs a home and an endpoint
@@ -54,8 +54,9 @@ the agent replies. It includes:
   maps to one session, rotated explicitly or after idle time and never reused;
 - ordinary run creation for a paired message through the same submission
   function the HTTP API uses, with origin attributed on the write;
-- replies and Milestone 12 notifications delivered back to the chat through a
-  Telegram outbound transport on the Milestone 12 port, redacted and chunked;
+- Milestone 12 notifications delivered back to the chat through a Telegram
+  outbound transport on the Milestone 12 port, and replies through a separate
+  surface-reply outbox, both redacted and chunked;
 - approvals and clarifying questions resolved through the existing services
   by deterministic commands or a plain reply;
 - per-sender rate limits, per-tenant ceilings, pairing routes and CLI
@@ -88,13 +89,16 @@ Telegram ---- getUpdates ----> surface role
                         existing queue, worker, loop, policy
                                    |
                                    v
-         terminal hook ---> Milestone 12 outbox ---> surface role ---> sendMessage
+         terminal hook ---> surface-reply outbox ---> surface role ---> sendMessage
+         (notifications: Milestone 12 outbox ---> surface role ---> sendMessage)
 ```
 
 This yields four load-bearing invariants:
 
-1. No run, session, event, or stored content exists for a sender who has not
-   completed pairing. Rejection happens before any write that carries content.
+1. No session, run, message, or content-bearing record exists for a sender
+   who has not completed pairing. The only writes for an unpaired update are
+   the content-free receipt, which idempotency requires, and the rejection
+   audit event; rejection happens before any write that carries content.
 2. A paired message creates a run bound to the paired principal with scopes no
    wider than the pairing grants and the principal currently holds, through
    the ordinary submission path; the policy engine is never told that a
@@ -103,8 +107,10 @@ This yields four load-bearing invariants:
 3. Every inbound update is processed at most once across restarts and
    duplicate polls, because the receipt is the first write and the poll offset
    advances only from committed receipts.
-4. Replies and notifications reach the chat through the durable Milestone 12
-   outbox, redacted and chunked; correctness never depends on Telegram
+4. Notifications reach the chat through the durable Milestone 12 outbox and
+   replies through a separate, equally durable surface-reply outbox — a reply
+   is not a notification and never enters Milestone 12's closed trigger
+   catalog — both redacted and chunked; correctness never depends on Telegram
    answering.
 
 ## Delivery mode: long polling, not a webhook
@@ -138,8 +144,9 @@ the environment. Because Telegram places the token in the request path, the
 adapter maps every transport failure into a closed `surface.*` vocabulary and
 scrubs request targets from exceptions before anything is logged.
 
-The role runs two loops: the inbound poll and an outbound drain of Milestone
-12 outbox rows targeted at the surface's device, so the token lives in exactly
+The role runs two loops: the inbound poll and an outbound drain of the
+surface's rows — Milestone 12 notification rows targeted at the surface's
+device and the surface-reply outbox rows below — so the token lives in exactly
 one process. The `notify` role never drains Telegram rows and the `surface`
 role never loads the push key.
 
@@ -266,9 +273,11 @@ For each update the surface role opens one short transaction and:
 3. Checks the sender's lockout and per-sender rate limit; a locked or
    rate-limited sender is recorded and receives one notice per window.
 4. Looks up the live pairing for `(surface, sender)`. None means
-   `REJECTED_UNPAIRED`: no content is stored, no session or run exists, and
-   one bounded notice per sender per window tells them to pair. This is
-   Section 22's default-deny before any run is created.
+   `REJECTED_UNPAIRED`: the receipt (already written, content-free) records
+   the disposition, `surface.inbound.rejected` is appended, no content is
+   stored, no session or run exists, and one bounded notice per sender per
+   window tells them to pair. This is Section 22's default-deny before any run
+   is created; the receipt is the permitted content-free first write.
 5. Handles commands deterministically, never through the model: `/pair`,
    `/new`, `/stop`, `/status`, `/approve`, `/deny`, `/help`.
 6. Resolves fresh authority for the pairing's principal through the principal
@@ -337,18 +346,23 @@ the model can keep replies short.
 
 ## Replies, notifications, approvals, and questions
 
-The run worker's terminal hook enqueues a `run.reply` notification targeted at
-the originating surface device (the Milestone 12 outbox gains a single-target
-form if it lacks one); the surface role drains it and sends the run's final
-assistant message. The text is redacted with the same secret-rule families the
+A reply is not a notification. Milestone 12's trigger catalog is closed at
+five run and schedule transitions, and an interactive completion is
+deliberately not one of them; a surface reply is a separate outbox class,
+`surface_replies`, that the run worker's terminal hook writes in the terminal
+transaction only for a run whose origin is a surface, keyed by the run (one
+reply per run), claimed with the same lease pattern, and drained by the
+surface role. The Milestone 12 outbox, its trigger catalog, and its gates are
+unchanged. The surface role sends the run's final assistant message. The text is redacted with the same secret-rule families the
 export and the scanner use, split at paragraph and line boundaries into chunks
 of at most 4096 characters, and sent in order with a per-chunk delivery receipt
 so a retry resumes without re-sending. A failed or cancelled run sends a reason
 code only, never provider text. Artifacts are referenced by name and
 identifier.
 
-Milestone 12's `run.waiting_for_user` notification reaches the chat as the
-question text; a plain reply is routed to the waiting run as input by the
+Milestone 12's notifications still travel the Milestone 12 outbox and are
+drained by the surface role for the surface device: its `run.waiting_for_user`
+notification reaches the chat as the question text; a plain reply is routed to the waiting run as input by the
 existing rule. Its `approval.requested` notification reaches the chat as
 "Approval needed" with a short identifier; `/approve <id>` and `/deny <id>`
 resolve through the existing approval service, idempotently, first wins, and
@@ -358,7 +372,7 @@ resolution entry point.
 
 ## Security
 
-- Default-deny and pairing before any run (engineering-plan.md:3324, ADR-0017
+- Default-deny and pairing before any run (engineering-plan.md:3330, ADR-0017
   decision 5). An unpaired sender stores no content.
 - Pairing codes: at least forty bits, salted hash, constant-time comparison,
   ten-minute expiry, five attempts, one-hour per-sender lockout, returned
@@ -378,7 +392,7 @@ resolution entry point.
   never exceeds the paired principal: `granted_scopes` is a subset of the
   minter's scopes at minting, intersected with the principal's current scopes
   at every message, and revocation is effective before the next message
-  (engineering-plan.md:3742).
+  (engineering-plan.md:3748).
 - Outbound redaction: secrets and raw provider errors never reach the chat;
   reasoning is never in events and so never in a reply.
 - Abuse controls: per-sender messages per minute, per-tenant active surface
@@ -390,7 +404,7 @@ resolution entry point.
 
 ## Persistence
 
-Milestone 14 adds five tables, all carrying the tenant row-level-security
+Milestone 14 adds six tables, all carrying the tenant row-level-security
 policy (the lockout table through its surface):
 
 ```text
@@ -450,13 +464,30 @@ surface_inbound_receipts
   run_id UUID NULL REFERENCES runs(id) ON DELETE SET NULL
   reason_code TEXT NULL
   PRIMARY KEY (surface_id, update_id)
+
+surface_replies
+  id UUID PRIMARY KEY
+  surface_id UUID NOT NULL REFERENCES devices(id)
+  tenant_id TEXT NOT NULL
+  principal_id TEXT NOT NULL
+  run_id UUID NOT NULL UNIQUE REFERENCES runs(id) ON DELETE CASCADE
+  chat_ref TEXT NOT NULL
+  status TEXT NOT NULL
+  chunks_total INTEGER NULL
+  chunks_sent INTEGER NOT NULL DEFAULT 0
+  attempts INTEGER NOT NULL DEFAULT 0
+  next_attempt_at TIMESTAMPTZ NOT NULL
+  claimed_by TEXT NULL
+  claimed_until TIMESTAMPTZ NULL
+  created_at TIMESTAMPTZ NOT NULL
+  settled_at TIMESTAMPTZ NULL
 ```
 
 Partial unique indexes keep one live pairing per `(surface_id, sender_id)
 WHERE revoked_at IS NULL` and one live mapping per `(surface_id,
 external_key) WHERE rotated_at IS NULL`; an index on `run_id` serves the reply
-path. Per-chunk outbound receipts live in the Milestone 12 delivery ledger
-keyed by chunk. The migration follows the Milestone 13 head. Erasure: deleting
+path. Per-chunk progress lives on the `surface_replies` row (`chunks_sent`), so a
+retry resumes at the next chunk. The migration follows the Milestone 13 head. Erasure: deleting
 a session cascades its mapping and nulls its receipt links; revoking a pairing
 keeps the row, rotates the sender's mappings, and leaves the sessions, which
 are the principal's; a pairing is hard-deleted only after revocation.
@@ -555,9 +586,11 @@ Metrics carry tenant-safe identifiers or aggregates, never content or tokens.
 
 ## Hard gates
 
-1. **An unpaired sender creates nothing.** A message from an unknown sender
-   creates no session, run, event, or stored content and receives one
-   throttled notice. Registered as `gate.surface.unpaired_denied`, case.
+1. **An unpaired sender creates nothing content-bearing.** A message from an
+   unknown sender creates no session, run, message, or stored content; its
+   only writes are the content-free receipt and the rejection audit event; it
+   receives one throttled notice. Registered as
+   `gate.surface.unpaired_denied`, case.
    **M14.**
 2. **The pairing ceremony is single-use and bound.** A code is hashed, expires,
    admits a bounded number of attempts, compares in constant time, is returned

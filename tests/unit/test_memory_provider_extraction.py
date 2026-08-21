@@ -1811,3 +1811,92 @@ async def test_evaluation_mode_cannot_bypass_an_active_evidence_gate(tmp_path: P
             memory_provider_evaluation_mode=True,
         ):
             pass
+
+
+@pytest.mark.parametrize(
+    ("claim_kind", "subject", "value", "guess", "expected"),
+    [
+        ("relationship", "wife", None, "internal", "sensitive"),
+        ("relationship", "wife", None, "restricted", "restricted"),
+        ("home_location", "home", "Lisbon", "public", "sensitive"),
+        ("home_location", "home", "Lisbon", "restricted", "restricted"),
+        ("occupation", "occupation", "nurse", "internal", "sensitive"),
+        ("occupation", "occupation", "nurse", "sensitive", "sensitive"),
+        ("accessibility_tool", "accessibility", "screen reader", "public", "sensitive"),
+        ("accessibility_tool", "accessibility", "screen reader", "restricted", "restricted"),
+        ("hobby", "hobby", "hiking", "internal", "internal"),
+    ],
+)
+def test_provider_claim_sensitivity_is_clamped_to_the_claim_kind_floor(
+    claim_kind: str,
+    subject: str,
+    value: str | None,
+    guess: str,
+    expected: str,
+) -> None:
+    """A provider cannot lower a relationship, home, occupation, or accessibility
+    claim below the deterministic extractor's SENSITIVE floor and bypass review."""
+    from agent_core.memory.provider_extraction import (
+        MemoryClaimKind,
+        _render_claim,
+        _SemanticClaim,
+    )
+
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind(claim_kind),
+        subject=subject,
+        value=value,
+        context=None,
+        quantity=None,
+        evidence_quote="quote",
+        polarity=Polarity("assert"),
+        source_event_ids=[1],
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity(guess),
+        valid_from=None,
+        expires_hint=None,
+    )
+    candidate = _render_claim(claim, "project-a")
+    assert candidate.sensitivity_guess.value == expected
+
+
+@pytest.mark.parametrize(
+    ("quantity", "quote", "grounded"),
+    [
+        (2, "three cats", False),
+        (3, "three cats", True),
+        (2, "two dogs and three cats", True),
+    ],
+)
+async def test_provider_quantity_grounding_is_scoped_to_the_evidence_quote(
+    quantity: int,
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A count is grounded only when the evidence quote itself states it, so a
+    quantity borrowed from elsewhere in the episode cannot render a false count."""
+    from agent_core.memory.provider_extraction import MemoryClaimKind, _SemanticClaim
+
+    _clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "I have two dogs and three cats.")
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind("pet_ownership"),
+        subject="cats",
+        value="cats",
+        context=None,
+        quantity=quantity,
+        evidence_quote=quote,
+        polarity=Polarity("assert"),
+        source_event_ids=[source],
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity("internal"),
+        valid_from=None,
+        expires_hint=None,
+    )
+    events = await session_events(factory)
+    assert (
+        ProviderAssistedCandidateExtractor._claim_is_grounded(claim, events, principal())
+        is grounded
+    )

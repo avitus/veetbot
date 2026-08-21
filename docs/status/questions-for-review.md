@@ -6607,7 +6607,7 @@ excluded from the automated set; `make secret-escrow` and a staleness signal.
 
 ### Alerts through the outbox, dead states through a free external pair
 
-**Decided:** `ops.alert` via the Milestone 12 outbox for degraded states; an
+**Decided:** `ops_alert` via the Milestone 12 outbox for degraded states; an
 external uptime check and a dead-man's switch for the database, disk, or host
 being down; no OTLP exporter.
 

@@ -71,7 +71,7 @@ veetbot-backup.timer -----> backup.sh ---- pg_dump, tar, manifest, age ----> off
                                   |                                              |
                                   +---- restore-rehearsal.sh (staging copy)      |
                                                                                  v
-veetbot-healthcheck.timer --> healthcheck.sh ---- signals ----> ops.alert --> notify role --> phone
+veetbot-healthcheck.timer --> healthcheck.sh ---- signals ----> ops_alert --> notify role --> phone
                                   |
                                   +---- dead-man ping / external uptime check (DB-independent)
 ```
@@ -153,7 +153,7 @@ consequence: content erased through the deletion contract persists in backups
 for up to thirty-five days.
 
 The runner is `veetbot-backup.timer`, daily at 03:30 UTC with a randomized
-delay and `Persistent=true`, driving a oneshot `veetbot-backup.service` as the
+delay and `Persistent=true`, driving a one-shot `veetbot-backup.service` as the
 `veetbot` user with `EnvironmentFile=/etc/veetbot/veetbot-backup.env` only —
 the database URL, the bucket endpoint and scoped key, the age recipient, and
 the dead-man ping address, and never a provider key — and write access only to
@@ -163,9 +163,17 @@ environment file. Staging is `/var/lib/veetbot/backup/<stamp>/`, mode `0700`,
 removed after verified upload.
 
 `release.sh` gains one step: `backup.sh --kind pre-release --no-upload`
-immediately before `alembic upgrade head`, retained twice. This is the cheap
-insurance that makes "restore the pre-release dump, then roll back the code" a
-minutes-long operation.
+immediately before `alembic upgrade head`. The pre-release backup follows
+every rule above except upload: it is encrypted to the same `age` recipient
+before retention, kept under the protected path
+`/var/lib/veetbot/backup/pre-release/` (mode `0700`, owned by the service
+user), its plaintext staging is removed the same way, and the two most recent
+are retained with older ones deleted by the same run. No plaintext dump
+survives this step either. This is the cheap insurance that makes "restore
+the pre-release dump, then roll back the code" a minutes-long operation; the
+restore needs the owner's `age` identity, which is acceptable because crossing
+a schema boundary is an owner operation, and the open question about a
+root-only host copy of the identity applies here too.
 
 ## Integrity and the restore rehearsal
 
@@ -232,13 +240,15 @@ secrets_unescrowed          secret file mtime vs stamp      any newer
 reboot_required             /var/run/reboot-required        present
 ```
 
-`veetbot-healthcheck.timer` fires every five minutes and drives a oneshot
+`veetbot-healthcheck.timer` fires every five minutes and drives a one-shot
 `veetbot-healthcheck.service` as the `veetbot` user with its own environment
 file (the database URL, thresholds, and the dead-man address; no bearer or
-provider key). A failing signal enqueues an `ops.alert` notification kind into
-the Milestone 12 outbox with deduplication key `ops.<signal>` and a cool-down
-(default six hours) kept in `/var/lib/veetbot/healthcheck/state.json`; a signal
-that clears enqueues one `recovered`. The payload is a closed schema — signal,
+provider key). A failing signal enqueues an `ops_alert` notification — a kind Milestone
+12's closed catalog already declares for this producer, with its four
+ops-only payload fields — into the Milestone 12 outbox with deduplication key
+`ops.<signal>` and a cool-down (default six hours) kept in
+`/var/lib/veetbot/healthcheck/state.json`; a signal that clears enqueues one
+`ops_recovered`. The payload is a closed schema — signal,
 severity, release id, and a reason code from a checked-in table — and never an
 environment value or a path, the discipline the tool failure vocabulary
 already follows. Delivery is the `notify` role over APNs, so the phone rings.
@@ -298,7 +308,7 @@ worth a credential and an egress path for a single-owner host.
    unit list with the same arguments (so the committed sudoers contract needs
    no new rule), verifies the public release header and each unit's process
    working directory exactly as `release.sh` does, appends to a rollback log,
-   and enqueues an informational `ops.alert`.
+   and enqueues an informational `ops_alert`.
 
 The policy is recorded in ADR-0065 and matches what the persistence design
 already says: rollback is code-only; migrations are forward-only; the
@@ -318,12 +328,13 @@ liveness signal.
 ## ADR-0046, amended
 
 ADR-0046 is amended in place rather than rewritten: its header records that
-decision 4 (Caddy) was superseded by ADR-0048 (Nginx) and that decision 7 —
-no required firewall, monitoring, alerts, backups, or restore rehearsal at
-launch — is the scope this milestone closes; an amendments section carries the
-dates; the consequences that named unrecoverable loss and reachable
-accidental listeners are struck with a pointer here. ADR-0065 supersedes
-decision 7 only; it does not supersede ADR-0048.
+decision 4 (Caddy) was superseded by ADR-0048 (Nginx) and that decision 7 — no
+required firewall, monitoring, alerts, backups, or restore rehearsal at launch
+— remains the current production posture until this milestone completes; an
+amendments section carries the dates and names this document as the
+specification that will supersede it. Nothing in ADR-0046 is marked superseded
+by controls that are only specified, and ADR-0065 will supersede decision 7
+only; it does not supersede ADR-0048.
 
 ## Configuration and deployment
 
@@ -360,7 +371,7 @@ Metrics carry no secret, path, or environment value.
    the production-refusal guard; wire the CI integration job. **M15.**
 3. Add the backup timer, environment file, release validation, the
    pre-release dump in `release.sh`, and the escrow target. **M15.**
-4. Add `agent ops probe`, `healthcheck.sh`, the `ops.alert` kind on the
+4. Add `agent ops probe`, `healthcheck.sh`, the `ops_alert` kind on the
    Milestone 12 outbox with cool-down state, the dead-man pings, and the
    timer. **M15.**
 5. Add `rollback.sh` and its tests, the sudoers reconciliation, and the
@@ -393,9 +404,11 @@ Metrics carry no secret, path, or environment value.
    a wrong `alembic_version` each fail with a distinct reason and no passing
    verdict. Registered as `gate.ops.restore_rehearsal_detects_corruption`,
    case. **M15.**
-5. **Backups are encrypted before they leave the host.** With a recipient the
-   uploaded object is an `age` envelope and plaintext staging is removed;
-   without one the upload fails closed. Registered as
+5. **Backups are encrypted before they leave the host, and retained ones
+   too.** With a recipient the uploaded object is an `age` envelope and
+   plaintext staging is removed; a retained pre-release backup is an `age`
+   envelope under the protected path with no plaintext beside it; without a
+   recipient the upload fails closed. Registered as
    `gate.ops.backup_encrypted_offhost`, case. **M15.**
 6. **Retention keeps seven daily and four weekly.** Over generated object
    listings the retention function keeps exactly that set, never deletes the
@@ -410,7 +423,7 @@ Metrics carry no secret, path, or environment value.
    threshold taken from versioned configuration. Registered as
    `gate.ops.healthcheck_signals`, case. **M15.**
 9. **Alerts are enqueued once per cool-down and recover once.** Repeated
-   failing evaluations inside the cool-down enqueue one `ops.alert`; after it,
+   failing evaluations inside the cool-down enqueue one `ops_alert`; after it,
    a second; a cleared signal enqueues one recovery — against the in-memory
    outbox. Registered as `gate.ops.alert_enqueued_deduped`, case. **M15.**
 10. **Alert payloads are closed.** Alert bodies match a closed schema with
