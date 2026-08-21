@@ -1,7 +1,9 @@
 # ADR-0046: Host-native DigitalOcean production topology
 
-- **Status:** Accepted
-- **Date:** 2026-08-07
+- **Status:** Accepted; decision 4 superseded by ADR-0048 (Nginx, not Caddy,
+  terminates TLS on the host); decision 7 is the scope Milestone 15 closes
+  (ADR-0061)
+- **Date:** 2026-08-07; amended 2026-08-20
 
 ## Context
 

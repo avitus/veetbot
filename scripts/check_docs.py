@@ -16,7 +16,7 @@ import unicodedata
 from pathlib import Path
 
 import yaml
-from gate_registry import load_registry, registry_errors
+from gate_registry import MAX_MILESTONE, load_registry, registry_errors
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / "docs" / "plan" / "engineering-plan.md"
@@ -106,14 +106,14 @@ def check_project_state() -> None:
         err(f"project-state.yaml does not parse: {exc}")
         return
     milestones = (data or {}).get("milestones", {})
-    for n in range(0, 11):
+    for n in range(0, MAX_MILESTONE + 1):
         if str(n) not in milestones:
             err(f"project-state.yaml missing milestone key '{n}'")
     current = (data or {}).get("project", {}).get("current_milestone")
-    if not isinstance(current, int) or not 0 <= current <= 10:
+    if not isinstance(current, int) or not 0 <= current <= MAX_MILESTONE:
         err(
-            "project-state.yaml current_milestone must be an integer from 0 to 10 "
-            f"(got {current!r})"
+            "project-state.yaml current_milestone must be an integer from 0 to "
+            f"{MAX_MILESTONE} (got {current!r})"
         )
 
 
@@ -124,7 +124,7 @@ def project_current_milestone() -> int:
         current = data["project"]["current_milestone"]
     except (OSError, KeyError, TypeError, yaml.YAMLError):
         return 0
-    return current if isinstance(current, int) and 0 <= current <= 10 else 0
+    return current if isinstance(current, int) and 0 <= current <= MAX_MILESTONE else 0
 
 
 def read_front_matter(text: str):
@@ -156,7 +156,7 @@ def check_plan() -> None:
     if len(h1) != 1:
         err(f"engineering-plan.md must have exactly one level-one heading (found {len(h1)})")
 
-    for n in range(0, 11):
+    for n in range(0, MAX_MILESTONE + 1):
         if not re.search(rf"^#+ Milestone {n}:", joined, re.M):
             err(f"engineering-plan.md missing 'Milestone {n}' section")
 

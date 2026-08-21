@@ -245,3 +245,42 @@ def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> No
     assert any("malformed identifier: gate" in error for error in errors)
     all_errors = registry_errors(tmp_path)
     assert "docs/plan/milestone-map.md is missing" in all_errors
+
+
+def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> None:
+    """Milestones 12 through 15 are authorized; the registry admits them and stops there."""
+    import scripts.gate_registry as gate_registry
+
+    assert getattr(gate_registry, "MAX_MILESTONE", None) == 15
+
+    gates = tmp_path / "evals" / "gates"
+    gates.mkdir(parents=True)
+    plan_dir = tmp_path / "docs" / "plan"
+    plan_dir.mkdir(parents=True)
+    for filename in gate_registry.DECLARING_SPECS:
+        (plan_dir / filename).write_text("## Hard gates\n", encoding="utf-8")
+    (plan_dir / "milestone-map.md").write_text(
+        "## The gate table\n\n```text\n"
+        "gate.schedule.roadmap_probe   case   15\n"
+        "gate.schedule.beyond_probe    case   16\n"
+        "```\n\n## The census\n\n```text\n```\n",
+        encoding="utf-8",
+    )
+
+    def entry(slug: str, milestone: int) -> dict[str, object]:
+        return {
+            "id": f"gate.schedule.{slug}",
+            "milestone": milestone,
+            "kind": "case",
+            "spec": "docs/plan/scheduling.md#hard-gates",
+            "statement": "bound fixture",
+            "check": "tests/gates/pending.py::pending_gate",
+        }
+
+    (gates / "schedule.yaml").write_text(
+        yaml.safe_dump([entry("roadmap_probe", 15), entry("beyond_probe", 16)]),
+        encoding="utf-8",
+    )
+    errors = registry_errors(tmp_path)
+    assert "gate.schedule.roadmap_probe has invalid milestone 15" not in errors
+    assert "gate.schedule.beyond_probe has invalid milestone 16" in errors

@@ -20,6 +20,10 @@ MAP_ROW = re.compile(
     r"(case|property|corpus|structural)\s+(\d+)(?:\s|$)",
     re.MULTILINE,
 )
+# The highest milestone the corpus authorizes; Milestones 12 through 15 were
+# authorized on 2026-08-20 (ADR-0061). The census reports a zero row for each
+# authorized milestone whose specification has not yet declared gates.
+MAX_MILESTONE = 15
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -240,7 +244,7 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
             errors.append(f"invalid gate identifier: {gate_id}")
         if entry.kind not in {"case", "property", "corpus", "structural"}:
             errors.append(f"{gate_id} has invalid kind {entry.kind}")
-        if entry.milestone < 0 or entry.milestone > 11:
+        if entry.milestone < 0 or entry.milestone > MAX_MILESTONE:
             errors.append(f"{gate_id} has invalid milestone {entry.milestone}")
         mapped = expected.get(gate_id)
         if mapped is not None and mapped != (entry.kind, entry.milestone):
@@ -315,7 +319,7 @@ def registry_errors(root: Path, current_milestone: int = 0) -> list[str]:
     counts = Counter(entry.milestone for entry in entries)
     cumulative = 0
     derived: dict[int, tuple[int, int]] = {}
-    for milestone in range(12):
+    for milestone in range(MAX_MILESTONE + 1):
         cumulative += counts[milestone]
         derived[milestone] = (counts[milestone], cumulative)
     if written != derived:

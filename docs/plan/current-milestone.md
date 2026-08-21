@@ -5,68 +5,47 @@ title: Current Milestone
 # Current milestone
 
 - **Active milestone:** Milestone 11 — scheduled runs (implemented locally;
-  final verification and hosted review remain)
-- **Verified gate ceiling:** Milestone 9
-- **Authorized workstreams:** Milestone 11 scheduling, alongside the unfinished
-  Milestone 10 automatic-memory and self-authored-skills tranches and the
-  provider-neutral web and authenticated-browser capability tranches.
-- **Deferred:** New routing behavior, general-purpose subagents, arbitrary cron,
-  workflow DAGs, and notification delivery.
-- **Project status:** Milestones 0 through 9 are complete. Milestones 10 and 11
-  are in progress. Milestone 11 cadence validation, pure recurrence, domain
-  values, durable schedule persistence, fresh firing authority, atomic
-  occurrence materialization, no-overlap behavior, admission, lifecycle and
-  HTTP surfaces, terminal accounting, wakeup, metrics, reserved queue capacity,
-  and the isolated production scheduler role are implemented locally. Hosted
-  CI and the required final CodeRabbit review are not complete.
+  hosted CI and the final review remain). Milestone 12 — notifications and
+  device identity — is authorized and begins as soon as its detailed design
+  lands.
+- **Verified gate ceiling:** Milestone 9 (166 gates).
+- **Authorized workstreams:** Milestone 10's four tranches (automatic memory,
+  self-authored skills, public-web access, authenticated browser automation),
+  Milestone 11 scheduling, and Milestones 12 through 15 in order —
+  notifications and device identity, general-purpose subagents and delegation,
+  inbound surfaces and pairing, operational hardening (ADR-0061).
+- **Deferred:** New model-routing behavior and everything listed in the
+  engineering plan's roadmap subsection. Nothing on the roadmap is authorized
+  until the owner says so and a specification with gates exists for it.
+- **Project status:** Milestones 0 through 9 are complete. Milestones 10 and
+  11 are implemented locally; every registered gate passes (227 cumulative),
+  and hosted CI plus the final CodeRabbit review remain for both. Milestones 12
+  through 15 are authorized and unspecified: each starts with its
+  detailed-design document and ADR, which declare the milestone's gates.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
-tenant rollout remains blocked until the evaluation threshold in the
-[skills design](skills.md#rollout-evidence) passes. The machine-readable
+tenant activation remains blocked until the evaluation threshold in the
+[skills design](skills.md#rollout-evidence) passes, and that activation is
+roadmap item B1 rather than a Milestone 10 completion condition (ADR-0061).
+The provider-assisted memory extractor's version-bound evidence passed on the
+intended production model and ADR-0057 is accepted. The machine-readable
 [project state](../status/project-state.yaml) records progress and evidence.
-The construction gates and local repository checks pass; paired rollout
-evidence, hosted CI, and the required GitHub CodeRabbit review remain open.
 
 Milestone 11 is an independent, logically subsequent milestone because adding
-scheduling to Milestone 10 would change that milestone's established thirty-four-gate
+scheduling to Milestone 10 would have changed that milestone's established
 completion contract. Its [scheduled-runs design](scheduling.md) defines a
 versioned schedule, immutable occurrences, deterministic civil time, bounded
 misfires, fresh authorization at firing, and atomic creation of an ordinary
-durable run. Scheduling remains default-off until all Milestone 11 gates pass.
-The recurrence slice validates the closed cadence union and computes
-next and latest-due instants directly from civil rules, including the declared
-gap and fold semantics. The persistence slice adds shared adapter contracts,
-four RLS-protected tables, unit-of-work composition, clean and stepwise
-migrations, and explicit audited erasure of occurrence links. The gate contract
-has been expanded to twenty-three entries so that discipline is explicit; this
-does not advance the verified gate ceiling. The materialization slice locks a
-due definition, revalidates current authority, creates the occurrence before
-its deferred session and run links, seeds the ordinary checkpoint and event
-sequence, and advances the definition in one PostgreSQL transaction. Its
-concurrency and every-write rollback gates pass on PostgreSQL.
-The overlap slice queries the latest materialized occurrence under the same
-schedule lock and records `SKIPPED_OVERLAP` without changing the linked run or
-failure counter. Admission has closed allow, transient-retry, and terminal-
-reject outcomes. Its PostgreSQL controller serializes each tenant's decision
-and enforces active-run, per-minute, active reservation, daily-cost, and
-monthly-cost ceilings from versioned configuration.
-The worker reads deterministic bounded batches, isolates one definition's
-failure from its siblings, and sleeps until notification, the next durable due
-time, or its fallback poll, with a bounded backoff for admission retries.
-Lifecycle operations use exact scopes, optimistic revisions, immutable
-definitions, request idempotency, stable pagination, and default-off HTTP
-routes. Terminal run accounting is idempotent and resets or increments the
-failure counter before applying the automatic-pause limit. A configured,
-content-versioned principal directory supplies fresh firing authority. The
-production scheduler uses a least-privilege PostgreSQL composition in the sole
-bootstrap root and receives no model, tool, sandbox, object-store, provider, or
-API bearer credential. Interactive and asynchronous workers claim disjoint
-reserved priority classes. Fifteen positive scheduling and capacity limits
-extend the executable configuration inventory to 121; two environment feature
-flags independently default the API and worker off, and production activation
-requires both together. All twenty-three schedule registry entries name real
-checks. This local evidence does not advance the verified gate ceiling.
+durable run; all twenty-three schedule registry entries name real checks, the
+production scheduler is a least-privilege role, and scheduling remains
+default-off until the milestone closes. This local evidence does not advance
+the verified gate ceiling.
+
+Milestones 12 through 15 follow the pattern Milestone 11 set: a detailed-design
+document and an ADR land first, register the milestone's gates, and only then
+does implementation begin. The milestone map's census reports a zero row for
+each until its specification declares gates.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -89,49 +68,48 @@ substitute.
 - [Milestone 10B — web access](engineering-plan.md#32-web-access)
 - [Milestone 10C — authenticated browser automation](engineering-plan.md#33-authenticated-browser-automation)
 - [Milestone 11 — scheduled runs](engineering-plan.md#milestone-11-scheduled-runs)
+- [Milestone 12 — notifications and device identity](engineering-plan.md#milestone-12-notifications-and-device-identity)
+- [Milestone 13 — general-purpose subagents and delegation](engineering-plan.md#milestone-13-general-purpose-subagents-and-delegation)
+- [Milestone 14 — inbound surfaces and pairing](engineering-plan.md#milestone-14-inbound-surfaces-and-pairing)
+- [Milestone 15 — operational hardening](engineering-plan.md#milestone-15-operational-hardening)
+- [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
-The five authorized workstreams are independently deliverable because they do
-not share a delivery dependency. The
-self-authored-skills contract is Section 30.6, the six Milestone 10
-`gate.skill.*` entries, and the definition of done. The memory-formation
-specification supplies eleven memory-maturation gates: five for ordinary
-conversation and lifecycle, plus six for governed inspection and the
+The Milestone 10 workstreams are independently deliverable because they do
+not share a delivery dependency. The self-authored-skills contract is Section
+30.6, the six `gate.skill.*` entries, and the definition of done. The
+memory-formation specification supplies fifteen memory-maturation gates for
+ordinary conversation and lifecycle, governed inspection, and the
 evaluation-gated provider path. The web-access tranche uses Section 32.3 and
-the seven formal gates in
-[web-access.md](web-access.md#hard-gates). Authorization does not extend to
-`delegate.run` or new model-routing behavior.
+the seven formal gates in [web-access.md](web-access.md#hard-gates); the
+browser tranche uses Section 33.3 and the ten gates in
+[browser-automation.md](browser-automation.md#hard-gates). The Milestone 11
+contract is its twenty-three `gate.schedule.*` entries plus the acceptance
+criteria in the engineering plan and the [scheduling design](scheduling.md).
 
-The browser tranche uses Section 33.3 and
-[browser-automation.md](browser-automation.md#hard-gates). All ten formal gates
-now resolve to executable checks. The completed implementation includes the
-provider-neutral tools and policy seam, origin-confined Playwright adapters,
-revision-bound approved actions, durable scoped profile/authentication/grant
-metadata, the separately deployed AES-256-GCM profile service, exclusive
-run-attempt leases, server-side storage sealing, hosted-provider composition,
-the direct five-minute user login surface, public management routes, and exact
-policy-revalidated standing grants with hard exclusions. Chromium, private
-secret mounts, bounded container resources, controlled egress, loopback-only
-ingress, HTTPS reverse proxying, release health waits, and migration/schema
-contracts are part of the deployment gate. Scheduling remains Milestone 11 and
-is not the scheduler implementation. The Milestone 11 contract is its
-twenty-three `gate.schedule.*` entries plus the acceptance criteria in the
-engineering plan and [scheduling design](scheduling.md).
+Milestones 12 through 15 each own one gate area declared by their design
+document: notifications and devices, delegation, surfaces, and operations.
+Their acceptance criteria are in the engineering plan today; their gates exist
+only once the specification that declares them lands.
 
 ## Completion rule
 
-The gate-bearing workstreams complete only when all thirty-four Milestone 10
-gates and all 200 cumulative gates pass, the self-authored form of case 27 clears its
-rollout threshold without increasing policy failures, all required CI lanes
-pass on the final head, and the final CodeRabbit review has no finding or
-unresolved conversation. The seven `gate.web.*` and ten `gate.browser.*`
-entries make both network-capability tranches part of that formal Milestone 10
-contract. Partial work does not advance the verified gate ceiling or mark
-Milestone 10 complete.
+Milestone 10 completes when all thirty-eight Milestone 10 gates and all 204
+cumulative gates pass, all required CI lanes pass on the final head, and the
+final CodeRabbit review has no finding or unresolved conversation. Enabling
+authoring for a tenant is separately governed by the rollout evidence rule and
+is not a completion condition (ADR-0061). Partial work does not advance the
+verified gate ceiling.
 
-Milestone 11 completes only when all twenty-three scheduling gates and all 223
+Milestone 11 completes only when all twenty-three scheduling gates and all 227
 cumulative gates pass, the PostgreSQL integration and resilience lanes pass,
 the hosted CI lanes pass on the final head, and the final CodeRabbit review has
 no finding or unresolved conversation. Even if its implementation finishes
 first, the verified gate ceiling cannot advance through 11 until Milestone 10
 also completes.
+
+Milestones 12 through 15 complete, in order, when every gate their specification
+declares and the cumulative registry pass, the PostgreSQL lanes pass where the
+milestone touches persistence, hosted CI passes on the final head, and the final
+CodeRabbit review is clean. The verified ceiling advances through each only
+after every earlier milestone has completed.

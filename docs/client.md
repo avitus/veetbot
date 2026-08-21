@@ -115,5 +115,5 @@ This release is deliberately a terminal client rather than a desktop GUI. It
 does not persist sessions or credentials locally, list historical sessions or
 runs, upload files, download artifact bytes, or implement device presence,
 device-scoped tools, pairing, notifications, or offline-authoritative state.
-Those omissions keep it within the existing fourteen-route API and the deferred
-Device seam.
+Those omissions keep it within the public versioned API and leave device
+identity, notifications, and pairing to Milestones 12 and 14.

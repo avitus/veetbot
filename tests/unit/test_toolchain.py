@@ -1021,6 +1021,42 @@ def test_required_files_include_the_status_split_surfaces(
     assert "required file missing: docs/status/corpus-audit-log.md" in check_docs.errors
 
 
+def test_docs_checks_admit_the_roadmap_milestones(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Milestones 12 through 15 are authorized; project state and plan checks follow."""
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+
+    status = tmp_path / "docs" / "status"
+    status.mkdir(parents=True)
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(16)}
+    (status / "project-state.yaml").write_text(
+        yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_project_state()
+    assert check_docs.errors == []
+    assert check_docs.project_current_milestone() == 11
+
+    plan = tmp_path / "docs" / "plan" / "engineering-plan.md"
+    plan.parent.mkdir(parents=True)
+    sections = "\n".join(f"## {n}. Section" for n in range(1, 26))
+    headings = "\n".join(f"### Milestone {n}: title" for n in range(12))
+    plan.write_text(
+        "---\ncanonical: true\n---\n# Plan\n"
+        f"{sections}\n## 26. First assignment for the coding agent\n{headings}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(check_docs, "PLAN", plan)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_plan()
+    assert "engineering-plan.md missing 'Milestone 12' section" in check_docs.errors
+    assert "engineering-plan.md missing 'Milestone 15' section" in check_docs.errors
+
+
 _SUDOERS_RULE = re.compile(r"^(\S+) (\S+)=\((\S+)\) NOPASSWD: (/\S+)( .+)?$")
 _SUDOERS_INCLUDE = re.compile(r"^[#@]include(dir)?\b")
 
