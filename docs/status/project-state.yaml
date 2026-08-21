@@ -141,6 +141,8 @@ milestones:
     status: authorized
     authorized_on: 2026-08-20
     design: docs/plan/operational-hardening.md
+    adr: docs/adr/0065-milestone-15-operational-hardening.md
+    gates_registered: 16
     authorized_scope:
       - encrypted off-host daily backup with manifest and restore rehearsal
       - host health check with deduplicated alerts through the outbox
@@ -648,19 +650,18 @@ readiness:
     locally implemented. On 2026-08-20 the owner authorized Milestones 12
     through 15 in order (ADR-0061). Milestone 12 is specified by
     notifications-and-devices.md with twenty registered gates, Milestone
-    13 by subagents-and-delegation.md with twenty-one, and Milestone 14 by
-    inbound-surfaces.md with twenty-one; 15 is specified only by its plan
-    section until its detailed-design document lands, and the census
-    reports a zero row for it until then.
+    13 by subagents-and-delegation.md with twenty-one, Milestone 14 by
+    inbound-surfaces.md with twenty-one, and Milestone 15 by
+    operational-hardening.md with sixteen; every authorized milestone has a
+    design document and the census reports no zero row.
     Model routing remains deferred
     on the plan's roadmap. Every plan subject through Milestone 11 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
-  documents_required_before_coding_reaches_them:
-    - docs/plan/operational-hardening.md
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-21T03:00:00Z
+last_updated: 2026-08-21T04:00:00Z
 last_reviewed_commit: ce71aba

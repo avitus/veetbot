@@ -13,7 +13,11 @@ title: Current Milestone
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates and follows Milestone 12. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
-  twenty-one gates and follows Milestone 13.
+  twenty-one gates and follows Milestone 13. Milestone 15 — operational
+  hardening — is specified by
+  [operational-hardening.md](operational-hardening.md) with sixteen gates and
+  follows Milestone 14; its backup tranche has no dependency on the three
+  before it.
 - **Verified gate ceiling:** Milestone 9 (166 gates).
 - **Authorized workstreams:** Milestone 10's four tranches (automatic memory,
   self-authored skills, public-web access, authenticated browser automation),
@@ -26,9 +30,9 @@ title: Current Milestone
 - **Project status:** Milestones 0 through 9 are complete. Milestones 10 and
   11 are implemented locally; every registered gate passes (227 cumulative),
   and hosted CI plus the final CodeRabbit review remain for both. Milestones
-  12, 13, and 14 are authorized and specified with twenty, twenty-one, and
-  twenty-one registered gates. Milestone 15 is authorized and unspecified: it
-  starts with its detailed-design document and ADR, which declare its gates.
+  12 through 15 are authorized and specified with twenty, twenty-one,
+  twenty-one, and sixteen registered gates; every authorized milestone has its
+  detailed-design document and ADR.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -57,8 +61,9 @@ landed with twenty `gate.device.*` and `gate.notify.*` entries, and
 Milestone 13's [subagents-and-delegation.md](subagents-and-delegation.md) and
 ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [inbound-surfaces.md](inbound-surfaces.md) and ADR-0064 with twenty-one
-`gate.surface.*` entries; the census reports a zero row for Milestone 15
-until its specification declares gates.
+`gate.surface.*` entries, and Milestone 15's
+[operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
+`gate.ops.*` entries; no authorized milestone reports a zero row.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -107,10 +112,9 @@ entries plus the acceptance criteria in the engineering plan and the
 criteria and the [delegation design](subagents-and-delegation.md), with tenant
 activation gated on the capability-scenario evidence; Milestone 14's is its
 twenty-one `gate.surface.*` entries plus the plan's acceptance criteria and
-the [inbound-surfaces design](inbound-surfaces.md). Milestone 15 owns one
-gate area declared by its design document: operations. Its acceptance criteria
-are in the engineering plan today; its gates exist only once the specification
-that declares them lands.
+the [inbound-surfaces design](inbound-surfaces.md); Milestone 15's is its
+sixteen `gate.ops.*` entries plus the plan's acceptance criteria and the
+[operational-hardening design](operational-hardening.md).
 
 ## Completion rule
 

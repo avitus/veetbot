@@ -73,3 +73,4 @@ implementation without one.
 - [ADR-0062 — Milestone 12 notifications and device identity (Proposed)](0062-milestone-12-notifications-and-device-identity.md)
 - [ADR-0063 — Milestone 13 general-purpose subagents and delegation (Proposed)](0063-milestone-13-subagents-and-delegation.md)
 - [ADR-0064 — Milestone 14 inbound surfaces and pairing (Proposed)](0064-milestone-14-inbound-surfaces-and-pairing.md)
+- [ADR-0065 — Milestone 15 operational hardening (Proposed)](0065-milestone-15-operational-hardening.md)

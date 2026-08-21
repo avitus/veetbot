@@ -66,6 +66,7 @@ def test_milestone_tokens_present() -> None:
         "notifications-and-devices.md",
         "subagents-and-delegation.md",
         "inbound-surfaces.md",
+        "operational-hardening.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -94,7 +95,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 289
+    assert len(entries) == 305
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -138,6 +139,7 @@ def test_census_is_derived() -> None:
         12: 20,
         13: 21,
         14: 21,
+        15: 16,
     }
 
 
@@ -333,3 +335,16 @@ def test_surfaces_have_complete_milestone_14_gate_area() -> None:
         entry.spec == "docs/plan/inbound-surfaces.md#hard-gates" for entry in surface_entries
     )
     assert all(GATE_ID.fullmatch(entry.id) for entry in surface_entries)
+
+
+def test_operational_hardening_has_complete_milestone_15_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    ops_entries = [entry for entry in entries if entry.id.startswith("gate.ops.")]
+
+    assert len(ops_entries) == 16
+    assert all(entry.milestone == 15 for entry in ops_entries)
+    assert all(
+        entry.spec == "docs/plan/operational-hardening.md#hard-gates" for entry in ops_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in ops_entries)

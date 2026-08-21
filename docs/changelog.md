@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-21 — Milestone 15 specified: operational hardening
+
+- Added `docs/plan/operational-hardening.md` and proposed ADR-0065: a
+  declared, encrypted, off-host daily backup of the database, artifact store,
+  and browser-profile ciphertext with a manifest and manual secret escrow; a
+  restore rehearsal with a five-part verdict on the host, in CI, and by the
+  owner from the off-host copy; a host health check on a closed signal list
+  delivering deduplicated alerts through the Milestone 12 outbox with a
+  dead-man's switch and an external uptime check for dead states; cloud and
+  host firewall, SSH hardening, proxy rate limits, and a loopback-only
+  structural gate; a code-only rollback that refuses to cross a schema
+  boundary without an override and never downgrades; worker watchdogs; and
+  sixteen hard gates.
+- Registered the sixteen gates in the new `ops` area; amended ADR-0046 with an
+  amendments section; added forward-looking pointers on the deployment and
+  security pages; every authorized milestone now has a design document and
+  the census reports no zero row.
+
 ## 2026-08-21 — Milestone 14 specified: inbound surfaces and pairing
 
 - Added `docs/plan/inbound-surfaces.md` and proposed ADR-0064: a Surface as a

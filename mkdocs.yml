@@ -83,6 +83,7 @@ nav:
       - Notifications & Devices: plan/notifications-and-devices.md
       - Subagents & Delegation: plan/subagents-and-delegation.md
       - Inbound Surfaces: plan/inbound-surfaces.md
+      - Operational Hardening: plan/operational-hardening.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
@@ -163,4 +164,5 @@ nav:
       - ADR-0062 Milestone 12 notifications and device identity: adr/0062-milestone-12-notifications-and-device-identity.md
       - ADR-0063 Milestone 13 subagents and delegation: adr/0063-milestone-13-subagents-and-delegation.md
       - ADR-0064 Milestone 14 inbound surfaces and pairing: adr/0064-milestone-14-inbound-surfaces-and-pairing.md
+      - ADR-0065 Milestone 15 operational hardening: adr/0065-milestone-15-operational-hardening.md
   - Changelog: changelog.md

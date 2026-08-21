@@ -344,6 +344,11 @@ Nginx backups are independent. To recover one, copy the selected file from
 
 ## Accepted limitations
 
+Milestone 15 ([operational-hardening.md](plan/operational-hardening.md),
+ADR-0065) specifies the backup, restore rehearsal, alerting, firewall,
+rollback, and watchdog controls that shrink this list to the residual single
+failure domain; until that milestone lands, the limitations below stand.
+
 This is still a single-server failure domain with no required cloud firewall,
 off-host database, backup, restore rehearsal, monitoring, load balancer, rolling
 deployment, or high availability. Loss of the Droplet may mean unrecoverable
