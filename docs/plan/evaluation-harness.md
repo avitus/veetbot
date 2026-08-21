@@ -546,6 +546,11 @@ saying which arm costs an hour to read. The runner prefixes the arm name to
 every assertion failure and prints both arms' event streams on failure, not
 only the failing one, because the comparison is the evidence.
 
+Milestone 13 adds case 32 in this form — a single-agent arm scripted to fail
+and a delegating arm that completes, with an arm-level `tools` overlay — as
+the deterministic half of the activation evidence
+[subagents-and-delegation.md](subagents-and-delegation.md) requires.
+
 ### The assertion vocabulary
 
 Section 20.2's sixteen types are the base. Five are added, all of them demanded

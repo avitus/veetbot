@@ -319,8 +319,10 @@ unchanged.
 Milestone 12 will add `device.read`, `device.write`, and `notification.read`
 for the device and notification routes in
 [notifications-and-devices.md](notifications-and-devices.md), making the
-executable vocabulary twenty-five strings when that code lands; until then
-the twenty-two-string count above stands.
+executable vocabulary twenty-five strings when that code lands, and
+Milestone 13 will add `run.delegate` for the `delegate.run` control tool in
+[subagents-and-delegation.md](subagents-and-delegation.md); until then the
+twenty-two-string count above stands.
 
 ### The grammar, and the contributor a closed list cannot hold
 
@@ -329,7 +331,7 @@ joined by dots, of which the last is the action. All twenty-two have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1216` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1219` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal

@@ -165,7 +165,7 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge, web, browser, schedule, device, notify
+      knowledge, web, browser, schedule, device, notify, delegate
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -225,6 +225,13 @@ transport as one delivery story. Neither is folded into `api` or `event`: a
 device has no session, and the outbox is a sibling write in the triggering
 transaction rather than a new event type.
 
+`delegate` is the twentieth, declared by
+[subagents-and-delegation.md](subagents-and-delegation.md) at Milestone 13. It
+owns the brief, materialization, the child-run suspension and join, derived
+limits, subset scopes and tools, untrusted results, the ledger, and the
+activation evidence as one delegation story; the child itself remains an
+ordinary run owned by `runtime`, `tool`, and `event` after materialization.
+
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
 does not admit — a slug is underscore-separated and holds no dots, so
@@ -283,9 +290,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 18 subject specifications declare 241 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 250
-declarations, 247 registry entries once the 3 aliases are subtracted.
+The 19 subject specifications declare 262 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 271
+declarations, 268 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -977,6 +984,46 @@ declared schema and contract coverage. The remaining sixteen are boundary cases
 over the terminal writer, the scheduler, the dispatcher, the transport, the
 API, and PostgreSQL.
 
+### Subagents and delegation, twenty-one gates
+
+Twenty-one gates, all new, in the twentieth area and all at Milestone 13. They
+cover the brief, atomic materialization, the dedicated session, the child-run
+suspension, subset tools and scopes, derived limits, additive usage, depth,
+fan-out, untrusted results, the single join, child failure, cancellation,
+prefix stability, the separate trace, artifact references, schema, migration,
+default-off, and the outcome evidence the gate for multi-agent work requires.
+
+```text
+#   id                                         kind         M
+--  -----------------------------------------  -----------  --
+1   gate.delegate.brief_schema                 case         13
+2   gate.delegate.materialize_atomic           case         13
+3   gate.delegate.dedicated_session            case         13
+4   gate.delegate.parent_suspends              case         13
+5   gate.delegate.tools_subset                 case         13
+6   gate.delegate.scopes_intersected           case         13
+7   gate.delegate.limits_derived               property     13
+8   gate.delegate.usage_additive               case         13
+9   gate.delegate.depth_one                    case         13
+10  gate.delegate.fanout_capped                case         13
+11  gate.delegate.result_untrusted             case         13
+12  gate.delegate.join_once                    case         13
+13  gate.delegate.child_failure_is_tool_error  case         13
+14  gate.delegate.cancel_propagates            case         13
+15  gate.delegate.prefix_stable                case         13
+16  gate.delegate.trace_separate               case         13
+17  gate.delegate.artifact_refs                case         13
+18  gate.delegate.persistence_schema           structural   13
+19  gate.delegate.migration_stepwise           case         13
+20  gate.delegate.default_off                  case         13
+21  gate.delegate.changes_outcome              case         13
+```
+
+Gate 7 is a property because limit derivation is a claim over generated
+parents and briefs; gate 18 is structural because it inspects declared schema.
+The remaining nineteen are boundary cases over the tool pipeline, the terminal
+writer, the queue, PostgreSQL, and the evaluation harness.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1043,11 +1090,12 @@ milestone  new gates  cumulative  the earliest of them
 12                20         247  device identity, the outbox, content-
                                   free payloads, dispatch, the APNs
                                   transport, the offline inbox
-13                 0         247  subagents and delegation: authorized,
-                                  specification pending
-14                 0         247  inbound surfaces and pairing:
+13                21         268  the brief, materialization, the
+                                  child-run suspension and join, derived
+                                  limits, the ledger, the evidence
+14                 0         268  inbound surfaces and pairing:
                                   authorized, specification pending
-15                 0         247  operational hardening: authorized,
+15                 0         268  operational hardening: authorized,
                                   specification pending
 ```
 
@@ -1069,23 +1117,23 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred and forty-seven gates are green before
+2.  **Forty-one of two hundred and sixty-eight gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred and forty-seven, which is every
-registry entry, at Milestone 12. Six of Milestone 10's gates are
+The cumulative column reaches two hundred and sixty-eight, which is every
+registry entry, at Milestone 13. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
-and Milestone 12's twenty are six `gate.device.*` and fourteen
-`gate.notify.*`. Milestones 13 through 15 — subagents and delegation, inbound
-surfaces and pairing, and operational hardening — were authorized with
-Milestone 12 on 2026-08-20 (ADR-0061) and report zero until each one's
-specification declares its gates; Decision 9 below is the rule those zeros
-close under. Routing remains deferred and adds none.
+Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
+and Milestone 13's twenty-one are `gate.delegate.*`. Milestones 14 and 15 —
+inbound surfaces and pairing, and operational hardening — were authorized with
+them on 2026-08-20 (ADR-0061) and report zero until each one's specification
+declares its gates; Decision 9 below is the rule those zeros close under.
+Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1346,9 +1394,10 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
     [skills.md](skills.md) for Milestones 8 and 10. The decision
     stands for the next milestone that shows a zero — and Milestones
-    13 through 15 are those milestones: each row reads zero until its
-    specification lands with gates to declare, as Milestone 12's did
-    with [notifications-and-devices.md](notifications-and-devices.md).
+    14 and 15 are those milestones: each row reads zero until its
+    specification lands with gates to declare, as Milestones 12 and 13
+    did with [notifications-and-devices.md](notifications-and-devices.md)
+    and [subagents-and-delegation.md](subagents-and-delegation.md).
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

@@ -2358,7 +2358,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - two hundred and fifty gate declarations, comprising two hundred and forty-one across eighteen detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to two hundred and forty-seven registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 15; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the two hundred and forty-seven registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - two hundred and seventy-one gate declarations, comprising two hundred and sixty-two across nineteen detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to two hundred and sixty-eight registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 15; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the two hundred and sixty-eight registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -2940,7 +2940,10 @@ Provider routing may then consider:
 
 Milestone 10 does not include general-purpose subagents or `delegate.run`. The
 owner authorized them as Milestone 13 on 2026-08-20; that milestone carries the
-requirements and the evidence gate below forward unchanged.
+requirements and the evidence gate below forward unchanged, and
+[subagents-and-delegation.md](subagents-and-delegation.md) supplies the brief
+schema, the child-limits rule, the ledger, and the dedicated-session
+resolution the readiness review found missing.
 
 Represent subagents as a special tool:
 
@@ -3103,7 +3106,9 @@ the `delegate.run` control tool this section designs under Milestone 10, with
 every child-run property listed there and the gate for multi-agent work
 honoured as written: construction is authorized now, and tenant activation
 requires evaluation evidence that a single agent fails where delegation
-succeeds. The detailed design is `subagents-and-delegation.md` and its ADR.
+succeeds. The detailed design is
+[subagents-and-delegation.md](subagents-and-delegation.md) and ADR-0063; the
+design declares this milestone's twenty-one gates.
 
 Implement:
 

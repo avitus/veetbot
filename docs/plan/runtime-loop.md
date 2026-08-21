@@ -1145,6 +1145,8 @@ enforced by the parent being suspended, not by the parent polling. A child
 that fails completes the parent's invocation with an error tool result; a
 child that exceeds the parent's deadline is cancelled with it, because the
 parent's `deadline_at` is copied onto every child at creation.
+[subagents-and-delegation.md](subagents-and-delegation.md) places the join and
+its `requeue_after_child` edge in the terminal writer at Milestone 13.
 
 ## Section 13 additions
 

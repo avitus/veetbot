@@ -109,6 +109,8 @@ milestones:
     status: authorized
     authorized_on: 2026-08-20
     design: docs/plan/subagents-and-delegation.md
+    adr: docs/adr/0063-milestone-13-subagents-and-delegation.md
+    gates_registered: 21
     authorized_scope:
       - delegate.run as a suspending control tool with a structured brief
       - dedicated child session and child run materialized in one transaction
@@ -643,8 +645,9 @@ readiness:
     11 scheduled runs, whose detailed design and 23 registered gates are
     locally implemented. On 2026-08-20 the owner authorized Milestones 12
     through 15 in order (ADR-0061). Milestone 12 is specified by
-    notifications-and-devices.md with twenty registered gates; 13 through
-    15 are specified only by their plan sections until their detailed-design
+    notifications-and-devices.md with twenty registered gates and Milestone
+    13 by subagents-and-delegation.md with twenty-one; 14 and 15 are
+    specified only by their plan sections until their detailed-design
     documents land, and the census reports a zero row for each until then.
     Model routing remains deferred
     on the plan's roadmap. Every plan subject through Milestone 11 has a
@@ -652,11 +655,10 @@ readiness:
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
   documents_required_before_coding_reaches_them:
-    - docs/plan/subagents-and-delegation.md
     - docs/plan/inbound-surfaces.md
     - docs/plan/operational-hardening.md
 
-last_updated: 2026-08-21T01:00:00Z
+last_updated: 2026-08-21T02:00:00Z
 last_reviewed_commit: ce71aba
