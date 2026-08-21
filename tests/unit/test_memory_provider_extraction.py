@@ -1037,6 +1037,32 @@ def test_provider_claim_grounding_accepts_decimal_tokens_present_in_the_source()
     )
 
 
+def test_provider_claim_grounding_rejects_cross_event_subject_value_mixing() -> None:
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind.USER_ATTRIBUTE,
+        subject="car",
+        value="red",
+        context=None,
+        quantity=None,
+        evidence_quote="My car is blue",
+        polarity=Polarity.ASSERT,
+        source_event_ids=[1, 2],
+        model_confidence=0.9,
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.INTERNAL,
+        valid_from=None,
+        expires_hint=None,
+    )
+
+    assert not ProviderAssistedCandidateExtractor._claim_is_grounded(
+        claim,
+        {
+            1: "My car is blue.",
+            2: "I bought a red bicycle.",
+        },
+    )
+
+
 def test_provider_merge_preserves_opposite_polarities_for_conflict_resolution() -> None:
     def candidate(statement: str, polarity: Polarity) -> MemoryCandidate:
         return MemoryCandidate(

@@ -294,4 +294,43 @@ fi
 grep -Fq 'return 203' "$AVAILABLE"
 [[ "$(readlink "$ENABLED")" == "$AVAILABLE" ]]
 
+publish_retained_docs_release() {
+  local release_id="$1"
+  local application_release="$DEPLOY_ROOT/releases/$release_id"
+  local docs_source="$TEST_ROOT/retained-$release_id-source"
+  local docs_archive="$TEST_ROOT/retained-$release_id.tar.gz"
+  local docs_checksum="$docs_archive.sha256"
+
+  mkdir -p "$application_release" "$docs_source"
+  printf 'VEETBOT_RELEASE_ID=%s\n' "$release_id" \
+    >"$application_release/.release.env"
+  ln -sfn "$application_release" "$DEPLOY_ROOT/current"
+  printf '<h1>Retained documentation %s</h1>\n' "$release_id" \
+    >"$docs_source/index.html"
+  printf '%s\n' "$release_id" >"$docs_source/release.txt"
+  tar -czf "$docs_archive" -C "$docs_source" .
+  (
+    cd "$(dirname "$docs_archive")"
+    sha256sum "$(basename "$docs_archive")" >"$(basename "$docs_checksum")"
+  )
+  VEETBOT_EXPECTED_RELEASE_ID="$release_id" \
+    VEETBOT_KEEP_DOCS_RELEASES=2 \
+    run_deploy "$SOURCE_CONFIG" "$docs_archive" "$docs_checksum" >/dev/null
+}
+
+first_retained_release=20260810-152300-1111111
+rollback_retained_release=20260810-152301-2222222
+current_retained_release=20260810-152302-3333333
+publish_retained_docs_release "$first_retained_release"
+publish_retained_docs_release "$rollback_retained_release"
+publish_retained_docs_release "$current_retained_release"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/$current_retained_release" ]]
+[[ -d "$DOCS_ROOT/releases/$current_retained_release" ]]
+[[ -d "$DOCS_ROOT/releases/$rollback_retained_release" ]]
+[[ ! -e "$DOCS_ROOT/releases/$first_retained_release" ]]
+[[ ! -e "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+[[ "$(find "$DOCS_ROOT/releases" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')" \
+  == 2 ]]
+
 printf 'nginx deployment script tests passed\n'

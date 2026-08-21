@@ -756,9 +756,16 @@ class ProviderAssistedCandidateExtractor:
             return False
         cited = [source_text_by_sequence[sequence] for sequence in claim.source_event_ids]
         quote = claim.evidence_quote
-        if not quote.strip() or not any(quote in source for source in cited):
+        if not quote.strip():
             return False
-        source_tokens = grounding_tokens(" ".join(cited))
+        return any(
+            quote in source and ProviderAssistedCandidateExtractor._claim_fits_source(claim, source)
+            for source in cited
+        )
+
+    @staticmethod
+    def _claim_fits_source(claim: _SemanticClaim, source: str) -> bool:
+        source_tokens = grounding_tokens(source)
         if (
             claim.claim_kind
             in {
