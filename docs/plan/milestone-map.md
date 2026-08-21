@@ -165,7 +165,7 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge, web, browser, schedule
+      knowledge, web, browser, schedule, device, notify
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -215,6 +215,15 @@ origin-confined governance story.
 `api` because occurrence identity, civil-time behavior, authority refresh, and
 lifecycle are one control-plane subject whose gates cross all three. The
 ordinary run remains owned by those existing areas after materialization.
+
+`device` is the eighteenth and `notify` the nineteenth, both declared by
+[notifications-and-devices.md](notifications-and-devices.md) at Milestone 12.
+They are two areas rather than one because device identity is the half of that
+milestone Milestone 14's Surfaces reuse and deserves its own census line, while
+`notify` owns the outbox, the content-free payload, dispatch, and the push
+transport as one delivery story. Neither is folded into `api` or `event`: a
+device has no session, and the outbox is a sibling write in the triggering
+transaction rather than a new event type.
 
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
@@ -274,9 +283,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 17 subject specifications declare 221 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 230
-declarations, 227 registry entries once the 3 aliases are subtracted.
+The 18 subject specifications declare 241 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 250
+declarations, 247 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -926,6 +935,48 @@ example. Gates 17 and 18 are structural because they inspect contract coverage
 and declared schema. The remaining sixteen are boundary cases over the
 application, PostgreSQL, queue, and API seams.
 
+### Notifications and devices, twenty gates
+
+Twenty gates, all new, in the eighteenth and nineteenth areas and all at
+Milestone 12. Six `device` gates cover registration identity, live-token
+uniqueness, revocation, lifecycle audit, schema, and isolation; fourteen
+`notify` gates cover enqueue atomicity, the closed trigger catalog,
+deduplication, content-free payloads, single delivery, bounded retry,
+staleness, token invalidation, the APNs adapter, port contracts, the offline
+inbox, default-off confinement, and the migration pair.
+
+```text
+#   id                                  kind         M
+--  ----------------------------------  -----------  --
+1   gate.device.register_idempotent     case         12
+2   gate.device.token_unique            case         12
+3   gate.device.revoke_immediate        case         12
+4   gate.device.lifecycle_audited       case         12
+5   gate.device.persistence_schema      structural   12
+6   gate.device.persistence_isolated    case         12
+7   gate.notify.enqueue_atomic          case         12
+8   gate.notify.trigger_catalog         case         12
+9   gate.notify.dedupe                  property     12
+10  gate.notify.content_free            corpus       12
+11  gate.notify.dispatch_once           case         12
+12  gate.notify.retry_bounded           case         12
+13  gate.notify.stale_suppressed        case         12
+14  gate.notify.token_revoked_on_410    case         12
+15  gate.notify.apns_auth               case         12
+16  gate.notify.port_contracts          structural   12
+17  gate.notify.offline_inbox           case         12
+18  gate.notify.default_off             case         12
+19  gate.notify.migration_clean         case         12
+20  gate.notify.migration_stepwise      case         12
+```
+
+Gate 9 is a property because repeated triggers are a family of interleavings,
+not one example; gate 10 is a corpus because secret-shaped and content-bearing
+inputs are a family; gates 5 and 16 are structural because they inspect
+declared schema and contract coverage. The remaining sixteen are boundary cases
+over the terminal writer, the scheduler, the dispatcher, the transport, the
+API, and PostgreSQL.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -989,13 +1040,14 @@ milestone  new gates  cumulative  the earliest of them
 11                23         227  recurrence, occurrence atomicity,
                                   authority refresh, offline results,
                                   contracts, migration, erasure, isolation
-12                 0         227  notifications and device identity:
-                                  authorized, specification pending
-13                 0         227  subagents and delegation: authorized,
+12                20         247  device identity, the outbox, content-
+                                  free payloads, dispatch, the APNs
+                                  transport, the offline inbox
+13                 0         247  subagents and delegation: authorized,
                                   specification pending
-14                 0         227  inbound surfaces and pairing:
+14                 0         247  inbound surfaces and pairing:
                                   authorized, specification pending
-15                 0         227  operational hardening: authorized,
+15                 0         247  operational hardening: authorized,
                                   specification pending
 ```
 
@@ -1017,22 +1069,23 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred and twenty-seven gates are green before
+2.  **Forty-one of two hundred and forty-seven gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred and twenty-seven, which is every
-registry entry, at Milestone 11. Six of Milestone 10's gates are
+The cumulative column reaches two hundred and forty-seven, which is every
+registry entry, at Milestone 12. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
-`gate.browser.*`, and all twenty-three Milestone 11 gates are
-`gate.schedule.*`. Milestones 12 through 15 — notifications and device
-identity, subagents and delegation, inbound surfaces and pairing, and
-operational hardening — were authorized on 2026-08-20 (ADR-0061) and report
-zero until each one's specification declares its gates; Decision 9 below is
-the rule those zeros close under. Routing remains deferred and adds none.
+`gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
+and Milestone 12's twenty are six `gate.device.*` and fourteen
+`gate.notify.*`. Milestones 13 through 15 — subagents and delegation, inbound
+surfaces and pairing, and operational hardening — were authorized with
+Milestone 12 on 2026-08-20 (ADR-0061) and report zero until each one's
+specification declares its gates; Decision 9 below is the rule those zeros
+close under. Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1293,8 +1346,9 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
     [skills.md](skills.md) for Milestones 8 and 10. The decision
     stands for the next milestone that shows a zero — and Milestones
-    12 through 15 are those milestones: each row reads zero until its
-    specification lands with gates to declare.
+    13 through 15 are those milestones: each row reads zero until its
+    specification lands with gates to declare, as Milestone 12's did
+    with [notifications-and-devices.md](notifications-and-devices.md).
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

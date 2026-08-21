@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-21 — Milestone 12 specified: notifications and device identity
+
+- Added `docs/plan/notifications-and-devices.md` and proposed ADR-0062: a
+  `Device` registry with a client-minted installation identity and per-device
+  muted kinds; a durable notification outbox written in the triggering
+  transaction through a savepoint-wrapped hook on the single terminal writer
+  and the scheduling accountant and materializer; exactly five trigger
+  transitions; a content-free payload; claim-lease dispatch with staleness
+  checks, a closed retry schedule, and token invalidation; an APNs adapter
+  behind a `PushTransport` port; a least-privilege `notify` role; three scopes
+  and seven routes including an offline inbox; and the Apple client's
+  registration and deep-link duties.
+- Registered twenty Milestone 12 gates in two new areas, `device` and
+  `notify`; the registry grammar, declaring-spec census, milestone map,
+  readiness review, current milestone, and project state follow.
+- Noted what Milestone 12 settles in the Section 29 seam audit and added the
+  forward-looking route and scope subsections to the HTTP and policy designs.
+
 ## 2026-08-20 — Roadmap: Milestones 12 through 15 authorized and the Milestone 10 completion contract amended
 
 - Added ADR-0061. Milestone 10 now completes on construction — all registered

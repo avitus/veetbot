@@ -70,3 +70,4 @@ implementation without one.
 - [ADR-0059 — Milestone 11 scheduled runs (Proposed)](0059-milestone-11-scheduled-runs.md)
 - [ADR-0060 — Reading lanes and the state-file split](0060-reading-lanes-and-state-file-split.md)
 - [ADR-0061 — Milestone 10 completion versus tenant activation, and the roadmap authorization](0061-milestone-10-completion-and-roadmap-authorization.md)
+- [ADR-0062 — Milestone 12 notifications and device identity (Proposed)](0062-milestone-12-notifications-and-device-identity.md)

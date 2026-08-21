@@ -316,6 +316,12 @@ pause, and resume, and cancel covers the terminal schedule transition. Exact
 matching, MCP namespace isolation, and every other rule in this section are
 unchanged.
 
+Milestone 12 will add `device.read`, `device.write`, and `notification.read`
+for the device and notification routes in
+[notifications-and-devices.md](notifications-and-devices.md), making the
+executable vocabulary twenty-five strings when that code lands; until then
+the twenty-two-string count above stands.
+
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`

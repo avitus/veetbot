@@ -63,6 +63,7 @@ def test_milestone_tokens_present() -> None:
         "web-access.md",
         "browser-automation.md",
         "scheduling.md",
+        "notifications-and-devices.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -91,7 +92,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 227
+    assert len(entries) == 247
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -132,6 +133,7 @@ def test_census_is_derived() -> None:
         9: 26,
         10: 38,
         11: 23,
+        12: 20,
     }
 
 
@@ -284,3 +286,19 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
     errors = registry_errors(tmp_path)
     assert "gate.schedule.roadmap_probe has invalid milestone 15" not in errors
     assert "gate.schedule.beyond_probe has invalid milestone 16" in errors
+
+
+def test_notifications_and_devices_have_complete_milestone_12_gate_areas() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    device_entries = [entry for entry in entries if entry.id.startswith("gate.device.")]
+    notify_entries = [entry for entry in entries if entry.id.startswith("gate.notify.")]
+
+    assert len(device_entries) == 6
+    assert len(notify_entries) == 14
+    assert all(entry.milestone == 12 for entry in device_entries + notify_entries)
+    assert all(
+        entry.spec == "docs/plan/notifications-and-devices.md#hard-gates"
+        for entry in device_entries + notify_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in device_entries + notify_entries)
