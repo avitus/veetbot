@@ -390,6 +390,7 @@ def test_documentation_verification_reads_the_resolved_release_identity() -> Non
 def test_manual_rollback_keeps_documentation_and_application_releases_aligned() -> None:
     deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
     manual = deployment.partition("## Manual rollback")[2].partition("## Accepted limitations")[0]
+    app_precondition = 'grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"'
     docs_precondition = 'test "$(cat "$docs_target/release.txt")" = "$target_id"'
     app_switch = 'mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current'
     docs_switch = 'mv -Tf "/opt/veetbot/docs/.rollback-$target_id" /opt/veetbot/docs/current'
@@ -397,9 +398,12 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
     assert 'test -d "$docs_target"' in manual
     assert 'test -f "$docs_target/release.txt"' in manual
+    assert app_precondition in manual
     assert docs_precondition in manual
     assert 'ln -s "$docs_target" "/opt/veetbot/docs/.rollback-$target_id"' in manual
     assert docs_switch in manual
+    assert manual.index(app_precondition) < manual.index(app_switch)
+    assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
 
