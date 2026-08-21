@@ -9,6 +9,7 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 BIN_DIR="$TEST_ROOT/bin"
 DEPLOY_ROOT="$TEST_ROOT/opt/veetbot"
 DOCS_ROOT="$DEPLOY_ROOT/docs"
+PROCESS_ROOT="$TEST_ROOT/proc"
 LOG_FILE="$TEST_ROOT/commands.log"
 DOCKER_STATE="$TEST_ROOT/docker-production-image"
 FAIL_MARKER="$TEST_ROOT/docs-switch-failed"
@@ -22,6 +23,7 @@ mkdir -p \
   "$DEPLOY_ROOT/releases/$PREVIOUS_ID" \
   "$DEPLOY_ROOT/releases/$TARGET_ID" \
   "$DEPLOY_ROOT/shared" \
+  "$PROCESS_ROOT/4242" \
   "$DOCS_ROOT/releases/$PREVIOUS_ID" \
   "$DOCS_ROOT/releases/$TARGET_ID"
 printf 'VEETBOT_RELEASE_ID=%s\n' "$PREVIOUS_ID" \
@@ -35,6 +37,7 @@ touch \
   "$DOCS_ROOT/releases/$TARGET_ID/index.html"
 ln -s "$DEPLOY_ROOT/releases/$PREVIOUS_ID" "$DEPLOY_ROOT/current"
 ln -s "$DOCS_ROOT/releases/$PREVIOUS_ID" "$DOCS_ROOT/current"
+ln -s "$DEPLOY_ROOT/releases/$TARGET_ID" "$PROCESS_ROOT/4242/cwd"
 printf '%s\n' previous-image-id >"$DOCKER_STATE"
 : >"$LOG_FILE"
 
@@ -104,6 +107,7 @@ write_stub sudo '
 '
 write_stub systemctl '
   printf "systemctl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
+  if [[ "${1:-}" == show ]]; then printf "4242\n"; fi
 '
 write_stub curl '
   printf "curl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
@@ -130,6 +134,7 @@ awk '
 sed \
   -e "s|^target_id=.*|target_id=$TARGET_ID|" \
   -e "s|/opt/veetbot|$DEPLOY_ROOT|g" \
+  -e "s|/proc|$PROCESS_ROOT|g" \
   "$RAW_RUNBOOK" >"$RUNBOOK"
 chmod +x "$RUNBOOK"
 
@@ -169,6 +174,16 @@ rm -f -- "$FAIL_MARKER"
 if VEETBOT_TEST_READY_RELEASE=20260810-152244-bbbbbbb run_rollback \
   >"$TEST_ROOT/mismatched.out" 2>&1; then
   printf 'rollback with a mismatched readiness identity unexpectedly succeeded\n' >&2
+  exit 1
+fi
+[[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(basename "$(readlink -f "$DOCS_ROOT/current")")" == "$PREVIOUS_ID" ]]
+[[ "$(cat "$DOCKER_STATE")" == previous-image-id ]]
+
+: >"$LOG_FILE"
+if VEETBOT_TEST_READY_RELEASE=20260810-152233-ABCDEF0 run_rollback \
+  >"$TEST_ROOT/case-mismatched.out" 2>&1; then
+  printf 'rollback with a case-mismatched readiness identity unexpectedly succeeded\n' >&2
   exit 1
 fi
 [[ "$(basename "$(readlink -f "$DEPLOY_ROOT/current")")" == "$PREVIOUS_ID" ]]

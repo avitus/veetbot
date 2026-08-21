@@ -395,6 +395,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     image_validation = 'docker image inspect "agent-core-sandbox:$target_id"'
     image_tag = 'docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production'
     readiness_identity = 'tolower($1) == "x-veetbot-release"'
+    unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
     docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/docs/current'
 
@@ -406,6 +407,8 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert image_validation in manual
     assert image_tag in manual
     assert readiness_identity in manual
+    assert "IGNORECASE" not in manual
+    assert unit_process_validation in manual
     assert 'ln -s "$docs_target" "$docs_next"' in manual
     assert docs_switch in manual
     assert manual.index(image_validation) < manual.index(app_switch)
@@ -416,6 +419,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     assert manual.index(app_precondition) < manual.index(docs_switch)
     assert manual.index(docs_precondition) < manual.index(app_switch)
     assert manual.index(docs_precondition) < manual.index(docs_switch)
+    assert manual.index(unit_process_validation) < manual.rindex("rollback_pending=0")
 
 
 def test_manual_rollback_has_failure_injection_coverage() -> None:
@@ -437,6 +441,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert "flock -w" in release
     assert '"$STAGE/.venv/bin/alembic" upgrade head' in release
     assert "X-Veetbot-Release" not in release
+    assert "IGNORECASE" not in release
     assert "VEETBOT_RELEASE_ID" in release
     assert "systemctl enable --now" in release
     assert "VEETBOT_KEEP_RELEASES:-5" in release

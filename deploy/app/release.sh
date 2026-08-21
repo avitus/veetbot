@@ -219,7 +219,6 @@ for ((attempt = 1; attempt <= HEALTH_TIMEOUT_SECS; attempt++)); do
     --dump-header "$HEALTH_HEADERS" --output /dev/null \
     "$HEALTH_URL"; then
     if awk -F ': *' -v expected="$RELEASE_ID" '
-      BEGIN { IGNORECASE = 1 }
       tolower($1) == "x-veetbot-release" {
         sub(/\r$/, "", $2)
         if ($2 == expected) found = 1

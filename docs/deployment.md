@@ -456,7 +456,6 @@ curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
   --dump-header "$health_headers" --output /dev/null \
   http://127.0.0.1:8000/health/ready
 awk -F ': *' -v expected="$target_id" '
-  BEGIN { IGNORECASE = 1 }
   tolower($1) == "x-veetbot-release" {
     sub(/\r$/, "", $2)
     if ($2 == expected) found = 1
@@ -466,6 +465,18 @@ awk -F ': *' -v expected="$target_id" '
 rm -f -- "$health_headers"
 health_headers=""
 test "$(cat /opt/veetbot/docs/current/release.txt)" = "$target_id"
+for unit in \
+  veetbot-execution \
+  veetbot-maintenance \
+  veetbot-worker \
+  veetbot-async-worker \
+  veetbot-api; do
+  sudo systemctl is-active --quiet "$unit"
+  pid="$(sudo systemctl show --property MainPID --value "$unit")"
+  test "$pid" -gt 0
+  process_cwd="$(readlink -f "/proc/$pid/cwd")"
+  test "$process_cwd" = "$target"
+done
 rollback_pending=0
 trap - EXIT
 ```

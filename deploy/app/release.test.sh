@@ -103,7 +103,8 @@ write_stub curl '
   if [[ -n "$headers" ]]; then
     printf "curl health\n" >>"$VEETBOT_TEST_LOG"
     if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
-    printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" "$VEETBOT_TEST_RELEASE" >"$headers"
+    printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
+      "$VEETBOT_TEST_READY_RELEASE" >"$headers"
   else
     cat >"$VEETBOT_TEST_AUTH_HEADERS"
     printf "curl session-index %s\n" "$request_url" >>"$VEETBOT_TEST_LOG"
@@ -169,6 +170,7 @@ run_release() {
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_AUTH_HEADERS="$TEST_ROOT/session-index-headers" \
   VEETBOT_TEST_RELEASE="$release_id" \
+  VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$release_id}" \
   VEETBOT_API_BASE_URL="${VEETBOT_TEST_API_BASE_URL:-http://127.0.0.1:8000/}" \
     "$RELEASE_SCRIPT" "$release_id"
 }
@@ -329,5 +331,17 @@ grep -Fxq "EnvironmentFile=$schedule_worker_env" \
 grep -Fq \
   'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
+
+case_mismatch_id="20260810-152257-abcdef0"
+make_stage "$case_mismatch_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$case_mismatch_id" "$PROCESS_ROOT/4242/cwd"
+if VEETBOT_TEST_READY_RELEASE=20260810-152257-ABCDEF0 run_release "$case_mismatch_id" \
+  >"$TEST_ROOT/case-mismatch.out" 2>&1; then
+  printf 'release with a case-mismatched readiness identity unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq "local readiness probe did not report $case_mismatch_id" \
+  "$TEST_ROOT/case-mismatch.out"
 
 printf 'release script tests passed\n'
