@@ -6577,3 +6577,68 @@ channel.
 
 **Reversal cost:** cheap; a column is additive.
 
+## Milestone 15 operational hardening (ADR-0065)
+
+### Object storage plus provider snapshots, `age` with an owner-held identity
+
+**Decided:** daily encrypted backups to S3-compatible object storage in another
+region via `rclone`, provider weekly snapshots as a complement, `age` X25519
+with the private identity only off-host.
+
+**Why:** snapshots alone are crash-consistent, include secrets under the
+provider's keys, and cannot restore one database; the host not being able to
+read its own backups is the point.
+
+**Question for you:** whether a root-only copy of the identity should also
+live on the host to allow nightly off-host rehearsals.
+
+**Reversal cost:** cheap.
+
+### Secrets are escrowed manually, not backed up
+
+**Decided:** environment files, the browser keyring, and certificates are
+excluded from the automated set; `make secret-escrow` and a staleness signal.
+
+**Why:** a bucket compromise must not be a live-credential compromise.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+
+### Alerts through the outbox, dead states through a free external pair
+
+**Decided:** `ops.alert` via the Milestone 12 outbox for degraded states; an
+external uptime check and a dead-man's switch for the database, disk, or host
+being down; no OTLP exporter.
+
+**Why:** the outbox is durable and already reaches the phone; nothing that
+depends on the database can report the database being down.
+
+**Question for you:** the uptime and dead-man providers; whether to add
+Telegram routing once Milestone 14 exists.
+
+**Reversal cost:** cheap.
+
+### Rollback is code-only; migrations are forward-only
+
+**Decided:** as stated; a pre-migration dump in the release path.
+
+**Why:** the persistence design already says a schema rollback is a restore.
+
+**Question for you:** none.
+
+**Reversal cost:** none; it is the standing rule.
+
+### The backup tranche could lead
+
+**Decided:** recorded as an open question, not reordered; Milestone 15 follows
+14 as the owner chose.
+
+**Why:** the tranche has no dependency on Milestones 12 through 14 and the
+risk is live.
+
+**Question for you:** pull the backup and restore slice ahead, or keep the
+order.
+
+**Reversal cost:** cheap; it is sequencing.
+

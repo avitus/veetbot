@@ -1,9 +1,19 @@
 # ADR-0046: Host-native DigitalOcean production topology
 
 - **Status:** Accepted; decision 4 superseded by ADR-0048 (Nginx, not Caddy,
-  terminates TLS on the host); decision 7 is the scope Milestone 15 closes
-  (ADR-0061)
+  terminates TLS on the host); decision 7 superseded by ADR-0065 (Milestone
+  15 operational hardening, authorized by ADR-0061)
 - **Date:** 2026-08-07; amended 2026-08-20
+
+## Amendments
+
+- 2026-08-10, ADR-0048: Nginx, not Caddy, is the reverse proxy and TLS
+  terminator on this host (decision 4).
+- 2026-08-20, ADR-0065: Milestone 15 adds the encrypted off-host backup and
+  restore rehearsal, the health check and alert channels, the cloud and host
+  firewall, proxy rate limits, scripted rollback, and worker watchdogs that
+  decision 7 declined at launch; the first two consequences below are
+  superseded to that extent.
 
 ## Context
 

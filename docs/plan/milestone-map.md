@@ -166,7 +166,7 @@ gate.<area>.<slug>
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
       knowledge, web, browser, schedule, device, notify, delegate,
-      surface
+      surface, ops
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -240,6 +240,13 @@ rules for a paired sender, the reply path, and the surface role's confinement
 as one inbound-channel story; the run a paired message creates remains an
 ordinary run owned by the existing areas.
 
+`ops` is the twenty-second, declared by
+[operational-hardening.md](operational-hardening.md) at Milestone 15. It is
+`ops` rather than `deploy` because ADR-0048 deliberately says the delivery
+jobs add no milestone gate; the subject is the operational lifecycle — backup,
+restore, watch, harden, roll back — and it is one spec owning one area, as
+`sandbox` was.
+
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
 does not admit — a slug is underscore-separated and holds no dots, so
@@ -298,9 +305,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 20 subject specifications declare 283 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 292
-declarations, 289 registry entries once the 3 aliases are subtracted.
+The 21 subject specifications declare 299 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 308
+declarations, 305 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1073,6 +1080,43 @@ declared confinement, the schema, and contract coverage. The remaining
 seventeen are boundary cases over the ingress transaction, the submission
 path, the outbox, and PostgreSQL.
 
+### Operational hardening, sixteen gates
+
+Sixteen gates, all new, in the twenty-second area and all at Milestone 15.
+They cover the declared backup set, the round trip, the restore rehearsal and
+its corruption detection, client-side encryption, retention, production
+refusal, the health-check signal list, alert deduplication and payload
+closure, the dead-database fallback, rollback promotion and schema-drift
+refusal, unit and sudoers reconciliation, the minimal public boundary, and the
+worker watchdog.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.ops.backup_set_complete                    structural   15
+2   gate.ops.backup_roundtrip                       case         15
+3   gate.ops.restore_rehearsal_passes               case         15
+4   gate.ops.restore_rehearsal_detects_corruption   case         15
+5   gate.ops.backup_encrypted_offhost               case         15
+6   gate.ops.backup_retention_policy                property     15
+7   gate.ops.rehearsal_never_touches_production     case         15
+8   gate.ops.healthcheck_signals                    case         15
+9   gate.ops.alert_enqueued_deduped                 case         15
+10  gate.ops.alert_payload_closed                   structural   15
+11  gate.ops.db_down_fallback                       case         15
+12  gate.ops.rollback_promotes_previous             case         15
+13  gate.ops.rollback_refuses_schema_drift          case         15
+14  gate.ops.units_and_sudoers_reconciled           structural   15
+15  gate.ops.public_boundary_minimal                structural   15
+16  gate.ops.worker_watchdog                        case         15
+```
+
+Gate 6 is a property because retention is a claim over generated listings;
+gates 1, 10, 14, and 15 are structural because they inspect a manifest, a
+schema, unit and sudoers files, and firewall and proxy declarations. The
+remaining eleven are boundary cases over the scripts, a throwaway database,
+the outbox, and the release tree.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1145,8 +1189,9 @@ milestone  new gates  cumulative  the earliest of them
 14                21         289  pairing, the session key, ingress
                                   atomicity, the scope ceiling, replies,
                                   the surface role's confinement
-15                 0         289  operational hardening: authorized,
-                                  specification pending
+15                16         305  the declared backup set, the
+                                  rehearsal, alerts, rollback, the
+                                  public boundary, the watchdog
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1167,23 +1212,23 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred and eighty-nine gates are green before
+2.  **Forty-one of three hundred and five gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred and eighty-nine, which is every
-registry entry, at Milestone 14. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and five, which is every
+registry entry, at Milestone 15. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
-Milestone 13's twenty-one are `gate.delegate.*`, and Milestone 14's
-twenty-one are `gate.surface.*`. Milestone 15 — operational hardening — was
-authorized with them on 2026-08-20 (ADR-0061) and reports zero until its
-specification declares its gates; Decision 9 below is the rule that zero
-closes under. Routing remains deferred and adds none.
+Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
+`gate.surface.*`, and Milestone 15's sixteen are `gate.ops.*`. Every
+authorized milestone now has a specification that declares its gates; the
+roadmap's items add none until the owner authorizes one and a specification
+lands for it. Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1443,12 +1488,10 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     specifications that had gates to declare, not by the column —
     [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
     [skills.md](skills.md) for Milestones 8 and 10. The decision
-    stands for the next milestone that shows a zero — and Milestone 15
-    is that milestone: its row reads zero until its specification
-    lands with gates to declare, as Milestones 12 through 14 did with
-    [notifications-and-devices.md](notifications-and-devices.md),
-    [subagents-and-delegation.md](subagents-and-delegation.md), and
-    [inbound-surfaces.md](inbound-surfaces.md).
+    stands for the next milestone that shows a zero. Milestones 12
+    through 15 each showed one on the day they were authorized and
+    each closed it the way the decision implies, with a specification
+    that had gates to declare.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

@@ -71,6 +71,7 @@ validates the floor, and no trailer means lane A.
 | Notifications, device identity, push delivery | `notifications-and-devices.md` |
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
 | Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
+| Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -94,8 +95,7 @@ validates the floor, and no trailer means lane A.
   inbound surfaces and pairing, operational hardening — are authorized in that
   order (ADR-0061); model routing and the plan's roadmap items are not.
 - Avoid unrelated refactors.
-- Do not introduce a major dependency without documenting the decision (an ADR or
-  a note in the relevant doc).
+- Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active
   acceptance criteria.
 
@@ -196,4 +196,4 @@ End every coding assignment with a report covering:
 
 ## Do not
 
-- Do not start implementation work during a documentation-only assignment, or edit `archive/`, `site/`, or `dist/`.
+- No implementation work in a documentation-only assignment; never edit `archive/`, `site/`, or `dist/`.

@@ -153,6 +153,12 @@ marker.
 
 ## Production delivery controls
 
+Milestone 15 ([operational-hardening.md](plan/operational-hardening.md))
+adds the backup, escrow, alerting, firewall, rollback, and watchdog controls
+and states that content erased through the deletion contract can persist in
+encrypted backups for up to thirty-five days; those controls are requirements
+of that milestone and are not claimed as implemented here.
+
 The production delivery path is privileged supply-chain code. CircleCI packages
 the exact tested commit with `git archive`, records a SHA-256 checksum, and
 connects only with a Veetbot-specific project deploy key and a context-provided

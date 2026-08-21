@@ -88,7 +88,7 @@ rather than smoothed.
 | 12 | Notifications and device identity | Authorized | 20 | Nothing in the corpus; the Apple push key and capability are owner actions outside it |
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
-| 15 | Operational hardening | Authorized, specification pending | 0 | `operational-hardening.md` and its ADR |
+| 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -551,7 +551,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3580-3657`
+Section 28 of the plan is not empty — `engineering-plan.md:3581-3658`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -570,7 +570,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1374`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3655` requires a container-escape attempt as
+    `engineering-plan.md:3656` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -987,7 +987,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:566` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3564` and `engineering-plan.md:2963` and picked
+`engineering-plan.md:3565` and `engineering-plan.md:2963` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1132,22 +1132,32 @@ choice between the corpus and the first red tests. What remains outside the
 corpus is the owner's bot and its private token file, and Milestone 12
 landing first.
 
-## Milestone 15: authorized, specification pending
+## Milestone 15: operational hardening, authorized and specified
 
-The owner authorized operational hardening with Milestones 12 through 14 on
-2026-08-20 (ADR-0061). The engineering plan states its requirement and
-acceptance criteria today; no detailed-design document exists yet, so the
-verdict is **Authorized, specification pending**: `operational-hardening.md`
-and its ADR are what stand between the milestone and its first red test, and
-the milestone map's census reports a zero row until that document declares
-its gates (Decision 9 of the map). It starts from the accepted limitations
-`docs/deployment.md` and ADR-0046 state.
+[operational-hardening.md](operational-hardening.md) turns the deployment
+page's accepted "unrecoverable" into recoverable within a backup window: a
+declared, encrypted, off-host daily backup of the database, the artifact
+store, and the browser-profile ciphertext with a manifest and a manual secret
+escrow; a restore rehearsal with a five-part verdict run on the host, in CI,
+and by the owner from the off-host copy; a host health check on a closed
+signal list delivering deduplicated alerts through the Milestone 12 outbox
+with a dead-man's switch and an external uptime check for the states that take
+the outbox down; cloud and host firewall, SSH hardening, proxy rate limits, and
+a loopback-only structural gate; a code-only rollback that refuses to cross a
+schema boundary without an override and never downgrades; and systemd
+watchdogs for the worker roles. Sixteen hard gates in the `ops` area; ADR-0065
+records the decisions and amends ADR-0046.
+
+The readiness verdict is therefore **Authorized**: there is no unnamed design
+choice between the corpus and the first red tests. What remains outside the
+corpus is the owner's bucket and scoped key, the `age` identity, the first
+escrow, and the first off-host rehearsal.
 
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3659-3817` for links to other documents returned
+`engineering-plan.md:3660-3818` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1368,7 +1378,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2514` against
-    `model-gateway.md:1795` and `milestone-map.md:1203`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1248`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1377,7 +1387,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3655` requires a test the harness's case set
+    `engineering-plan.md:3656` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
