@@ -6,11 +6,13 @@ import asyncio
 import base64
 import dataclasses
 import json
+import logging
 import os
 import socket
 import stat
 import struct
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import suppress
 from datetime import datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath
@@ -44,9 +46,12 @@ from agent_core.ports.execution import ExecutionEnvironment, WorkspaceHandle
 
 _HEADER = struct.Struct("!Q")
 _MAX_FRAME_BYTES = 512 * 1024 * 1024
+_MAX_WORKSPACE_READ_BYTES = 512 * 1024 * 1024
 _STREAM_CHUNK_BYTES = 64 * 1024
 _CONNECT_ATTEMPTS = 50
 _CONNECT_RETRY_SECONDS = 0.1
+_REQUEST_TIMEOUT_SECONDS = 31 * 60.0
+logger = logging.getLogger(__name__)
 
 _DATACLASSES: dict[str, type[Any]] = {
     item.__name__: item
@@ -167,7 +172,9 @@ def _decode(value: object) -> object:
         pairs = value["__mapping__"]
         if not isinstance(pairs, list):
             raise ValueError("execution service received an invalid mapping")
-        return {str(pair[0]): _decode(pair[1]) for pair in pairs if isinstance(pair, list)}
+        if not all(isinstance(pair, list) and len(pair) == 2 for pair in pairs):
+            raise ValueError("execution service received an invalid mapping")
+        return {str(pair[0]): _decode(pair[1]) for pair in pairs}
     if "__frozenset__" in value:
         items = value["__frozenset__"]
         if not isinstance(items, list):
@@ -219,10 +226,17 @@ class ExecutionServiceWorkspace:
         return self.root.joinpath(*validated_workspace_components(path))
 
     async def read(self, path: str) -> bytes:
-        result = await self._owner._call(
-            "workspace_read", {"environment": self._environment, "path": path}
-        )
-        return cast(bytes, result)
+        result = bytearray()
+        async for chunk in self._owner._stream(
+            "workspace_stream",
+            {
+                "environment": self._environment,
+                "path": path,
+                "maximum_bytes": _MAX_WORKSPACE_READ_BYTES,
+            },
+        ):
+            result.extend(chunk)
+        return bytes(result)
 
     async def read_bounded(self, path: str, maximum_bytes: int) -> bytes:
         result = await self._owner._call(
@@ -285,53 +299,57 @@ class ExecutionServiceClient:
     ) -> object:
         reader, writer = await self._connect()
         try:
-            await _write_frame(
-                writer,
-                {"kind": "request", "operation": operation, "payload": _encode(payload)},
-            )
-            while True:
-                frame = await _read_frame(reader)
-                kind = frame.get("kind")
-                if kind == "callback":
-                    if callback is None:
-                        raise ExecutionRejected("execution service sent an unexpected callback")
-                    callback_id = frame.get("id")
-                    try:
-                        callback_result = await callback(
-                            str(frame.get("callback")), _decode(frame.get("payload"))
-                        )
-                    except Exception as exc:
-                        await _write_frame(
-                            writer,
-                            {
-                                "kind": "callback_response",
-                                "id": callback_id,
-                                "ok": False,
-                                "error_type": type(exc).__name__,
-                                "message": str(exc),
-                            },
-                        )
-                    else:
-                        await _write_frame(
-                            writer,
-                            {
-                                "kind": "callback_response",
-                                "id": callback_id,
-                                "ok": True,
-                                "payload": _encode(callback_result),
-                            },
-                        )
-                    continue
-                if kind != "response":
-                    raise ExecutionUnavailable("execution service returned an invalid frame")
-                if not frame.get("ok"):
-                    _raise_remote(frame)
-                return _decode(frame.get("payload"))
+            async with asyncio.timeout(_REQUEST_TIMEOUT_SECONDS):
+                await _write_frame(
+                    writer,
+                    {"kind": "request", "operation": operation, "payload": _encode(payload)},
+                )
+                while True:
+                    frame = await _read_frame(reader)
+                    kind = frame.get("kind")
+                    if kind == "callback":
+                        if callback is None:
+                            raise ExecutionRejected("execution service sent an unexpected callback")
+                        callback_id = frame.get("id")
+                        try:
+                            callback_result = await callback(
+                                str(frame.get("callback")), _decode(frame.get("payload"))
+                            )
+                        except Exception as exc:
+                            await _write_frame(
+                                writer,
+                                {
+                                    "kind": "callback_response",
+                                    "id": callback_id,
+                                    "ok": False,
+                                    "error_type": type(exc).__name__,
+                                    "message": str(exc),
+                                },
+                            )
+                        else:
+                            await _write_frame(
+                                writer,
+                                {
+                                    "kind": "callback_response",
+                                    "id": callback_id,
+                                    "ok": True,
+                                    "payload": _encode(callback_result),
+                                },
+                            )
+                        continue
+                    if kind != "response":
+                        raise ExecutionUnavailable("execution service returned an invalid frame")
+                    if not frame.get("ok"):
+                        _raise_remote(frame)
+                    return _decode(frame.get("payload"))
+        except TimeoutError as exc:
+            raise ExecutionUnavailable("execution service request timed out") from exc
         except (asyncio.IncompleteReadError, ConnectionError, json.JSONDecodeError) as exc:
             raise ExecutionUnavailable("execution service connection failed") from exc
         finally:
             writer.close()
-            await writer.wait_closed()
+            with suppress(ConnectionError, OSError):
+                await writer.wait_closed()
 
     async def _stream(
         self,
@@ -340,29 +358,37 @@ class ExecutionServiceClient:
     ) -> AsyncIterator[bytes]:
         reader, writer = await self._connect()
         try:
-            await _write_frame(
-                writer,
-                {"kind": "request", "operation": operation, "payload": _encode(payload)},
-            )
-            while True:
-                frame = await _read_frame(reader)
-                kind = frame.get("kind")
-                if kind == "stream_chunk":
-                    chunk = _decode(frame.get("payload"))
-                    if not isinstance(chunk, bytes) or len(chunk) > _STREAM_CHUNK_BYTES:
-                        raise ExecutionUnavailable("execution service returned an invalid stream")
-                    yield chunk
-                    continue
-                if kind != "response":
-                    raise ExecutionUnavailable("execution service returned an invalid stream frame")
-                if not frame.get("ok"):
-                    _raise_remote(frame)
-                return
+            async with asyncio.timeout(_REQUEST_TIMEOUT_SECONDS):
+                await _write_frame(
+                    writer,
+                    {"kind": "request", "operation": operation, "payload": _encode(payload)},
+                )
+                while True:
+                    frame = await _read_frame(reader)
+                    kind = frame.get("kind")
+                    if kind == "stream_chunk":
+                        chunk = _decode(frame.get("payload"))
+                        if not isinstance(chunk, bytes) or len(chunk) > _STREAM_CHUNK_BYTES:
+                            raise ExecutionUnavailable(
+                                "execution service returned an invalid stream"
+                            )
+                        yield chunk
+                        continue
+                    if kind != "response":
+                        raise ExecutionUnavailable(
+                            "execution service returned an invalid stream frame"
+                        )
+                    if not frame.get("ok"):
+                        _raise_remote(frame)
+                    return
+        except TimeoutError as exc:
+            raise ExecutionUnavailable("execution service request timed out") from exc
         except (asyncio.IncompleteReadError, ConnectionError, json.JSONDecodeError) as exc:
             raise ExecutionUnavailable("execution service connection failed") from exc
         finally:
             writer.close()
-            await writer.wait_closed()
+            with suppress(ConnectionError, OSError):
+                await writer.wait_closed()
 
     async def resolve_image_digest(self, reference: str) -> str:
         return cast(str, await self._call("resolve_image_digest", {"reference": reference}))
@@ -532,23 +558,31 @@ class ExecutionServiceServer:
             callback = _RemoteCallback(reader, writer)
             result = await self._dispatch(str(frame.get("operation")), payload, callback)
         except Exception as exc:
-            await _write_frame(
-                writer,
-                {
-                    "kind": "response",
-                    "ok": False,
-                    "error_type": type(exc).__name__,
-                    "message": str(exc),
-                },
-            )
+            if type(exc).__name__ not in _REMOTE_ERRORS:
+                logger.exception(
+                    "execution_service_request_failed",
+                    extra={"error_class": type(exc).__name__},
+                )
+            with suppress(ConnectionError, OSError):
+                await _write_frame(
+                    writer,
+                    {
+                        "kind": "response",
+                        "ok": False,
+                        "error_type": type(exc).__name__,
+                        "message": str(exc),
+                    },
+                )
         else:
-            await _write_frame(
-                writer,
-                {"kind": "response", "ok": True, "payload": _encode(result)},
-            )
+            with suppress(ConnectionError, OSError):
+                await _write_frame(
+                    writer,
+                    {"kind": "response", "ok": True, "payload": _encode(result)},
+                )
         finally:
             writer.close()
-            await writer.wait_closed()
+            with suppress(ConnectionError, OSError):
+                await writer.wait_closed()
 
     async def _dispatch(
         self,
@@ -580,8 +614,6 @@ class ExecutionServiceServer:
         if operation.startswith("workspace_"):
             workspace = self._environment.workspace(environment)
             path = cast(str, payload["path"])
-            if operation == "workspace_read":
-                return await workspace.read(path)
             if operation == "workspace_read_bounded":
                 return await workspace.read_bounded(path, cast(int, payload["maximum_bytes"]))
             if operation == "workspace_write":

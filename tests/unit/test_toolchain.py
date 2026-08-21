@@ -302,6 +302,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "SupplementaryGroups=docker" not in async_worker
     assert "/var/run/docker.sock" not in async_worker
     assert "agent execution-service" in execution
+    assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
     assert "SupplementaryGroups=docker" in execution
     assert "/var/run/docker.sock" in execution
@@ -312,6 +313,8 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "SupplementaryGroups=docker" not in maintenance
     assert "agent worker --role schedule" in scheduler
     assert "SupplementaryGroups=docker" not in scheduler
+    assert "SANDBOX_MECHANISM=" not in schedule_environment
+    assert "AGENT_EXECUTION_SERVICE_SOCKET=" not in schedule_environment
     assert "ReadWritePaths=" not in scheduler
     assert "EnvironmentFile=/etc/veetbot/veetbot-schedule.env" in scheduler
     assert "EnvironmentFile=/etc/veetbot/veetbot.env" not in scheduler
@@ -356,6 +359,7 @@ def test_deployment_accounts_and_documentation_are_separated() -> None:
     assert "usermod -aG docker veetbot\n" not in deployment
     assert "chown -R veetbot-deploy:veetbot /opt/veetbot" in deployment
     assert "application services have no Docker-socket access" in normalized
+    assert "public key for the `veetbot-deploy` account" in deployment
 
 
 def test_nginx_deployment_test_exercises_declared_gnu_toolchain() -> None:
@@ -391,6 +395,8 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert '[[ -f "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]]' in release
     assert '[[ -d "$BROWSER_PROFILE_KEY_DIR" ]]' in release
     assert '[[ -f "$BROWSER_CONTROL_CREDENTIAL_FILE" ]]' in release
+    assert release.count("VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE must") == 3
+    assert release.count(": $BROWSER_CONTROL_CREDENTIAL_FILE") == 3
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
     assert "veetbot-async-worker" in release

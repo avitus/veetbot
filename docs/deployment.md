@@ -285,7 +285,7 @@ ssh-keygen -t ed25519 -N '' -f veetbot-circleci -C veetbot-circleci-production
 ssh-keygen -lf veetbot-circleci.pub
 ```
 
-Install only the public key for the `veetbot` account, using the restricted
+Install only the public key for the `veetbot-deploy` account, using the restricted
 `authorized_keys` options described above. Add the private key to the Veetbot
 CircleCI project's SSH keys and do not add the Mankunku key or any personal key
 to this project. The deployment jobs intentionally load the project's attached

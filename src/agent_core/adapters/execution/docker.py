@@ -1073,6 +1073,24 @@ class DockerExecutionEnvironment:
                 state.network_name,
             )
 
+    async def close(self) -> None:
+        """Destroy every runtime resource still owned by this service process."""
+
+        async with self._lock:
+            states = tuple(self._states.values())
+            self._states.clear()
+        await asyncio.gather(
+            *(
+                self._discard(
+                    state.container_id,
+                    state.volume_name,
+                    state.proxy_container_id,
+                    state.network_name,
+                )
+                for state in states
+            )
+        )
+
     async def egress_log(self, environment: EnvironmentHandle) -> tuple[dict[str, object], ...]:
         state = self._state(environment)
         if state.proxy_container_id is None:

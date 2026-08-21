@@ -573,7 +573,12 @@ def _provider_extraction_evidence_is_valid(path: Path) -> bool:
     return True
 
 
-def validate_settings(settings: Settings, *, require_auth_token: bool = True) -> None:
+def validate_settings(
+    settings: Settings,
+    *,
+    require_auth_token: bool = True,
+    require_execution_environment: bool = True,
+) -> None:
     """Refuse unsafe deployment identities before constructing resources."""
 
     _validate_release_id(settings.release_id)
@@ -596,9 +601,13 @@ def validate_settings(settings: Settings, *, require_auth_token: bool = True) ->
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
     if require_auth_token and settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
-    if settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE} and (
-        settings.deployment_mode is DeploymentMode.PRODUCTION
-        or settings.auth_mode is not AuthMode.DEV
+    if (
+        require_execution_environment
+        and settings.sandbox in {SandboxMechanism.DOCKER, SandboxMechanism.FAKE}
+        and (
+            settings.deployment_mode is DeploymentMode.PRODUCTION
+            or settings.auth_mode is not AuthMode.DEV
+        )
     ):
         raise ConfigurationError(
             "unsafe sandbox configuration: "
@@ -609,7 +618,8 @@ def validate_settings(settings: Settings, *, require_auth_token: bool = True) ->
             "and AUTH_MODE=dev"
         )
     if (
-        settings.deployment_mode is DeploymentMode.PRODUCTION
+        require_execution_environment
+        and settings.deployment_mode is DeploymentMode.PRODUCTION
         and settings.sandbox in {SandboxMechanism.GVISOR, SandboxMechanism.MICROVM}
         and settings.execution_service_socket is None
     ):
@@ -683,7 +693,11 @@ def validate_runtime_identity(
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     """Load and validate the environment layer before constructing resources."""
 
-    return _load_settings(environ, require_auth_token=True)
+    return _load_settings(
+        environ,
+        require_auth_token=True,
+        require_execution_environment=True,
+    )
 
 
 def load_schedule_worker_settings(
@@ -691,13 +705,18 @@ def load_schedule_worker_settings(
 ) -> Settings:
     """Load the credential-minimized environment for the scheduler-only role."""
 
-    return _load_settings(environ, require_auth_token=False)
+    return _load_settings(
+        environ,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
 
 
 def _load_settings(
     environ: Mapping[str, str] | None,
     *,
     require_auth_token: bool,
+    require_execution_environment: bool,
 ) -> Settings:
 
     values = _environment(environ)
@@ -884,5 +903,9 @@ def _load_settings(
         browser_grant_id=browser_grant_id,
         browser_run_purpose=browser_run_purpose,
     )
-    validate_settings(settings, require_auth_token=require_auth_token)
+    validate_settings(
+        settings,
+        require_auth_token=require_auth_token,
+        require_execution_environment=require_execution_environment,
+    )
     return settings

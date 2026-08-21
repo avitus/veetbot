@@ -413,15 +413,16 @@ def test_token_auth_requires_token() -> None:
 def test_schedule_worker_identity_does_not_require_the_api_bearer_token() -> None:
     values = {
         **base_environment(),
+        "DEPLOYMENT_MODE": "production",
         "AUTH_MODE": "token",
         "AUTH_TENANT_ID": "tenant-a",
         "AUTH_PRINCIPAL_ID": "principal-a",
         "AUTH_SCOPES": "schedule.read",
-        "SANDBOX_MECHANISM": "gvisor",
     }
     settings = load_schedule_worker_settings(values)
     assert settings.auth_token is None
     assert settings.auth_principal_id == "principal-a"
+    assert settings.execution_service_socket is None
 
 
 @pytest.mark.parametrize("mechanism", ["docker", "fake"])

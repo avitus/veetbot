@@ -455,30 +455,18 @@ async def _run_worker_service(service: WorkerService) -> None:
     await service.run_forever()
 
 
-async def _serve_execution_service(socket_path: Path, runtime: str) -> None:
-    await serve_execution_service(socket_path, runtime)
-
-
 @app.command("execution-service")
 def execution_service_command(
     socket_path: Annotated[
         Path,
         typer.Option("--socket", help="Absolute Unix socket used by application workers."),
     ] = Path("/run/veetbot/execution.sock"),
-    runtime: Annotated[
-        str,
-        typer.Option("--runtime", help="Kernel-isolating container runtime name."),
-    ] = "runsc",
 ) -> None:
     """Serve sandbox lifecycle without loading application credentials."""
 
     if not socket_path.is_absolute():
         raise typer.BadParameter("execution service socket must be absolute", param_hint="--socket")
-    if runtime != "runsc":
-        raise typer.BadParameter(
-            "production execution service requires runsc", param_hint="--runtime"
-        )
-    asyncio.run(_serve_execution_service(socket_path, runtime))
+    asyncio.run(serve_execution_service(socket_path))
 
 
 @app.command("worker")

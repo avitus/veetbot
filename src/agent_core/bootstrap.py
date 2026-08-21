@@ -763,7 +763,11 @@ class _ScheduleUnitOfWorkFactory:
 
 
 def _validate_schedule_role(settings: Settings) -> Principal:
-    validate_settings(settings, require_auth_token=False)
+    validate_settings(
+        settings,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
     if not settings.schedule_worker_enabled:
         raise ConfigurationError("schedule worker is disabled; set AGENT_SCHEDULE_WORKER_ENABLED=1")
     if not settings.schedule_api_enabled:
@@ -791,13 +795,13 @@ def _validate_schedule_role(settings: Settings) -> Principal:
     )
 
 
-async def serve_execution_service(socket_path: Path, runtime: str = "runsc") -> None:
+async def serve_execution_service(socket_path: Path) -> None:
     """Run the credential-free production execution-service composition."""
 
     environment = DockerExecutionEnvironment(
         SystemClock(),
         RandomIdFactory(),
-        runtime=runtime,
+        runtime="runsc",
     )
     server = ExecutionServiceServer(
         environment,
@@ -807,7 +811,10 @@ async def serve_execution_service(socket_path: Path, runtime: str = "runsc") -> 
     try:
         await server.serve_forever()
     finally:
-        await server.close()
+        try:
+            await server.close()
+        finally:
+            await environment.close()
 
 
 @asynccontextmanager
