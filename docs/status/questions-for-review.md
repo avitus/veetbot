@@ -6515,3 +6515,65 @@ the way device identity is.
 
 **Reversal cost:** cheap.
 
+## Milestone 14 inbound surfaces and pairing (ADR-0064)
+
+### Long polling rather than a webhook
+
+**Decided:** the surface role polls `getUpdates`, holds a per-surface advisory
+lock, and resumes from the last committed update; no public route is added.
+
+**Why:** the API is loopback-only behind Nginx and a webhook would couple
+inbound delivery to API availability for no benefit at this scale.
+
+**Question for you:** none unless the deployment gains a second host.
+
+**Reversal cost:** cheap; a webhook is a second implementation of the port.
+
+### A paired sender's message is USER for the bound principal
+
+**Decided:** pairing is authentication; the owner's own pairing yields `USER`;
+pairing anyone else to the owner's principal needs explicit approval and is
+bounded by `granted_scopes`; no new trust level.
+
+**Why:** the seam audit's caution is about third parties, and this milestone
+has none; adding a label with no sender to carry it would be speculative.
+
+**Question for you:** confirm before pairing any non-owner sender.
+
+**Reversal cost:** moderate; a label is a closed-vocabulary change.
+
+### Session rotation: `/new`, twenty-four hours idle, closed session, stale agent version
+
+**Decided:** as stated; a rotated key is never reused.
+
+**Why:** the seam audit asked what happens when a thread outlives an
+`agent_version`; rotation on idle plus drift answers it without surprising a
+mid-conversation sender.
+
+**Question for you:** the idle period.
+
+**Reversal cost:** cheap; configuration.
+
+### Approvals by text command, not inline keyboard
+
+**Decided:** `/approve <id>` and `/deny <id>` through the existing approval
+service; a plain reply answers a waiting question.
+
+**Why:** same authority, no second resolution entry point.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; additive.
+
+### Attribution on the write, not on a column
+
+**Decided:** origin on the seed message and the queued run, the receipt as the
+reverse map, the surface in session metadata.
+
+**Why:** a session may be continued from the Apple client; it is not owned by a
+channel.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; a column is additive.
+

@@ -1,0 +1,129 @@
+# Canonical gate registry entries for Milestone 14 inbound surfaces and pairing.
+- id: gate.surface.unpaired_denied
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**An unpaired sender creates nothing.** A message from an unknown sender creates no session, run, event, or stored content and receives one throttled notice."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.pairing_ceremony
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**The pairing ceremony is single-use and bound.** A code is hashed, expires, admits a bounded number of attempts, compares in constant time, is returned exactly once, and binds the sender to the minting principal and the granted scopes."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.pairing_lockout
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Failed pairing locks the sender.** Reaching the attempt threshold locks the sender for the configured period; locked attempts are not verified and the lockout is audited."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.paired_submits_ordinary_run
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**A paired message is an ordinary run.** A paired text yields one session, run, seed event, and checkpoint through the shared submission function, at interactive priority, as a USER message for the paired principal."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.inbound_idempotent
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Inbound delivery is idempotent.** A replayed update identifier after a restart or duplicate poll yields one receipt and one run; the poll offset resumes from committed receipts."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.ingest_atomic
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Ingress is atomic across a crash.** No injected pre-commit crash leaves a partial receipt, mapping, session, or run, and the update is re-delivered once."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.session_key_stable
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**The session key is stable, rotatable, and never reused.** Messages map to one session; /new, idle time, a closed session, and a stale agent version rotate; a rotated key is never reused; a new session pins the current agent version."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.input_routing
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Input routing follows the run's state.** A run waiting for user input receives the text as input on the same run; a running run yields a notice and no second run."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.revocation_immediate
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Revocation takes effect before the next message.** A revoked pairing is denied before any write on the sender's next message and its session keys are rotated."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.scope_ceiling
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Scopes are a ceiling, intersected fresh.** The run stamps the pairing's granted scopes intersected with the principal's current scopes; a lost scope disappears at the next message; the authority version is recorded."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.no_token_leak
+  milestone: 14
+  kind: corpus
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**The bot token never leaks.** Over a corpus of transport failures, events, logs, spans, receipts, exceptions, and exports the token is absent; the loader rejects unsafe files; the secret-rule family matches it."
+  check: tests/gates/pending.py::pending_gate
+  corpus: tests/corpora/surface_token_leak
+  minimum_members: 8
+- id: gate.surface.reply_chunked_redacted
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Replies are chunked, ordered, and redacted.** A long reply arrives as ordered chunks within the channel limit; a retry resumes without duplicates; secret-shaped text is redacted; a failure carries a reason code only."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.approval_roundtrip
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Approvals and questions round-trip.** An approval notice reaches the chat and /approve resolves it idempotently, first wins; a sender without approval.resolve is refused; a plain reply answers a waiting question."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.rate_limited
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Rate and admission limits hold before any write.** Per-sender rate and per-tenant active-run and cost ceilings are enforced before any content is stored."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.default_off
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Surfaces are default-off.** With either flag off the routes are absent and the worker refuses to start; the worker's environment carries no provider, bearer, or browser credential."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.transport_confined
+  milestone: 14
+  kind: structural
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**The transport is confined.** The adapter reaches only the configured Telegram origin over HTTPS, follows no redirects, bounds response bodies, and maps failures to a closed vocabulary."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.persistence_schema
+  milestone: 14
+  kind: structural
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**The surface schema encodes its trust boundaries.** Metadata inspection proves keys, the partial unique pairing and mapping indexes, cascade and erasure rules, and row-level security."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.persistence_isolated
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Surface persistence is principal isolated.** Row-level security and repository predicates prevent cross-tenant and cross-principal reads and mutations."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.repository_contract
+  milestone: 14
+  kind: structural
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Every surface port has executable adapter contracts.** The transport, pairing, session-key, receipt, and admission ports each have a named shared contract exercised by every registered adapter."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.migration_clean
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**Surfaces migrate cleanly from an empty database.** The migration chain reaches head and exactly matches the declared SQLAlchemy metadata."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.surface.migration_stepwise
+  milestone: 14
+  kind: case
+  spec: docs/plan/inbound-surfaces.md#hard-gates
+  statement: "**The surface migration is reversible at its boundary.** Upgrade, downgrade, and re-upgrade from the immediate predecessor leave a valid schema."
+  check: tests/gates/pending.py::pending_gate

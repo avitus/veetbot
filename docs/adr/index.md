@@ -72,3 +72,4 @@ implementation without one.
 - [ADR-0061 — Milestone 10 completion versus tenant activation, and the roadmap authorization](0061-milestone-10-completion-and-roadmap-authorization.md)
 - [ADR-0062 — Milestone 12 notifications and device identity (Proposed)](0062-milestone-12-notifications-and-device-identity.md)
 - [ADR-0063 — Milestone 13 general-purpose subagents and delegation (Proposed)](0063-milestone-13-subagents-and-delegation.md)
+- [ADR-0064 — Milestone 14 inbound surfaces and pairing (Proposed)](0064-milestone-14-inbound-surfaces-and-pairing.md)

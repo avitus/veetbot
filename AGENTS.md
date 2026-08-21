@@ -22,8 +22,7 @@ Read, in this order, before starting an assignment:
 6. Relevant ADRs in `docs/adr/` (index at `docs/adr/index.md`)
 7. Existing code and tests related to the assignment
 
-Additionally, read `docs/plan/milestone-map.md` whenever the change could move
-a gate, and `docs/plan/readiness.md` before concluding anything is undesigned.
+Also read `docs/plan/milestone-map.md` when a gate could move, and `docs/plan/readiness.md` before calling anything undesigned.
 
 ## Reading lanes
 
@@ -71,6 +70,7 @@ validates the floor, and no trailer means lane A.
 | Scheduled runs and recurrence | `scheduling.md` |
 | Notifications, device identity, push delivery | `notifications-and-devices.md` |
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
+| Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |

@@ -165,7 +165,8 @@ gate.<area>.<slug>
 
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
-      knowledge, web, browser, schedule, device, notify, delegate
+      knowledge, web, browser, schedule, device, notify, delegate,
+      surface
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -232,6 +233,13 @@ limits, subset scopes and tools, untrusted results, the ledger, and the
 activation evidence as one delegation story; the child itself remains an
 ordinary run owned by `runtime`, `tool`, and `event` after materialization.
 
+`surface` is the twenty-first, declared by
+[inbound-surfaces.md](inbound-surfaces.md) at Milestone 14. It owns pairing,
+the session-key resolver, the ingress transaction, the trust and attribution
+rules for a paired sender, the reply path, and the surface role's confinement
+as one inbound-channel story; the run a paired message creates remains an
+ordinary run owned by the existing areas.
+
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
 does not admit — a slug is underscore-separated and holds no dots, so
@@ -290,9 +298,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 19 subject specifications declare 262 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 271
-declarations, 268 registry entries once the 3 aliases are subtracted.
+The 20 subject specifications declare 283 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 292
+declarations, 289 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1024,6 +1032,47 @@ parents and briefs; gate 18 is structural because it inspects declared schema.
 The remaining nineteen are boundary cases over the tool pipeline, the terminal
 writer, the queue, PostgreSQL, and the evaluation harness.
 
+### Inbound surfaces, twenty-one gates
+
+Twenty-one gates, all new, in the twenty-first area and all at Milestone 14.
+They cover the default-deny before any run, the pairing ceremony and lockout,
+ordinary submission, inbound idempotency, ingress atomicity, the session key,
+input routing, revocation, the scope ceiling, the bot token, replies,
+approvals and questions, rate limits, default-off, transport confinement,
+schema, isolation, contracts, and the migration pair.
+
+```text
+#   id                                         kind         M
+--  -----------------------------------------  -----------  --
+1   gate.surface.unpaired_denied               case         14
+2   gate.surface.pairing_ceremony              case         14
+3   gate.surface.pairing_lockout               case         14
+4   gate.surface.paired_submits_ordinary_run   case         14
+5   gate.surface.inbound_idempotent            case         14
+6   gate.surface.ingest_atomic                 case         14
+7   gate.surface.session_key_stable            case         14
+8   gate.surface.input_routing                 case         14
+9   gate.surface.revocation_immediate          case         14
+10  gate.surface.scope_ceiling                 case         14
+11  gate.surface.no_token_leak                 corpus       14
+12  gate.surface.reply_chunked_redacted        case         14
+13  gate.surface.approval_roundtrip            case         14
+14  gate.surface.rate_limited                  case         14
+15  gate.surface.default_off                   case         14
+16  gate.surface.transport_confined            structural   14
+17  gate.surface.persistence_schema            structural   14
+18  gate.surface.persistence_isolated          case         14
+19  gate.surface.repository_contract           structural   14
+20  gate.surface.migration_clean               case         14
+21  gate.surface.migration_stepwise            case         14
+```
+
+Gate 11 is a corpus because a token can leak through a family of surfaces;
+gates 16, 17, and 19 are structural because they inspect the transport's
+declared confinement, the schema, and contract coverage. The remaining
+seventeen are boundary cases over the ingress transaction, the submission
+path, the outbox, and PostgreSQL.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1093,9 +1142,10 @@ milestone  new gates  cumulative  the earliest of them
 13                21         268  the brief, materialization, the
                                   child-run suspension and join, derived
                                   limits, the ledger, the evidence
-14                 0         268  inbound surfaces and pairing:
-                                  authorized, specification pending
-15                 0         268  operational hardening: authorized,
+14                21         289  pairing, the session key, ingress
+                                  atomicity, the scope ceiling, replies,
+                                  the surface role's confinement
+15                 0         289  operational hardening: authorized,
                                   specification pending
 ```
 
@@ -1117,23 +1167,23 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of two hundred and sixty-eight gates are green before
+2.  **Forty-one of two hundred and eighty-nine gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches two hundred and sixty-eight, which is every
-registry entry, at Milestone 13. Six of Milestone 10's gates are
+The cumulative column reaches two hundred and eighty-nine, which is every
+registry entry, at Milestone 14. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
-and Milestone 13's twenty-one are `gate.delegate.*`. Milestones 14 and 15 —
-inbound surfaces and pairing, and operational hardening — were authorized with
-them on 2026-08-20 (ADR-0061) and report zero until each one's specification
-declares its gates; Decision 9 below is the rule those zeros close under.
-Routing remains deferred and adds none.
+Milestone 13's twenty-one are `gate.delegate.*`, and Milestone 14's
+twenty-one are `gate.surface.*`. Milestone 15 — operational hardening — was
+authorized with them on 2026-08-20 (ADR-0061) and reports zero until its
+specification declares its gates; Decision 9 below is the rule that zero
+closes under. Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1393,11 +1443,12 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     specifications that had gates to declare, not by the column —
     [sandbox-isolation.md](sandbox-isolation.md) for Milestone 6 and
     [skills.md](skills.md) for Milestones 8 and 10. The decision
-    stands for the next milestone that shows a zero — and Milestones
-    14 and 15 are those milestones: each row reads zero until its
-    specification lands with gates to declare, as Milestones 12 and 13
-    did with [notifications-and-devices.md](notifications-and-devices.md)
-    and [subagents-and-delegation.md](subagents-and-delegation.md).
+    stands for the next milestone that shows a zero — and Milestone 15
+    is that milestone: its row reads zero until its specification
+    lands with gates to declare, as Milestones 12 through 14 did with
+    [notifications-and-devices.md](notifications-and-devices.md),
+    [subagents-and-delegation.md](subagents-and-delegation.md), and
+    [inbound-surfaces.md](inbound-surfaces.md).
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —
