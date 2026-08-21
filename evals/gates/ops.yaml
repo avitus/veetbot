@@ -51,7 +51,7 @@
   milestone: 15
   kind: case
   spec: docs/plan/operational-hardening.md#hard-gates
-  statement: "**Alerts are enqueued once per cool-down and recover once.** Repeated failing evaluations inside the cool-down enqueue one ops_alert; after it a second; a cleared signal enqueues one recovery."
+  statement: "**Alerts are enqueued once per cool-down and recover once.** Repeated failing evaluations inside the cool-down enqueue one ops_alert under the tenant- and episode-scoped key; after it a second; a cleared signal enqueues one ops_recovered under the episode recovery key; a signal that fails again after recovering opens a new episode and a new alert."
   check: tests/gates/pending.py::pending_gate
 - id: gate.ops.alert_payload_closed
   milestone: 15

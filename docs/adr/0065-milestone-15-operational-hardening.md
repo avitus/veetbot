@@ -47,9 +47,11 @@ and the memory store is the owner's own.
    retained under a protected path.** Two most recent kept; no plaintext
    survives the step.
 6. **Degraded states alert through the outbox; dead states through an
-   independent channel.** A closed signal list with versioned thresholds; an
-   `ops_alert` kind with deduplication and cool-down delivered by the `notify`
-   role; an external uptime check with certificate-expiry alerting and a
+   independent channel.** A closed signal list with versioned thresholds; `ops_alert` and
+   `ops_recovered` kinds, declared by the Milestone 12 contract, deduplicated
+   by tenant, signal, and alert episode (`ops.<tenant>.<signal>.<episode>` and
+   its `.recovered` form) with a cool-down, delivered by the `notify` role;
+   `release_rollback` as the one informational signal; an external uptime check with certificate-expiry alerting and a
    dead-man's switch for the states that take the outbox down.
 7. **OpenTelemetry stays local.** No exporter; journal with persistent storage
    and a size cap; the endpoint variable remains the future seam.
@@ -74,9 +76,9 @@ and the memory store is the owner's own.
   degradation is noticed on the owner's phone or by email when the host is
   dark.
 - Two timers, two environment files, two feature flags, a rollback script, a
-  firewall rules file and apply script, proxy rate limits, watchdog lines in
-  the worker units, a notify helper, an `ops_alert` notification kind, and a
-  CI rehearsal job are added; `release.sh` gains a pre-migration dump and the
+  firewall rules file and apply script, proxy rate limits, watchdog lines in the worker units, a notify helper, the `ops_alert` and
+  `ops_recovered` notification kinds with their episode-scoped keys, and a CI
+  rehearsal job are added; `release.sh` gains a pre-migration dump and the
   unit list grows.
 - The security page states that erased content can persist in backups for up
   to thirty-five days; the deployment page's accepted limitations shrink to

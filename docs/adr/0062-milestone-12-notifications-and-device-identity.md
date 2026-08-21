@@ -69,6 +69,9 @@ was already partly superseded once by ADR-0050 for local history.
    revoke, delete, a client-minted installation identity unique per principal,
    a partial unique index on live tokens, and per-device muted kinds.
    `capabilities` and `granted_scopes` from Section 29.6 wait for a consumer.
+   The closed enums declare `DeviceKind.SURFACE` and `PushProvider.TELEGRAM`
+   for Milestone 14, and dispatch is partitioned by provider so that the
+   `notify` role and the surface role each hold one secret.
 9. **Device lifecycle is audited as process events.** The precedent Milestone
    11 set for schedules resolves the seam audit's second open question without
    a new audit table, because a device has no session.

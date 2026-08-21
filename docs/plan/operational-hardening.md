@@ -238,17 +238,24 @@ backup_fresh                last-success marker age         > 26 hours
 rehearsal_verdict           last verdict.json               passed != true
 secrets_unescrowed          secret file mtime vs stamp      any newer
 reboot_required             /var/run/reboot-required        present
+release_rollback            rollback.sh                     informational: one per
+                                                            rollback, keyed by the
+                                                            promoted release id
 ```
 
 `veetbot-healthcheck.timer` fires every five minutes and drives a one-shot
 `veetbot-healthcheck.service` as the `veetbot` user with its own environment
 file (the database URL, thresholds, and the dead-man address; no bearer or
 provider key). A failing signal enqueues an `ops_alert` notification — a kind Milestone
-12's closed catalog already declares for this producer, with its four
-ops-only payload fields — into the Milestone 12 outbox with deduplication key
-`ops.<signal>` and a cool-down (default six hours) kept in
-`/var/lib/veetbot/healthcheck/state.json`; a signal that clears enqueues one
-`ops_recovered`. The payload is a closed schema — signal,
+12's closed catalog already declares for this producer, with its four ops-only
+payload fields — into the Milestone 12 outbox with the tenant- and
+episode-scoped key `ops.<tenant_id>.<signal>.<episode>` and a cool-down
+(default six hours); a signal that clears enqueues one `ops_recovered` keyed
+`ops.<tenant_id>.<signal>.<episode>.recovered`. An *episode* is the
+per-signal counter in `/var/lib/veetbot/healthcheck/state.json` that
+increments each time a signal fails after having recovered, so a signal that
+recovers and fails again is a new alert and a past recovery can never
+deduplicate the next episode away. The same state file holds the cool-down. The payload is a closed schema — signal,
 severity, release id, and a reason code from a checked-in table — and never an
 environment value or a path, the discipline the tool failure vocabulary
 already follows. Delivery is the `notify` role over APNs, so the phone rings.
@@ -306,9 +313,11 @@ worth a credential and an egress path for a single-owner host.
    path.
 4. Promotes through the same atomic symlink swap, retags, restarts the same
    unit list with the same arguments (so the committed sudoers contract needs
-   no new rule), verifies the public release header and each unit's process
-   working directory exactly as `release.sh` does, appends to a rollback log,
-   and enqueues an informational `ops_alert`.
+   no new rule), verifies the public release header and each unit's process working directory
+   exactly as `release.sh` does, appends to a rollback log, and enqueues an
+   `ops_alert` with the declared `release_rollback` signal, severity `info`, the
+   promoted release id, the `ops.release_rollback` reason code, and key
+   `ops.<tenant_id>.release_rollback.<release_id>`.
 
 The policy is recorded in ADR-0065 and matches what the persistence design
 already says: rollback is code-only; migrations are forward-only; the
@@ -423,9 +432,12 @@ Metrics carry no secret, path, or environment value.
    threshold taken from versioned configuration. Registered as
    `gate.ops.healthcheck_signals`, case. **M15.**
 9. **Alerts are enqueued once per cool-down and recover once.** Repeated
-   failing evaluations inside the cool-down enqueue one `ops_alert`; after it,
-   a second; a cleared signal enqueues one recovery — against the in-memory
-   outbox. Registered as `gate.ops.alert_enqueued_deduped`, case. **M15.**
+   failing evaluations inside the cool-down enqueue one `ops_alert` under the
+   tenant- and episode-scoped key; after it, a second; a cleared signal
+   enqueues one `ops_recovered` under the episode's recovery key; a signal
+   that fails again after recovering opens a new episode and a new alert —
+   against the in-memory outbox. Registered as
+   `gate.ops.alert_enqueued_deduped`, case. **M15.**
 10. **Alert payloads are closed.** Alert bodies match a closed schema with
     table-sourced reason codes, and the secret-pattern families find nothing
     in generated payloads. Registered as `gate.ops.alert_payload_closed`,

@@ -26,7 +26,10 @@ be reached from a phone without the native client.
 ## Proposed decisions
 
 1. **A Surface is a Device with an empty capability set.** One `devices` row
-   per configured bot, `kind = telegram`; no second model, as ADR-0034 decided.
+   per configured bot with `kind = surface`, `platform = telegram`, and
+   `push_provider = telegram` — the kind and provider Milestone 12's closed
+   enums declare for this purpose — so the row is representable by the
+   Milestone 12 contract; no second model, as ADR-0034 decided.
 2. **Long polling, not a webhook.** The API stays loopback-only behind the
    proxy; the surface role polls, resumes from the last committed update, and
    holds a per-surface advisory lock so two workers are safe. A webhook is a
@@ -34,7 +37,9 @@ be reached from a phone without the native client.
 3. **A dedicated least-privilege `surface` role holds the bot token.** The
    token comes from an owner-only private file into a secret field, never the
    credential map; the role has the database credential and nothing else; it
-   also drains the surface's outbound rows so the token lives in one process.
+   runs Milestone 12's dispatcher for the Telegram provider only (dispatch is
+   partitioned by provider) and drains the surface-reply outbox, so the token
+   lives in one process and the push key in another.
 4. **Pairing as ADR-0017 decided, given a home.** A one-time code minted by an
    authenticated principal with `surface.write`, at least forty bits, salted
    hash, ten-minute expiry, five attempts, one-hour per-sender lockout,
@@ -65,7 +70,10 @@ be reached from a phone without the native client.
     secret-rule families and chunked to Telegram's limit with per-chunk
     progress; approvals by `/approve` and `/deny` through the existing service;
     questions by a plain reply through the existing input rule; inline
-    keyboards deferred.
+    keyboards deferred. Because notification payloads are content-free, the
+    surface role reads question text and approval summaries through the
+    existing application services as the paired principal under the pairing's
+    scopes, and sends a generic notice when it lacks them.
 11. **Two scopes, six routes, two flags, default-off.** `surface.read`,
     `surface.write`; pairing routes and CLI; `AGENT_SURFACE_API_ENABLED` and
     `AGENT_SURFACE_WORKER_ENABLED` changing together.

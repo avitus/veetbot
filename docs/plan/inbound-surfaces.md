@@ -43,8 +43,10 @@ a paired sender reaches the agent from a messaging channel, and through which
 the agent replies. It includes:
 
 - a Surface registry on the Milestone 12 device registry — one `devices` row
-  per configured bot with `kind = telegram` and an empty capability set — and
-  an inbound transport port with a Telegram long-polling adapter;
+  per configured bot with `kind = surface`, `platform = telegram`, and
+  `push_provider = telegram`, the kind and provider Milestone 12's closed
+  enums declare for this purpose — and an inbound transport port with a
+  Telegram long-polling adapter;
 - a least-privilege `surface` role that holds the bot token and the database
   credential and nothing else;
 - the pairing ceremony: a one-time code minted by an authenticated principal,
@@ -145,19 +147,23 @@ adapter maps every transport failure into a closed `surface.*` vocabulary and
 scrubs request targets from exceptions before anything is logged.
 
 The role runs two loops: the inbound poll and an outbound drain of the
-surface's rows — Milestone 12 notification rows targeted at the surface's
-device and the surface-reply outbox rows below — so the token lives in exactly
-one process. The `notify` role never drains Telegram rows and the `surface`
-role never loads the push key.
+surface's rows — it runs Milestone 12's dispatcher with `providers =
+{telegram}` against the notification outbox, and drains the surface-reply
+outbox below — so the token lives in exactly one process. The `notify` role
+claims only rows with an APNs target, the `surface` role only rows with a
+Telegram target, and neither loads the other's secret.
 
 ## Domain model
 
 ### Surface
 
-A Surface is a `Device` with `kind = telegram`, `capabilities` empty, and a
-presence that is the poller's last successful poll. Registering a surface
-inserts its device row and appends `surface.registered`; nothing else about
-the device model changes.
+A Surface is a `Device` with `kind = surface` (the Section 29 kind Milestone
+12 declares), `platform = telegram`, `push_provider = telegram`, the paired
+chat reference as its routing token, an empty capability set, and a presence
+that is the poller's last successful poll. Registering a surface inserts its
+device row and appends `surface.registered`; nothing else about the device
+model changes. The Telegram outbound adapter is a second implementation of
+Milestone 12's `PushTransport`, living in the surface role.
 
 ### Pairing
 
@@ -361,10 +367,20 @@ code only, never provider text. Artifacts are referenced by name and
 identifier.
 
 Milestone 12's notifications still travel the Milestone 12 outbox and are
-drained by the surface role for the surface device: its `run.waiting_for_user`
-notification reaches the chat as the question text; a plain reply is routed to the waiting run as input by the
-existing rule. Its `approval.requested` notification reaches the chat as
-"Approval needed" with a short identifier; `/approve <id>` and `/deny <id>`
+drained by the surface role for the surface device. The payload is
+content-free — it carries a `question_id` or `approval_id` and no text — so the
+surface role performs an authenticated detail read before it sends: as the
+paired principal, with the pairing's intersected scopes, through the same
+application services the API serves, it reads the question text from the run's
+`run.waiting_for_user` event (which requires `run.read` among the granted
+scopes) and the approval's summary from the approval service (which requires
+`approval.read`); if the pairing lacks the scope, it sends a generic notice
+("The agent has a question" / "Approval needed") with the identifier instead.
+Every detail read is redacted before it leaves. With that, its
+`run.waiting_for_user` notification reaches the chat as the question text; a
+plain reply is routed to the waiting run as input by the existing rule. Its
+`approval.requested` notification reaches the chat as "Approval needed" with
+the summary and a short identifier; `/approve <id>` and `/deny <id>`
 resolve through the existing approval service, idempotently, first wins, and
 a sender whose intersected scopes lack `approval.resolve` is refused. Inline
 keyboards are deferred: text commands give the same authority with no new

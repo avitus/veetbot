@@ -665,11 +665,18 @@ class ProviderAssistedCandidateExtractor:
                 or usage.cost > self._budget.maximum_cost_usd
             ):
                 raise ValueError("memory extraction model exceeded its recorded budget")
-            grounded = [
-                _render_claim(claim, scope)
-                for claim in batch.candidates
-                if self._claim_is_grounded(claim, events, principal)
-            ]
+            grounded: list[MemoryCandidate] = []
+            for claim in batch.candidates:
+                if not self._claim_is_grounded(claim, events, principal):
+                    continue
+                try:
+                    grounded.append(_render_claim(claim, scope))
+                except ValueError:
+                    # One malformed claim must not discard the rest of the batch.
+                    logger.warning(
+                        "memory_provider_claim_render_failed",
+                        extra={"claim_kind": claim.claim_kind.value, "job_id": str(job_id)},
+                    )
         except asyncio.CancelledError:
             audit_task = asyncio.create_task(
                 self._audit(
@@ -759,9 +766,11 @@ class ProviderAssistedCandidateExtractor:
             return False
         cited = [by_sequence[sequence] for sequence in claim.source_event_ids]
         quote = claim.evidence_quote
-        if not quote.strip() or not any(quote in source for source in cited):
+        quoted = [source for source in cited if quote in source]
+        if not quote.strip() or not quoted:
             return False
-        source_tokens = grounding_tokens(" ".join(cited))
+        # Ground against the episode(s) that hold the quote, never a sibling.
+        source_tokens = grounding_tokens(" ".join(quoted))
         if (
             claim.claim_kind
             in {

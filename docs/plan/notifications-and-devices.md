@@ -118,10 +118,12 @@ class DeviceKind(StrEnum):
     DESKTOP = "desktop"
     WEB = "web"
     CLI = "cli"
+    SURFACE = "surface"    # a Section 29 Surface (Milestone 14): a messaging channel, no local capabilities
 
 
 class PushProvider(StrEnum):
     APNS = "apns"
+    TELEGRAM = "telegram"  # Milestone 14: the token is the chat reference resolved at pairing
 
 
 class PushEnvironment(StrEnum):
@@ -158,7 +160,12 @@ class Device(BaseModel):
 
 `client_device_id` is minted once by the client, persisted in the client's
 keychain beside the bearer token, and is stable across token rotation and app
-updates; it is unique per principal. `push_token`, `push_provider`, and
+updates; it is unique per principal. A `surface` device is the exception
+Milestone 14 defines: its identity is minted by the surface role, its
+`platform` names the channel, and its `push_provider` is `telegram`, with the
+paired chat reference as the routing token — declared here so that a Surface
+row is representable by this contract and the dispatcher can partition by
+provider. `push_token`, `push_provider`, and
 `push_environment` are present together or absent together. The token is a
 secret value: it is returned to no client, appears in no event or log, and
 device views carry a six-character fingerprint of it. `muted_kinds` is the
@@ -243,7 +250,15 @@ run.failed:{run_id}
 schedule.run_accounted:{occurrence_id}
 schedule.occurrence.skipped:{occurrence_id}
 device.test:{device_id}:{idempotency_key}
+ops.{tenant_id}.{signal}.{episode}             # Milestone 15 alert
+ops.{tenant_id}.{signal}.{episode}.recovered   # Milestone 15 recovery
 ```
+
+The two ops forms are scoped by tenant and by *alert episode* — the health
+check's per-signal counter that increments each time a signal fails after
+having recovered — so a recovered-then-failing signal is a new notification,
+and the recovery of one episode can never be deduplicated away by the alert of
+the next.
 
 The database enforces `UNIQUE(dedupe_key)`. A retry after an unknown commit,
 a repeated hook invocation, or a second process recording the same transition
@@ -268,7 +283,7 @@ class NotificationPayload(BaseModel):
     occurrence_id: UUID | None
     notification_id: UUID
     signal: str | None            # ops kinds only: a declared health signal
-    severity: str | None          # ops kinds only: warn | critical | recovered
+    severity: str | None          # ops kinds only: info | warn | critical | recovered
     reason_code: str | None       # ops kinds only: from the checked-in table
     release_id: str | None        # ops kinds only
 ```
@@ -329,17 +344,22 @@ interactive run finished is, by construction, watching it. A surface reply
 (Milestone 14) is a separate outbox class, not a notification. The one
 producer that is not a run or schedule transition is Milestone 15's host
 health check, which enqueues only the `ops_alert` and `ops_recovered` kinds
-through the outbox port with its own deduplication keys (`ops.<signal>`) and
-cool-down; it adds no trigger to the five above.
+through the outbox port with its own tenant- and episode-scoped deduplication
+keys and cool-down; it adds no trigger to the five above.
 
 ## Dispatch
 
 The `notify` role runs `NotificationDispatcher.run_once()` in bounded batches.
 For each claimed row it:
 
-1. Claims pending rows whose `next_attempt_at` is due with
-   `FOR UPDATE SKIP LOCKED`, stamping `claimed_by` and a lease `claimed_until`,
-   in the manner of the schedule worker's `lock_due`.
+1. Claims pending rows whose `next_attempt_at` is due and that have an
+   undelivered target for a provider the calling role can deliver — the
+   `notify` role passes `{apns}`, the Milestone 14 surface role `{telegram}` —
+   with `FOR UPDATE SKIP LOCKED`, stamping `claimed_by` and a lease
+   `claimed_until`, in the manner of the schedule worker's `lock_due`. Dispatch
+   is partitioned by provider so that each role holds exactly one secret; a row
+   is settled only when no provider has an undelivered target, and the
+   per-attempt ledger keeps two roles' attempts from colliding.
 2. Checks staleness against the row's identifiers: an approval already
    resolved or expired, a question already answered, a run no longer waiting,
    or a session that no longer exists settles the row `superseded` with no
@@ -439,7 +459,7 @@ class DeviceRegistry(Protocol):
 
 class NotificationOutbox(Protocol):
     async def enqueue(self, notification: NewNotification) -> Notification | None: ...
-    async def claim_due(self, now: datetime, limit: int, claimant: str, lease_seconds: float) -> list[Notification]: ...
+    async def claim_due(self, now: datetime, limit: int, claimant: str, lease_seconds: float, providers: frozenset[PushProvider]) -> list[Notification]: ...
     async def record_delivery(self, delivery: NotificationDelivery) -> None: ...
     async def settle(self, notification_id: UUID, status: NotificationStatus, next_attempt_at: datetime | None) -> None: ...
     async def list(self, principal: Principal, page: Page) -> Page[Notification]: ...
