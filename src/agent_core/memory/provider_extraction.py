@@ -769,8 +769,17 @@ class ProviderAssistedCandidateExtractor:
         quoted = [source for source in cited if quote in source]
         if not quote.strip() or not quoted:
             return False
-        # Ground against the episode(s) that hold the quote, never a sibling.
-        source_tokens = grounding_tokens(" ".join(quoted))
+        # Every required field must be supported by one episode that holds the
+        # quote; tokens are never combined across episodes, so a short quote
+        # repeated in several episodes cannot split the evidence between them.
+        return any(
+            ProviderAssistedCandidateExtractor._claim_fields_grounded_in(claim, source)
+            for source in quoted
+        )
+
+    @staticmethod
+    def _claim_fields_grounded_in(claim: _SemanticClaim, source: str) -> bool:
+        source_tokens = grounding_tokens(source)
         if (
             claim.claim_kind
             in {
@@ -812,7 +821,8 @@ class ProviderAssistedCandidateExtractor:
                 and claim.quantity == 1
                 and grounding_tokens(claim.subject) <= source_tokens
             )
-            if not implicit_single_relation and not quantity_markers & grounding_tokens(quote):
+            quote_tokens = grounding_tokens(claim.evidence_quote)
+            if not implicit_single_relation and not quantity_markers & quote_tokens:
                 return False
         return True
 

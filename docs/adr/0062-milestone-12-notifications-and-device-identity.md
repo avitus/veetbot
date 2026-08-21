@@ -66,8 +66,9 @@ was already partly superseded once by ADR-0050 for local history.
    `BadDeviceToken` invalidate the token once and audit it. The HTTP client's
    `h2` extra is the one new dependency this milestone introduces.
 8. **The `Device` table lands now; the channel does not.** Registry, refresh,
-   revoke, delete, a client-minted installation identity unique per principal,
-   a partial unique index on live tokens, and per-device muted kinds.
+   revoke, delete, a client-minted installation identity unique per principal (except that
+   Surface identity is minted by the `surface` role, per ADR-0064), a partial
+   unique index on live tokens, and per-device muted kinds.
    `capabilities` and `granted_scopes` from Section 29.6 wait for a consumer.
    The closed enums declare `DeviceKind.SURFACE` and `PushProvider.TELEGRAM`
    for Milestone 14, and dispatch is partitioned by provider so that the

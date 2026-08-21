@@ -2011,3 +2011,43 @@ async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
         ProviderAssistedCandidateExtractor._claim_is_grounded(claim, events, principal())
         is grounded
     )
+
+
+@pytest.mark.parametrize(
+    ("episodes", "quote", "grounded"),
+    [
+        (("I prefer concise answers.", "I use NASA data."), "I", False),
+        (("I prefer concise answers for NASA data.", "I use NASA data."), "I", True),
+    ],
+)
+async def test_provider_grounding_requires_one_episode_to_carry_every_field(
+    episodes: tuple[str, ...],
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A short quote repeated across episodes cannot let one episode supply the
+    value and another the context; a single quoted episode must carry them all."""
+    from agent_core.memory.provider_extraction import MemoryClaimKind, _SemanticClaim
+
+    _clock, factory, _service, _retriever = await formation_stack()
+    sources = [await user_event(factory, text) for text in episodes]
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind("user_preference"),
+        subject="answers",
+        value="concise",
+        context="NASA",
+        quantity=None,
+        evidence_quote=quote,
+        polarity=Polarity("assert"),
+        source_event_ids=sources,
+        model_confidence=0.9,
+        proposed_portability=Portability("contextual"),
+        sensitivity_guess=Sensitivity("internal"),
+        valid_from=None,
+        expires_hint=None,
+    )
+    events = await session_events(factory)
+    assert (
+        ProviderAssistedCandidateExtractor._claim_is_grounded(claim, events, principal())
+        is grounded
+    )

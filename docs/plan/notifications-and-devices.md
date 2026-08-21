@@ -165,9 +165,10 @@ Milestone 14 defines: its identity is minted by the surface role, its
 `platform` names the channel, and its `push_provider` is `telegram`, with the
 paired chat reference as the routing token — declared here so that a Surface
 row is representable by this contract and the dispatcher can partition by
-provider. `push_token`, `push_provider`, and
-`push_environment` are present together or absent together. The token is a
-secret value: it is returned to no client, appears in no event or log, and
+provider. `push_token` and `push_provider` are present together or absent together;
+`push_environment` is required when `push_provider` is `apns` and must be null
+for any other provider — a Telegram Surface has no sandbox or production host.
+The token is a secret value: it is returned to no client, appears in no event or log, and
 device views carry a six-character fingerprint of it. `muted_kinds` is the
 per-device preference: a phone can be loud and a laptop quiet without a third
 table. `status = revoked` requires `revoked_at` and a null token.
@@ -283,7 +284,7 @@ class NotificationPayload(BaseModel):
     occurrence_id: UUID | None
     notification_id: UUID
     signal: str | None            # ops kinds only: a declared health signal
-    severity: str | None          # ops kinds only: info | warn | critical | recovered
+    severity: Literal["info", "warn", "critical", "recovered"] | None   # ops kinds only
     reason_code: str | None       # ops kinds only: from the checked-in table
     release_id: str | None        # ops kinds only
 ```
@@ -292,8 +293,9 @@ class NotificationPayload(BaseModel):
 agent has a question", "Run failed", "Scheduled run finished", "Scheduled run skipped", "Production alert", "Production recovered", "Test
 notification" — and `status` is a closed-enum disposition or run status. The
 four ops fields are null for every kind but the two ops kinds, for which
-`signal` is one of the declared health signals, `severity` is closed, and
-`reason_code` comes from the checked-in table — never free text. `tool_name` is registry vocabulary (`domain.verb`), never user
+`signal` is one of the declared health signals, `severity` is the literal set
+`info | warn | critical | recovered` that the model enforces before enqueue,
+and `reason_code` comes from the checked-in table — never free text. `tool_name` is registry vocabulary (`domain.verb`), never user
 content. The model has no extra fields. What the payload never carries:
 message text, tool arguments, an approval's `action_summary`, question text, a
 failure `message`, a schedule's `title` or `instruction`, reasoning, or a
@@ -370,9 +372,14 @@ For each claimed row it:
    `muted_kinds` excludes the row's kind.
 5. Calls `PushTransport.deliver` once per target and writes one
    `NotificationDelivery` row per attempt.
-6. Settles the row: `dispatched` when at least one target accepted or no target
-   exists; `pending` with the next backoff instant when every target returned
-   `RETRY`; `failed` when the attempt ceiling is reached.
+6. Settles the row only when no provider has an undelivered target. After
+   delivering its own provider's targets it records each attempt in the
+   ledger; if another provider still has an undelivered target it releases the
+   claim without settling so that provider's role can claim the row; once
+   every target across every provider has a terminal delivery row (or no
+   target exists) the row is `dispatched`, or `failed` when any target ended
+   at its attempt ceiling; a target that returned `RETRY` leaves the row
+   `pending` with the next backoff instant for that provider.
 
 The transport's outcome vocabulary is closed and mapped deliberately. A
 transport 5xx, 429, network failure, or expired provider token is `RETRY` — the
@@ -547,9 +554,10 @@ notification_deliveries
   UNIQUE (notification_id, device_id, attempt)
 ```
 
-Check constraints enforce that `push_provider`, `push_token`, and
-`push_environment` are null together or present together, that `status =
-revoked` implies `revoked_at` and a null token, and that `muted_kinds` holds
+Check constraints enforce that `push_provider` and `push_token` are null
+together or present together, that `push_environment` is present exactly when
+`push_provider` is `apns`, that `status = revoked` implies `revoked_at` and a
+null token, and that `muted_kinds` holds
 only declared kinds. A partial unique index on `(push_provider, push_token)
 WHERE push_token IS NOT NULL AND status = 'active'` makes one live token belong
 to at most one active device; a token re-registered from a fresh installation
@@ -760,8 +768,8 @@ content, tokens, or the key.
    token. Registered as `gate.device.lifecycle_audited`, case. **M12.**
 5. **The device and notification schema encodes its trust boundaries.**
    Metadata inspection proves primary and foreign keys, the partial unique
-   token index, the together-or-absent token constraints, the dispatch and
-   listing indexes, and row-level security on all three tables. Registered as
+   token index, the provider-specific push-field constraints, the dispatch
+   and listing indexes, and row-level security on all three tables. Registered as
    `gate.device.persistence_schema`, structural. **M12.**
 6. **Device and notification persistence is principal isolated.** Row-level
    security and repository predicates prevent cross-tenant and
