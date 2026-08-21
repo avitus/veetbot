@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import re
 from datetime import datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from enum import StrEnum
@@ -51,8 +50,6 @@ PROVIDER_EXTRACTOR_VERSION = "provider-assisted-v2"
 PROVIDER_FORMATION_POLICY_VERSION = "formation@4"
 
 logger = logging.getLogger(__name__)
-_NAMED_OR_NUMERIC_TOKEN = re.compile(r"\b(?:[A-Z][A-Za-z0-9'-]*|\d[\d.-]*)\b")
-_IGNORED_GROUNDING_TOKENS = frozenset({"User", "User's", "The"})
 
 
 def provider_extraction_evidence_matches(
@@ -371,6 +368,16 @@ def _event_text(event: EventEnvelope) -> str:
     return "\n".join(texts).strip()
 
 
+def _source_text_by_sequence(events: list[EventEnvelope], principal: Principal) -> dict[int, str]:
+    return {
+        event.sequence: _event_text(event)
+        for event in events
+        if event.event_type == "user.message.created"
+        and event.actor_type == "principal"
+        and event.actor_id == principal.principal_id
+    }
+
+
 def _assistant_text(turn: ModelTurn) -> str:
     if turn.stop_reason is not StopReason.END_TURN or turn.tool_calls:
         raise ValueError("memory extraction model did not return one final document")
@@ -650,11 +657,24 @@ class ProviderAssistedCandidateExtractor:
                 or usage.cost > self._budget.maximum_cost_usd
             ):
                 raise ValueError("memory extraction model exceeded its recorded budget")
-            grounded = [
-                _render_claim(claim, scope)
-                for claim in batch.candidates
-                if self._claim_is_grounded(claim, events, principal)
-            ]
+            source_text_by_sequence = _source_text_by_sequence(events, principal)
+            grounded: list[MemoryCandidate] = []
+            render_failure_count = 0
+            for claim in batch.candidates:
+                if not self._claim_is_grounded(claim, source_text_by_sequence):
+                    continue
+                try:
+                    grounded.append(_render_claim(claim, scope))
+                except ValueError:
+                    render_failure_count += 1
+            if render_failure_count:
+                logger.warning(
+                    "memory_provider_claim_render_failed",
+                    extra={
+                        "job_id": str(job_id),
+                        "rejected_candidate_count": render_failure_count,
+                    },
+                )
         except asyncio.CancelledError:
             audit_task = asyncio.create_task(
                 self._audit(
@@ -730,19 +750,11 @@ class ProviderAssistedCandidateExtractor:
     @staticmethod
     def _claim_is_grounded(
         claim: _SemanticClaim,
-        events: list[EventEnvelope],
-        principal: Principal,
+        source_text_by_sequence: dict[int, str],
     ) -> bool:
-        by_sequence = {
-            event.sequence: _event_text(event)
-            for event in events
-            if event.event_type == "user.message.created"
-            and event.actor_type == "principal"
-            and event.actor_id == principal.principal_id
-        }
-        if any(sequence not in by_sequence for sequence in claim.source_event_ids):
+        if any(sequence not in source_text_by_sequence for sequence in claim.source_event_ids):
             return False
-        cited = [by_sequence[sequence] for sequence in claim.source_event_ids]
+        cited = [source_text_by_sequence[sequence] for sequence in claim.source_event_ids]
         quote = claim.evidence_quote
         if not quote.strip() or not any(quote in source for source in cited):
             return False
@@ -791,36 +803,6 @@ class ProviderAssistedCandidateExtractor:
             if not implicit_single_relation and not quantity_markers & source_tokens:
                 return False
         return True
-
-    @staticmethod
-    def _is_grounded(
-        candidate: MemoryCandidate,
-        events: list[EventEnvelope],
-        principal: Principal,
-        scope: str,
-    ) -> bool:
-        if candidate.proposed_scope != scope:
-            return False
-        by_sequence = {
-            event.sequence: _event_text(event)
-            for event in events
-            if event.event_type == "user.message.created"
-            and event.actor_type == "principal"
-            and event.actor_id == principal.principal_id
-        }
-        if any(sequence not in by_sequence for sequence in candidate.source_event_ids):
-            return False
-        source = " ".join(by_sequence[sequence] for sequence in candidate.source_event_ids)
-        source_tokens = grounding_tokens(source)
-        subject_tokens = grounding_tokens(candidate.subject)
-        if subject_tokens and not any(token in source_tokens for token in subject_tokens):
-            return False
-        named = {
-            token
-            for token in _NAMED_OR_NUMERIC_TOKEN.findall(candidate.statement)
-            if token not in _IGNORED_GROUNDING_TOKENS
-        }
-        return all(token.casefold() in source_tokens for token in named)
 
     @staticmethod
     def _instructions() -> str:

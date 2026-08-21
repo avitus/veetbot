@@ -75,8 +75,11 @@ write_stub systemctl '
 '
 write_stub mv '
   if [[ "${1:-}" == -Tf ]]; then
-    rm -f -- "$3"
-    /bin/mv -f "$2" "$3"
+    if [[ "$OSTYPE" == darwin* ]]; then
+      /bin/mv -hf "$2" "$3"
+    else
+      /bin/mv -Tf "$2" "$3"
+    fi
   else
     /bin/mv "$@"
   fi
@@ -151,6 +154,57 @@ printf 'VEETBOT_RELEASE_ID=%s\n' "$next_release_id" \
   >"$DEPLOY_ROOT/releases/$next_release_id/.release.env"
 ln -sfn "$DEPLOY_ROOT/releases/$next_release_id" "$DEPLOY_ROOT/current"
 
+MISSING_RELEASE_DOCS_SOURCE="$TEST_ROOT/missing-release-docs-source"
+MISSING_RELEASE_DOCS_ARCHIVE="$TEST_ROOT/missing-release-docs.tar.gz"
+MISSING_RELEASE_DOCS_CHECKSUM="$MISSING_RELEASE_DOCS_ARCHIVE.sha256"
+mkdir -p "$MISSING_RELEASE_DOCS_SOURCE"
+printf '<h1>Missing release identity</h1>\n' \
+  >"$MISSING_RELEASE_DOCS_SOURCE/index.html"
+tar -czf "$MISSING_RELEASE_DOCS_ARCHIVE" -C "$MISSING_RELEASE_DOCS_SOURCE" .
+(
+  cd "$(dirname "$MISSING_RELEASE_DOCS_ARCHIVE")"
+  sha256sum "$(basename "$MISSING_RELEASE_DOCS_ARCHIVE")" \
+    >"$(basename "$MISSING_RELEASE_DOCS_CHECKSUM")"
+)
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "$MISSING_RELEASE_DOCS_ARCHIVE" \
+  "$MISSING_RELEASE_DOCS_CHECKSUM" >"$TEST_ROOT/missing-release.out" 2>&1; then
+  printf 'documentation archive without release.txt unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fqx \
+  'nginx deployment failed: documentation archive release.txt does not match expected release' \
+  "$TEST_ROOT/missing-release.out"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
+MISMATCHED_RELEASE_DOCS_SOURCE="$TEST_ROOT/mismatched-release-docs-source"
+MISMATCHED_RELEASE_DOCS_ARCHIVE="$TEST_ROOT/mismatched-release-docs.tar.gz"
+MISMATCHED_RELEASE_DOCS_CHECKSUM="$MISMATCHED_RELEASE_DOCS_ARCHIVE.sha256"
+mkdir -p "$MISMATCHED_RELEASE_DOCS_SOURCE"
+printf '<h1>Mismatched release identity</h1>\n' \
+  >"$MISMATCHED_RELEASE_DOCS_SOURCE/index.html"
+printf '20260810-152255-cdef012\n' \
+  >"$MISMATCHED_RELEASE_DOCS_SOURCE/release.txt"
+tar -czf "$MISMATCHED_RELEASE_DOCS_ARCHIVE" \
+  -C "$MISMATCHED_RELEASE_DOCS_SOURCE" .
+(
+  cd "$(dirname "$MISMATCHED_RELEASE_DOCS_ARCHIVE")"
+  sha256sum "$(basename "$MISMATCHED_RELEASE_DOCS_ARCHIVE")" \
+    >"$(basename "$MISMATCHED_RELEASE_DOCS_CHECKSUM")"
+)
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "$MISMATCHED_RELEASE_DOCS_ARCHIVE" \
+  "$MISMATCHED_RELEASE_DOCS_CHECKSUM" >"$TEST_ROOT/mismatched-release.out" 2>&1; then
+  printf 'documentation archive with mismatched release.txt unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fqx \
+  'nginx deployment failed: documentation archive release.txt does not match expected release' \
+  "$TEST_ROOT/mismatched-release.out"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
 UNSAFE_DOCS_SOURCE="$TEST_ROOT/unsafe-docs-source"
 UNSAFE_DOCS_ARCHIVE="$TEST_ROOT/unsafe-docs.tar.gz"
 UNSAFE_DOCS_CHECKSUM="$UNSAFE_DOCS_ARCHIVE.sha256"
@@ -165,10 +219,13 @@ tar -czf "$UNSAFE_DOCS_ARCHIVE" -C "$UNSAFE_DOCS_SOURCE" .
 )
 if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
   "$SOURCE_CONFIG" "$UNSAFE_DOCS_ARCHIVE" "$UNSAFE_DOCS_CHECKSUM" \
-  >/dev/null 2>&1; then
+  >"$TEST_ROOT/unsafe-docs.out" 2>&1; then
   printf 'documentation archive with a symlink unexpectedly succeeded\n' >&2
   exit 1
 fi
+grep -Fqx \
+  'nginx deployment failed: documentation archive contains a non-file entry' \
+  "$TEST_ROOT/unsafe-docs.out"
 [[ "$(readlink "$DOCS_ROOT/current")" == \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
 

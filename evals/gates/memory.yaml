@@ -85,7 +85,7 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Provider provenance boundary** — provider proposals remain proposals: invented source ids cannot pass the governed service's provenance check."
+  statement: "**Provider provenance boundary** — provider proposals remain proposals: invented source ids and secret-shaped source content cannot pass the governed service's provenance and safety checks."
   check: tests/unit/test_memory_provider_extraction.py::test_provider_proposals_still_pass_source_and_secret_gates
 - id: gate.memory.provider_audit_fallback
   milestone: 10

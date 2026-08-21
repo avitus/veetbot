@@ -605,7 +605,8 @@ first formation layer (Section 20).
     model policy, provider, model, policy profile, and compiled policy version;
     a mismatch in any field does not activate it. **M10.**
 14. **Provider provenance boundary** — provider proposals remain proposals:
-    invented source ids cannot pass the governed service's provenance check.
+    invented source ids cannot pass the governed service's provenance check,
+    and secret-shaped source content cannot pass its safety checks.
     **M10.**
 15. **Audited deterministic fallback** — a failed provider attempt records a
     content-free failed audit and returns the independently derived deterministic

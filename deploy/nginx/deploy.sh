@@ -20,6 +20,13 @@ fail() {
   exit 1
 }
 
+docs_release_identity_matches() {
+  local release_file="$1"
+  [[ -f "$release_file" ]] || return 1
+  [[ "$(awk 'END { print NR }' "$release_file")" == 1 ]] || return 1
+  [[ "$(<"$release_file")" == "$EXPECTED_RELEASE_ID" ]]
+}
+
 [[ -n "$SOURCE_CONFIG" && -f "$SOURCE_CONFIG" ]] || fail \
   "pass the repository Nginx configuration as the first argument"
 [[ "$DEPLOY_ROOT" = /* && "$DEPLOY_ROOT" != / ]] || fail \
@@ -171,14 +178,17 @@ if [[ -n "$DOCS_ARCHIVE" ]]; then
     [[ -d "$DOCS_RELEASE" \
       && -f "$DOCS_RELEASE/index.html" \
       && -f "$DOCS_RELEASE/.artifact-sha256" \
-      && "$(<"$DOCS_RELEASE/.artifact-sha256")" == "$EXPECTED_DIGEST" ]] || fail \
-      "existing documentation release is incomplete or has a different checksum"
+      && "$(<"$DOCS_RELEASE/.artifact-sha256")" == "$EXPECTED_DIGEST" ]] \
+      && docs_release_identity_matches "$DOCS_RELEASE/release.txt" || fail \
+      "existing documentation release is incomplete or has a different identity or checksum"
   else
     DOCS_STAGE="$DOCS_ROOT/.staging-$EXPECTED_RELEASE_ID-$$"
     mkdir -m 0755 "$DOCS_STAGE"
     tar --no-same-owner --no-same-permissions -xzf "$DOCS_ARCHIVE" -C "$DOCS_STAGE"
     [[ -f "$DOCS_STAGE/index.html" ]] || fail \
       "documentation archive does not contain index.html"
+    docs_release_identity_matches "$DOCS_STAGE/release.txt" || fail \
+      "documentation archive release.txt does not match expected release"
     printf '%s\n' "$EXPECTED_DIGEST" >"$DOCS_STAGE/.artifact-sha256"
     mv "$DOCS_STAGE" "$DOCS_RELEASE"
     DOCS_STAGE=""

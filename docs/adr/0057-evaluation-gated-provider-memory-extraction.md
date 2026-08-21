@@ -44,7 +44,8 @@ behavior.
    fail-closed deployment semantics and refuses startup without a matching
    artifact. A legacy explicit enable flag maps to `required` so an operator's
    demand is never silently weakened. Every artifact must cover at least twenty
-   labeled samples, fully support at least eighty percent of positive cases, and
+   labeled samples with at least twenty positive cases, fully support at least
+   eighty percent of positive cases, and
    demonstrate strictly more supported candidates than the deterministic baseline,
    zero fabricated candidates in either arm, and no increase in policy failures.
    The artifact schema derives the coverage minimum from the positive-case count;

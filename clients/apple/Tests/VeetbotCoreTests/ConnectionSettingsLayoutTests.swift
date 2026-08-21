@@ -29,9 +29,12 @@ import AppKit
             contentsOf: packageRoot.appendingPathComponent("Veetbot/VeetbotApp.swift"),
             encoding: .utf8
         )
+        let normalizedSource = source
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
 
-        #expect(source.contains("WindowGroup {\n            VeetbotSceneRoot("))
-        #expect(!source.contains("WindowGroup {\n            RootView("))
+        #expect(normalizedSource.contains("WindowGroup { VeetbotSceneRoot("))
+        #expect(!normalizedSource.contains("WindowGroup { RootView("))
         let rootTypeName = String(reflecting: VeetbotSceneRoot.self)
         #expect(rootTypeName.hasSuffix(".VeetbotSceneRoot"))
         #expect(!rootTypeName.contains("unknown context"))

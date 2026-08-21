@@ -43,8 +43,10 @@ from agent_core.domain.messages import (
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
+    MemoryClaimKind,
     ProviderAssistedCandidateExtractor,
     _merge_candidates,
+    _SemanticClaim,
     provider_extraction_evidence_matches,
 )
 from agent_core.policy.loader import load_ruleset_documents
@@ -559,6 +561,82 @@ async def test_provider_semantic_claims_render_canonical_memories(
     ] == [expected]
 
 
+async def test_provider_keeps_valid_grounded_claims_when_one_claim_cannot_render() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    source = await user_event(factory, "My telescope aperture is 3.5 inches.")
+    response = json.dumps(
+        {
+            "candidates": [
+                {
+                    "claim_kind": "user_attribute",
+                    "subject": "telescope aperture",
+                    "value": "3.5 inches",
+                    "context": None,
+                    "quantity": None,
+                    "evidence_quote": "telescope aperture is 3.5 inches",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.9,
+                    "proposed_portability": "contextual",
+                    "sensitivity_guess": "internal",
+                    "valid_from": None,
+                    "expires_hint": None,
+                },
+                {
+                    "claim_kind": "explanation_style",
+                    "subject": "answer style",
+                    "value": None,
+                    "context": "telescope aperture",
+                    "quantity": None,
+                    "evidence_quote": "telescope aperture is 3.5 inches",
+                    "polarity": "assert",
+                    "source_event_ids": [source],
+                    "model_confidence": 0.9,
+                    "proposed_portability": "contextual",
+                    "sensitivity_guess": "internal",
+                    "valid_from": None,
+                    "expires_hint": None,
+                },
+            ]
+        }
+    )
+    provider = FakeModelProvider(FakeModelScript(turns=[ScriptedTurn(text=response)]), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(7_050, 7_150)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    candidates = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert [(candidate.subject, candidate.statement) for candidate in candidates] == [
+        ("telescope aperture", "User's telescope aperture is 3.5 inches.")
+    ]
+    async with factory() as uow:
+        audits = await uow.process_events.list("memory.provider_extraction.completed")
+    assert audits[0].payload["outcome"] == "completed"
+    assert audits[0].payload["candidate_count"] == 2
+    assert audits[0].payload["grounded_candidate_count"] == 1
+
+
 async def test_provider_canonicalizes_go_hiking_without_losing_the_wife_fallback() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     source = await user_event(factory, "My wife and I go hiking most weekends.")
@@ -937,26 +1015,25 @@ async def test_provider_relationship_claim_requires_exact_grounding(
     assert audits[0].payload["grounded_candidate_count"] == 0
 
 
-async def test_provider_grounding_accepts_decimal_tokens_present_in_the_source() -> None:
-    _clock, factory, _service, _retriever = await formation_stack()
-    source = await user_event(factory, "My telescope aperture is 3.5 inches.")
-    candidate = MemoryCandidate(
-        belief_type=BeliefType.FACT,
+def test_provider_claim_grounding_accepts_decimal_tokens_present_in_the_source() -> None:
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind.USER_ATTRIBUTE,
         subject="telescope aperture",
-        statement="User's telescope aperture is 3.5 inches.",
+        value="3.5 inches",
+        context=None,
+        quantity=None,
+        evidence_quote="telescope aperture is 3.5 inches",
         polarity=Polarity.ASSERT,
-        source_event_ids=[source],
+        source_event_ids=[1],
         model_confidence=0.9,
-        proposed_scope="project-a",
         proposed_portability=Portability.CONTEXTUAL,
         sensitivity_guess=Sensitivity.INTERNAL,
+        valid_from=None,
+        expires_hint=None,
     )
 
-    assert ProviderAssistedCandidateExtractor._is_grounded(
-        candidate,
-        await session_events(factory),
-        principal(),
-        "project-a",
+    assert ProviderAssistedCandidateExtractor._claim_is_grounded(
+        claim, {1: "My telescope aperture is 3.5 inches."}
     )
 
 
