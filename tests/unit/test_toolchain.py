@@ -297,16 +297,17 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "SupplementaryGroups=docker" not in api
     assert "agent worker --role interactive" in worker
     assert "SupplementaryGroups=docker" not in worker
-    assert "/var/run/docker.sock" not in worker
     assert "agent worker --role async" in async_worker
     assert "SupplementaryGroups=docker" not in async_worker
-    assert "/var/run/docker.sock" not in async_worker
     assert "agent execution-service" in execution
     assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
     assert "SupplementaryGroups=docker" in execution
     assert "/run/docker.sock" in execution
     assert "/var/run/docker.sock" not in execution
+    for unit in (api, worker, async_worker, maintenance, scheduler):
+        assert "/run/docker.sock" not in unit
+        assert "/var/run/docker.sock" not in unit
     assert "EnvironmentFile=" not in execution
     assert "veetbot-execution.service" in worker
     assert "veetbot-execution.service" in async_worker
@@ -346,6 +347,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         for unit in (api, worker, async_worker, maintenance)
     )
     assert credential_source not in execution
+    assert credential_environment not in execution
 
 
 def test_deployment_accounts_and_documentation_are_separated() -> None:
@@ -360,6 +362,11 @@ def test_deployment_accounts_and_documentation_are_separated() -> None:
     assert "usermod -aG docker veetbot\n" not in deployment
     assert "chown -R veetbot-deploy:veetbot /opt/veetbot" in deployment
     assert "application services have no Docker-socket access" in normalized
+    assert (
+        "replace `/run/veetbot/execution.sock` with an authenticated network "
+        "transport while preserving the `ExecutionEnvironment` port"
+    ) in normalized
+    assert "without changing the port" not in deployment
     assert "public key for the `veetbot-deploy` account" in deployment
 
 
@@ -378,6 +385,23 @@ def test_documentation_verification_reads_the_resolved_release_identity() -> Non
 
     assert 'docs_release="$(readlink -f /opt/veetbot/docs/current)"' in deployment
     assert 'test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"' in deployment
+
+
+def test_manual_rollback_keeps_documentation_and_application_releases_aligned() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    manual = deployment.partition("## Manual rollback")[2].partition("## Accepted limitations")[0]
+    docs_precondition = 'test "$(cat "$docs_target/release.txt")" = "$target_id"'
+    app_switch = 'mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current'
+    docs_switch = 'mv -Tf "/opt/veetbot/docs/.rollback-$target_id" /opt/veetbot/docs/current'
+
+    assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
+    assert 'test -d "$docs_target"' in manual
+    assert 'test -f "$docs_target/release.txt"' in manual
+    assert docs_precondition in manual
+    assert 'ln -s "$docs_target" "/opt/veetbot/docs/.rollback-$target_id"' in manual
+    assert docs_switch in manual
+    assert manual.index(docs_precondition) < manual.index(app_switch)
+    assert manual.index(docs_precondition) < manual.index(docs_switch)
 
 
 def test_release_script_preserves_release_boundaries() -> None:

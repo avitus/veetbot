@@ -132,8 +132,10 @@ browser-profile service, and prunes release images. That trusted operator
 boundary is the explicit tradeoff in ADR-0062 decision 1; it is never an
 application systemd identity. Consequently neither an application process nor
 an application-launched container can modify the documentation release. On a
-multi-host deployment, move that execution service to the dedicated sandbox
-host described by ADR-0008 without changing the port.
+single host, workers reach the service at `/run/veetbot/execution.sock`. On a
+multi-host deployment, move the service to the dedicated sandbox host described
+by ADR-0008 and replace `/run/veetbot/execution.sock` with an authenticated
+network transport while preserving the `ExecutionEnvironment` port.
 
 The deploy key must log in as `veetbot-deploy`, so that account needs an executable
 shell. Restrict that key in `authorized_keys` to the CircleCI source and disable
@@ -393,20 +395,29 @@ fi
 
 target_id=YYYYMMDD-HHMMSS-abcdef0
 target="/opt/veetbot/releases/$target_id"
+docs_target="/opt/veetbot/docs/releases/$target_id"
 test -d "$target"
 test -f "$target/.release.env"
+test -d "$docs_target"
+test -f "$docs_target/release.txt"
+test "$(cat "$docs_target/release.txt")" = "$target_id"
 ln -s "$target" "/opt/veetbot/.rollback-$target_id"
+ln -s "$docs_target" "/opt/veetbot/docs/.rollback-$target_id"
 mv -Tf "/opt/veetbot/.rollback-$target_id" /opt/veetbot/current
+mv -Tf "/opt/veetbot/docs/.rollback-$target_id" /opt/veetbot/docs/current
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
 sudo systemctl restart \
   veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 curl --fail --show-error --dump-header - --output /dev/null \
   http://127.0.0.1:8000/health/ready
+test "$(cat /opt/veetbot/docs/current/release.txt)" = "$target_id"
 ```
 
 The returned `X-Veetbot-Release` must equal `target_id`, and each unit's
-`MainPID` working directory must resolve to `target`. If the older release image
-was pruned, rebuild it from that retained source tree before switching.
+`MainPID` working directory must resolve to `target`. The matching documentation
+release is a precondition, so a missing or mismatched `release.txt` fails before
+either symlink changes. If the older release image was pruned, rebuild it from
+that retained source tree before switching.
 
 Nginx backups are independent. To recover one, copy the selected file from
 `/etc/nginx/veetbot-backups` to `/etc/nginx/sites-available/veetbot`, run
