@@ -11,6 +11,12 @@ release below `/opt/veetbot/releases`. The same pipeline publishes the complete
 MkDocs site at `docs.veetbot.com` from a checksummed artifact tied to that
 release.
 
+The production deployment scripts require the Ubuntu GNU userland: Bash, GNU
+coreutils (including `mv -T` and `sha256sum`), GNU tar and findutils, and
+util-linux `flock`. Local macOS deployment-script tests require Homebrew
+coreutils so `gmv -Tf` exercises the same atomic replacement command as the
+production host; the test harness stubs privileged Nginx and systemd operations.
+
 The flow adapts the useful deployment invariants from
 [avitus/mankunku](https://github.com/avitus/mankunku) to Veetbot's Python and
 systemd runtime. ADR-0048 records the differences and security boundary.

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from enum import StrEnum
@@ -140,6 +141,12 @@ _DURATION_TOKENS = frozenset(
         "years",
     }
 )
+_RETRACTION_CUE = re.compile(
+    r"\b(?:do not|does not|don't|doesn't|gave up|have no|no longer|not|never|quit|stopped)\b",
+    re.IGNORECASE,
+)
+_VALID_FROM_CUE = re.compile(r"\b(?:effective|from|since|starting)\b", re.IGNORECASE)
+_EXPIRES_CUE = re.compile(r"\b(?:expires?|through|until)\b", re.IGNORECASE)
 
 
 class _SemanticClaim(BaseModel):
@@ -213,6 +220,26 @@ def _claim_value(claim: _SemanticClaim) -> str | None:
         raw = claim.subject
     value = "" if raw is None else raw.strip(" \t\n\r,.:;!?")
     return value or None
+
+
+def _occupation_is_user_attributed(source: str, value: str) -> bool:
+    occupation = re.escape(value.casefold())
+    patterns = (
+        rf"\bas\s+(?:an?\s+)?{occupation}\b[^.!?]*\bi\b",
+        rf"\bi(?:\s+am|'m|\u2019m)\s+(?:an?\s+)?{occupation}\b",
+        rf"\bi\s+work(?:ed|ing)?\s+as\s+(?:an?\s+)?{occupation}\b",
+        rf"\bmy\s+(?:career|job|occupation|profession)\s+is\s+(?:an?\s+)?{occupation}\b",
+    )
+    lowered = source.casefold()
+    return any(re.search(pattern, lowered) is not None for pattern in patterns)
+
+
+def _temporal_value_is_grounded(
+    value: datetime | None,
+    source: str,
+    cue: re.Pattern[str],
+) -> bool:
+    return value is None or (value.date().isoformat() in source and cue.search(source) is not None)
 
 
 def _required_value(claim: _SemanticClaim) -> str:
@@ -765,6 +792,12 @@ class ProviderAssistedCandidateExtractor:
 
     @staticmethod
     def _claim_fits_source(claim: _SemanticClaim, source: str) -> bool:
+        if claim.polarity is Polarity.RETRACT and _RETRACTION_CUE.search(source) is None:
+            return False
+        if not _temporal_value_is_grounded(claim.valid_from, source, _VALID_FROM_CUE):
+            return False
+        if not _temporal_value_is_grounded(claim.expires_hint, source, _EXPIRES_CUE):
+            return False
         source_tokens = grounding_tokens(source)
         if (
             claim.claim_kind
@@ -781,6 +814,10 @@ class ProviderAssistedCandidateExtractor:
         if claim_value is not None:
             value_tokens = grounding_tokens(claim_value)
             if not value_tokens <= source_tokens:
+                return False
+            if claim.claim_kind is MemoryClaimKind.OCCUPATION and not (
+                _occupation_is_user_attributed(source, claim_value)
+            ):
                 return False
             if (
                 claim.claim_kind is MemoryClaimKind.EXPLANATION_STYLE

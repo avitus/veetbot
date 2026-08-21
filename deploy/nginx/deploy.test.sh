@@ -21,6 +21,11 @@ DOCS_ROOT="$DEPLOY_ROOT/docs"
 DOCS_SOURCE="$TEST_ROOT/docs-source"
 DOCS_ARCHIVE="$TEST_ROOT/veetbot-docs.tar.gz"
 DOCS_CHECKSUM="$DOCS_ARCHIVE.sha256"
+GNU_MV="${VEETBOT_TEST_GNU_MV:-$(command -v gmv || command -v mv)}"
+if ! "$GNU_MV" --version 2>/dev/null | grep -Fq 'GNU coreutils'; then
+  printf 'nginx deployment tests require GNU mv (install coreutils on macOS)\n' >&2
+  exit 1
+fi
 mkdir -p \
   "$BIN_DIR" \
   "$DEPLOY_ROOT/shared" \
@@ -74,15 +79,7 @@ write_stub systemctl '
   fi
 '
 write_stub mv '
-  if [[ "${1:-}" == -Tf ]]; then
-    if [[ "$OSTYPE" == darwin* ]]; then
-      /bin/mv -hf "$2" "$3"
-    else
-      /bin/mv -Tf "$2" "$3"
-    fi
-  else
-    /bin/mv "$@"
-  fi
+  "$VEETBOT_TEST_GNU_MV" "$@"
 '
 
 run_deploy() {
@@ -97,6 +94,7 @@ run_deploy() {
   VEETBOT_TEST_SYSTEMCTL_FAIL_MARKER="$SYSTEMCTL_FAIL_MARKER" \
   VEETBOT_TEST_INSTALL_FAIL_MARKER="$INSTALL_FAIL_MARKER" \
   VEETBOT_TEST_SYMLINK_FAIL_MARKER="$SYMLINK_FAIL_MARKER" \
+  VEETBOT_TEST_GNU_MV="$GNU_MV" \
     "$DEPLOY_SCRIPT" \
       "${1:-$SOURCE_CONFIG}" \
       "${2:-}" \
@@ -153,6 +151,20 @@ mkdir -p "$DEPLOY_ROOT/releases/$next_release_id"
 printf 'VEETBOT_RELEASE_ID=%s\n' "$next_release_id" \
   >"$DEPLOY_ROOT/releases/$next_release_id/.release.env"
 ln -sfn "$DEPLOY_ROOT/releases/$next_release_id" "$DEPLOY_ROOT/current"
+
+MISMATCHED_CHECKSUM="$TEST_ROOT/mismatched-checksum.sha256"
+printf '%064d  %s\n' 0 "$(basename "$DOCS_ARCHIVE")" >"$MISMATCHED_CHECKSUM"
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "$DOCS_ARCHIVE" "$MISMATCHED_CHECKSUM" \
+  >"$TEST_ROOT/mismatched-checksum.out" 2>&1; then
+  printf 'documentation archive with a mismatched checksum unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fqx \
+  'nginx deployment failed: documentation archive checksum verification failed' \
+  "$TEST_ROOT/mismatched-checksum.out"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
 
 MISSING_RELEASE_DOCS_SOURCE="$TEST_ROOT/missing-release-docs-source"
 MISSING_RELEASE_DOCS_ARCHIVE="$TEST_ROOT/missing-release-docs.tar.gz"
@@ -229,6 +241,55 @@ grep -Fqx \
 [[ "$(readlink "$DOCS_ROOT/current")" == \
   "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
 
+ABSOLUTE_DOCS_SOURCE="$TEST_ROOT/absolute-entry"
+ABSOLUTE_DOCS_ARCHIVE="$TEST_ROOT/absolute-docs.tar.gz"
+ABSOLUTE_DOCS_CHECKSUM="$ABSOLUTE_DOCS_ARCHIVE.sha256"
+printf 'absolute archive entry\n' >"$ABSOLUTE_DOCS_SOURCE"
+tar -czPf "$ABSOLUTE_DOCS_ARCHIVE" "$ABSOLUTE_DOCS_SOURCE"
+(
+  cd "$(dirname "$ABSOLUTE_DOCS_ARCHIVE")"
+  sha256sum "$(basename "$ABSOLUTE_DOCS_ARCHIVE")" \
+    >"$(basename "$ABSOLUTE_DOCS_CHECKSUM")"
+)
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "$ABSOLUTE_DOCS_ARCHIVE" "$ABSOLUTE_DOCS_CHECKSUM" \
+  >"$TEST_ROOT/absolute-docs.out" 2>&1; then
+  printf 'documentation archive with an absolute path unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq \
+  'nginx deployment failed: documentation archive contains an unsafe path:' \
+  "$TEST_ROOT/absolute-docs.out"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
+PARENT_DOCS_SOURCE="$TEST_ROOT/parent-entry"
+PARENT_DOCS_WORK="$TEST_ROOT/parent-docs-work"
+PARENT_DOCS_ARCHIVE="$TEST_ROOT/parent-docs.tar.gz"
+PARENT_DOCS_CHECKSUM="$PARENT_DOCS_ARCHIVE.sha256"
+printf 'parent archive entry\n' >"$PARENT_DOCS_SOURCE"
+mkdir -p "$PARENT_DOCS_WORK"
+(
+  cd "$PARENT_DOCS_WORK"
+  tar -czPf "$PARENT_DOCS_ARCHIVE" ../parent-entry
+)
+(
+  cd "$(dirname "$PARENT_DOCS_ARCHIVE")"
+  sha256sum "$(basename "$PARENT_DOCS_ARCHIVE")" \
+    >"$(basename "$PARENT_DOCS_CHECKSUM")"
+)
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" run_deploy \
+  "$SOURCE_CONFIG" "$PARENT_DOCS_ARCHIVE" "$PARENT_DOCS_CHECKSUM" \
+  >"$TEST_ROOT/parent-docs.out" 2>&1; then
+  printf 'documentation archive with a parent path unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq \
+  'nginx deployment failed: documentation archive contains an unsafe path:' \
+  "$TEST_ROOT/parent-docs.out"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
 NEXT_DOCS_SOURCE="$TEST_ROOT/next-docs-source"
 NEXT_DOCS_ARCHIVE="$TEST_ROOT/next-docs.tar.gz"
 NEXT_DOCS_CHECKSUM="$NEXT_DOCS_ARCHIVE.sha256"
@@ -249,6 +310,20 @@ if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" \
     "$SOURCE_CONFIG" "$NEXT_DOCS_ARCHIVE" "$NEXT_DOCS_CHECKSUM" \
     >/dev/null 2>&1; then
   printf 'failed Nginx validation published documentation unexpectedly\n' >&2
+  exit 1
+fi
+grep -Fq 'return 200' "$AVAILABLE"
+[[ "$(readlink "$DOCS_ROOT/current")" == \
+  "$DOCS_ROOT/releases/20260810-152233-abcdef0" ]]
+
+printf 'server { return 200; }\n' >"$AVAILABLE"
+printf 'server { return 503; }\n' >"$SOURCE_CONFIG"
+rm -f -- "$SYSTEMCTL_FAIL_MARKER"
+if VEETBOT_EXPECTED_RELEASE_ID="$next_release_id" \
+  VEETBOT_TEST_SYSTEMCTL_FAIL_ONCE=1 run_deploy \
+    "$SOURCE_CONFIG" "$NEXT_DOCS_ARCHIVE" "$NEXT_DOCS_CHECKSUM" \
+    >/dev/null 2>&1; then
+  printf 'failed Nginx reload published documentation unexpectedly\n' >&2
   exit 1
 fi
 grep -Fq 'return 200' "$AVAILABLE"

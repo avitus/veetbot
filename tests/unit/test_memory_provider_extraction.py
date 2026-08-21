@@ -1063,6 +1063,82 @@ def test_provider_claim_grounding_rejects_cross_event_subject_value_mixing() -> 
     )
 
 
+@pytest.mark.parametrize(
+    ("source", "updates"),
+    [
+        (
+            "My friend is a marine biologist.",
+            {
+                "claim_kind": MemoryClaimKind.OCCUPATION,
+                "subject": "occupation",
+                "value": "marine biologist",
+                "quantity": None,
+                "evidence_quote": "marine biologist",
+            },
+        ),
+        ("I have a daughter.", {"polarity": Polarity.RETRACT}),
+        ("I have a daughter.", {"valid_from": NOW}),
+        ("I have a daughter.", {"expires_hint": NOW}),
+    ],
+)
+def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
+    source: str,
+    updates: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "claim_kind": MemoryClaimKind.RELATIONSHIP,
+        "subject": "daughter",
+        "value": None,
+        "context": None,
+        "quantity": 1,
+        "evidence_quote": "daughter",
+        "polarity": Polarity.ASSERT,
+        "source_event_ids": [1],
+        "model_confidence": 0.9,
+        "proposed_portability": Portability.CONTEXTUAL,
+        "sensitivity_guess": Sensitivity.INTERNAL,
+        "valid_from": None,
+        "expires_hint": None,
+    }
+    values.update(updates)
+    claim = _SemanticClaim.model_validate(values)
+
+    assert not ProviderAssistedCandidateExtractor._claim_is_grounded(claim, {1: source})
+
+
+@pytest.mark.parametrize(
+    ("source", "updates"),
+    [
+        ("I no longer have a daughter.", {"polarity": Polarity.RETRACT}),
+        ("Starting 2026-07-25, I have a daughter.", {"valid_from": NOW}),
+        ("I have a daughter until 2026-07-25.", {"expires_hint": NOW}),
+    ],
+)
+def test_provider_claim_grounding_accepts_supported_polarity_and_metadata(
+    source: str,
+    updates: dict[str, object],
+) -> None:
+    values: dict[str, object] = {
+        "claim_kind": MemoryClaimKind.RELATIONSHIP,
+        "subject": "daughter",
+        "value": None,
+        "context": None,
+        "quantity": 1,
+        "evidence_quote": "daughter",
+        "polarity": Polarity.ASSERT,
+        "source_event_ids": [1],
+        "model_confidence": 0.9,
+        "proposed_portability": Portability.CONTEXTUAL,
+        "sensitivity_guess": Sensitivity.INTERNAL,
+        "valid_from": None,
+        "expires_hint": None,
+    }
+    values.update(updates)
+    claim = _SemanticClaim.model_validate(values)
+
+    assert ProviderAssistedCandidateExtractor._claim_is_grounded(claim, {1: source})
+
+
 def test_provider_merge_preserves_opposite_polarities_for_conflict_resolution() -> None:
     def candidate(statement: str, polarity: Polarity) -> MemoryCandidate:
         return MemoryCandidate(
