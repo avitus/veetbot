@@ -4,6 +4,24 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-21 — Milestone 13 specified: general-purpose subagents and delegation
+
+- Added `docs/plan/subagents-and-delegation.md` and proposed ADR-0063:
+  `delegate.run` as a suspending control tool with a structured brief; a
+  dedicated child session and child run materialized in one transaction with
+  intersected scopes, subset tools, derived limits, and a bounded deadline;
+  the `CHILD_RUN` suspension and a join that completes the parent's
+  invocation once through a `requeue_after_child` edge in the single terminal
+  writer; additive usage with cost reserved at materialization; depth and
+  fan-out caps; a `delegations` ledger carrying the separate trace and
+  artifact references; cancellation cascading downward only; a default-off
+  flag; and the capability-scenario and case-32 evidence the plan's gate for
+  multi-agent work requires before tenant activation.
+- Registered twenty-one Milestone 13 gates in the new `delegate` area; the
+  registry grammar, declaring-spec census, milestone map, readiness review,
+  current milestone, project state, and cross-document pointers in the tool
+  system, run loop, evaluation harness, and policy designs follow.
+
 ## 2026-08-21 — Milestone 12 specified: notifications and device identity
 
 - Added `docs/plan/notifications-and-devices.md` and proposed ADR-0062: a

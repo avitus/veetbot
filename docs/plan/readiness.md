@@ -60,7 +60,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1977` states that device tools are *"a reserved
+    `tool-system.md:1980` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -86,7 +86,7 @@ rather than smoothed.
 | 10 | Memory maturation, self-authored skills, web access, browser automation | Authorized | 38 | Hosted CI and the final review remain; tenant activation is roadmap item B1 (ADR-0061) |
 | 11 | Scheduled runs | Authorized | 23 | Implemented locally; hosted CI and the final review remain |
 | 12 | Notifications and device identity | Authorized | 20 | Nothing in the corpus; the Apple push key and capability are owner actions outside it |
-| 13 | General-purpose subagents and delegation | Authorized, specification pending | 0 | `subagents-and-delegation.md` and its ADR, plus the activation evidence the gate for multi-agent work requires |
+| 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized, specification pending | 0 | `inbound-surfaces.md` and its ADR, after Milestone 12's device registry |
 | 15 | Operational hardening | Authorized, specification pending | 0 | `operational-hardening.md` and its ADR |
 
@@ -468,9 +468,9 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1026-1027` and the resolve at
-`policy-and-approvals.md:1036`, and one reference in
-`runtime-loop.md:1180` to `POST /runs/{id}/input` that routed to an
+at `policy-and-approvals.md:1028-1029` and the resolve at
+`policy-and-approvals.md:1038`, and one reference in
+`runtime-loop.md:1182` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
 That matters more than it would for a milestone whose plan section was
@@ -551,11 +551,11 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3574-3651`
+Section 28 of the plan is not empty — `engineering-plan.md:3579-3656`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:1007` constrains MCP server URLs by *"the
+existed. `tool-system.md:1010` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:205` and `:183` assign ownership of
@@ -565,12 +565,12 @@ them.
 
 Two bullets are covered. Output truncation and artifactization are
 specified at `tool-system.md:724`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1371`.
+bridge Section 8.5 requires is specified from `tool-system.md:1374`.
 
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3649` requires a container-escape attempt as
+    `engineering-plan.md:3654` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -603,7 +603,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:1007` depends on by
+remaining. The egress allowlist `tool-system.md:1010` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -724,7 +724,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1303-1350` draws the line between
+had to be written. `tool-system.md:1306-1353` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -987,7 +987,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:566` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3558` and `engineering-plan.md:2960` and picked
+`engineering-plan.md:3563` and `engineering-plan.md:2963` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1088,16 +1088,39 @@ corpus is the owner's Apple Developer work — an APNs key and the push
 capability on the bundle identifier — and the verified ceiling, which cannot
 pass 11 until Milestones 10 and 11 close.
 
-## Milestones 13 through 15: authorized, specifications pending
+## Milestone 13: subagents and delegation, authorized and specified
 
-The owner authorized these with Milestone 12 on 2026-08-20 (ADR-0061):
-Milestone 13, general-purpose subagents and delegation; Milestone 14, inbound
-surfaces and pairing; Milestone 15, operational hardening. The engineering plan
-states each one's requirement and acceptance criteria today. None has a
-detailed-design document yet, so each verdict is **Authorized, specification
-pending**: the named document and its ADR are what stand between the milestone
-and its first red test, and the milestone map's census reports a zero row for
-each until that document declares its gates (Decision 9 of the map).
+[subagents-and-delegation.md](subagents-and-delegation.md) supplies the four
+items this review measured as partial or absent under Milestone 10 and
+resolves the conflict it recorded: the structured brief as the objective's
+schema; the rule deriving a child's limits from the parent's remainder with
+cost reserved at materialization; the `delegations` ledger as the carrier for
+the separate trace and the artifact references; and a dedicated child session
+always, so the one-active-run index is neither widened nor contended. The
+rest was already decided — the control-tool contract, the `CHILD_RUN`
+suspension in place of an eighth state, the post-terminal join, the untrusted
+result label, the brief-seeded child context — and the document cites each
+decision rather than restating it. It honours the gate for multi-agent work as
+written: construction is authorized, activation requires a capability scenario
+admitted from a real failed trajectory and a two-arm case 32, and twenty-one
+hard gates in the `delegate` area cover the rest. ADR-0063 records the
+decisions.
+
+The readiness verdict is therefore **Authorized**: there is no unnamed design
+choice between the corpus and the first red tests. What remains outside the
+corpus is the owner's failed trajectory for the capability scenario, and the
+verified ceiling, which advances in order.
+
+## Milestones 14 and 15: authorized, specifications pending
+
+The owner authorized these with Milestones 12 and 13 on 2026-08-20
+(ADR-0061): Milestone 14, inbound surfaces and pairing; Milestone 15,
+operational hardening. The engineering plan states each one's requirement and
+acceptance criteria today. Neither has a detailed-design document yet, so each
+verdict is **Authorized, specification pending**: the named document and its
+ADR are what stand between the milestone and its first red test, and the
+milestone map's census reports a zero row for each until that document
+declares its gates (Decision 9 of the map).
 
 What the corpus already supplies is not nothing. Milestone 14 lands the
 second half [multi-device-and-surfaces.md](multi-device-and-surfaces.md)
@@ -1105,12 +1128,8 @@ audited: of the five gaps it names, Milestone 12 takes device lifecycle events
 and the `NotificationService` port, leaving the third registration source, the
 hand-off suspension kind, and client attribution on a write to Milestone 14 and
 the roadmap; pairing is designed in ADR-0017, and the session-key resolver is
-the one genuinely new mechanism. Milestone 13 starts from the child-run properties the
-plan lists under Milestone 10, from the confined review child run Milestone 10A
-already builds, and from the two partial and two absent items this review
-records above, with the recorded child-session conflict resolved in the
-dedicated-session direction (ADR-0061, decision 7). Milestone 15 starts from
-the accepted limitations `docs/deployment.md` and ADR-0046 state. The
+the one genuinely new mechanism. Milestone 15 starts from the accepted
+limitations `docs/deployment.md` and ADR-0046 state. The
 `documents_required_before_coding_reaches_them` list in the project state
 names the four documents.
 
@@ -1118,7 +1137,7 @@ names the four documents.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3653-3811` for links to other documents returned
+`engineering-plan.md:3658-3816` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1143,8 +1162,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1454` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1977` states that device tools are *"a reserved seam,
+`tool-system.md:1457` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1980` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1184,7 +1203,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1468` reserved by name —
+one of them the question `tool-system.md:1471` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1339,7 +1358,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2514` against
-    `model-gateway.md:1795` and `milestone-map.md:1105`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1153`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1348,7 +1367,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3649` requires a test the harness's case set
+    `engineering-plan.md:3654` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1399,7 +1418,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:1007` already depends on an egress
+    come first: `tool-system.md:1010` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two

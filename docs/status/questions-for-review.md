@@ -6450,3 +6450,68 @@ each is on the roadmap with its own entry condition.
 
 **Reversal cost:** cheap.
 
+## Milestone 13 subagents and delegation (ADR-0063)
+
+### The objective is a structured brief
+
+**Decided:** objective, success condition, optional context and artifact
+references, an explicit allowed-tool subset, optional limits, and a return
+shape; validated by the ordinary schema validator before policy.
+
+**Why:** the child seeds from the brief and nothing else, so the stop rule has
+to travel with it; this closes the "carrier and no schema" partial.
+
+**Question for you:** confirm the field list before code; a plain string is the
+alternative and is strictly less.
+
+**Reversal cost:** cheap before implementation, moderate after.
+
+### A dedicated child session always
+
+**Decided:** the Section 27.6 "or the parent's session per policy" branch is
+deleted (ADR-0061, decision 7); the one-active-run index is untouched.
+
+**Why:** only this branch is implementable as the schema stands, and the index
+predicate is what keeps one active run per session true.
+
+**Question for you:** none.
+
+**Reversal cost:** expensive after; it is a schema invariant.
+
+### Starting caps: three per call, eight per parent, depth one, async priority
+
+**Decided:** as stated, from the versioned limits file.
+
+**Why:** runaway cost is the primary risk and the capability scenario will
+show whether the numbers are too tight.
+
+**Question for you:** whether children of an interactive parent may take
+interactive priority; the conservative start is no.
+
+**Reversal cost:** cheap; configuration.
+
+### Activation needs the owner's failed trajectory
+
+**Decided:** construction is authorized; tenant activation waits for a
+capability scenario admitted from a real redacted failed long-research
+trajectory and for case 32.
+
+**Why:** the plan's gate names evidence; the evidence is cheap once the tool
+exists and impossible before.
+
+**Question for you:** supply the trajectory, or accept that the milestone is
+buildable but not activatable until one exists.
+
+**Reversal cost:** none; it is the plan's rule.
+
+### One gate area, `delegate`
+
+**Decided:** twenty-one gates in one area.
+
+**Why:** delegation is one story; nothing in it is reused by a later milestone
+the way device identity is.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap.
+

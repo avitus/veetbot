@@ -976,7 +976,7 @@ set, and the narrowing is inside the profile hash, so a run's
 
 `ProviderPin.registry_version` and the `model_calls` column of the same name
 are declared as strings above with no format. The format mirrors
-`policy_version` at `policy-and-approvals.md:660` because it answers the
+`policy_version` at `policy-and-approvals.md:662` because it answers the
 same question about a different ruleset.
 
 ```text
@@ -1451,7 +1451,7 @@ renames are.
 
 `engineering-plan.md:605` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
-`policy-and-approvals.md:855-884` maps trust tiers to policy restrictiveness,
+`policy-and-approvals.md:857-886` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
 platform configuration. That is backwards: reasoning is model output, and
 `AssistantMessage` correctly defaults to `TrustLevel.EXTERNAL_UNTRUSTED`.

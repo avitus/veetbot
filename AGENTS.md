@@ -70,6 +70,7 @@ validates the floor, and no trailer means lane A.
 | Authenticated browser automation | `browser-automation.md` |
 | Scheduled runs and recurrence | `scheduling.md` |
 | Notifications, device identity, push delivery | `notifications-and-devices.md` |
+| Subagents, delegation, child runs | `subagents-and-delegation.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -140,8 +141,7 @@ failure, and retry coverage.
 ## Pull request review gate
 
 GitHub mergeability does not make a PR ready under this contract. Use only the
-CodeRabbit GitHub PR integration; never run local CodeRabbit CLI reviews (the
-local service is continually rate-limited and is not authoritative). Loop:
+CodeRabbit GitHub PR integration, never the local CLI (rate-limited, not authoritative). Loop:
 
 1. Wait for CodeRabbit to finish reviewing the current head commit.
 2. Address every CodeRabbit comment of any severity or placement — inline,

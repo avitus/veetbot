@@ -64,6 +64,7 @@ def test_milestone_tokens_present() -> None:
         "browser-automation.md",
         "scheduling.md",
         "notifications-and-devices.md",
+        "subagents-and-delegation.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -92,7 +93,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 247
+    assert len(entries) == 268
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -134,6 +135,7 @@ def test_census_is_derived() -> None:
         10: 38,
         11: 23,
         12: 20,
+        13: 21,
     }
 
 
@@ -302,3 +304,17 @@ def test_notifications_and_devices_have_complete_milestone_12_gate_areas() -> No
         for entry in device_entries + notify_entries
     )
     assert all(GATE_ID.fullmatch(entry.id) for entry in device_entries + notify_entries)
+
+
+def test_delegation_has_complete_milestone_13_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    delegate_entries = [entry for entry in entries if entry.id.startswith("gate.delegate.")]
+
+    assert len(delegate_entries) == 21
+    assert all(entry.milestone == 13 for entry in delegate_entries)
+    assert all(
+        entry.spec == "docs/plan/subagents-and-delegation.md#hard-gates"
+        for entry in delegate_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in delegate_entries)
