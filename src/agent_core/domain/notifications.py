@@ -197,6 +197,52 @@ class Notification(BaseModel):
         return self
 
 
+class NewNotification(BaseModel):
+    """Input to the durable outbox before repository-owned delivery state exists."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: UUID
+    tenant_id: str = Field(min_length=1, max_length=255)
+    principal_id: str = Field(min_length=1, max_length=255)
+    kind: NotificationKind
+    dedupe_key: str = Field(min_length=1, max_length=1024)
+    session_id: UUID | None = None
+    run_id: UUID | None = None
+    approval_id: UUID | None = None
+    question_id: UUID | None = None
+    schedule_id: UUID | None = None
+    occurrence_id: UUID | None = None
+    payload: NotificationPayload
+    priority: int = Field(ge=0, le=32_767)
+    expires_at: datetime | None = None
+    next_attempt_at: datetime
+    created_at: datetime
+
+    @field_validator("expires_at", "next_attempt_at", "created_at")
+    @classmethod
+    def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
+        return _optional_aware_utc(value)
+
+    @model_validator(mode="after")
+    def references_match_payload(self) -> NewNotification:
+        if self.payload.notification_id != self.id or self.payload.kind is not self.kind:
+            raise ValueError("new notification payload identity does not match")
+        for field_name in (
+            "session_id",
+            "run_id",
+            "approval_id",
+            "question_id",
+            "schedule_id",
+            "occurrence_id",
+        ):
+            if getattr(self.payload, field_name) != getattr(self, field_name):
+                raise ValueError("new notification references do not match its payload")
+        if self.expires_at is not None and self.expires_at < self.created_at:
+            raise ValueError("new notification expiry precedes creation")
+        return self
+
+
 class NotificationDelivery(BaseModel):
     """One recorded transport attempt for one device target."""
 
@@ -215,6 +261,53 @@ class NotificationDelivery(BaseModel):
     @classmethod
     def attempted_at_is_aware_utc(cls, value: datetime) -> datetime:
         return _aware_utc(value)
+
+
+class NotificationCursor(BaseModel):
+    """Stable descending notification-inbox cursor."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    created_at: datetime
+    id: UUID
+
+    @field_validator("created_at")
+    @classmethod
+    def created_at_is_aware_utc(cls, value: datetime) -> datetime:
+        return _aware_utc(value)
+
+
+class PushMessage(BaseModel):
+    """Provider-neutral message presented to a push transport."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    notification_id: UUID
+    dedupe_key: str = Field(min_length=1, max_length=1024)
+    payload: NotificationPayload
+    priority: int = Field(ge=0, le=32_767)
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def expires_at_is_aware_utc(cls, value: datetime | None) -> datetime | None:
+        return _optional_aware_utc(value)
+
+    @model_validator(mode="after")
+    def payload_identity_matches(self) -> PushMessage:
+        if self.payload.notification_id != self.notification_id:
+            raise ValueError("push message payload identity does not match")
+        return self
+
+
+class PushOutcome(BaseModel):
+    """Closed result returned by a push provider adapter."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    outcome: DeliveryOutcome
+    provider_reason: str | None = Field(default=None, min_length=1, max_length=128)
+    provider_id: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 def approval_requested_key(approval_id: UUID) -> str:

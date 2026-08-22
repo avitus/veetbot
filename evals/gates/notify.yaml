@@ -16,7 +16,7 @@
   kind: property
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Repeated triggers deduplicate.** Generated repeats of one transition produce exactly one outbox row per deduplication key."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_notification_persistence_m12.py::test_postgres_repeated_notification_triggers_create_one_durable_row
 - id: gate.notify.content_free
   milestone: 12
   kind: corpus
@@ -78,10 +78,10 @@
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Notifications migrate cleanly from an empty database.** The migration chain reaches head and exactly matches the declared SQLAlchemy metadata."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_migrations.py::test_migrations_upgrade_cleanly_and_match_metadata
 - id: gate.notify.migration_stepwise
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**The notification migration is reversible at its boundary.** Upgrade, downgrade, and re-upgrade from the immediate predecessor leave a valid schema."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_migrations.py::test_migrations_round_trip_each_step_from_its_predecessor

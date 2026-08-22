@@ -108,6 +108,12 @@ from agent_core.adapters.persistence.memory_repositories import (
     PostgresMemoryStore,
     PostgresTraceStore,
 )
+from agent_core.adapters.persistence.notifications import (
+    InMemoryDeviceRegistry,
+    InMemoryNotificationOutbox,
+    PostgresDeviceRegistry,
+    PostgresNotificationOutbox,
+)
 from agent_core.adapters.persistence.projections import (
     PostgresSessionHistoryRepository,
     PostgresTrajectoryProjectionRepository,
@@ -504,6 +510,7 @@ def _memory_uow_repositories(
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
+    devices = InMemoryDeviceRegistry()
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
@@ -558,6 +565,8 @@ def _memory_uow_repositories(
         schedule_occurrences=schedule_occurrences,
         schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
         schedule_admission=AllowScheduleAdmissionController(),
+        devices=devices,
+        notification_outbox=InMemoryNotificationOutbox(clock, devices),
         queue=None,
     )
 
@@ -590,6 +599,7 @@ def _postgres_repository_factory(
         traces = PostgresTraceStore(session)
         knowledge = PostgresKnowledgeStore(session, clock)
         schedules = PostgresScheduleRepository(session)
+        devices = PostgresDeviceRegistry(session)
         return UnitOfWorkRepositories(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
@@ -631,6 +641,8 @@ def _postgres_repository_factory(
             schedule_admission=PostgresScheduleAdmissionController(
                 session, schedule_admission_limits, schedule_metrics
             ),
+            devices=devices,
+            notification_outbox=PostgresNotificationOutbox(session, clock),
             queue=PostgresRunQueue(
                 session,
                 clock,

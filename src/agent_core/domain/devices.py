@@ -121,6 +121,50 @@ class Device(BaseModel):
         return self
 
 
+class DeviceCursor(BaseModel):
+    """Stable descending device-list cursor."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    created_at: datetime
+    id: UUID
+
+    @field_validator("created_at")
+    @classmethod
+    def created_at_is_aware_utc(cls, value: datetime) -> datetime:
+        normalized = Device.instants_are_aware_utc(value)
+        assert normalized is not None
+        return normalized
+
+
+class PushTarget(BaseModel):
+    """Secret-bearing routing value passed only to a push transport."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    device_id: UUID
+    provider: PushProvider
+    token: SecretStr
+    environment: PushEnvironment | None = None
+    app_bundle_id: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @field_validator("token")
+    @classmethod
+    def token_is_not_blank(cls, value: SecretStr) -> SecretStr:
+        if not value.get_secret_value():
+            raise ValueError("push target token cannot be empty")
+        return value
+
+    @model_validator(mode="after")
+    def provider_fields_are_consistent(self) -> PushTarget:
+        if self.provider is PushProvider.APNS:
+            if self.environment is None or self.app_bundle_id is None:
+                raise ValueError("APNs push target requires environment and bundle identifier")
+        elif self.environment is not None:
+            raise ValueError("only APNs push target may carry an environment")
+        return self
+
+
 def push_token_fingerprint(token: str) -> str:
     if not token:
         raise ValueError("push token fingerprint requires a token")

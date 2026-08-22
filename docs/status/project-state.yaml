@@ -158,7 +158,7 @@ milestones:
 verification:
   history: docs/status/verification-history.yaml
   milestone_12:
-    recorded_at: 2026-08-22T20:01:13Z
+    recorded_at: 2026-08-22T20:32:12Z
     status: in_progress
     evidence:
       - check: notification-domain and content-free-payload red-green cycle
@@ -191,10 +191,53 @@ verification:
           tests, 156 citation checks, and strict documentation builds pass. The
           gate registry contains 305 entries and retains 227 as the verified
           ceiling through Milestone 11 while Milestone 12 is in progress.
+      - check: notification persistence red-green cycle
+        outcome: passed_locally
+        detail: >-
+          Six executable shared-contract tests first failed at the deliberately
+          unimplemented device and outbox adapters, and the structural schema
+          check separately failed because all three tables were absent. The
+          in-memory device registry and outbox now pass registration, token move,
+          lifecycle target removal, stable cursor, durable deduplication, claim,
+          settlement, delivery uniqueness, and principal-listing contracts; the
+          ORM metadata check proves the declared keys, constraints, partial token
+          index, and dispatch and listing indexes.
+      - check: PostgreSQL notification persistence and migrations
+        outcome: passed_locally
+        detail: >-
+          A dedicated nonsuperuser PostgreSQL database upgraded from base through
+          revision c7e9a4f2d105. Seven integration tests pass the same device and
+          outbox contracts against PostgreSQL, prove shared commit and rollback,
+          create one durable row for each of thirty-two repeated deduplication
+          keys, reject cross-principal delivery links, hide all three tables after
+          a tenant switch, and inspect forced row-level security. Both the clean
+          migration and predecessor downgrade and re-upgrade checks pass with no
+          SQLAlchemy metadata drift. The complete PostgreSQL 16.15 integration
+          and resilience lane passes all 114 selected tests.
+      - check: second Milestone 12 — Notifications and device identity gate tranche
+        outcome: passed_locally
+        detail: >-
+          gate.device.register_idempotent, gate.device.token_unique,
+          gate.device.persistence_schema, gate.device.persistence_isolated,
+          gate.notify.dedupe, gate.notify.migration_clean, and
+          gate.notify.migration_stepwise now point at exact executable checks.
+          Together with gate.notify.content_free, eight of twenty gates are
+          executable while the verified cumulative ceiling remains at Milestone
+          11 — Scheduled runs. Completion and hosted review for Milestone 12 —
+          Notifications and device identity — are still pending.
+      - check: make check after notification persistence
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 528 files, strict mypy over 486 source
+          and test files, 988 static tests, 330 contract tests, all deployment
+          script tests, 156 citation checks, and the strict documentation builds
+          pass with the eight executable gates for Milestone 12 — Notifications
+          and device identity recorded but the cumulative verified ceiling held
+          through Milestone 11 — Scheduled runs.
     remaining:
-      - Implement the remaining six device and thirteen notification gates in the
-        specification's build order, followed by the full Milestone 12 delivery
-        verification.
+      - Implement the remaining two device and ten notification gates in the
+        specification's build order, followed by the full Milestone 12 —
+        Notifications and device identity delivery verification.
 
 documentation:
   canonical_format: markdown
@@ -233,5 +276,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-22T20:01:13Z
+last_updated: 2026-08-22T20:32:12Z
 last_reviewed_commit: 90e9142

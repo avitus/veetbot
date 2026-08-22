@@ -4,13 +4,13 @@
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Device registration is idempotent and principal-scoped.** Re-registering the same client device identity for the same principal updates one row in place; the same identity under another principal is a distinct row; a cross-principal read returns not found."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_notification_persistence_m12.py::test_postgres_device_registration_is_idempotent_and_principal_scoped
 - id: gate.device.token_unique
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**One live token belongs to one active device.** A token re-registered from a new installation moves to the new row and the old row's token is nulled; two active devices never hold the same token."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_notification_persistence_m12.py::test_postgres_live_push_token_moves_to_new_installation
 - id: gate.device.revoke_immediate
   milestone: 12
   kind: case
@@ -28,10 +28,10 @@
   kind: structural
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**The device and notification schema encodes its trust boundaries.** Metadata inspection proves keys, the partial unique token index, the provider-specific push-field constraints, the dispatch and listing indexes, and row-level security on all three tables."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_persistence_schema.py::test_notification_tables_encode_routing_identity_and_query_constraints
 - id: gate.device.persistence_isolated
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Device and notification persistence is principal isolated.** Row-level security and repository predicates prevent cross-tenant and cross-principal reads and mutations of devices, outbox rows, and deliveries."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_notification_persistence_m12.py::test_notification_rows_are_principal_isolated_and_rls_forced

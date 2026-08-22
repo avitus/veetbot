@@ -60,12 +60,16 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 build step 1 is implemented locally. The device and notification
-domain vocabulary, closed content-free payload, and documented deduplication-key
-rules are implemented with focused example and property coverage;
-`gate.notify.content_free` now points at its executable corpus check. The
-deduplication gate remains pending until the outbox repository can prove that
-repeated triggers create exactly one durable row, leaving nineteen pending gates.
+Milestone 12 — notifications and device identity — build steps 1 and 2 are
+implemented locally. The device and notification domain vocabulary, closed
+content-free payload, documented deduplication-key rules, three-table migration,
+ORM mappings, in-memory and PostgreSQL device and outbox repositories, unit-of-work
+wiring, row-level security, and all three named port-contract modules are present.
+The content-free, durable-deduplication, idempotent-registration, live-token,
+schema, persistence-isolation, clean-migration, and stepwise-migration checks now
+resolve to executable tests. Eight gates are executable and twelve remain pending;
+the push-transport contract stays pending until its fake and APNs adapters land in
+build step 4.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
