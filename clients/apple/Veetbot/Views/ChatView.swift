@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum ConversationScrollTarget: Equatable {
+    case bottom
+    case notification(NotificationFocus)
+
+    static func resolve(_ focus: NotificationFocus?) -> ConversationScrollTarget {
+        focus.map(Self.notification) ?? .bottom
+    }
+
+    var scrollID: String {
+        switch self {
+        case .bottom: return "conversation-bottom"
+        case .notification(let focus): return focus.scrollID
+        }
+    }
+}
+
 public struct ChatView: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
@@ -169,7 +185,7 @@ public struct ChatView: View {
             && (!state.isRunActive || state.runStatus == .waitingForUser)
     }
 
-    private static let bottomAnchorID = "conversation-bottom"
+    private static let bottomAnchorID = ConversationScrollTarget.bottom.scrollID
 
     private var scrollChangeToken: String {
         // Follow newly inserted activity, but leave the viewport fixed while an
@@ -179,10 +195,12 @@ public struct ChatView: View {
 
     private func scroll(_ proxy: ScrollViewProxy) {
         withAnimation {
-            if let focus = model.notificationFocus {
-                proxy.scrollTo(focus.scrollID, anchor: .center)
-            } else {
-                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            let target = ConversationScrollTarget.resolve(model.notificationFocus)
+            switch target {
+            case .notification:
+                proxy.scrollTo(target.scrollID, anchor: .center)
+            case .bottom:
+                proxy.scrollTo(target.scrollID, anchor: .bottom)
             }
         }
     }

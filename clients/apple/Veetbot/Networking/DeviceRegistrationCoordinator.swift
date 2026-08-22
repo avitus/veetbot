@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 #if os(iOS)
@@ -101,13 +102,27 @@ public actor DeviceRegistrationCoordinator {
             pushEnvironment: descriptor.environment
         )
         do {
-            let device = try await api.registerDevice(body, idempotencyKey: installationID)
+            let device = try await api.registerDevice(
+                body,
+                idempotencyKey: try Self.registrationIdempotencyKey(for: body)
+            )
             registeredDeviceIDs[api.notificationServerID] = device.id
             return .registered(device.id)
         } catch {
             if Self.isUnsupported(error) { return .unsupported }
             throw error
         }
+    }
+
+    private static func registrationIdempotencyKey(
+        for body: AppleDeviceRegistration
+    ) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let digest = SHA256.hash(data: try encoder.encode(body))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return "\(body.clientDeviceID):\(digest)"
     }
 
     public func revoke(

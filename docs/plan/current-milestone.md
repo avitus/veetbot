@@ -5,29 +5,29 @@ title: Current Milestone
 # Current milestone
 
 - **Active milestone:** Milestone 12 — notifications and device identity — is
-  specified by [notifications-and-devices.md](notifications-and-devices.md);
-  its twenty gates are registered and implementation is in progress. Milestone 13 —
-  subagents and delegation — is specified by
+  complete. Milestone 13 — general-purpose subagents and delegation — is the
+  next authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
-  gates and follows Milestone 12. Milestone 14 — inbound surfaces and
+  gates, and has not started. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
   twenty-one gates and follows Milestone 13. Milestone 15 — operational
   hardening — is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates and
   follows Milestone 14; its backup tranche has no dependency on the three
   before it.
-- **Verified gate ceiling:** Milestone 11 (227 gates).
-- **Authorized workstreams:** Milestones 12 through 15 in order — notifications
-  and device identity, general-purpose subagents and delegation, inbound
-  surfaces and pairing, operational hardening (ADR-0061).
+- **Verified gate ceiling:** Milestone 12 (247 gates).
+- **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
+  subagents and delegation, inbound surfaces and pairing, operational hardening
+  (ADR-0061).
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
-- **Project status:** Milestones 0 through 11 are complete: all 227 cumulative
-  gates and the hosted lanes passed on final head `90e9142`, CodeRabbit passed,
-  and every review conversation was resolved. Milestone 12 is in progress;
-  Milestones 13 through 15 remain authorized and specified with twenty-one,
-  twenty-one, and sixteen registered gates.
+- **Project status:** Milestones 0 through 12 are complete: all 247 cumulative
+  gates, the full local and PostgreSQL lanes, Apple package and simulator lanes,
+  hosted CI, and the required CodeRabbit review passed on the final pull-request
+  head with every conversation resolved. Milestones 13 through 15 remain
+  authorized and specified with twenty-one, twenty-one, and sixteen registered
+  gates; none has started.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -50,7 +50,7 @@ review passed on head `90e9142`, advancing the verified ceiling through 11.
 
 Milestones 12 through 15 follow the pattern Milestone 11 set: a detailed-design
 document and an ADR land first, register the milestone's gates, and only then
-does implementation begin. Milestone 12 implementation is now active; its
+does implementation begin. Milestone 12 implementation is complete; its
 [notifications-and-devices.md](notifications-and-devices.md) and ADR-0062 have
 landed with twenty `gate.device.*` and `gate.notify.*` entries, and
 Milestone 13's [subagents-and-delegation.md](subagents-and-delegation.md) and
@@ -60,27 +60,18 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 — notifications and device identity — build steps 1 through 7 are
-implemented locally. The domain, persistence, and transactional producer foundation
-now feeds a provider-partitioned dispatcher with a PostgreSQL claim lease, closed
-retry schedule, staleness and expiry suppression, per-attempt delivery ledger,
-accepted-send crash replay, immediate token invalidation, and fake and APNs push
-transports under one shared contract. The APNs adapter verifies a mode-`0600` P-256
-key, signs and refreshes ES256 provider tokens, selects sandbox or production per
-device, sends the closed content-free payload over HTTP/2, and maps every provider
-response into the closed outcome vocabulary. Six dispatcher and transport gates are
-newly executable. The dedicated notify role adds a least-privilege repository set,
-transactional PostgreSQL wakeups with a bounded polling fallback, default-off
-settings, conditional trigger composition, a credential-minimized environment,
-and an independently confined systemd unit. The feature-flagged public surface
-adds all seven exact-scope routes, secret-free device views, stable device and
-inbox pagination, targeted test pushes, content-free lifecycle audit, immediate
-revocation, and offline recovery of every kind and delivery outcome. The native
-Apple client now mints its installation identity in Keychain, uploads and revokes
-APNs routing through the versioned API, accepts only the closed push payload,
-restores the authoritative transcript before exact-run navigation, and focuses
-approval or question cards without persisting notification state. All twenty gates
-are executable; final delivery verification in build step 8 remains.
+Milestone 12 — notifications and device identity — completed all eight build
+steps. The delivered slice includes the principal-scoped device registry,
+transactional content-free outbox, provider-partitioned claim and retry worker,
+APNs HTTP/2 adapter, least-privilege `notify` role, seven exact-scope routes,
+offline inbox, and native Apple registration and deep-link restoration. Review
+hardening made registration request identity deterministic, preserves partial
+per-target delivery outcomes, and executes queued navigation plus initial and
+changed focus behavior. All twenty gates and all 247 cumulative gates pass;
+PostgreSQL, Apple package, iPhone and iPad UI, unsigned Release builds, hosted CI,
+and the required CodeRabbit loop pass on the final pull-request head. Production
+APNs activation remains default-off until the owner supplies the external Apple
+capability, provisioning profiles, and provider key.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a

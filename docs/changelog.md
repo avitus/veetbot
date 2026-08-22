@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-22 — Milestone 12 completed: notifications and device identity
+
+- Added the principal-scoped device registry, durable content-free notification
+  outbox, transactional trigger producers, provider-partitioned dispatcher,
+  bounded retries, APNs HTTP/2 transport, least-privilege `notify` role, seven
+  exact-scope routes, offline inbox, and native Apple registration and deep-link
+  restoration.
+- Closed review regressions for deterministic registration identity, per-target
+  transport failure accounting, request-specific Apple idempotency keys, queued
+  notification navigation, existing and changed focus scrolling, and exact APNs
+  collapse-identifier wording.
+- Passed all twenty notification and device gates, all 247 cumulative gates,
+  PostgreSQL integration and resilience, Apple package and iPhone/iPad UI lanes,
+  unsigned Release builds, hosted CI, and the required CodeRabbit loop. Physical
+  APNs activation remains an explicit owner action outside the repository.
+
 ## 2026-08-22 — Documentation adopts Veetbot's visual system
 
 - Replaced the stock indigo Material presentation with Veetbot's turquoise,

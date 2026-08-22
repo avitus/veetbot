@@ -114,6 +114,48 @@ async def test_unexpected_failure_isolated_to_one_claimed_notification() -> None
         ).status is (NotificationStatus.DISPATCHED)
 
 
+async def test_transport_failure_records_prior_target_and_retries_failed_target() -> None:
+    clock, factory = await memory_uow_factory()
+    ids = SequenceIdFactory()
+
+    class FailSecondTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def deliver(self, target, message):  # type: ignore[no-untyped-def]
+            del target, message
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("sensitive provider detail")
+            return PushOutcome(outcome=DeliveryOutcome.DELIVERED, provider_id="accepted")
+
+    transport = FailSecondTransport()
+    async with factory() as uow:
+        await uow.devices.upsert(device(), principal())
+        await uow.devices.upsert(
+            device(
+                device_id=UUID(int=903),
+                client_device_id="client-device-b",
+                token="push-token-b",
+            ),
+            principal(),
+        )
+        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+
+    assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
+    assert transport.calls == 2
+    async with factory() as uow:
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+        deliveries = await uow.notification_outbox.list_deliveries(notification.id)
+        assert notification.status is NotificationStatus.PENDING
+        assert [delivery.outcome for delivery in deliveries] == [
+            DeliveryOutcome.DELIVERED,
+            DeliveryOutcome.RETRY,
+        ]
+        assert deliveries[1].provider_reason == "TransportError"
+        assert "sensitive" not in repr(deliveries[1])
+
+
 async def test_claim_is_partitioned_by_pending_target_provider() -> None:
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()

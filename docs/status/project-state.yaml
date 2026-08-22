@@ -3,7 +3,7 @@ schema_version: 1
 project:
   name: modular-general-purpose-ai-agent
   phase: implementation
-  status: milestone_12_in_progress
+  status: milestone_12_complete
   canonical_plan: docs/plan/engineering-plan.md
   current_milestone: 12
   active_milestone: 12
@@ -88,7 +88,7 @@ milestones:
       - continuous-session recurrence
   "12":
     title: Notifications and device identity
-    status: in_progress
+    status: complete
     authorized_on: 2026-08-20
     design: docs/plan/notifications-and-devices.md
     adr: docs/adr/0062-milestone-12-notifications-and-device-identity.md
@@ -152,264 +152,11 @@ milestones:
       - high availability, off-host database, load balancer, rolling deploys
       - Kubernetes, microservices, a second queue
 
-# Evidence for completed milestones 0 through 11 lives in
-# docs/status/verification-history.yaml; an in-progress milestone's
-# evidence stays here until it completes.
+# Evidence for completed milestones 0 through 12 lives in
+# docs/status/verification-history.yaml; a future in-progress milestone's
+# evidence will stay here until it completes.
 verification:
   history: docs/status/verification-history.yaml
-  milestone_12:
-    recorded_at: 2026-08-22T21:14:08Z
-    status: in_progress
-    evidence:
-      - check: notification-domain and content-free-payload red-green cycle
-        outcome: passed_locally
-        detail: >-
-          After the import-only scaffold made the behavioral test collect, the
-          valid red run reported thirteen expected failures and ten passing
-          boundary checks. The implemented domain slice now defines the closed
-          device, provider, notification, delivery, subject-status, and severity
-          vocabularies; validates kind-specific identifier sets, fixed titles,
-          registry tool names, ops-only fields, aware lifecycle instants, push
-          token secrecy, APNs and Telegram routing, revocation, outbox settlement,
-          and delivery attempts; and constructs every declared deduplication key.
-          All twenty-four focused tests pass.
-      - check: first executable Milestone 12 gate
-        outcome: passed_locally
-        detail: >-
-          gate.notify.content_free resolves to a twelve-member corpus containing
-          message, argument, approval, question, failure, schedule, reasoning,
-          traceback, API-key, bearer-token, and cookie-shaped content. Generated
-          tests cover the deduplication-key rules, while gate.notify.dedupe stays
-          pending until an outbox repository can prove one durable row under
-          repeated triggers. The focused domain and gate-registry partition passes
-          all forty-seven tests.
-      - check: make check
-        outcome: passed
-        detail: >-
-          Ruff formatting and linting over 520 files, strict mypy over 479 source
-          and test files, 987 static tests, 324 contracts, deployment-script
-          tests, 156 citation checks, and strict documentation builds pass. The
-          gate registry contains 305 entries and retains 227 as the verified
-          ceiling through Milestone 11 while Milestone 12 is in progress.
-      - check: notification persistence red-green cycle
-        outcome: passed_locally
-        detail: >-
-          Six executable shared-contract tests first failed at the deliberately
-          unimplemented device and outbox adapters, and the structural schema
-          check separately failed because all three tables were absent. The
-          in-memory device registry and outbox now pass registration, token move,
-          lifecycle target removal, stable cursor, durable deduplication, claim,
-          settlement, delivery uniqueness, and principal-listing contracts; the
-          ORM metadata check proves the declared keys, constraints, partial token
-          index, and dispatch and listing indexes.
-      - check: PostgreSQL notification persistence and migrations
-        outcome: passed_locally
-        detail: >-
-          A dedicated nonsuperuser PostgreSQL database upgraded from base through
-          revision c7e9a4f2d105. Seven integration tests pass the same device and
-          outbox contracts against PostgreSQL, prove shared commit and rollback,
-          create one durable row for each of thirty-two repeated deduplication
-          keys, reject cross-principal delivery links, hide all three tables after
-          a tenant switch, and inspect forced row-level security. Both the clean
-          migration and predecessor downgrade and re-upgrade checks pass with no
-          SQLAlchemy metadata drift. The complete PostgreSQL 16.15 integration
-          and resilience lane passes all 114 selected tests.
-      - check: second Milestone 12 — Notifications and device identity gate tranche
-        outcome: passed_locally
-        detail: >-
-          gate.device.register_idempotent, gate.device.token_unique,
-          gate.device.persistence_schema, gate.device.persistence_isolated,
-          gate.notify.dedupe, gate.notify.migration_clean, and
-          gate.notify.migration_stepwise now point at exact executable checks.
-          Together with gate.notify.content_free, eight of twenty gates are
-          executable while the verified cumulative ceiling remains at Milestone
-          11 — Scheduled runs. Completion and hosted review for Milestone 12 —
-          Notifications and device identity — are still pending.
-      - check: make check after notification persistence
-        outcome: passed
-        detail: >-
-          Ruff formatting and linting over 528 files, strict mypy over 486 source
-          and test files, 988 static tests, 330 contract tests, all deployment
-          script tests, 156 citation checks, and the strict documentation builds
-          pass with the eight executable gates for Milestone 12 — Notifications
-          and device identity recorded but the cumulative verified ceiling held
-          through Milestone 11 — Scheduled runs.
-      - check: transactional notification producers
-        outcome: passed_locally
-        detail: >-
-          The terminal writer, scheduling accountant, and scheduling materializer
-          invoke one content-free notification producer inside their existing unit
-          of work. PostgreSQL crash injection after every write boundary on all
-          three paths proves that a trigger and its outbox row commit together or
-          both roll back. A deliberately invalid outbox insert rolls back inside
-          the repository savepoint while the run reaches its intended terminal
-          status and the same transaction appends a content-free
-          notification.enqueue_failed process event without database or failure
-          text. Replays deduplicate by the specified transition keys.
-      - check: notification erasure semantics
-        outcome: passed_locally
-        detail: >-
-          PostgreSQL and deterministic repository tests prove that session erasure
-          deletes pending notification rows and their delivery attempts before the
-          session graph, while retaining settled content-free notification rows as
-          audit facts. The exact transition catalog rejects interactive completion
-          and missing identifiers and produces only the five declared kinds.
-      - check: third Milestone 12 — Notifications and device identity gate tranche
-        outcome: passed_locally
-        detail: >-
-          gate.notify.enqueue_atomic and gate.notify.trigger_catalog now resolve to
-          exact executable checks. Ten of twenty gates are executable while the
-          cumulative verified ceiling remains at Milestone 11 — Scheduled runs.
-      - check: make check after transactional notification producers
-        outcome: passed
-        detail: >-
-          Ruff formatting and linting over 531 files, strict mypy over 489 source
-          and test files, 991 static tests, 330 contract tests, all deployment
-          script tests, 156 citation checks, and both strict documentation builds
-          pass. The focused PostgreSQL producer, persistence, materializer, and
-          schedule-lifecycle partition passes all seventeen tests.
-      - check: notification dispatcher and APNs red-green cycle
-        outcome: passed_locally
-        detail: >-
-          Ten APNs authentication, addressing, response-mapping, network-failure,
-          and private-key checks first failed at the deliberately unimplemented
-          adapter. The implemented HTTP/2 adapter signs verifiable ES256 provider
-          tokens from a mode-0600 P-256 key, refreshes them at twenty minutes and
-          after ExpiredProviderToken, selects the APNs host per device, sends the
-          topic, alert type, priority, collapse key, expiration, and content-free
-          body, and maps success, retry, unregistered, and rejected outcomes without
-          logging the key or device token.
-      - check: notification claim, dispatch, retry, and staleness contracts
-        outcome: passed_locally
-        detail: >-
-          PostgreSQL FOR UPDATE SKIP LOCKED claims are filtered by pending target
-          provider before the bounded lock, and thirteen focused integration tests
-          pass persistence, transactional production, two-dispatcher exclusion,
-          and accepted-send crash replay. Deterministic contracts prove the closed
-          retry schedule and ceiling, expiry suppression, every stale-subject case,
-          provider partitioning, per-target delivery attempts, one-time token
-          invalidation for Unregistered and BadDeviceToken, and no invalidation for
-          429 or 5xx outcomes.
-      - check: fourth Milestone 12 — Notifications and device identity gate tranche
-        outcome: passed_locally
-        detail: >-
-          gate.notify.dispatch_once, gate.notify.retry_bounded,
-          gate.notify.stale_suppressed, gate.notify.token_revoked_on_410,
-          gate.notify.apns_auth, and gate.notify.port_contracts now resolve to exact
-          executable checks. Sixteen of twenty gates are executable while the
-          cumulative verified ceiling remains at Milestone 11 — Scheduled runs.
-      - check: make check after notification dispatch and APNs
-        outcome: passed
-        detail: >-
-          Ruff formatting and linting over 538 files, strict mypy over 496 source
-          and test files, 1013 static tests, 333 contract tests, all deployment
-          script tests, 156 citation checks, and both strict documentation builds
-          pass. The focused PostgreSQL persistence, producer, dispatcher, and
-          accepted-send replay partition passes all thirteen tests.
-      - check: least-privilege notification role and wakeup red-green cycle
-        outcome: passed_locally
-        detail: >-
-          Focused tests first failed because notification production was not
-          composed, outbox commits did not wake a dispatcher, and the dedicated
-          CLI and deployment role did not exist. The notify-only composition now
-          exposes exactly approvals, checkpoints, devices, notification outbox,
-          process events, runs, and sessions; rejects disabled, non-production,
-          credential-bearing, non-PostgreSQL, and incomplete APNs settings; and
-          builds without model, tool, browser, web, sandbox, or API-bearer
-          capability. PostgreSQL NOTIFY is issued in the enqueue transaction and
-          becomes visible only after commit, while the worker retains a bounded
-          polling fallback and graceful stop.
-      - check: notification deployment confinement
-        outcome: passed_locally
-        detail: >-
-          The CLI exposes a dedicated notify role. The notification environment
-          contains only database identity, two enable flags, and the four APNs
-          configuration fields; the systemd unit does not load the application
-          environment, execution service, Docker socket, or writable paths. The
-          release harness proves default-off disablement and enabled-unit
-          environment rewriting and restart behavior. The APNs adapter enforces
-          an absolute regular mode-0600 P-256 key at construction.
-      - check: make check after least-privilege notification role
-        outcome: passed
-        detail: >-
-          Ruff formatting and linting over 542 files, strict mypy over 500 source
-          and test files, 1023 static tests, 333 contract tests, all deployment
-          script tests, 156 citation checks, and both strict documentation builds
-          pass. The focused notification worker, transport, persistence, and
-          PostgreSQL wakeup partition passes all forty tests.
-      - check: device lifecycle and offline inbox red-green cycle
-        outcome: passed_locally
-        detail: >-
-          The boundary test first observed a not-found response because the
-          feature router and application services did not exist. All seven routes
-          now require the exact device.read, device.write, or notification.read
-          scope; registration refreshes one natural identity, returns only a
-          six-character token fingerprint, rejects malformed provider and routing
-          combinations with stable device reason codes, and paginates by opaque
-          stable cursors. Register, token update, provider invalidation, revoke,
-          and delete each append one content-free process event, while a targeted
-          test notification never reaches a different device and a revoked target
-          is absent before the next dispatch.
-      - check: offline notification recovery and PostgreSQL application service
-        outcome: passed_locally
-        detail: >-
-          With no transport configured, the feature-gated inbox returns all eight
-          closed notification kinds plus status and per-device delivery outcomes
-          through stable pagination. A PostgreSQL integration test registers,
-          replays, updates, test-enqueues, reads, revokes, and deletes a device and
-          observes exactly the four corresponding durable lifecycle events. All
-          sixteen focused PostgreSQL notification tests pass.
-      - check: final Milestone 12 gate registration tranche
-        outcome: passed_locally
-        detail: >-
-          gate.device.revoke_immediate, gate.device.lifecycle_audited,
-          gate.notify.offline_inbox, and gate.notify.default_off now resolve to
-          exact executable checks. All twenty gates are executable while the
-          cumulative verified ceiling remains at Milestone 11 — Scheduled runs
-          until the Apple and hosted delivery lanes complete.
-      - check: make check after device lifecycle and offline inbox
-        outcome: passed
-        detail: >-
-          Ruff formatting and linting over 544 files, strict mypy over 502 source
-          and test files, 1027 static tests, 333 contract tests, all deployment
-          script tests, 156 citation checks, and both strict documentation builds
-          pass after the seven device and notification routes and all twenty
-          executable gates landed.
-      - check: native Apple registration and deep-link red-green cycle
-        outcome: passed_locally
-        detail: >-
-          The coordinator test first failed because no registration API,
-          installation identity store, closed push model, or deep-link reducer
-          existed. The client now mints one nonsynchronizing Data Protection
-          Keychain identity, uploads every APNs token with the build-derived
-          environment, revokes on disconnect, and treats a missing device router
-          as an older compatible server. A notification tap restores the durable
-          transcript, attaches to the payload's exact run, and focuses the named
-          approval or question without persisting notification state.
-      - check: native Apple build and test lanes
-        outcome: passed_locally
-        detail: >-
-          All 104 Swift transport, coordinator, reducer, history, and presentation
-          tests pass under full Xcode. Debug and release unsigned iOS Simulator
-          builds and the unsigned macOS build pass with the tracked aps-environment
-          entitlement. The iPhone simulator UI lane passes with its debug fixture
-          suppressing notification authorization.
-      - check: production schedule notification topology audit
-        outcome: passed_locally
-        detail: >-
-          A regression first showed that the credential-minimized schedule
-          environment omitted both notification flags, so enabled production
-          scheduling would silently skip its named notification producers. The
-          schedule template now carries default-off flags and release validation
-          requires them to change together and exactly match the application
-          flags. The schedule role can enqueue outcomes but still never loads the
-          APNs key; the release harness proves a mismatch fails closed.
-    remaining:
-      - Run the complete Milestone 12 — Notifications and device identity build
-        step 8 delivery verification, hosted CI, and CodeRabbit review loop. The
-        owner must separately enable the Apple application identifier's push
-        capability, regenerate provisioning profiles, and provide the production
-        APNs key before a physical-device live push can be exercised.
 
 documentation:
   canonical_format: markdown
@@ -431,11 +178,12 @@ readiness:
   review: docs/plan/readiness.md
   audit_log: docs/status/corpus-audit-log.md
   summary: >-
-    Milestones 0 through 11 are complete and implementable from the corpus.
-    Milestone 12 is active for notifications and device identity, specified by
-    notifications-and-devices.md with twenty registered gates. On 2026-08-20
-    the owner authorized Milestones 12 through 15 in order (ADR-0061).
-    Milestone 13 is specified by subagents-and-delegation.md with twenty-one,
+    Milestones 0 through 12 are complete and implementable from the corpus.
+    Milestone 12 completed notifications and device identity with all twenty
+    registered gates and the 247-gate cumulative registry passing. On 2026-08-20
+    the owner authorized Milestones 12 through 15 in order (ADR-0061). Milestone
+    13 is the next authorized work and is specified by
+    subagents-and-delegation.md with twenty-one gates,
     Milestone 14 by
     inbound-surfaces.md with twenty-one, and Milestone 15 by
     operational-hardening.md with sixteen; every authorized milestone has a
@@ -448,5 +196,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-22T22:45:00Z
+last_updated: 2026-08-22T23:32:31Z
 last_reviewed_commit: 90e9142

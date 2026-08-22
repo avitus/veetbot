@@ -391,6 +391,7 @@ def _optional_idempotency_key(value: str | None) -> str | None:
 
 def _registration_hash(registration: DeviceRegistration) -> str:
     payload = registration.model_dump(mode="json")
+    payload["muted_kinds"] = sorted(kind.value for kind in registration.muted_kinds)
     payload["push_token"] = (
         None if registration.push_token is None else registration.push_token.get_secret_value()
     )

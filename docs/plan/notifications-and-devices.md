@@ -431,8 +431,8 @@ Apple app ([apple-client.md](../apple-client.md), ADR-0049). The adapter:
   logged;
 - sends `apns-topic` equal to the configured bundle identifier,
   `apns-push-type: alert`, `apns-priority` 10 for approvals and questions and 5
-  for terminal notices, `apns-collapse-id` equal to the `dedupe_key` when it
-  fits Apple's 64-byte limit or its SHA-256 digest otherwise, and
+  for terminal notices, `apns-collapse-id` equal to the `dedupe_key` when it is
+  ASCII and fits Apple's 64-byte limit or its SHA-256 digest otherwise, and
   `apns-expiration` equal to the row's `expires_at` where present;
 - maps every response into the closed `DeliveryOutcome` vocabulary above and
   records the provider's reason string and identifier on the delivery row;

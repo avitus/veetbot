@@ -13,9 +13,9 @@ the corpus runs out?
 The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
-were written. The present answer is different: Milestones 0 through 11 are
-complete, and Milestone 12 notifications and device identity is specified and
-in progress.
+were written. The present answer is different: Milestones 0 through 12 are
+complete, and Milestone 13 subagents and delegation is the next authorized,
+fully specified milestone.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -1063,7 +1063,7 @@ choice in the delivered contract. All twenty-three scheduling gates and the
 on final head `90e9142`. Production scheduling remains default-off until
 explicitly activated.
 
-## Milestone 12: notifications and device identity, authorized and specified
+## Milestone 12: notifications and device identity complete
 
 [notifications-and-devices.md](notifications-and-devices.md) closes the half
 of Section 29 it was written for. It defines the `Device` registry with a
@@ -1081,11 +1081,14 @@ records why two ports replace the `NotificationService` name, why the
 broadcaster stays, why registration replay has a separate principal-scoped
 repository, and why the push key lives in one role.
 
-The readiness verdict is therefore **In progress**: there is no unnamed design
-choice between the corpus and the implementation. What remains outside the
-corpus is the owner's Apple Developer work — an APNs key and the push capability
-on the bundle identifier. The verified ceiling is 11 while Milestone 12's gates
-are implemented.
+The readiness verdict is therefore **Complete**: all twenty notification and
+device gates and all 247 cumulative gates pass, with the full PostgreSQL, Apple,
+hosted CI, and final review lanes green on the final pull-request head. There is
+no unnamed design choice between the corpus and the implementation. The owner's
+Apple Developer work — enabling the bundle identifier's push capability,
+regenerating provisioning profiles, and mounting a production APNs key — remains
+an external, default-off activation action rather than a repository completion
+condition.
 
 ## Milestone 13: subagents and delegation, authorized and specified
 

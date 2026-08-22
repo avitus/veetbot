@@ -32,14 +32,26 @@ import Testing
             descriptor: descriptor,
             using: api
         )
+        let retry = try await coordinator.register(
+            deviceToken: Data([0x01, 0x02]),
+            descriptor: descriptor,
+            using: api
+        )
 
         #expect(first == .registered(deviceID))
         #expect(second == .registered(deviceID))
+        #expect(retry == .registered(deviceID))
         let registrations = await api.registrations()
-        #expect(registrations.count == 2)
-        #expect(registrations.map(\.body.clientDeviceID) == [installationID, installationID])
-        #expect(registrations.map(\.body.pushToken) == ["00abff", "0102"])
-        #expect(registrations.map(\.idempotencyKey) == [installationID, installationID])
+        #expect(registrations.count == 3)
+        #expect(
+            registrations.map(\.body.clientDeviceID)
+                == [installationID, installationID, installationID]
+        )
+        #expect(registrations.map(\.body.pushToken) == ["00abff", "0102", "0102"])
+        #expect(registrations[0].idempotencyKey != registrations[1].idempotencyKey)
+        #expect(registrations[1].idempotencyKey == registrations[2].idempotencyKey)
+        #expect(registrations.allSatisfy { $0.idempotencyKey.count <= 255 })
+        #expect(registrations.allSatisfy { !$0.idempotencyKey.contains($0.body.pushToken) })
         #expect(await identityStore.creationCount() == 1)
 
         let revoke = try await coordinator.revoke(using: api)
@@ -205,42 +217,22 @@ import Testing
         #expect(delegate.contains("requestAuthorization"))
     }
 
-    @Test @MainActor
-    func testNotificationResponseBeforeModelAttachmentIsRetainedAndReplayed() throws {
-        let payload = try #require(
-            NotificationPushPayload(
-                userInfo: [
-                    "veetbot": [
-                        "version": 1,
-                        "kind": "test",
-                        "title": "Test notification",
-                        "notification_id": UUID().uuidString,
-                    ]
-                ]
-            )
-        )
-        let delegate = NotificationApplicationDelegateBase()
-
-        delegate.received(payload: payload)
-
-        #expect(delegate.pendingResponseCount == 1)
-        delegate.attach(to: ChatViewModel())
-        #expect(delegate.pendingResponseCount == 0)
-    }
-
     @Test
-    func testConversationViewHandlesExistingNotificationFocusOnAppearance() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let chatView = try String(
-            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ChatView.swift"),
-            encoding: .utf8
+    func testConversationScrollBehaviorTargetsExistingAndChangedNotificationFocus() throws {
+        let approvalID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000031")
+        )
+        let questionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000032")
         )
 
-        #expect(chatView.contains(".onAppear {\n                    scroll(proxy)"))
-        #expect(chatView.contains(".onChange(of: model.notificationFocus)"))
+        let existing = ConversationScrollTarget.resolve(.approval(approvalID))
+        let changed = ConversationScrollTarget.resolve(.question(questionID))
+
+        #expect(existing == .notification(.approval(approvalID)))
+        #expect(existing.scrollID == NotificationFocus.approval(approvalID).scrollID)
+        #expect(changed == .notification(.question(questionID)))
+        #expect(changed.scrollID == NotificationFocus.question(questionID).scrollID)
     }
 }
 

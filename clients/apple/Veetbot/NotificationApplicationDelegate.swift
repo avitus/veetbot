@@ -14,7 +14,21 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
     private var configuredSubscription: AnyCancellable?
     private var requestedServer: URL?
     private var pendingResponsePayloads: [NotificationPushPayload] = []
+    private let remoteRegistrationEnabled: Bool
     var pendingResponseCount: Int { pendingResponsePayloads.count }
+
+    override convenience init() {
+        self.init(
+            remoteRegistrationEnabled: !ProcessInfo.processInfo.arguments.contains(
+                "--ui-testing-conversation-navigation"
+            )
+        )
+    }
+
+    init(remoteRegistrationEnabled: Bool) {
+        self.remoteRegistrationEnabled = remoteRegistrationEnabled
+        super.init()
+    }
 
     func attach(to model: ChatViewModel) {
         guard self.model !== model else { return }
@@ -39,10 +53,7 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
     }
 
     private func requestRemoteNotificationsAfterConnection() {
-        guard !ProcessInfo.processInfo.arguments.contains(
-                "--ui-testing-conversation-navigation"
-            )
-        else { return }
+        guard remoteRegistrationEnabled else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         Task { [weak self] in

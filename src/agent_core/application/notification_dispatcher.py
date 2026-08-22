@@ -177,7 +177,17 @@ class NotificationDispatcher:
             expires_at=notification.expires_at,
         )
         for target in pending_targets:
-            outcome = await self._transport.deliver(target, message)
+            try:
+                outcome = await self._transport.deliver(target, message)
+            except DispatchProbeError:
+                raise
+            except Exception:
+                outcome = PushOutcome(
+                    outcome=DeliveryOutcome.RETRY,
+                    provider_reason="TransportError",
+                )
+                outcomes.append((target, outcome))
+                continue
             outcomes.append((target, outcome))
             try:
                 self._dispatch_probe("transport_accepted")

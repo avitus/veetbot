@@ -100,7 +100,11 @@ import Testing
             )
         )
 
-        await model.openNotification(payload)
+        let delegate = NotificationApplicationDelegateBase(remoteRegistrationEnabled: false)
+        delegate.received(payload: payload)
+        #expect(delegate.pendingResponseCount == 1)
+        delegate.attach(to: model)
+        #expect(delegate.pendingResponseCount == 0)
         #expect(model.selectedSessionID == nil)
         #expect(
             await model.configure(
