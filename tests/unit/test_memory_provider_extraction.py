@@ -2460,3 +2460,44 @@ def test_provider_user_facing_claims_require_user_attribution_in_the_quote(
     )
 
     assert ProviderAssistedCandidateExtractor._claim_is_grounded(claim, {1: source}) is grounded
+
+
+@pytest.mark.parametrize(
+    ("source", "quote", "grounded"),
+    [
+        ("I am no longer a nurse.", "I am no longer a nurse", True),
+        ("I'm not a nurse.", "I'm not a nurse", True),
+        ("I do not work as a nurse.", "I do not work as a nurse", True),
+        ("I no longer work as a nurse.", "I no longer work as a nurse", True),
+        ("I stopped working as a nurse.", "I stopped working as a nurse", True),
+        # Someone else's retraction, and an affirmative quote, retract nothing.
+        ("My friend is no longer a nurse.", "My friend is no longer a nurse", False),
+        ("I am a nurse.", "I am a nurse", False),
+    ],
+)
+def test_provider_occupation_retractions_require_a_bound_first_person_negation(
+    source: str,
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A user can retract an occupation: the negation must sit between the
+    first-person subject and the occupation, and the span must still attribute
+    the occupation to the user, so a third party's retraction and an affirmative
+    quote both fail."""
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind.OCCUPATION,
+        subject="occupation",
+        value="nurse",
+        context=None,
+        quantity=None,
+        evidence_quote=quote,
+        polarity=Polarity.RETRACT,
+        source_event_ids=[1],
+        model_confidence=0.9,
+        proposed_portability=Portability.PORTABLE,
+        sensitivity_guess=Sensitivity.SENSITIVE,
+        valid_from=None,
+        expires_hint=None,
+    )
+
+    assert ProviderAssistedCandidateExtractor._claim_is_grounded(claim, {1: source}) is grounded

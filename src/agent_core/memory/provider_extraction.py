@@ -286,14 +286,21 @@ def _claim_value(claim: _SemanticClaim) -> str | None:
 
 
 def _occupation_is_user_attributed(span: str, value: str) -> bool:
-    """Whether a first person directly binds to the occupation inside the span."""
+    """Whether a first person directly binds to the occupation inside the span.
+
+    A direct negation may sit between the subject and the occupation ("I am no
+    longer a nurse", "I do not work as a nurse") so that a user can retract an
+    occupation; whether that negation matches the claim's polarity is judged
+    separately by the polarity checks."""
 
     occupation = re.escape(value.casefold())
+    negation = r"(?:not\s+|no\s+longer\s+)?"
+    work_negation = r"(?:do\s+not\s+|don't\s+|don\u2019t\s+|no\s+longer\s+|stopped\s+|quit\s+)?"
     patterns = (
         rf"\bas\s+(?:an?\s+)?{occupation}\b,?\s+i\b",
-        rf"\bi(?:\s+am|'m|\u2019m)\s+(?:an?\s+)?{occupation}\b",
-        rf"\bi\s+work(?:ed|ing)?\s+as\s+(?:an?\s+)?{occupation}\b",
-        rf"\bmy\s+(?:career|job|occupation|profession)\s+is\s+(?:an?\s+)?{occupation}\b",
+        rf"\bi(?:\s+am|'m|\u2019m)\s+{negation}(?:an?\s+)?{occupation}\b",
+        rf"\bi\s+{work_negation}work(?:ed|ing)?\s+as\s+(?:an?\s+)?{occupation}\b",
+        rf"\bmy\s+(?:career|job|occupation|profession)\s+is\s+{negation}(?:an?\s+)?{occupation}\b",
     )
     lowered = span.casefold()
     return any(re.search(pattern, lowered) is not None for pattern in patterns)
