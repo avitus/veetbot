@@ -796,6 +796,18 @@ verification:
           formation@4 semantic-claim, source-safety, diagnostic, and positive-case
           coverage boundaries are accepted, implemented, and backed by passing
           intended-production-model evidence.
+      - check: accepted ADR-0068 memory-formation repair
+        outcome: passed_locally
+        detail: >-
+          Exact regression coverage forms separate soprano activity, tenor
+          experience, and recurring right-thumb pain memories from the reported
+          production wording. Provider failures now retain safe normalized
+          diagnostics, use durable 60-second and 300-second formation retries,
+          preserve the watermark until success or the third attempt, and emit a
+          terminal exhaustion event. Principal-scoped diagnosis and confirmed
+          source-event replay use the governed service. Deterministic formation
+          is versioned as formation@5 and provider-assisted formation as
+          formation@6, invalidating the historical formation@4 activation tuple.
       - check: hosted CircleCI and CodeRabbit for pull request 37
         outcome: passed
         detail: >-
@@ -808,6 +820,8 @@ verification:
     activation_pending:
       # Tenant activation is not a completion condition (ADR-0061); it is
       # roadmap item B1 and stays default-off until the evidence rule passes.
+      - Run and review the version-bound formation@6 provider-memory evaluation
+        before provider assistance can reactivate for the production tuple.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
@@ -1276,7 +1290,7 @@ verification:
         outcome: passed_locally
         detail: >-
           Ruff formatting and linting over 546 files, strict mypy over 504 source
-          and test files, 1051 static tests, 335 adapter contracts, all deployment
+          and test files, 1054 static tests, 335 adapter contracts, all deployment
           script tests, strict documentation and 156 citation checks pass. The
           PostgreSQL integration and resilience lane passes all 124 tests; clean
           and stepwise migration plus metadata-drift checks pass. All 107 Apple

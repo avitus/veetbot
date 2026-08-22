@@ -76,3 +76,4 @@ implementation without one.
 - [ADR-0065 — Milestone 15 operational hardening (Proposed)](0065-milestone-15-operational-hardening.md)
 - [ADR-0066 — Atomic publication of the documentation site](0066-atomic-documentation-publication.md)
 - [ADR-0067 — Credential-free production execution service](0067-credential-free-execution-service.md)
+- [ADR-0068 — Retryable memory formation and governed replay](0068-retryable-memory-formation-and-governed-replay.md)

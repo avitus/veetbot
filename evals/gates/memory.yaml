@@ -67,7 +67,7 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Governed inspection and reversibility** — the public memory surface exposes beliefs, formation audits, and recall traces through the same principal-scoped service used for edits and deletion; a foreign principal can observe or mutate none of them."
+  statement: "**Governed inspection and reversibility** — the public memory surface exposes beliefs, formation audits, recall traces, session diagnosis, and provenance-preserving replay through the same principal-scoped service used for edits and deletion; a foreign principal can observe or mutate none of them."
   check: tests/gates/test_memory_m10.py::test_memory_inspection_surface_is_governed_and_traceable
 - id: gate.memory.extractor_contract
   milestone: 10
@@ -91,7 +91,7 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Audited deterministic fallback** — a failed provider attempt records a content-free failure audit and returns independently derived deterministic proposals."
+  statement: "**Audited deterministic fallback** — a failed provider attempt records safe normalized failure fields and returns independently derived deterministic proposals."
   check: tests/unit/test_memory_provider_extraction.py::test_provider_failure_is_audited_and_uses_deterministic_fallback
 - id: gate.memory.provider_evidence_publish
   milestone: 10
@@ -115,7 +115,7 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least sixteen of the twenty labeled positive cases before evidence can be published."
+  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least seventeen of the twenty-one labeled positive cases before evidence can be published."
   check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_lift_without_minimum_positive_coverage_does_not_publish
 - id: gate.memory.provider_source_safety
   milestone: 10
