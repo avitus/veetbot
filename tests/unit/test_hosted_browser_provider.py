@@ -8,7 +8,10 @@ from uuid import UUID
 
 import pytest
 
-from agent_core.adapters.browser.hosted_provider import HostedBrowserProvider
+from agent_core.adapters.browser.hosted_provider import (
+    HostedBrowserProvider,
+    SessionBoundHostedBrowserProvider,
+)
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
     BrowserAction,
@@ -20,6 +23,8 @@ from agent_core.domain.browser import (
     BrowserProviderError,
 )
 from agent_core.domain.errors import NotFoundError
+from agent_core.domain.tools import ToolExecutionContext
+from agent_core.tools.browser_navigate import BrowserNavigateTool
 from tests.contract.support import NOW, principal, tool_context
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000e7")
@@ -187,3 +192,35 @@ async def test_hosted_provider_normalizes_missing_profile_without_leaking_reposi
 
     assert raised.value.reason_code == "tool.browser.profile_unavailable"
     assert raised.value.retryable is False
+
+
+async def test_session_bound_provider_resolves_profile_before_enforcing_its_origins() -> None:
+    sessions = FakeSessions()
+    selected_contexts: list[ToolExecutionContext] = []
+
+    async def load(owner: Principal, profile_id: UUID) -> BrowserProfile:
+        assert owner == principal()
+        assert profile_id == PROFILE_ID
+        return profile()
+
+    async def select(context: ToolExecutionContext) -> UUID:
+        selected_contexts.append(context)
+        return PROFILE_ID
+
+    provider = SessionBoundHostedBrowserProvider(
+        principal=principal(),
+        profiles=load,
+        profile_selector=select,
+        sessions=sessions,
+        now=lambda: NOW,
+    )
+    context = replace(tool_context(), deadline_at=NOW + timedelta(minutes=5))
+
+    result = await BrowserNavigateTool(provider).execute(
+        {"url": "https://example.org/account"},
+        context,
+    )
+
+    assert result.ok
+    assert selected_contexts == [context]
+    assert sessions.acquisitions == [(PROFILE_ID, context.run_id, context.attempt_number)]

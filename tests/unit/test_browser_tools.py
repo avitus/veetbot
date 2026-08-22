@@ -126,6 +126,28 @@ async def test_browser_tool_binds_trusted_execution_context_before_provider_disp
     assert provider.execution_contexts == [context]
 
 
+async def test_navigate_resolves_session_binding_before_checking_its_origin_policy() -> None:
+    class SessionBoundProvider(FakeBrowserProvider):
+        def __init__(self) -> None:
+            super().__init__(allowed_origins=())
+
+        async def bind_execution(self, context: object) -> None:
+            await super().bind_execution(context)
+            self.allowed_origins = ("https://example.org",)
+
+    provider = SessionBoundProvider()
+    context = tool_context()
+
+    result = await BrowserNavigateTool(provider).execute(
+        {"url": "https://example.org/account"},
+        context,
+    )
+
+    assert result.ok
+    assert provider.execution_contexts == [context]
+    assert provider.navigations == ["https://example.org/account"]
+
+
 async def test_navigate_returns_bounded_external_untrusted_observation() -> None:
     provider = FakeBrowserProvider()
 
