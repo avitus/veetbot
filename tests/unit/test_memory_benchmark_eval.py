@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import (
@@ -19,6 +19,7 @@ from agent_core.domain.memory import (
     RecallTrace,
 )
 from agent_core.domain.runs import RunStatus
+from agent_core.evals import memory_benchmark_driver
 from agent_core.evals.memory_benchmark import (
     BASELINE_PATH,
     BENCHMARK_VERSION,
@@ -47,10 +48,20 @@ from agent_core.evals.memory_benchmark import (
     score_formation,
     score_probe,
 )
+from agent_core.evals.memory_benchmark_driver import MemoryBenchmarkResult
 from tests.contract.memory_fixtures import memory, recalled, trace
 
 _START = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 _FORTY_DAYS = 40 * 24 * 60 * 60
+
+
+class _LiveStandIn(BaseModel):
+    """Stand in for the live metrics Task 2 adds, to exercise the validator."""
+
+    probe_count: int = 0
+
+
+_LIVE_STAND_IN = _LiveStandIn()
 
 
 def _sessions(
@@ -1040,3 +1051,173 @@ def test_load_baseline_returns_none_until_it_is_recorded(tmp_path: Path) -> None
     (repository / BASELINE_PATH).write_text(recorded.model_dump_json(), encoding="utf-8")
 
     assert load_baseline(repository) == recorded
+
+
+async def test_run_benchmark_fails_on_regression_and_writes_baseline_when_asked(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / BASELINE_PATH.parent).mkdir(parents=True)
+    (repository / BASELINE_PATH).write_text(
+        _baseline_of(_result()).model_dump_json(), encoding="utf-8"
+    )
+    regressed = _result(_worse_results())
+
+    async def run_deterministic_benchmark(
+        _root: Path, **_kwargs: object
+    ) -> DeterministicBenchmarkResult:
+        return regressed
+
+    async def resolve_run_identity(
+        _settings: object = None, **_kwargs: object
+    ) -> tuple[str, datetime]:
+        return regressed.extractor_name, _START
+
+    monkeypatch.setattr(
+        memory_benchmark_driver, "run_deterministic_benchmark", run_deterministic_benchmark
+    )
+    monkeypatch.setattr(memory_benchmark_driver, "resolve_run_identity", resolve_run_identity)
+    output = tmp_path / "recorded.json"
+
+    result = await memory_benchmark_driver.run_benchmark(
+        repository,
+        deterministic_only=True,
+        model_policy="balanced",
+        policy_profile="default",
+        build_ref="0123456789ab",
+        output=None,
+        baseline_output=output,
+    )
+
+    assert result is not None
+    assert result.passed is False
+    assert result.failure_summary is not None
+    assert "needed_recalled regressed" in result.failure_summary
+    assert result.deterministic == regressed
+    assert result.baseline is not None
+    assert result.baseline.drift == []
+    assert result.baseline.regressions
+    assert result.live is None
+    assert result.evidence is None
+
+    recorded = MemoryBenchmarkBaseline.model_validate_json(output.read_text(encoding="utf-8"))
+
+    assert recorded.build_ref == "0123456789ab"
+    assert recorded.corpus_sha256 == regressed.corpus_sha256
+    assert recorded.extractor_name == regressed.extractor_name
+    assert recorded.metrics == regressed.metrics
+    assert recorded.probes == baseline_probe_rows(regressed)
+    assert recorded.recorded_at == _START
+
+    with pytest.raises(ValueError, match="refusing to overwrite"):
+        await memory_benchmark_driver.run_benchmark(
+            repository,
+            deterministic_only=True,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=None,
+            baseline_output=output,
+        )
+
+
+async def test_run_benchmark_passes_when_no_baseline_is_recorded(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def run_deterministic_benchmark(
+        _root: Path, **_kwargs: object
+    ) -> DeterministicBenchmarkResult:
+        return _result()
+
+    monkeypatch.setattr(
+        memory_benchmark_driver, "run_deterministic_benchmark", run_deterministic_benchmark
+    )
+
+    result = await memory_benchmark_driver.run_benchmark(
+        tmp_path,
+        deterministic_only=True,
+        model_policy="balanced",
+        policy_profile="default",
+        build_ref="0123456789ab",
+        output=None,
+        baseline_output=None,
+    )
+
+    assert result is not None
+    assert result.passed is True
+    assert result.failure_summary is None
+    assert result.baseline is None
+    assert not any(tmp_path.iterdir())
+
+
+async def test_run_benchmark_defers_the_live_arm_to_the_opt_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.delenv("RUN_LIVE_MODEL_TESTS", raising=False)
+
+    assert (
+        await memory_benchmark_driver.run_benchmark(
+            tmp_path,
+            deterministic_only=False,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=tmp_path / "evidence.json",
+            baseline_output=None,
+        )
+        is None
+    )
+
+    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+
+    with pytest.raises(NotImplementedError, match="Task 2"):
+        await memory_benchmark_driver.run_benchmark(
+            tmp_path,
+            deterministic_only=False,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=tmp_path / "evidence.json",
+            baseline_output=None,
+        )
+
+
+def test_memory_benchmark_result_requires_evidence_only_for_a_live_arm() -> None:
+    deterministic = _result()
+
+    passing = MemoryBenchmarkResult(passed=True, failure_summary=None, deterministic=deterministic)
+
+    assert passing.evidence is None
+
+    with pytest.raises(ValidationError, match="failure summary"):
+        MemoryBenchmarkResult(passed=False, failure_summary=None, deterministic=deterministic)
+
+    with pytest.raises(ValidationError, match="failure summary"):
+        MemoryBenchmarkResult(passed=True, failure_summary="drifted", deterministic=deterministic)
+
+    with pytest.raises(ValidationError, match="activation evidence"):
+        MemoryBenchmarkResult(
+            passed=True,
+            failure_summary=None,
+            deterministic=deterministic,
+            live=_LIVE_STAND_IN,
+        )
+
+    with pytest.raises(ValidationError, match="activation evidence"):
+        MemoryBenchmarkResult(
+            passed=False,
+            failure_summary="live arm failed",
+            deterministic=deterministic,
+            live=_LIVE_STAND_IN,
+            evidence=_LIVE_STAND_IN,
+        )
+
+
+def test_probe_prompt_appends_the_instruction_only_for_the_live_arm() -> None:
+    corpus = _corpus()
+    probe = corpus.scenarios[0].probes[0]
+
+    assert memory_benchmark_driver.probe_prompt(probe, corpus, live=False) == probe.question
+    assert memory_benchmark_driver.probe_prompt(probe, corpus, live=True) == (
+        f"{probe.question}\n{corpus.probe_instruction}"
+    )

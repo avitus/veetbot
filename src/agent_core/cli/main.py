@@ -127,6 +127,8 @@ class _CapabilityModule(Protocol):
         build_ref: str | None,
     ) -> Any | None: ...
 
+    def resolve_build_ref(self, repository_root: Path, explicit: str | None) -> str: ...
+
 
 class _MemoryFormationEvalModule(Protocol):
     async def run_live_evaluation(
@@ -137,6 +139,20 @@ class _MemoryFormationEvalModule(Protocol):
         policy_profile: str,
         build_ref: str,
         output: Path,
+    ) -> Any | None: ...
+
+
+class _MemoryBenchmarkModule(Protocol):
+    async def run_benchmark(
+        self,
+        repository_root: Path,
+        *,
+        deterministic_only: bool,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path | None,
+        baseline_output: Path | None,
     ) -> Any | None: ...
 
 
@@ -926,4 +942,72 @@ def eval_memory_formation(
     typer.echo(result.model_dump_json())
     if not result.passed:
         typer.echo(f"memory-formation evaluation failed: {result.failure_summary}", err=True)
+        raise typer.Exit(1)
+
+
+@eval_app.command("memory-benchmark")
+def eval_memory_benchmark(
+    deterministic_only: Annotated[
+        bool,
+        typer.Option(
+            "--deterministic-only/--no-deterministic-only",
+            help="Run only the deterministic arm; the live arm is opt-in.",
+        ),
+    ] = True,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Write passing live evidence to this path."),
+    ] = None,
+    write_baseline: Annotated[
+        Path | None,
+        typer.Option("--write-baseline", help="Record this run as the deterministic baseline."),
+    ] = None,
+    build_ref: Annotated[
+        str | None,
+        typer.Option("--build-ref", help="Commit or build identifier; defaults to CI or Git."),
+    ] = None,
+    model_policy: Annotated[
+        str,
+        typer.Option("--model-policy", help="Evaluate one declared model policy."),
+    ] = "balanced",
+    policy_profile: Annotated[
+        str,
+        typer.Option("--policy-profile", help="Evaluate one policy profile."),
+    ] = "default",
+) -> None:
+    """Measure what memory forms across sessions and recalls when probed."""
+
+    try:
+        capability = cast(_CapabilityModule, importlib.import_module("agent_core.evals.capability"))
+        module = cast(
+            _MemoryBenchmarkModule,
+            importlib.import_module("agent_core.evals.memory_benchmark_driver"),
+        )
+        result = asyncio.run(
+            module.run_benchmark(
+                Path.cwd(),
+                deterministic_only=deterministic_only,
+                model_policy=model_policy,
+                policy_profile=policy_profile,
+                build_ref=capability.resolve_build_ref(Path.cwd(), build_ref),
+                output=output,
+                baseline_output=write_baseline,
+            )
+        )
+    except (
+        ConfigurationError,
+        ImportError,
+        NotImplementedError,
+        OSError,
+        RuntimeError,
+        ValueError,
+    ) as exc:
+        typer.echo(f"memory-benchmark evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to run the live memory benchmark")
+        return
+    typer.echo(result.model_dump_json())
+    if not result.passed:
+        typer.echo(f"memory-benchmark evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
