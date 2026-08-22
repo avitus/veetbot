@@ -488,7 +488,7 @@ def test_score_probe_counts_noise_and_forbidden_by_category() -> None:
     assert violation.needed_recalled == 1
     assert violation.noise_snapshot == 1
     assert violation.noise_in_turn == 1
-    assert violation.noise_total == 2
+    assert violation.noise_total == 1
     assert violation.returned_total == 2
     assert violation.currency_violations == 1
     assert violation.currency_unformed == 0
@@ -579,6 +579,53 @@ def test_score_probe_counts_noise_and_forbidden_by_category() -> None:
     assert carried.other_forbidden_rendered == 0
 
 
+def test_score_probe_counts_noise_returned_in_both_moments_once() -> None:
+    scenario = _scoring_scenario()
+    probe = scenario.probes[0]
+    alpha = _recalled_belief(belief_id=701, subject="answer style", statement="User prefers alpha.")
+    stray = _recalled_belief(belief_id=750, subject="hobby", statement="User goes hiking.")
+
+    result = score_probe(
+        probe,
+        scenario,
+        store_live=[
+            _record(belief_id=701, subject="answer style", statement="User prefers alpha.")
+        ],
+        snapshot=_recall_trace(trace_id=911, moment=RecallMoment.SNAPSHOT, beliefs=[alpha, stray]),
+        in_turn=[_recall_trace(trace_id=912, moment=RecallMoment.IN_TURN, beliefs=[alpha, stray])],
+        distinct_prefixes=1,
+        policy_failures=0,
+        run_completed=True,
+    )
+
+    assert result.noise_snapshot == 1
+    assert result.noise_in_turn == 1
+    assert result.noise_total == 1
+    assert result.returned_snapshot == 2
+    assert result.returned_in_turn == 2
+    assert result.returned_total == 2
+
+    metrics = aggregate_deterministic(
+        [
+            DeterministicScenarioResult(
+                scenario_id="mb-bench-001",
+                formation=FormationMetrics(
+                    expected=1,
+                    supported=1,
+                    formed=1,
+                    fabricated=0,
+                    stale_live=0,
+                    policy_failures=0,
+                ),
+                probes=[result],
+            )
+        ]
+    )
+
+    assert metrics.noise_total <= metrics.returned_total
+    assert ratios(metrics)["noise_ratio"] == "0.5000"
+
+
 def test_score_formation_separates_stale_from_fabricated() -> None:
     scenario = _scenario(_valid_probe("update"), protected=["REDACTED-TOKEN"])
     live = [
@@ -647,6 +694,7 @@ def _probe_result(
     returned_total: int = 0,
     noise_snapshot: int = 0,
     noise_in_turn: int = 0,
+    noise_total: int = 0,
     dropped_for_budget: int = 0,
     blocked_rendered: int = 0,
     currency_violations: int = 0,
@@ -654,6 +702,7 @@ def _probe_result(
     abstention_leaks: int = 0,
     false_transfers: int = 0,
     other_forbidden_rendered: int = 0,
+    forbidden_rendered: int = 0,
     policy_failures: int = 0,
     distinct_prefixes: int = 1,
 ) -> ProbeRetrievalResult:
@@ -672,6 +721,7 @@ def _probe_result(
         returned_total=returned_total,
         noise_snapshot=noise_snapshot,
         noise_in_turn=noise_in_turn,
+        noise_total=noise_total,
         dropped_for_budget=dropped_for_budget,
         blocked_rendered=blocked_rendered,
         currency_violations=currency_violations,
@@ -679,6 +729,7 @@ def _probe_result(
         abstention_leaks=abstention_leaks,
         false_transfers=false_transfers,
         other_forbidden_rendered=other_forbidden_rendered,
+        forbidden_rendered=forbidden_rendered,
         policy_failures=policy_failures,
         distinct_prefixes=distinct_prefixes,
     )
@@ -702,6 +753,7 @@ def _scenario_results() -> list[DeterministicScenarioResult]:
                     returned_snapshot=2,
                     returned_total=2,
                     noise_snapshot=1,
+                    noise_total=1,
                 ),
                 _probe_result(
                     probe_id="p02",
@@ -710,7 +762,9 @@ def _scenario_results() -> list[DeterministicScenarioResult]:
                     returned_in_turn=1,
                     returned_total=1,
                     noise_in_turn=1,
+                    noise_total=1,
                     abstention_leaks=1,
+                    forbidden_rendered=1,
                     policy_failures=2,
                     distinct_prefixes=2,
                 ),
@@ -733,9 +787,11 @@ def _scenario_results() -> list[DeterministicScenarioResult]:
                     returned_in_turn=3,
                     returned_total=3,
                     noise_in_turn=1,
+                    noise_total=1,
                     dropped_for_budget=2,
                     blocked_rendered=1,
                     currency_violations=1,
+                    forbidden_rendered=1,
                 ),
             ],
         ),
@@ -855,12 +911,14 @@ def _result(
     *,
     corpus_sha256: str = _DIGEST,
     extractor_name: str = "memory-extractor@1",
+    provider_formation_policy_version: str = "provider-formation@1",
 ) -> DeterministicBenchmarkResult:
     values = list(_scenario_results() if scenarios is None else scenarios)
     return DeterministicBenchmarkResult(
         benchmark_version=BENCHMARK_VERSION,
         corpus_sha256=corpus_sha256,
         formation_policy_version="formation@1",
+        provider_formation_policy_version=provider_formation_policy_version,
         retrieval_policy_version="retrieval@1",
         extractor_name=extractor_name,
         scenarios=values,
@@ -873,6 +931,7 @@ def _baseline_of(result: DeterministicBenchmarkResult) -> MemoryBenchmarkBaselin
         benchmark_version=result.benchmark_version,
         corpus_sha256=result.corpus_sha256,
         formation_policy_version=result.formation_policy_version,
+        provider_formation_policy_version=result.provider_formation_policy_version,
         retrieval_policy_version=result.retrieval_policy_version,
         extractor_name=result.extractor_name,
         build_ref="0123456789ab",
@@ -885,7 +944,7 @@ def _baseline_of(result: DeterministicBenchmarkResult) -> MemoryBenchmarkBaselin
 def _worse_results() -> list[DeterministicScenarioResult]:
     first, second = _scenario_results()
     lowered = second.probes[0].model_copy(
-        update={"needed_recalled": 1, "recalled_both": 0, "noise_in_turn": 2}
+        update={"needed_recalled": 1, "recalled_both": 0, "noise_in_turn": 2, "noise_total": 2}
     )
     return [first, second.model_copy(update={"probes": [lowered]})]
 
@@ -936,6 +995,17 @@ def test_compare_to_baseline_reports_regression_drift_and_improvement() -> None:
     assert any(
         entry.startswith("mb-bench-002/p01 needed_recalled") for entry in improved.improvements
     )
+
+
+def test_compare_to_baseline_reports_provider_formation_version_drift() -> None:
+    baseline = _baseline_of(_result())
+
+    drifted = compare_to_baseline(
+        _result(provider_formation_policy_version="provider-formation@2"), baseline
+    )
+
+    assert any(entry.startswith("provider_formation_policy_version") for entry in drifted.drift)
+    assert drifted.regressions == []
 
 
 def test_load_corpus_rejects_paths_outside_repository(tmp_path: Path) -> None:

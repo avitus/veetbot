@@ -66,6 +66,7 @@ _DRIFT_IDENTITY = (
     "benchmark_version",
     "corpus_sha256",
     "formation_policy_version",
+    "provider_formation_policy_version",
     "retrieval_policy_version",
     "extractor_name",
 )
@@ -422,6 +423,7 @@ class ProbeRetrievalResult(BaseModel):
     returned_total: int = Field(ge=0)
     noise_snapshot: int = Field(ge=0)
     noise_in_turn: int = Field(ge=0)
+    noise_total: int = Field(ge=0)
     dropped_for_budget: int = Field(ge=0)
     blocked_rendered: int = Field(ge=0)
     currency_violations: int = Field(ge=0)
@@ -429,33 +431,11 @@ class ProbeRetrievalResult(BaseModel):
     abstention_leaks: int = Field(ge=0)
     false_transfers: int = Field(ge=0)
     other_forbidden_rendered: int = Field(ge=0)
+    forbidden_rendered: int = Field(ge=0)
     policy_failures: int = Field(ge=0)
     distinct_prefixes: int = Field(ge=0)
     snapshot_trace_id: UUID | None = None
     in_turn_trace_ids: list[UUID] = Field(default_factory=list)
-
-    @property
-    def noise_total(self) -> int:
-        """Noise summed over the two moments.
-
-        A belief returned in both moments counts once per moment here while
-        `returned_total` counts it once, so `noise_ratio` is an upper bound
-        whenever the snapshot and the in-turn recall overlap on noise.
-        """
-
-        return self.noise_snapshot + self.noise_in_turn
-
-    @property
-    def forbidden_rendered(self) -> int:
-        """Every forbidden statement this probe rendered, whatever its bucket."""
-
-        return (
-            self.currency_violations
-            + self.currency_unformed
-            + self.abstention_leaks
-            + self.false_transfers
-            + self.other_forbidden_rendered
-        )
 
 
 class DeterministicScenarioResult(BaseModel):
@@ -525,6 +505,7 @@ class DeterministicBenchmarkResult(BaseModel):
     benchmark_version: str = Field(min_length=1)
     corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     formation_policy_version: str = Field(min_length=1)
+    provider_formation_policy_version: str = Field(min_length=1)
     retrieval_policy_version: str = Field(min_length=1)
     extractor_name: str = Field(min_length=1)
     scenarios: list[DeterministicScenarioResult] = Field(default_factory=list)
@@ -557,6 +538,7 @@ class MemoryBenchmarkBaseline(BaseModel):
     benchmark_version: str = Field(min_length=1)
     corpus_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     formation_policy_version: str = Field(min_length=1)
+    provider_formation_policy_version: str = Field(min_length=1)
     retrieval_policy_version: str = Field(min_length=1)
     extractor_name: str = Field(min_length=1)
     build_ref: str = Field(min_length=1)
@@ -738,8 +720,11 @@ def score_probe(
     so recall counts returned items only.  Returned counts are distinct belief
     identifiers per moment and across both.  A returned belief matching no
     needed label is noise, which makes every returned belief noise for a probe
-    that needs nothing.  Each forbidden statement the probe rendered anywhere
-    is counted once and bucketed by the probe's category.
+    that needs nothing; `noise_total` counts the distinct noisy beliefs across
+    both moments, so a belief both moments returned counts once and the noise
+    ratio it feeds stays a ratio, while `noise_snapshot` and `noise_in_turn`
+    attribute that noise to each moment.  Each forbidden statement the probe
+    rendered anywhere is counted once and bucketed by the probe's category.
     """
 
     labels = {belief.label: belief for belief in scenario.beliefs}
@@ -774,6 +759,7 @@ def score_probe(
         returned_total=len(snapshot_returned | in_turn_returned),
         noise_snapshot=_noise_count(snapshots, needed),
         noise_in_turn=_noise_count(in_turn, needed),
+        noise_total=_noise_count(traces, needed),
         dropped_for_budget=sum(len(value.dropped_for_budget) for value in traces),
         blocked_rendered=sum(len(value.blocked) for value in traces),
         currency_violations=counts["currency_violations"],
@@ -781,6 +767,7 @@ def score_probe(
         abstention_leaks=counts["abstention_leaks"],
         false_transfers=counts["false_transfers"],
         other_forbidden_rendered=counts["other_forbidden_rendered"],
+        forbidden_rendered=sum(counts.values()),
         policy_failures=policy_failures,
         distinct_prefixes=distinct_prefixes,
         snapshot_trace_id=snapshot_trace_id,
@@ -918,7 +905,9 @@ def ratios(metrics: DeterministicMetrics) -> dict[str, str]:
     divides recalled needed labels by every needed label and
     `retrieval_recall_given_formed` divides them by the needed labels that
     formed, which separates a retrieval miss from an extractor gap.
-    `noise_ratio` divides noise by the beliefs returned, and `snapshot_share`
+    `noise_ratio` divides noise by the beliefs returned, both counted as
+    distinct beliefs across the two moments so the ratio cannot exceed one, and
+    `snapshot_share`
     divides the labels the snapshot recalled, including those the in-turn
     recall also found, by the labels recalled at all.  A ratio with a zero
     denominator is reported as "n/a" rather than as zero.
