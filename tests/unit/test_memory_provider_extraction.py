@@ -1100,6 +1100,22 @@ def test_provider_claim_grounding_rejects_cross_event_subject_value_mixing() -> 
             "I do not drink coffee and I have a daughter.",
             {"evidence_quote": "I do not drink coffee and I have a daughter"},
         ),
+        # An elided subject does not let a cue on an earlier predicate reach
+        # the claimed one across a conjunction.
+        (
+            "I do not drink coffee but have a daughter.",
+            {
+                "polarity": Polarity.RETRACT,
+                "evidence_quote": "I do not drink coffee but have a daughter",
+            },
+        ),
+        (
+            "I do not drink coffee and have a daughter.",
+            {
+                "polarity": Polarity.RETRACT,
+                "evidence_quote": "I do not drink coffee and have a daughter",
+            },
+        ),
     ],
 )
 def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
@@ -1146,6 +1162,20 @@ def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
             {
                 "polarity": Polarity.RETRACT,
                 "evidence_quote": "I drink coffee and I don't have a daughter",
+            },
+        ),
+        (
+            "I do not drink coffee and no longer have a daughter.",
+            {
+                "polarity": Polarity.RETRACT,
+                "evidence_quote": "I do not drink coffee and no longer have a daughter",
+            },
+        ),
+        (
+            "I do not currently have a daughter.",
+            {
+                "polarity": Polarity.RETRACT,
+                "evidence_quote": "I do not currently have a daughter",
             },
         ),
         (

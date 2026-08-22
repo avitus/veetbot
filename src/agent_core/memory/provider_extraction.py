@@ -198,6 +198,13 @@ _THIRD_PARTY_PRONOUN = re.compile(
     r"\b(?:he|she|they|it|you|him|them|his|her|hers|their|theirs|your|yours|its)\b"
 )
 _CLAIMED_STOPWORDS = frozenset({"a", "an", "and", "for", "in", "of", "on", "or", "the", "to"})
+# A negation binds to the claimed predicate only while nothing starts a new
+# clause between the cue and the claimed term ("I do not drink coffee but have
+# a daughter" negates the coffee, not the daughter) and the gap stays short.
+_CLAUSE_BREAK = re.compile(
+    r"[,;:.!?]|\b(?:and|but|or|nor|yet|so|although|though|while|whereas|because|since|unless)\b"
+)
+_NEGATION_REACH_WORDS = 4
 _FIRST_PERSON_PATTERN = re.compile(
     r"\b(?:"
     + "|".join(re.escape(token) for token in sorted(_FIRST_PERSON_TOKENS, key=len, reverse=True))
@@ -361,10 +368,11 @@ def _claim_is_user_attributed(claim: _SemanticClaim, span: str) -> bool:
 
 
 def _retraction_binds(claim: _SemanticClaim, span: str) -> bool:
-    """Whether a negation cue modifies the claimed fact: it must sit between the
-    subject that binds the fact and the fact itself, not on a neighbouring fact
-    ("I do not drink coffee and I have a daughter" retracts nothing about the
-    daughter)."""
+    """Whether a negation cue modifies the claimed predicate: it must sit between
+    the subject that binds the fact and the fact itself, and reach the claimed
+    term without crossing a clause break ("I do not drink coffee and I have a
+    daughter" and "I do not drink coffee but have a daughter" retract nothing
+    about the daughter; "I do not currently have a daughter" does)."""
 
     pattern = _claimed_pattern(claim)
     if pattern is None:
@@ -375,7 +383,11 @@ def _retraction_binds(claim: _SemanticClaim, span: str) -> bool:
     before, _after = split
     subjects = list(_FIRST_PERSON_PATTERN.finditer(before))
     window = before[subjects[-1].end() :] if subjects else before
-    return _RETRACTION_CUE.search(window) is not None
+    cues = list(_RETRACTION_CUE.finditer(window))
+    if not cues:
+        return False
+    gap = window[cues[-1].end() :]
+    return _CLAUSE_BREAK.search(gap) is None and len(gap.split()) <= _NEGATION_REACH_WORDS
 
 
 def _quantity_modifies_value(claim: _SemanticClaim, span: str) -> bool:
