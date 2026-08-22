@@ -35,7 +35,6 @@ printf '%s\n' \
   'AUTH_PRINCIPAL_ID=test' \
   'AUTH_SCOPES=session.read' \
   'SANDBOX_MECHANISM=gvisor' \
-  'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   'AGENT_ARTIFACT_ROOT=/tmp' \
   'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' \
   "BROWSER_PROFILE_SERVICE_AUTH_FILE=$PROFILE_AUTH_FILE" \
@@ -149,7 +148,7 @@ make_stage() {
     >"$stage/deploy/systemd/veetbot-schedule.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
-  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
+  printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/python"
   chmod +x "$stage/.venv/bin/alembic" "$stage/.venv/bin/python"
 }
@@ -200,7 +199,10 @@ run_release "$release_id"
 
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$release_id" ]]
 [[ -f "$DEPLOY_ROOT/releases/$release_id/.release.env" ]]
+grep -Fxq 'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
+  "$DEPLOY_ROOT/releases/$release_id/.release.env"
 grep -Fq 'alembic upgrade head' "$LOG_FILE"
+grep -Fxq 'execution socket /run/veetbot/execution.sock' "$LOG_FILE"
 grep -Fq 'docker build -f execution/sandbox.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"

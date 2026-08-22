@@ -213,7 +213,11 @@ sudo chmod 0640 /etc/veetbot/veetbot-schedule.env
 ```
 
 Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
-it to `/opt/veetbot/current/.release.env`, which only the API systemd unit loads.
+it and the fixed host-native execution-service socket to
+`/opt/veetbot/current/.release.env`, which every credential-bearing application
+unit loads after the shared environment. This release-local wiring lets an
+existing host adopt the execution service without rewriting the protected
+shared environment before the first compatible release.
 
 ### Browser profile service host prerequisites
 

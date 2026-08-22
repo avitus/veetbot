@@ -349,7 +349,10 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
         for unit in (api, worker, async_worker, maintenance)
     )
-    assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
+    assert all(
+        "EnvironmentFile=-/opt/veetbot/current/.release.env" in unit
+        for unit in (api, worker, async_worker, maintenance)
+    )
     credential_source = (
         "LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential"
     )

@@ -10,6 +10,7 @@ User=veetbot
 Group=veetbot
 WorkingDirectory=/opt/veetbot/current
 EnvironmentFile=/etc/veetbot/veetbot.env
+EnvironmentFile=-/opt/veetbot/current/.release.env
 LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential
 Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane
 ExecStart=/opt/veetbot/current/.venv/bin/agent worker --role maintenance
