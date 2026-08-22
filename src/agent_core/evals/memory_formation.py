@@ -33,7 +33,7 @@ from agent_core.memory.provider_extraction import (
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
 
-CORPUS_PATH = Path("evals/capability/memory-formation.v1.json")
+CORPUS_PATH = Path("evals/capability/memory-formation.v2.json")
 EVALUATION_SCOPE = "memory-formation-evaluation"
 
 

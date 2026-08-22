@@ -22,10 +22,12 @@ from agent_core.domain.memory import (
     SENSITIVITY_ORDER,
     BeliefType,
     MemoryCandidate,
+    MemoryExtractionResult,
     MemoryRecord,
     Polarity,
     Portability,
     ProviderExtractionEvaluationEvidence,
+    ProviderExtractionFailure,
     Sensitivity,
 )
 from agent_core.domain.messages import (
@@ -42,16 +44,50 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.memory.formation import contains_memory_injection, grounding_tokens
 from agent_core.model.cost import price_usage
-from agent_core.model.streaming import collect_turn
+from agent_core.model.streaming import ModelStreamError, collect_turn
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 PROVIDER_EXTRACTOR_VERSION = "provider-assisted-v2"
-PROVIDER_FORMATION_POLICY_VERSION = "formation@4"
+PROVIDER_FORMATION_POLICY_VERSION = "formation@6"
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_provider_failure(exc: Exception, *, stream_had_output: bool) -> ProviderExtractionFailure:
+    if isinstance(exc, ModelStreamError) and exc.failure is not None:
+        failure = exc.failure
+        return ProviderExtractionFailure(
+            error_class=type(exc).__name__,
+            failure_kind=failure.kind,
+            provider_code=failure.provider_code,
+            http_status=failure.http_status,
+            provider_parameter=failure.provider_parameter,
+            stream_had_output=(getattr(failure, "stream_had_output", False) or stream_had_output),
+            retryable=failure.kind in {"transient", "protocol"},
+        )
+    if isinstance(exc, TimeoutError):
+        return ProviderExtractionFailure(
+            error_class=type(exc).__name__,
+            failure_kind="transient",
+            stream_had_output=stream_had_output,
+            retryable=True,
+        )
+    if isinstance(exc, (ModelStreamError, ValueError)):
+        return ProviderExtractionFailure(
+            error_class=type(exc).__name__,
+            failure_kind="protocol",
+            stream_had_output=stream_had_output,
+            retryable=True,
+        )
+    return ProviderExtractionFailure(
+        error_class=type(exc).__name__,
+        failure_kind="permanent",
+        stream_had_output=stream_had_output,
+        retryable=False,
+    )
 
 
 def provider_extraction_evidence_matches(
@@ -73,7 +109,7 @@ def provider_extraction_evidence_matches(
 
 
 class ProviderExtractionBudget(BaseModel):
-    """The fixed formation@4 ceiling for one provider-assisted consolidation."""
+    """The fixed formation@6 ceiling for one provider-assisted consolidation."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -934,6 +970,10 @@ class ProviderAssistedCandidateExtractor:
                 )
             raise
         except Exception as exc:
+            failure = _safe_provider_failure(
+                exc,
+                stream_had_output=response_sha256 is not None,
+            )
             logger.warning(
                 "memory_provider_extraction_failed",
                 extra={"error_class": type(exc).__name__, "job_id": str(job_id)},
@@ -949,8 +989,9 @@ class ProviderAssistedCandidateExtractor:
                 usage=usage,
                 response_sha256=response_sha256,
                 error_class=type(exc).__name__,
+                failure=failure,
             )
-            return deterministic
+            return MemoryExtractionResult(deterministic, provider_failure=failure)
 
         await self._audit(
             job_id=job_id,
@@ -1117,6 +1158,7 @@ class ProviderAssistedCandidateExtractor:
         candidate_count: int = 0,
         grounded_candidate_count: int = 0,
         error_class: str | None = None,
+        failure: ProviderExtractionFailure | None = None,
     ) -> None:
         session_id = events[0].session_id if events else None
         payload = {
@@ -1159,6 +1201,12 @@ class ProviderAssistedCandidateExtractor:
             "usage": None if usage is None else usage.model_dump(mode="json"),
             "outcome": outcome,
             "error_class": error_class,
+            "failure_kind": None if failure is None else failure.failure_kind,
+            "provider_code": None if failure is None else failure.provider_code,
+            "http_status": None if failure is None else failure.http_status,
+            "provider_parameter": None if failure is None else failure.provider_parameter,
+            "stream_had_output": False if failure is None else failure.stream_had_output,
+            "retryable": False if failure is None else failure.retryable,
         }
         event_type = (
             "memory.provider_extraction.completed"

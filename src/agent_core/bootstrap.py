@@ -1267,7 +1267,7 @@ async def _compose(
             evidence_corpus_sha256 or "none",
         )
     )
-    selection_key = f"memory.provider_extraction.selection:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v2:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -1276,6 +1276,8 @@ async def _compose(
                 actor_type="composition-root",
                 actor_id=principal.principal_id,
                 payload={
+                    "tenant_id": principal.tenant_id,
+                    "principal_id": principal.principal_id,
                     "mode": memory_mode.value,
                     "outcome": selection_outcome,
                     "reason": selection_reason,

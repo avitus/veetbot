@@ -27,7 +27,7 @@ from agent_core.cli.main import app
 from agent_core.config import load_settings
 from agent_core.domain.errors import ExportConsentError
 from agent_core.domain.events import EventEnvelope
-from agent_core.domain.memory import ConsolidationRun, MemoryEdit
+from agent_core.domain.memory import ConsolidationResult, ConsolidationRun, MemoryEdit
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import PersistedStreamFrame
@@ -974,12 +974,25 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         seen.append(("trace", trace_id))
         return recall_trace
 
+    async def fake_diagnose(session_id: UUID) -> object:
+        seen.append(("diagnose", session_id))
+        return {"session_id": str(session_id), "pending_retry": False}
+
+    async def fake_replay(session_id: UUID) -> object:
+        seen.append(("replay", session_id))
+        return ConsolidationResult(
+            run=formation.model_copy(update={"trigger": "operator_replay"}),
+            beliefs=[belief],
+        )
+
     monkeypatch.setattr(cli_main, "_memory_list", fake_list)
     monkeypatch.setattr(cli_main, "_memory_get", fake_get)
     monkeypatch.setattr(cli_main, "_memory_edit", fake_edit)
     monkeypatch.setattr(cli_main, "_memory_delete", fake_delete)
     monkeypatch.setattr(cli_main, "_memory_formations", fake_formations)
     monkeypatch.setattr(cli_main, "_memory_trace", fake_trace)
+    monkeypatch.setattr(cli_main, "_memory_diagnose", fake_diagnose, raising=False)
+    monkeypatch.setattr(cli_main, "_memory_replay", fake_replay, raising=False)
     runner = CliRunner()
 
     listed = runner.invoke(
@@ -1004,16 +1017,24 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         ["memory", "formations", "--session", str(SESSION_ID), "--limit", "9"],
     )
     traced = runner.invoke(app, ["memory", "trace", str(recall_trace.id)])
+    diagnosed = runner.invoke(app, ["memory", "diagnose", "--session", str(SESSION_ID)])
+    unconfirmed_replay = runner.invoke(app, ["memory", "replay", "--session", str(SESSION_ID)])
+    replayed = runner.invoke(app, ["memory", "replay", "--session", str(SESSION_ID), "--confirm"])
     deleted = runner.invoke(app, ["memory", "delete", str(belief.id)])
 
     assert all(
-        result.exit_code == 0 for result in (listed, fetched, edited, formations, traced, deleted)
+        result.exit_code == 0
+        for result in (listed, fetched, edited, formations, traced, diagnosed, replayed, deleted)
     )
     assert json.loads(listed.stdout)[0]["formation_run_id"] == str(formation.id)
     assert json.loads(fetched.stdout)["source_session_id"] == str(SESSION_ID)
     assert json.loads(edited.stdout)["statement"] == "User prefers direct answers"
     assert json.loads(formations.stdout)[0]["committed"] == 1
     assert json.loads(traced.stdout)["query"]["text"] == "concise answers"
+    assert json.loads(diagnosed.stdout)["pending_retry"] is False
+    assert unconfirmed_replay.exit_code == 2
+    assert "requires --confirm" in unconfirmed_replay.stderr
+    assert json.loads(replayed.stdout)["run"]["trigger"] == "operator_replay"
     assert json.loads(deleted.stdout) == {"id": str(belief.id)}
     assert seen == [
         ("list", (True, SESSION_ID, 7)),
@@ -1021,6 +1042,8 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         ("edit", (belief.id, "User prefers direct answers")),
         ("formations", (SESSION_ID, 9)),
         ("trace", recall_trace.id),
+        ("diagnose", SESSION_ID),
+        ("replay", SESSION_ID),
         ("delete", belief.id),
     ]
 

@@ -80,7 +80,7 @@ class _BlockingProvider:
 def _evidence() -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@4",
+        formation_policy_version="formation@6",
         model_policy="fake",
         provider="fake",
         model="scripted",
@@ -1503,7 +1503,7 @@ async def test_evaluated_provider_extractor_is_activated_by_composition(
         ("daughter", "User has at least one daughter.")
     ]
     assert result.run.model.startswith("provider-assisted-v2:fake:scripted")
-    assert result.run.policy_version == "formation@4"
+    assert result.run.policy_version == "formation@6"
 
 
 async def test_provider_extractor_has_a_non_activating_evaluation_mode() -> None:
@@ -1559,6 +1559,9 @@ async def test_provider_failure_is_audited_and_uses_deterministic_fallback() -> 
                         model="scripted",
                         attempt_id=UUID(int=1),
                         message="provider unavailable",
+                        provider_code="invalid_schema",
+                        http_status=400,
+                        provider_parameter="response_format",
                     )
                 )
             ]
@@ -1600,6 +1603,12 @@ async def test_provider_failure_is_audited_and_uses_deterministic_fallback() -> 
     payload = audits[0].payload
     assert payload["outcome"] == "failed"
     assert payload["error_class"] == "ModelStreamError"
+    assert payload["failure_kind"] == "permanent"
+    assert payload["provider_code"] == "invalid_schema"
+    assert payload["http_status"] == 400
+    assert payload["provider_parameter"] == "response_format"
+    assert payload["stream_had_output"] is False
+    assert payload["retryable"] is False
     assert "Apple Watch" not in json.dumps(payload)
     assert "provider unavailable" not in json.dumps(payload)
 

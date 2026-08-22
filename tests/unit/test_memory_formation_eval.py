@@ -88,6 +88,7 @@ def test_checked_in_memory_formation_corpus_is_versioned_and_large_enough() -> N
     assert len(corpus.cases) >= 20
     assert len(digest) == 64
     assert {case.id for case in corpus.cases} >= {
+        "attribute-saxophone-experience-and-pain-001",
         "relationship-daughter-001",
         "secret-001",
         "injection-001",
@@ -228,7 +229,7 @@ class TestProviderEvidencePublicationGate:
         persisted = type(evidence).model_validate_json(rendered)
         assert persisted == evidence
         assert persisted.extractor_version == "provider-assisted-v2"
-        assert persisted.formation_policy_version == "formation@4"
+        assert persisted.formation_policy_version == "formation@6"
         assert (
             persisted.model_policy,
             persisted.provider,
@@ -244,13 +245,13 @@ class TestProviderEvidencePublicationGate:
         )
         assert persisted.corpus_sha256 == evidence.corpus_sha256
         assert len(persisted.corpus_sha256) == 64
-        assert persisted.sample_count == evidence.sample_count == 24
+        assert persisted.sample_count == evidence.sample_count == 25
         assert persisted.deterministic_supported_candidates == 0
         assert persisted.provider_supported_candidates == evidence.provider_supported_candidates
         assert persisted.deterministic_fabricated_candidates == 0
         assert persisted.provider_fabricated_candidates == 0
         assert persisted.provider_supported_case_count == persisted.positive_case_count
-        assert persisted.minimum_supported_case_count == 16
+        assert persisted.minimum_supported_case_count == 17
         assert rendered.endswith("\n")
 
     async def test_failure_returns_diagnostics_and_leaves_no_activation_artifact(
@@ -376,5 +377,5 @@ class TestProviderEvidencePublicationGate:
         assert result is not None
         assert not result.passed
         assert result.failure_summary is not None
-        assert "positive coverage 1/20" in result.failure_summary
+        assert "positive coverage 1/21" in result.failure_summary
         assert not output.exists()

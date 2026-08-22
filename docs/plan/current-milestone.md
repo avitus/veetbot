@@ -39,9 +39,13 @@ non-joining background-review child run. Authoring stays disabled by default;
 tenant activation remains blocked until the evaluation threshold in the
 [skills design](skills.md#rollout-evidence) passes, and that activation is
 roadmap item B1 rather than a Milestone 10 completion condition (ADR-0061).
-The provider-assisted memory extractor's version-bound evidence passed on the
-intended production model and ADR-0057 is accepted. The machine-readable
-[project state](../status/project-state.yaml) records progress and evidence.
+The provider-assisted memory extractor's historical `formation@4` evidence
+passed on the intended production model and ADR-0057 is accepted. ADR-0068's
+semantic deterministic repair and retry lifecycle advance the active policies to
+deterministic `formation@5` and provider-assisted `formation@6`; `auto` now falls
+back safely until the current tuple is reevaluated. Tenant activation remains
+separate from Milestone completion under ADR-0061. The machine-readable [project
+state](../status/project-state.yaml) records progress and evidence.
 
 Milestone 11 is an independent, logically subsequent milestone because adding
 scheduling to Milestone 10 would have changed that milestone's established

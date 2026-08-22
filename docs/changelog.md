@@ -4,6 +4,22 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-22 — Retryable and diagnosable memory formation
+
+- Added exact ordinary-language formation for a newly started soprano-saxophone
+  activity, prior tenor-saxophone experience, and recurring right-thumb pain as
+  three separate provenance-linked memories; the symptom is sensitive and
+  flagged for review.
+- Preserved safe normalized provider failures, committed deterministic fallback
+  immediately, and added durable retries after 60 seconds and 5 minutes without
+  advancing the source watermark. Three failures emit a content-free exhaustion
+  event and close the prefix.
+- Added principal-scoped `agent memory diagnose --session` and confirmed
+  provenance-preserving `agent memory replay --session --confirm` commands.
+- Accepted ADR-0068 and versioned the changed policies as deterministic
+  `formation@5` and provider-assisted `formation@6`. Historical `formation@4`
+  evidence remains inspectable but no longer activates the current tuple.
+
 ## 2026-08-21 — Milestone 15 specified: operational hardening
 
 - Added `docs/plan/operational-hardening.md` and proposed ADR-0065: a

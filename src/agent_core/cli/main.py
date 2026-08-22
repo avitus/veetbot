@@ -670,6 +670,58 @@ def memory_formations(
     typer.echo(json.dumps([row.model_dump(mode="json") for row in rows], default=str))
 
 
+async def _memory_diagnose(session_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.diagnose(session_id)
+
+
+@memory_app.command("diagnose")
+def memory_diagnose(
+    session_id: Annotated[
+        UUID,
+        typer.Option("--session", help="Diagnose formation for one source session."),
+    ],
+) -> None:
+    """Inspect flags, watermarks, provider attempts, audits, and formed beliefs."""
+
+    try:
+        diagnosis = asyncio.run(_memory_diagnose(session_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    payload = diagnosis if isinstance(diagnosis, dict) else diagnosis.model_dump(mode="json")
+    typer.echo(json.dumps(payload, default=str))
+
+
+async def _memory_replay(session_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.replay(session_id)
+
+
+@memory_app.command("replay")
+def memory_replay(
+    session_id: Annotated[
+        UUID,
+        typer.Option("--session", help="Replay formation for one source session."),
+    ],
+    confirm: Annotated[
+        bool,
+        typer.Option("--confirm", help="Confirm the auditable formation replay."),
+    ] = False,
+) -> None:
+    """Reprocess original session evidence through the governed formation path."""
+
+    if not confirm:
+        typer.echo("memory replay requires --confirm", err=True)
+        raise typer.Exit(2)
+    try:
+        result = asyncio.run(_memory_replay(session_id))
+    except (ConfigurationError, NotFoundError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
+
+
 async def _memory_trace(trace_id: UUID) -> Any:
     async with build(storage="postgres") as composition:
         return await composition.memory.get_recall_trace(trace_id)
