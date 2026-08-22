@@ -3,7 +3,8 @@ import Foundation
 
 enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
-    static let sessionID = "00000000-0000-0000-0000-000000000123"
+    static let firstSessionID = "00000000-0000-0000-0000-000000000123"
+    static let secondSessionID = "00000000-0000-0000-0000-000000000456"
 
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
@@ -43,18 +44,30 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         switch (request.httpMethod, url.path) {
         case ("GET", "/v1/sessions"):
             body = """
-                {"items":[\(Self.sessionJSON)],"next_cursor":null}
+                {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)],"next_cursor":null}
                 """
-        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.sessionID)"):
-            body = Self.sessionJSON
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)"):
+            body = Self.firstSessionJSON
         case (
             "GET",
-            "/v1/sessions/\(ConversationNavigationUITestFixture.sessionID)/messages"
+            "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/messages"
         ):
             body = """
                 {"items":[
                   {"sequence":1,"role":"user","content":[{"type":"text","text":"Historical question"}]},
                   {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Historical answer loaded"}]}
+                ],"next_cursor":null}
+                """
+        case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)"):
+            body = Self.secondSessionJSON
+        case (
+            "GET",
+            "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)/messages"
+        ):
+            body = """
+                {"items":[
+                  {"sequence":1,"role":"user","content":[{"type":"text","text":"Second historical question"}]},
+                  {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Second historical answer loaded"}]}
                 ],"next_cursor":null}
                 """
         default:
@@ -78,8 +91,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     override func stopLoading() {}
 
-    private static let sessionJSON = """
-        {"id":"\(ConversationNavigationUITestFixture.sessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Historical chat","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":null}
+    private static let firstSessionJSON = """
+        {"id":"\(ConversationNavigationUITestFixture.firstSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Historical chat","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":null,"last_run_id":null}
+        """
+
+    private static let secondSessionJSON = """
+        {"id":"\(ConversationNavigationUITestFixture.secondSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Second historical chat","metadata":{},"created_at":"2026-08-13T00:00:00Z","updated_at":"2026-08-13T00:04:00Z","active_run_id":null,"last_run_id":null}
         """
 }
 #endif

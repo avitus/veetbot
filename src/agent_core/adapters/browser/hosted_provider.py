@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
+from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -25,6 +28,14 @@ from agent_core.domain.tools import ToolExecutionContext
 from agent_core.ports.browser_sessions import BrowserSessionControlPlane
 
 ProfileLoader = Callable[[Principal, UUID], Awaitable[BrowserProfile]]
+ProfileSelector = Callable[[ToolExecutionContext], Awaitable[UUID]]
+
+
+@dataclass
+class _SessionBinding:
+    profile_id: UUID
+    provider: HostedBrowserProvider
+    deadline_at: datetime
 
 
 class HostedBrowserProvider:
@@ -181,6 +192,111 @@ class HostedBrowserProvider:
         self._lease_scope = None
         self._sequence = 0
         self._observation = None
+
+
+class SessionBoundHostedBrowserProvider:
+    """Resolve a trusted profile from session metadata before each tool invocation."""
+
+    name = "hosted-session-bound-playwright"
+
+    def __init__(
+        self,
+        *,
+        principal: Principal,
+        profiles: ProfileLoader,
+        profile_selector: ProfileSelector,
+        sessions: BrowserSessionControlPlane,
+        now: Callable[[], datetime],
+    ) -> None:
+        self._principal = principal.model_copy(deep=True)
+        self._profiles = profiles
+        self._profile_selector = profile_selector
+        self._sessions = sessions
+        self._now = now
+        self._bindings: dict[UUID, _SessionBinding] = {}
+        self._current: ContextVar[HostedBrowserProvider | None] = ContextVar(
+            "session_bound_hosted_browser_provider",
+            default=None,
+        )
+        self._lock = asyncio.Lock()
+
+    async def bind_execution(self, context: ToolExecutionContext) -> None:
+        if context.principal != self._principal or context.tenant_id != self._principal.tenant_id:
+            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        try:
+            profile_id = await self._profile_selector(context)
+        except (AgentCoreError, OSError, ValueError) as exc:
+            raise BrowserProviderError(
+                "tool.browser.profile_unavailable",
+                retryable=False,
+            ) from exc
+
+        providers_to_close: list[HostedBrowserProvider] = []
+        async with self._lock:
+            now = self._now()
+            for session_id, stale_binding in tuple(self._bindings.items()):
+                if session_id != context.session_id and stale_binding.deadline_at <= now:
+                    providers_to_close.append(self._bindings.pop(session_id).provider)
+            binding = self._bindings.get(context.session_id)
+            if binding is None or binding.profile_id != profile_id:
+                if binding is not None:
+                    providers_to_close.append(binding.provider)
+                try:
+                    profile = await self._profiles(self._principal, profile_id)
+                except (AgentCoreError, OSError) as exc:
+                    raise BrowserProviderError(
+                        "tool.browser.profile_unavailable",
+                        retryable=False,
+                    ) from exc
+                binding = _SessionBinding(
+                    profile_id=profile_id,
+                    provider=HostedBrowserProvider(
+                        principal=self._principal,
+                        profile_id=profile_id,
+                        allowed_origins=profile.allowed_origins,
+                        profiles=self._profiles,
+                        sessions=self._sessions,
+                    ),
+                    deadline_at=context.deadline_at,
+                )
+                self._bindings[context.session_id] = binding
+            else:
+                binding.deadline_at = max(binding.deadline_at, context.deadline_at)
+
+        for provider in providers_to_close:
+            await provider.close()
+        await binding.provider.bind_execution(context)
+        self._current.set(binding.provider)
+
+    def allows(self, url: str) -> bool:
+        provider = self._current.get()
+        return provider is not None and provider.allows(url)
+
+    async def navigate(self, url: str) -> BrowserObservation:
+        return await self._required_provider().navigate(url)
+
+    async def observe(self) -> BrowserObservation:
+        return await self._required_provider().observe()
+
+    async def act(self, action: BrowserAction) -> BrowserObservation:
+        return await self._required_provider().act(action)
+
+    async def action_context(self, action: BrowserAction) -> BrowserActionContext:
+        return await self._required_provider().action_context(action)
+
+    async def close(self) -> None:
+        async with self._lock:
+            providers = [binding.provider for binding in self._bindings.values()]
+            self._bindings.clear()
+            self._current.set(None)
+        for provider in providers:
+            await provider.close()
+
+    def _required_provider(self) -> HostedBrowserProvider:
+        provider = self._current.get()
+        if provider is None:
+            raise BrowserProviderError("tool.browser.profile_unavailable", retryable=False)
+        return provider
 
 
 _HARD_EXCLUSION_WORDS = frozenset(

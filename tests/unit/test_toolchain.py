@@ -755,6 +755,27 @@ def test_mkdocs_site_has_its_public_origin() -> None:
     assert config["theme"]["font"] is False
 
 
+def test_mkdocs_site_uses_veetbot_visual_identity() -> None:
+    config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+    theme = config["theme"]
+    css = (ROOT / "docs" / "assets" / "stylesheets" / "extra.css").read_text(encoding="utf-8")
+    source_icon = (ROOT / "assets" / "brand" / "veetbot-icon.svg").read_text(encoding="utf-8")
+    docs_icon = (ROOT / "docs" / "assets" / "images" / "veetbot-icon.svg").read_text(
+        encoding="utf-8"
+    )
+
+    assert config["site_name"] == "Veetbot Documentation"
+    assert theme["logo"] == "assets/images/veetbot-icon.svg"
+    assert theme["favicon"] == "assets/images/veetbot-icon.svg"
+    assert all(palette["primary"] == "custom" for palette in theme["palette"])
+    assert all(palette["accent"] == "custom" for palette in theme["palette"])
+    assert "--veetbot-turquoise: #00706d" in css
+    assert "--veetbot-orange: #a73e00" in css
+    assert "--veetbot-ink: #0d172a" in css
+    assert "--veetbot-paper: #fafaf7" in css
+    assert source_icon == docs_icon
+
+
 def test_repository_contract_requires_red_green_tdd_evidence() -> None:
     contract = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
