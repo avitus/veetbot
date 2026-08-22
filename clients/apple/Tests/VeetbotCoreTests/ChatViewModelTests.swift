@@ -25,6 +25,99 @@ import Testing
     }
 
     @Test
+    func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval() async throws {
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000101")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000102")
+        )
+        let approvalID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000103")
+        )
+        let notificationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000104")
+        )
+        let sessionJSON = """
+            {"id":"\(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Push target","metadata":{},"created_at":"2026-08-14T00:00:00Z","updated_at":"2026-08-14T00:04:00Z","active_run_id":"\(runID.uuidString)","last_run_id":"\(runID.uuidString)"}
+            """
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":[\(sessionJSON)],\"next_cursor\":null}"
+                )
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)"):
+                return try response(for: request, statusCode: 200, body: sessionJSON)
+            case ("GET", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[{"sequence":1,"role":"user","content":[{"type":"text","text":"Restored before focus"}]}],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","parent_run_id":null,"status":"WAITING_FOR_APPROVAL","step_count":1,"model_call_count":1,"tool_call_count":1,"usage":{"input_tokens":1,"output_tokens":1,"cost_usd":"0"},"limits":{"max_steps":8,"deadline_at":null,"max_cost_usd":null},"failure":null,"cancel_requested_at":null,"created_at":"2026-08-14T00:03:00Z","updated_at":"2026-08-14T00:04:00Z"}
+                        """
+                )
+            case ("GET", "/v1/approvals/\(approvalID.uuidString)"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"id":"\(approvalID.uuidString)","run_id":"\(runID.uuidString)","session_id":"\(sessionID.uuidString)","status":"PENDING","tool_name":"sandbox.run_command","action_summary":"Run command","arguments":{},"risk":"HIGH","policy_reason":"approval required","expires_at":null,"created_at":"2026-08-14T00:04:00Z","resolved_at":null,"resolved_by":null,"decision":null}
+                        """
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(for: request, statusCode: 200, body: "")
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try response(for: request, statusCode: 500, body: "")
+            }
+        }
+        let payload = try #require(
+            NotificationPushPayload(
+                userInfo: [
+                    "veetbot": [
+                        "version": 1,
+                        "kind": "approval_requested",
+                        "title": "Approval needed",
+                        "status": "WAITING_FOR_APPROVAL",
+                        "tool_name": "sandbox.run_command",
+                        "session_id": sessionID.uuidString,
+                        "run_id": runID.uuidString,
+                        "approval_id": approvalID.uuidString,
+                        "notification_id": notificationID.uuidString,
+                    ]
+                ]
+            )
+        )
+
+        await model.openNotification(payload)
+        #expect(model.selectedSessionID == nil)
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        #expect(model.selectedSessionID == sessionID)
+        #expect(model.runState.activeRunID == runID)
+        #expect(model.runState.timeline.map(\.text) == ["Restored before focus"])
+        #expect(model.runState.approvals.map(\.id) == [approvalID])
+        #expect(model.notificationFocus == .approval(approvalID))
+        #expect(model.notificationNavigationID != nil)
+    }
+
+    @Test
     func testHistoryPaginationHasNoArbitraryPageCapAndRejectsLoops() throws {
         var seen: Set<String> = []
 

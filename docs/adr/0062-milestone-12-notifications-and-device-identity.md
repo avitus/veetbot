@@ -82,6 +82,10 @@ was already partly superseded once by ADR-0050 for local history.
     notification inbox; two feature flags that production release validation
     requires to change together; a provider selector in the form the web and
     browser providers use.
+    Registration idempotency uses its own principal-scoped repository and table,
+    following the schedule-route pattern, because the generic run-idempotency
+    record cannot store an exact device response. The replay snapshot is the
+    public device view and therefore never contains the push token.
 11. **The Apple client registers and renders; it holds no notification state.**
     ADR-0049 decision 2 is superseded to that extent and no further. Actionable
     lock-screen approval is explicitly out of scope because it is an
@@ -95,7 +99,7 @@ was already partly superseded once by ADR-0050 for local history.
 - Scheduled runs, approvals, and questions become actionable from a phone
   without opening the app first; the approval, question, and result remain
   readable through the existing API whether or not the push arrived.
-- Three tables, three ports, three scopes, seven routes, one worker role, one
+- Four tables, four ports, three scopes, seven routes, one worker role, one
   systemd unit, one environment file, and one dependency extra are added.
 - Session erasure gains one obligation: delete the session's pending outbox
   rows in the same transaction.

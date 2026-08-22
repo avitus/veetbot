@@ -61,6 +61,9 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var isSending = false
     @Published public private(set) var sessionBusy = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var notificationFeatureAvailable: Bool?
+    @Published public private(set) var notificationFocus: NotificationFocus?
+    @Published public private(set) var notificationNavigationID: UUID?
 
     public let runState: RunStateReducer
 
@@ -68,6 +71,7 @@ public final class ChatViewModel: ObservableObject {
     private let configurationStore: ConnectionConfigurationStore
     private let historyStore: any SessionHistoryStore
     private let artifactCache: ArtifactCache
+    private let deviceRegistrationCoordinator: DeviceRegistrationCoordinator
     private let urlSession: URLSession?
     private var api: VeetbotAPIClient?
     private var eventStream: ReconnectingEventStream?
@@ -78,12 +82,15 @@ public final class ChatViewModel: ObservableObject {
     private var deletingHistorySessionIDs: Set<UUID> = []
     private var historyReconciliationID: UUID?
     private var pendingSubmission: (text: String, key: String)?
+    private var pendingNotificationPayload: NotificationPushPayload?
 
     public init(
         tokenStore: any TokenStore = KeychainTokenStore(),
         configurationStore: ConnectionConfigurationStore = ConnectionConfigurationStore(),
         historyStore: (any SessionHistoryStore)? = nil,
         artifactCache: ArtifactCache = ArtifactCache(),
+        deviceRegistrationCoordinator: DeviceRegistrationCoordinator =
+            DeviceRegistrationCoordinator(),
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil
     ) {
@@ -91,6 +98,7 @@ public final class ChatViewModel: ObservableObject {
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
         self.artifactCache = artifactCache
+        self.deviceRegistrationCoordinator = deviceRegistrationCoordinator
         self.runState = runState ?? RunStateReducer()
         self.urlSession = urlSession
         Task { await bootstrap() }
@@ -119,6 +127,14 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        if let api {
+            do {
+                _ = try await deviceRegistrationCoordinator.revoke(using: api)
+            } catch {
+                present(error)
+                return
+            }
+        }
         selectionRequestID = nil
         historyReconciliationID = nil
         watchTasks.cancel()
@@ -128,6 +144,71 @@ public final class ChatViewModel: ObservableObject {
         await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
+    }
+
+    public func registerRemoteNotifications(
+        deviceToken: Data,
+        descriptor: AppleDeviceDescriptor
+    ) async {
+        guard let api else { return }
+        do {
+            let outcome = try await deviceRegistrationCoordinator.register(
+                deviceToken: deviceToken,
+                descriptor: descriptor,
+                using: api
+            )
+            notificationFeatureAvailable = outcome != .unsupported
+        } catch {
+            present(error)
+        }
+    }
+
+    public func openNotification(_ payload: NotificationPushPayload) async {
+        guard let link = NotificationDeepLinkReducer.reduce(payload) else { return }
+        guard let api else {
+            pendingNotificationPayload = payload
+            return
+        }
+        do {
+            let entry: SessionHistoryEntry
+            if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
+                entry = existing
+            } else {
+                let session = try await api.getSession(link.sessionID)
+                try await store(
+                    session: session,
+                    lastRunID: link.runID
+                )
+                guard let stored = history.first(where: { $0.sessionID == link.sessionID }) else {
+                    throw HTTPTransportError.invalidResponse
+                }
+                entry = stored
+            }
+            await selectSession(entry, preferredRunID: link.runID)
+            guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
+                return
+            }
+            if case .approval(let approvalID) = link.focus {
+                let approval = try await api.getApproval(approvalID)
+                guard approval.sessionID == link.sessionID, approval.runID == link.runID else {
+                    throw HTTPTransportError.invalidResponse
+                }
+                loadedApprovalIDs.insert(approval.id)
+                runState.mergeApproval(approval)
+            }
+            notificationFocus = link.focus
+            notificationNavigationID = UUID()
+        } catch {
+            present(error)
+        }
+    }
+
+    public func acknowledgeNotificationNavigation() {
+        notificationNavigationID = nil
+    }
+
+    public func reportNotificationRegistrationFailure(_ error: Error) {
+        present(error)
     }
 
     public func newSession() {
@@ -141,10 +222,15 @@ public final class ChatViewModel: ObservableObject {
         sessionBusy = false
         loadedApprovalIDs.removeAll()
         pendingSubmission = nil
+        notificationFocus = nil
+        notificationNavigationID = nil
         runState.reset()
     }
 
-    public func selectSession(_ entry: SessionHistoryEntry) async {
+    public func selectSession(
+        _ entry: SessionHistoryEntry,
+        preferredRunID: UUID? = nil
+    ) async {
         guard let api, !removedHistorySessionIDs.contains(entry.sessionID) else { return }
         let requestID = UUID()
         selectionRequestID = requestID
@@ -153,6 +239,8 @@ public final class ChatViewModel: ObservableObject {
         sessionBusy = false
         loadedApprovalIDs.removeAll()
         pendingSubmission = nil
+        notificationFocus = nil
+        notificationNavigationID = nil
         runState.reset()
         do {
             let session = try await api.getSession(entry.sessionID)
@@ -181,9 +269,16 @@ public final class ChatViewModel: ObservableObject {
             )
             guard selectionRequestID == requestID else { return }
             runState.restore(messages: messages)
-            if let runID = session.activeRunID ?? session.lastRunID ?? entry.lastRunID {
+            if let runID = preferredRunID
+                ?? session.activeRunID
+                ?? session.lastRunID
+                ?? entry.lastRunID
+            {
                 let run = try await api.getRun(runID)
                 guard selectionRequestID == requestID else { return }
+                guard run.sessionID == session.id else {
+                    throw HTTPTransportError.invalidResponse
+                }
                 runState.seed(run: run)
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
             }
@@ -580,6 +675,10 @@ public final class ChatViewModel: ObservableObject {
             throw error
         }
         isConfigured = true
+        if let pendingNotificationPayload {
+            self.pendingNotificationPayload = nil
+            await openNotification(pendingNotificationPayload)
+        }
     }
 
     private func clearInstalledConnection() {

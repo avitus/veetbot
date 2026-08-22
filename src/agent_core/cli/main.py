@@ -23,7 +23,12 @@ from typer.core import TyperGroup
 
 from agent_core import __version__
 from agent_core.api import create_app
-from agent_core.bootstrap import build, build_schedule_worker, serve_execution_service
+from agent_core.bootstrap import (
+    build,
+    build_notification_worker,
+    build_schedule_worker,
+    serve_execution_service,
+)
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import (
@@ -59,6 +64,7 @@ class WorkerRole(StrEnum):
     ASYNC = "async"
     MAINTENANCE = "maintenance"
     SCHEDULE = "schedule"
+    NOTIFY = "notify"
 
 
 class QueuedRunTimeoutError(TimeoutError):
@@ -432,6 +438,10 @@ async def _create_session() -> UUID:
 
 
 async def _serve_worker(role: WorkerRole) -> None:
+    if role is WorkerRole.NOTIFY:
+        async with build_notification_worker() as notification_service:
+            await _run_worker_service(notification_service)
+        return
     if role is WorkerRole.SCHEDULE:
         async with build_schedule_worker() as schedule_service:
             await _run_worker_service(schedule_service)
@@ -475,11 +485,13 @@ def worker_command(
         WorkerRole,
         typer.Option(
             "--role",
-            help="Process role: interactive, async, maintenance, schedule, or legacy worker.",
+            help=(
+                "Process role: interactive, async, maintenance, schedule, notify, or legacy worker."
+            ),
         ),
     ] = WorkerRole.WORKER,
 ) -> None:
-    """Execute an interactive, async, maintenance, schedule, or legacy worker role."""
+    """Execute an interactive, async, maintenance, schedule, notify, or legacy worker role."""
 
     try:
         asyncio.run(_serve_worker(role))

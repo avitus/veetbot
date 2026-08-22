@@ -1,14 +1,34 @@
 """Idempotent post-run accounting for scheduled occurrences."""
 
+from collections.abc import Callable
+from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import ProcessEvent
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunStatus
-from agent_core.domain.schedules import SchedulePauseReason, ScheduleState
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
+from agent_core.domain.schedules import (
+    Schedule,
+    ScheduleOccurrence,
+    SchedulePauseReason,
+    ScheduleState,
+)
 from agent_core.observability.schedules import ScheduleMetrics
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.persistence import ScheduleUnitOfWorkFactory
+from agent_core.ports.persistence import ScheduleUnitOfWork, ScheduleUnitOfWorkFactory
+
+WriteProbe = Callable[[str], None]
+
+
+class _NotificationProducer(Protocol):
+    async def for_schedule_run_accounted(
+        self,
+        uow: ScheduleUnitOfWork,
+        *,
+        schedule: Schedule,
+        occurrence: ScheduleOccurrence,
+        run: Run,
+    ) -> bool: ...
 
 
 class ScheduleOutcomeAccountant:
@@ -19,11 +39,15 @@ class ScheduleOutcomeAccountant:
         clock: Clock,
         ids: IdFactory,
         metrics: ScheduleMetrics | None = None,
+        notification_producer: _NotificationProducer | None = None,
+        write_probe: WriteProbe | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
         self._metrics = metrics or ScheduleMetrics()
+        self._notification_producer = notification_producer
+        self._write_probe = write_probe or (lambda _boundary: None)
 
     async def account(self, run_id: UUID) -> bool:
         async with self._uow_factory() as uow:
@@ -71,6 +95,7 @@ class ScheduleOutcomeAccountant:
             )
             if updated != schedule:
                 await uow.schedules.replace(schedule, updated)
+                self._write_probe("schedule")
             await uow.process_events.append(
                 ProcessEvent(
                     id=self._ids.new_id(),
@@ -92,6 +117,16 @@ class ScheduleOutcomeAccountant:
                     created_at=self._clock.now(),
                 )
             )
+            self._write_probe("process_event")
+            if self._notification_producer is not None:
+                produced = await self._notification_producer.for_schedule_run_accounted(
+                    uow,
+                    schedule=updated,
+                    occurrence=occurrence,
+                    run=run,
+                )
+                if produced:
+                    self._write_probe("notification")
             if auto_paused:
                 await uow.process_events.append(
                     ProcessEvent(
@@ -114,6 +149,7 @@ class ScheduleOutcomeAccountant:
                         created_at=self._clock.now(),
                     )
                 )
+                self._write_probe("auto_pause_event")
                 self._metrics.record_auto_pause()
             self._metrics.record_terminal(
                 tenant_id=schedule.tenant_id,

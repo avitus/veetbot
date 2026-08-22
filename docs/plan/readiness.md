@@ -13,10 +13,9 @@ the corpus runs out?
 The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
-were written. The present answer is different: Milestones 0 through 9 are
-complete, Milestone 10's authorized tranches are specified and in progress, and
-the separately authorized Milestone 11 scheduling tranche is implementable from
-[scheduling.md](scheduling.md) and ADR-0059.
+were written. The present answer is different: Milestones 0 through 11 are
+complete, and Milestone 12 notifications and device identity is specified and
+in progress.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -83,9 +82,9 @@ rather than smoothed.
 | 7 | Context budgeting and working state | Ready | 7 | Nothing |
 | 8 | Skills and MCP integration | Ready | 17 | Nothing |
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
-| 10 | Memory maturation, self-authored skills, web access, browser automation | Authorized | 38 | Hosted CI and the final review remain; tenant activation is roadmap item B1 (ADR-0061) |
-| 11 | Scheduled runs | Authorized | 23 | Implemented locally; hosted CI and the final review remain |
-| 12 | Notifications and device identity | Authorized | 20 | Nothing in the corpus; the Apple push key and capability are owner actions outside it |
+| 10 | Memory maturation, self-authored skills, web access, browser automation | Complete | 38 | Tenant activation remains roadmap item B1 (ADR-0061) |
+| 11 | Scheduled runs | Complete | 23 | Nothing |
+| 12 | Notifications and device identity | In progress | 20 | The Apple push key and capability are owner actions outside the corpus |
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
@@ -224,7 +223,7 @@ specification, and recorded as
     and a repository constructed with a live session that never
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
-    `engineering-plan.md:1632` says *"Create Alembic migrations for at
+    `engineering-plan.md:1636` says *"Create Alembic migrations for at
     least these tables"* and `development-toolchain.md:183` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
@@ -248,7 +247,7 @@ ORM.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2514`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2518`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -268,7 +267,7 @@ Three items fell short, one of them completely.
 
 1.  **Provider response metadata is designed nowhere.**
     `provider_metadata` appears exactly once in the entire corpus, as
-    a `dict[str, Any]` field at `engineering-plan.md:1218`. No document
+    a `dict[str, Any]` field at `engineering-plan.md:1222`. No document
     states which keys go in it, whether the set is open or closed,
     whether it is persisted, or where. It is absent from the
     `model_calls` schema. A field of that shape with no key discipline
@@ -356,11 +355,11 @@ of thing that is written three different ways by three implementers,
 two of which are subtly wrong.
 
 **Principal scopes were half-designed.** The `Principal` model lived
-only at `engineering-plan.md:472`, the policy spec identified where
+only at `engineering-plan.md:476`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:575` named `ApprovalService` as one of
+`bootstrap-and-composition.md:577` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -452,7 +451,7 @@ the fewest of any milestone that adds work — and that number was the
 finding.
 
 Section 16 of the engineering plan, at
-`engineering-plan.md:1806-2011`, designs the API more thoroughly than
+`engineering-plan.md:1810-2015`, designs the API more thoroughly than
 a summary of this milestone's coverage would suggest. At the time of the
 Milestone 5 review it specified nine endpoints with methods, paths, and where
 relevant headers; ADR-0050 later added the authoritative session list and
@@ -495,7 +494,7 @@ Six things were visibly unsettled inside it.
     to the trace identifier the observability section requires.
 3.  **`Idempotency-Key` handling is named in two places and specified
     in neither.** It appears as a header at
-    `engineering-plan.md:1899` and as an implement bullet, and the
+    `engineering-plan.md:1903` and as an implement bullet, and the
     idempotency port the map schedules at Milestone 1 is a tool-call
     concern rather than an HTTP one. Whether these are the same
     mechanism is undecided.
@@ -551,7 +550,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3587-3664`
+Section 28 of the plan is not empty — `engineering-plan.md:3591-3668`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -570,7 +569,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1374`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3662` requires a container-escape attempt as
+    `engineering-plan.md:3666` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -732,7 +731,7 @@ What was missing was everything underneath it: no package format, no
 manifest schema, no types, no storage, no reference grammar, no
 context accounting, and no gates. The acceptance criterion *"A
 selected skill is version-pinned in the run"* at
-`engineering-plan.md:2760` had no design behind it — and no document
+`engineering-plan.md:2764` had no design behind it — and no document
 outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
 and remains the sharper of the two observations.
 
@@ -926,9 +925,9 @@ fourteen registry entries to twenty-six, and the corpus from one
 hundred and sixty to one hundred and seventy-two. The named gap is
 closed, so the verdict changes with it.
 
-## Milestone 10: authorized workstreams in progress
+## Milestone 10: complete; activation evidence remains separate
 
-The project authorizes automatic memory formation, the independently
+The project authorized automatic memory formation, the independently
 deliverable self-authored-skills tranche, provider-neutral public-web access,
 and authenticated browser automation. The six registered `gate.skill.*`
 entries and fifteen automatic-memory, inspection, and provider gates form the
@@ -939,11 +938,11 @@ plan's roadmap; general-purpose subagents were authorized as Milestone 13 on
 
 The readiness review originally found this milestone structurally unlike every
 other one in the plan. The repository owner explicitly authorized it on
-2026-08-17 and selected memory maturation as the first workstream. Thirty-four
-registry entries now belong to Milestone 10: six for skill authoring, eleven for
-automatic memory formation and governed provider assistance, seven for
+2026-08-17 and selected memory maturation as the first workstream. Thirty-eight
+registry entries belong to Milestone 10: six for skill authoring, fifteen for
+automatic memory formation, inspection, and governed provider assistance, seven for
 public-web access, and ten for authenticated browser automation. Authorization
-permits implementation; it does not make the remaining work ready or complete.
+permitted implementation; the passing delivery evidence now makes it complete.
 
 When this review was written, it had no `#### Implement` heading and no
 `#### Acceptance criteria` heading. It opened with *"These are separate optional
@@ -968,7 +967,7 @@ rather than a full transcript — and two more were partial.
 That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
-Section 15 column at `engineering-plan.md:1687`, and the sibling join
+Section 15 column at `engineering-plan.md:1691`, and the sibling join
 at `runtime-loop.md:1140` reads it. Restricted context is
 `context-engine.md:282`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
@@ -984,10 +983,10 @@ plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
 `tool-system.md:973`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
 `tool-system.md:931` and no input type for it exists anywhere, and
-the child budget is additive by `engineering-plan.md:566` while no
+the child budget is additive by `engineering-plan.md:570` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3571` and `engineering-plan.md:2963` and picked
+`engineering-plan.md:3575` and `engineering-plan.md:2967` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1005,13 +1004,12 @@ resolved: resolving it is Milestone 10 work, and this review
 authorizes none.
 
 The historical verdict was that this was a direction rather than a milestone.
-The authorization and new memory-maturation acceptance criteria change that
-operational verdict: Milestone 10 is now active, but its verified gate ceiling
-remains Milestone 9 until all thirty-eight Milestone 10 gates pass, hosted CI
-passes on the final head, and the final review is clean. Skill-authoring
-activation is roadmap item B1 rather than a completion condition (ADR-0061);
-routing remains deferred; subagents are Milestone 13; scheduling is outside
-this milestone.
+The authorization and new memory-maturation acceptance criteria changed that
+operational verdict. All thirty-eight Milestone 10 gates, the cumulative
+registry, hosted CI, and the final review passed on final head `90e9142`, so the
+milestone is complete. Skill-authoring activation is roadmap item B1 rather
+than a completion condition (ADR-0061); routing remains deferred; subagents are
+Milestone 13; scheduling is outside this milestone.
 
 The owner separately authorized provider-neutral public-web access on
 2026-08-18. [web-access.md](web-access.md) now covers its port, two tools,
@@ -1029,8 +1027,8 @@ scheduler handoff, delivery slices, and acceptance criteria. Ten formal
 entries without changing the Milestone 9 verified ceiling. All ten resolve to
 executable profile-lifecycle, authentication, grant, provider, policy, trust,
 revision, origin, and uncertainty checks.
-Milestone 11's later scheduling design raises the complete registry to 227
-without changing the Milestone 9 verified ceiling.
+The later Milestone 11 scheduling design raises the complete registry to 227
+and, after final verification, advances the verified gate ceiling through 11.
 
 Open question 4 below closes the remaining half of this, which was
 whether the missing criteria are an omission or a choice. They are a
@@ -1043,7 +1041,7 @@ criteria are a promise about a delivery, and a promise cannot be made
 about work that must not start until evidence arrives. What Milestone
 10 is missing is the heading, not the content the heading would hold.
 
-## Milestone 11: scheduled runs authorized and ready
+## Milestone 11: scheduled runs complete
 
 The scheduling entry condition is now true: Milestone 2's durable worker and
 queue, Milestone 4's policy and approvals, and Milestone 5's authenticated HTTP
@@ -1059,11 +1057,11 @@ sessions, async priority and admission, the eight-route API, default-off
 deployment requirements, metrics, and twenty-three hard gates. ADR-0059 records why
 those mechanisms reuse PostgreSQL and the ordinary run path.
 
-The readiness verdict is therefore **Authorized**. There is no unnamed design
-choice between the corpus and the first red tests. The implementation is locally
-complete and production scheduling remains default-off pending hosted review.
-Because Milestone 10 is numerically earlier and incomplete, Milestone 11 does not
-by itself advance the verified gate ceiling past 9.
+The readiness verdict is therefore **Complete**. There is no unnamed design
+choice in the delivered contract. All twenty-three scheduling gates and the
+227-gate cumulative registry passed, and hosted CI plus the final review passed
+on final head `90e9142`. Production scheduling remains default-off until
+explicitly activated.
 
 ## Milestone 12: notifications and device identity, authorized and specified
 
@@ -1080,13 +1078,14 @@ confinement; three scopes and seven routes including the offline inbox; the
 Apple client's registration and deep-link duties; process-event lifecycle
 audit; and twenty hard gates across the `device` and `notify` areas. ADR-0062
 records why two ports replace the `NotificationService` name, why the
-broadcaster stays, and why the push key lives in one role.
+broadcaster stays, why registration replay has a separate principal-scoped
+repository, and why the push key lives in one role.
 
-The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's Apple Developer work — an APNs key and the push
-capability on the bundle identifier — and the verified ceiling, which cannot
-pass 11 until Milestones 10 and 11 close.
+The readiness verdict is therefore **In progress**: there is no unnamed design
+choice between the corpus and the implementation. What remains outside the
+corpus is the owner's Apple Developer work — an APNs key and the push capability
+on the bundle identifier. The verified ceiling is 11 while Milestone 12's gates
+are implemented.
 
 ## Milestone 13: subagents and delegation, authorized and specified
 
@@ -1157,7 +1156,7 @@ escrow, and the first off-host rehearsal.
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3666-3824` for links to other documents returned
+`engineering-plan.md:3670-3828` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1249,7 +1248,7 @@ sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
 criterion, and 30.6's constraints are each carried forward rather
 than reinterpreted. Two citation errors are corrected in the process.
 One is this review's: the version-pinning criterion is at
-`engineering-plan.md:2760`, and the line this review first named was
+`engineering-plan.md:2764`, and the line this review first named was
 an MCP configuration bullet a few lines above it. A line-number
 citation into the plan is correct only until the plan is next edited,
 which is why every citation in this corpus is now recorded in
@@ -1377,7 +1376,7 @@ under the conflict it settles.
     Milestone 5 was an off-by-one against a list in which 5 is the
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2514` against
+    Milestone 3.** `engineering-plan.md:2518` against
     `model-gateway.md:1795` and `milestone-map.md:1248`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
@@ -1387,7 +1386,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3662` requires a test the harness's case set
+    `engineering-plan.md:3666` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

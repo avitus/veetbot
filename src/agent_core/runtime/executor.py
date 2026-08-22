@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -71,7 +72,22 @@ type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
 type TokenCompleteCallback = Callable[[UUID], None]
 type RunCompleteCallback = Callable[[UUID, int | None], Awaitable[None]]
+type FinalizationWriteProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
+
+
+class _RunNotificationProducer(Protocol):
+    async def for_run_transition(
+        self,
+        uow: RepositoryUnitOfWork,
+        *,
+        run: Run,
+        principal_id: str,
+        status: RunStatus,
+        approval_id: UUID | None = None,
+        question_id: UUID | None = None,
+        approval_expires_at: datetime | None = None,
+    ) -> bool: ...
 
 
 @dataclass(slots=True)
@@ -81,7 +97,11 @@ class _FinalizationContext:
     uow_factory: UnitOfWorkFactory
     lease: WorkerLease | None
     clock: Clock
+    ids: IdFactory
     token: RunCancellationToken
+    principal: Principal
+    notification_producer: _RunNotificationProducer | None
+    finalization_write_probe: FinalizationWriteProbe | None
 
 
 class RunExecutor:
@@ -109,6 +129,8 @@ class RunExecutor:
         on_token_complete: TokenCompleteCallback | None = None,
         on_run_complete: RunCompleteCallback | None = None,
         on_model_event: ModelEventCallback | None = None,
+        notification_producer: _RunNotificationProducer | None = None,
+        finalization_write_probe: FinalizationWriteProbe | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,
         identical_denial_threshold: int = 3,
@@ -135,6 +157,8 @@ class RunExecutor:
         self._on_token_complete = on_token_complete
         self._on_run_complete = on_run_complete
         self._on_model_event = on_model_event
+        self._notification_producer = notification_producer
+        self._finalization_write_probe = finalization_write_probe
         self._max_internal_attempts = max_internal_attempts
         self._identical_call_threshold = identical_call_threshold
         self._identical_denial_threshold = identical_denial_threshold
@@ -325,7 +349,11 @@ class RunExecutor:
             uow_factory=self._uow_factory,
             lease=lease,
             clock=self._clock,
+            ids=self._ids,
             token=token,
+            principal=self._principal,
+            notification_producer=self._notification_producer,
+            finalization_write_probe=self._finalization_write_probe,
         )
         context: RunContext | None = None
         try:
@@ -335,6 +363,7 @@ class RunExecutor:
                 checkpoint_state = persisted_checkpoint
                 finalization.checkpoint = persisted_checkpoint
             principal = await self._principals.for_run(run)
+            finalization.principal = principal
             if persisted_checkpoint is None:
                 async with self._uow_factory() as uow:
                     checkpoint_state = await self._seed_checkpoint(
@@ -416,6 +445,8 @@ class RunExecutor:
                 token=token,
                 dispatch_tools=self._dispatch_tools,
                 add_open_question=self._add_open_question,
+                notification_producer=self._notification_producer,
+                finalization_write_probe=self._finalization_write_probe,
                 on_model_event=self._on_model_event,
                 max_internal_attempts=self._max_internal_attempts,
                 identical_call_threshold=self._identical_call_threshold,
@@ -673,7 +704,10 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             ),
             lease=context.lease,
         )
+        if context.finalization_write_probe is not None:
+            context.finalization_write_probe("terminal_event")
         last_event = terminal_event
+        approval_id: UUID | None = None
         if outcome.kind is OutcomeKind.SUSPENDED and status is RunStatus.WAITING_FOR_APPROVAL:
             approval_id = (
                 context.checkpoint.pending_approval_ids[0]
@@ -692,6 +726,30 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
                 ),
                 lease=context.lease,
             )
+            if context.finalization_write_probe is not None:
+                context.finalization_write_probe("approval_event")
+        if context.notification_producer is not None:
+            question_id = None
+            approval_expires_at = None
+            if status is RunStatus.WAITING_FOR_USER:
+                raw_question_id = payload.get("question_id")
+                if raw_question_id is None:
+                    raise RuntimeError("user suspension has no question id")
+                question_id = UUID(str(raw_question_id))
+            if approval_id is not None:
+                approval = await uow.approvals.get(approval_id, context.principal)
+                approval_expires_at = approval.expires_at
+            await context.notification_producer.for_run_transition(
+                uow,
+                run=context.run,
+                principal_id=context.principal.principal_id,
+                status=status,
+                approval_id=approval_id,
+                question_id=question_id,
+                approval_expires_at=approval_expires_at,
+            )
+            if context.finalization_write_probe is not None:
+                context.finalization_write_probe("notification")
         context.checkpoint.last_event_sequence = last_event.sequence
         await uow.checkpoints.write(
             context.run.id,
@@ -699,6 +757,8 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             full=True,
             lease=context.lease,
         )
+        if context.finalization_write_probe is not None:
+            context.finalization_write_probe("checkpoint")
         await uow.runs.transition(
             context.run.id,
             RunStatus.RUNNING,
@@ -707,7 +767,11 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             final_message=final_message,
             lease=context.lease,
         )
+        if context.finalization_write_probe is not None:
+            context.finalization_write_probe("run")
         if context.lease is not None:
             if uow.queue is None:
                 raise RuntimeError("durable lease has no queue repository")
             await uow.queue.release(context.lease, status)
+            if context.finalization_write_probe is not None:
+                context.finalization_write_probe("queue")

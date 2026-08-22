@@ -15,11 +15,16 @@ from sqlalchemy.sql.functions import func
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.devices import (
+    DeviceRegistrationIdempotencyRepository,
+    DeviceRegistry,
+)
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
 from agent_core.ports.mcp import MCPServerRepository
 from agent_core.ports.memory import MemoryStore, TraceStore
+from agent_core.ports.notifications import NotificationOutbox
 from agent_core.ports.persistence import TransactionCallback, TransactionCallbackRegistrar
 from agent_core.ports.repositories import (
     AgentRepository,
@@ -97,6 +102,9 @@ class UnitOfWorkRepositories:
     schedule_occurrences: ScheduleOccurrenceRepository
     schedule_idempotency: ScheduleIdempotencyRepository
     schedule_admission: ScheduleAdmissionController
+    devices: DeviceRegistry
+    device_registration_idempotency: DeviceRegistrationIdempotencyRepository
+    notification_outbox: NotificationOutbox
     queue: RunQueue | None
 
 
@@ -148,6 +156,9 @@ class MemoryUnitOfWork:
         self.schedule_occurrences = repositories.schedule_occurrences
         self.schedule_idempotency = repositories.schedule_idempotency
         self.schedule_admission = repositories.schedule_admission
+        self.devices = repositories.devices
+        self.device_registration_idempotency = repositories.device_registration_idempotency
+        self.notification_outbox = repositories.notification_outbox
         self.queue = repositories.queue
         self._depth_token: Token[int] | None = None
         self._rollback_callbacks: list[TransactionCallback] = []
@@ -255,6 +266,9 @@ class PostgresUnitOfWork:
         self.schedule_occurrences = repositories.schedule_occurrences
         self.schedule_idempotency = repositories.schedule_idempotency
         self.schedule_admission = repositories.schedule_admission
+        self.devices = repositories.devices
+        self.device_registration_idempotency = repositories.device_registration_idempotency
+        self.notification_outbox = repositories.notification_outbox
         self.queue = repositories.queue
         self._depth_token = _enter_unit_of_work()
         return self

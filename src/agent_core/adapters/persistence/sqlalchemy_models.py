@@ -1147,3 +1147,194 @@ class ScheduleIdempotencyKeyRow(Base):
         PGUUID(as_uuid=True), ForeignKey("schedules.id", ondelete="RESTRICT")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DeviceRow(Base):
+    __tablename__ = "devices"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "principal_id",
+            "client_device_id",
+            name="uq_devices_principal_client_identity",
+        ),
+        CheckConstraint(
+            "kind IN ('mobile','laptop','desktop','web','cli','surface')",
+            name="device_kind_closed",
+        ),
+        CheckConstraint(
+            "push_provider IS NULL OR push_provider IN ('apns','telegram')",
+            name="device_push_provider_closed",
+        ),
+        CheckConstraint(
+            "push_environment IS NULL OR push_environment IN ('sandbox','production')",
+            name="device_push_environment_closed",
+        ),
+        CheckConstraint(
+            "(push_provider IS NULL AND push_token IS NULL) OR "
+            "(push_provider IS NOT NULL AND push_token IS NOT NULL)",
+            name="device_push_routing_pair",
+        ),
+        CheckConstraint(
+            "(push_provider = 'apns' AND push_environment IS NOT NULL) OR "
+            "((push_provider IS NULL OR push_provider <> 'apns') "
+            "AND push_environment IS NULL)",
+            name="device_push_environment_provider",
+        ),
+        CheckConstraint(
+            "(kind = 'surface' AND "
+            "(push_provider IS NULL OR push_provider = 'telegram')) OR "
+            "(kind <> 'surface' AND (push_provider IS NULL OR push_provider <> 'telegram'))",
+            name="device_surface_routing",
+        ),
+        CheckConstraint(
+            "status IN ('active','revoked')",
+            name="device_status_closed",
+        ),
+        CheckConstraint(
+            "(status = 'revoked' AND revoked_at IS NOT NULL AND push_token IS NULL) OR "
+            "(status = 'active' AND revoked_at IS NULL)",
+            name="device_revocation_consistent",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(muted_kinds) = 'array' AND muted_kinds <@ "
+            '\'["approval_requested","question_asked","run_failed",'
+            '"schedule_run_finished","schedule_occurrence_skipped",'
+            '"ops_alert","ops_recovered","test"]\'::jsonb',
+            name="device_muted_kinds_closed",
+        ),
+        Index(
+            "uq_devices_active_push_token",
+            "push_provider",
+            "push_token",
+            unique=True,
+            postgresql_where=text("push_token IS NOT NULL AND status = 'active'"),
+        ),
+        Index(
+            "ix_devices_tenant_principal_created",
+            "tenant_id",
+            "principal_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    client_device_id: Mapped[str] = mapped_column(Text)
+    name: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(32))
+    platform: Mapped[str] = mapped_column(String(64))
+    app_bundle_id: Mapped[str | None] = mapped_column(Text)
+    push_provider: Mapped[str | None] = mapped_column(String(32))
+    push_token: Mapped[str | None] = mapped_column(Text)
+    push_environment: Mapped[str | None] = mapped_column(String(32))
+    push_token_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    push_token_invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    muted_kinds: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
+    status: Mapped[str] = mapped_column(String(32))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DeviceRegistrationIdempotencyRow(Base):
+    __tablename__ = "device_registration_idempotency_keys"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    response: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationOutboxRow(Base):
+    __tablename__ = "notification_outbox"
+    __table_args__ = (
+        UniqueConstraint("dedupe_key", name="uq_notification_outbox_dedupe_key"),
+        CheckConstraint(
+            "kind IN ('approval_requested','question_asked','run_failed',"
+            "'schedule_run_finished','schedule_occurrence_skipped','ops_alert',"
+            "'ops_recovered','test')",
+            name="notification_kind_closed",
+        ),
+        CheckConstraint(
+            "status IN ('pending','dispatched','superseded','expired','failed')",
+            name="notification_status_closed",
+        ),
+        CheckConstraint("attempts >= 0", name="notification_attempts_nonnegative"),
+        CheckConstraint("priority >= 0", name="notification_priority_nonnegative"),
+        CheckConstraint(
+            "(claimed_by IS NULL AND claimed_until IS NULL) OR "
+            "(claimed_by IS NOT NULL AND claimed_until IS NOT NULL)",
+            name="notification_claim_pair",
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND settled_at IS NULL) OR "
+            "(status <> 'pending' AND settled_at IS NOT NULL)",
+            name="notification_settlement_consistent",
+        ),
+        Index("ix_notification_outbox_due", "status", "next_attempt_at"),
+        Index(
+            "ix_notification_outbox_tenant_principal_created",
+            "tenant_id",
+            "principal_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(64))
+    dedupe_key: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    run_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    approval_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    question_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    schedule_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    occurrence_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    priority: Mapped[int] = mapped_column(SmallInteger)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(32))
+    attempts: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    claimed_by: Mapped[str | None] = mapped_column(Text)
+    claimed_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationDeliveryRow(Base):
+    __tablename__ = "notification_deliveries"
+    __table_args__ = (
+        UniqueConstraint(
+            "notification_id",
+            "device_id",
+            "attempt",
+            name="uq_notification_delivery_attempt",
+        ),
+        CheckConstraint("attempt > 0", name="notification_delivery_attempt_positive"),
+        CheckConstraint(
+            "outcome IN ('delivered','retry','unregistered','rejected','skipped')",
+            name="notification_delivery_outcome_closed",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    notification_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("notification_outbox.id", ondelete="RESTRICT")
+    )
+    device_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("devices.id", ondelete="RESTRICT")
+    )
+    attempt: Mapped[int] = mapped_column(Integer)
+    outcome: Mapped[str] = mapped_column(String(32))
+    provider_reason: Mapped[str | None] = mapped_column(Text)
+    provider_id: Mapped[str | None] = mapped_column(Text)
+    attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

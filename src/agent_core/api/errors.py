@@ -19,6 +19,7 @@ ERROR_STATUS_MAP: dict[type[BaseException], ErrorMapping] = {
     domain_errors.NotFoundError: ErrorMapping("not_found", 404),
     domain_errors.ConflictError: ErrorMapping("conflict", 409),
     domain_errors.ScheduleValidationError: ErrorMapping("schedule_validation_error", 422),
+    domain_errors.DeviceValidationError: ErrorMapping("device_validation_error", 422),
     domain_errors.InvalidStateTransition: ErrorMapping("invalid_state_transition", 409),
     domain_errors.ToolNotFoundError: ErrorMapping("tool_not_found", 404),
     domain_errors.ToolValidationError: ErrorMapping("tool_validation_error", 422),
@@ -83,5 +84,7 @@ def details_for(exc: BaseException, code: str) -> dict[str, object]:
     if code == "schedule_validation_error" and isinstance(
         exc, domain_errors.ScheduleValidationError
     ):
+        return {"reason": exc.reason}
+    if code == "device_validation_error" and isinstance(exc, domain_errors.DeviceValidationError):
         return {"reason": exc.reason}
     return {}

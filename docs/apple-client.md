@@ -43,6 +43,22 @@ access, the user must enter the token once in the signed build. The transport
 refuses redirects, uses the operating system trust store, and maps `401` to
 re-authentication while preserving `403` as an authorization failure.
 
+Once a connection is configured, the application-delegate adaptor requests
+notification authorization and registers with APNs. The client mints one
+`client_device_id`, stores it in the nonsynchronizing Data Protection Keychain
+beside the bearer credential, and posts the APNs token and build-derived sandbox
+or production environment to `POST /v1/devices`. System registration runs again
+on launch and Apple invokes the same upload path whenever it rotates the token.
+Forgetting a connection revokes that server device before deleting the bearer.
+A `404` from the feature-gated device surface marks notifications unavailable
+without preventing the rest of the client from using an older server.
+
+The tracked entitlement declares `aps-environment`; enabling the push capability
+for the application identifier and regenerating provisioning profiles remain
+owner actions in the Apple Developer portal. Debug and release simulator builds
+remain unsigned-build compatible, and the debug UI-test fixture suppresses the
+permission request.
+
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 
@@ -110,6 +126,14 @@ detail is already visible, those rows activate the detail directly. This
 adaptive navigation prevents a compact-width tap from mutating an unbound
 sidebar value and prevents a regular-width selection from leaving the visible
 detail stale.
+
+A notification tap accepts only the closed, content-free `veetbot` payload
+dictionary. If it names a session and run, the client restores the complete
+durable transcript before attaching to that exact run. Approval and question
+notifications then focus their corresponding card; a cold-launch tap waits for
+the saved connection to install before following the same path. The client keeps
+only transient navigation focus and never persists notification state; offline
+recovery remains the server's `/v1/notifications` authority.
 
 Deleting a row is an irreversible `Delete Everywhere` operation. The client
 first asks the server to delete the session and its associated conversation

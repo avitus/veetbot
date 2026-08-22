@@ -181,6 +181,23 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Settings")
             }
         }
+        #if !os(macOS)
+        .background {
+            NavigationLink(
+                isActive: Binding(
+                    get: { model.notificationNavigationID != nil },
+                    set: { active in
+                        if !active { model.acknowledgeNotificationNavigation() }
+                    }
+                )
+            ) {
+                ChatView(model: model)
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+        }
+        #endif
     }
 
     @available(iOS 16.0, macOS 13.0, *)

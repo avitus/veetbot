@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -37,6 +38,16 @@ from agent_core.ports.schedules import (
 WriteProbe = Callable[[str], None]
 
 
+class _NotificationProducer(Protocol):
+    async def for_schedule_occurrence(
+        self,
+        uow: ScheduleUnitOfWork,
+        *,
+        schedule: Schedule,
+        occurrence: ScheduleOccurrence,
+    ) -> bool: ...
+
+
 class ScheduleMaterializer:
     """Make one due occurrence durable in the schedule transaction."""
 
@@ -51,6 +62,7 @@ class ScheduleMaterializer:
         seed_checkpoint: ScheduleCheckpointSeeder,
         write_probe: WriteProbe | None = None,
         metrics: ScheduleMetrics | None = None,
+        notification_producer: _NotificationProducer | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._principals = principals
@@ -60,6 +72,7 @@ class ScheduleMaterializer:
         self._seed_checkpoint = seed_checkpoint
         self._write_probe = write_probe or (lambda _boundary: None)
         self._metrics = metrics or ScheduleMetrics()
+        self._notification_producer = notification_producer
 
     async def materialize(self, schedule_id: UUID) -> ScheduleOccurrence | None:
         now = self._clock.now()
@@ -347,6 +360,13 @@ class ScheduleMaterializer:
         )
         await self._append_occurrence_event(uow, occurrence, schedule, advanced.state, now)
         self._write_probe("process_event")
+        if self._notification_producer is not None:
+            await self._notification_producer.for_schedule_occurrence(
+                uow,
+                schedule=schedule,
+                occurrence=occurrence,
+            )
+            self._write_probe("notification")
         auto_paused = (
             schedule.state is ScheduleState.ACTIVE
             and advanced.state is ScheduleState.PAUSED
