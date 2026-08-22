@@ -312,6 +312,19 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "EnvironmentFile=" not in execution
     assert "veetbot-execution.service" in worker
     assert "veetbot-execution.service" in async_worker
+    # ADR-0067: dependents require and order after the execution service; an
+    # explicit restart of it propagates through Requires=, while its own
+    # on-failure recovery propagates nowhere because nothing binds to it.
+    for dependent in (worker, async_worker, maintenance):
+        lines = dependent.splitlines()
+        assert "Requires=veetbot-execution.service" in lines
+        assert any(
+            line.startswith("After=") and "veetbot-execution.service" in line.split()
+            for line in lines
+        )
+    assert "Restart=on-failure" in execution.splitlines()
+    for unit in (api, worker, async_worker, execution, maintenance, scheduler):
+        assert not any(line.startswith(("BindsTo=", "PartOf=")) for line in unit.splitlines())
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
     assert "agent worker --role schedule" in scheduler

@@ -303,6 +303,37 @@ async def test_execution_service_closed_socket_is_unavailable(
 
 
 @pytest.mark.asyncio
+async def test_execution_service_client_recovers_after_the_service_restarts(
+    socket_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-0067: a dependent that loses the socket surfaces ExecutionUnavailable
+    for that request and reconnects on its next one, because the client opens a
+    connection per call; recovery needs no restart propagation."""
+    socket_path = socket_dir / "execution.sock"
+    environment = FakeExecutionEnvironment(FixedClock(NOW), SequenceIdFactory())
+
+    async def resolve(_reference: str) -> str:
+        return fake_image_digest()
+
+    client = ExecutionServiceClient(socket_path)
+    first = ExecutionServiceServer(environment, socket_path, resolve_image_digest=resolve)
+    await first.start()
+    assert await client.resolve_image_digest("image:tag") == fake_image_digest()
+    await first.close()
+    monkeypatch.setattr(service_adapter, "_CONNECT_ATTEMPTS", 1)
+    with pytest.raises(ExecutionUnavailable, match="socket is unavailable"):
+        await client.resolve_image_digest("image:tag")
+
+    second = ExecutionServiceServer(environment, socket_path, resolve_image_digest=resolve)
+    await second.start()
+    try:
+        assert await client.resolve_image_digest("image:tag") == fake_image_digest()
+    finally:
+        await second.close()
+
+
+@pytest.mark.asyncio
 async def test_execution_service_connect_retries_are_bounded(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

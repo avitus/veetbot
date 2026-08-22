@@ -198,6 +198,11 @@ _THIRD_PARTY_PRONOUN = re.compile(
     r"\b(?:he|she|they|it|you|him|them|his|her|hers|their|theirs|your|yours|its)\b"
 )
 _CLAIMED_STOPWORDS = frozenset({"a", "an", "and", "for", "in", "of", "on", "or", "the", "to"})
+_FIRST_PERSON_PATTERN = re.compile(
+    r"\b(?:"
+    + "|".join(re.escape(token) for token in sorted(_FIRST_PERSON_TOKENS, key=len, reverse=True))
+    + r")\b"
+)
 
 
 class _SemanticClaim(BaseModel):
@@ -296,6 +301,28 @@ def _names_someone_else(text: str) -> bool:
     return re.search(other_possession, text) is not None
 
 
+def _claimed_pattern(claim: _SemanticClaim) -> str | None:
+    """An alternation of the tokens that name the claimed fact, longest first."""
+
+    claimed = grounding_tokens(claim.subject)
+    value = _claim_value(claim)
+    if value is not None:
+        claimed |= grounding_tokens(value)
+    claimed -= _CLAIMED_STOPWORDS
+    if not claimed:
+        return None
+    return "|".join(re.escape(token) for token in sorted(claimed, key=len, reverse=True))
+
+
+def _split_at_claimed_fact(pattern: str, lowered: str) -> tuple[str, str] | None:
+    """The text before and after the first claimed token in a span, else None."""
+
+    fact = re.search(rf"\b(?:{pattern})\b", lowered)
+    if fact is None:
+        return None
+    return lowered[: fact.start()], lowered[fact.end() :]
+
+
 def _claim_is_user_attributed(claim: _SemanticClaim, span: str) -> bool:
     """Whether the evidence span attributes a user-facing claim to the user and
     binds that attribution to the claimed fact rather than to a neighbour."""
@@ -305,26 +332,19 @@ def _claim_is_user_attributed(claim: _SemanticClaim, span: str) -> bool:
     value = _claim_value(claim)
     if claim.claim_kind is MemoryClaimKind.OCCUPATION:
         return value is not None and _occupation_is_user_attributed(span, value)
-    claimed = grounding_tokens(claim.subject)
-    if value is not None:
-        claimed |= grounding_tokens(value)
-    claimed -= _CLAIMED_STOPWORDS
-    if not claimed:
+    pattern = _claimed_pattern(claim)
+    if pattern is None:
         return False
     lowered = span.casefold()
-    claimed_pattern = "|".join(re.escape(token) for token in sorted(claimed, key=len, reverse=True))
     # A first-person possessive directly on the claimed subject binds by itself
     # ("my daughter", "our two cats", "my telescope aperture").
-    possessed = (
-        rf"{_FIRST_PERSON_POSSESSIVE}(?:\s+{_POSSESSIVE_MODIFIER})?\s+(?:{claimed_pattern})\b"
-    )
+    possessed = rf"{_FIRST_PERSON_POSSESSIVE}(?:\s+{_POSSESSIVE_MODIFIER})?\s+(?:{pattern})\b"
     if re.search(possessed, lowered) is not None:
         return True
-    fact = re.search(rf"\b(?:{claimed_pattern})\b", lowered)
-    if fact is None:
+    split = _split_at_claimed_fact(pattern, lowered)
+    if split is None:
         return False
-    before = lowered[: fact.start()]
-    after = lowered[fact.end() :]
+    before, after = split
     # A first-person subject ahead of the fact binds ("I live in Lisbon",
     # "my wife and I go hiking"); someone else's subject ahead of it makes the
     # fact theirs, whatever follows ("my friend lives in Lisbon and I ...").
@@ -334,11 +354,28 @@ def _claim_is_user_attributed(claim: _SemanticClaim, span: str) -> bool:
         return False
     # A first person after the fact binds only while no other subject
     # intervenes ("Portland is home for me", "vegan; that is how I eat").
-    first_person = "|".join(re.escape(token) for token in sorted(_FIRST_PERSON_TOKENS))
-    cue = re.search(rf"\b(?:{first_person})\b", after)
+    cue = _FIRST_PERSON_PATTERN.search(after)
     if cue is None:
         return False
     return not _names_someone_else(after[: cue.start()])
+
+
+def _retraction_binds(claim: _SemanticClaim, span: str) -> bool:
+    """Whether a negation cue modifies the claimed fact: it must sit between the
+    subject that binds the fact and the fact itself, not on a neighbouring fact
+    ("I do not drink coffee and I have a daughter" retracts nothing about the
+    daughter)."""
+
+    pattern = _claimed_pattern(claim)
+    if pattern is None:
+        return False
+    split = _split_at_claimed_fact(pattern, span.casefold())
+    if split is None:
+        return False
+    before, _after = split
+    subjects = list(_FIRST_PERSON_PATTERN.finditer(before))
+    window = before[subjects[-1].end() :] if subjects else before
+    return _RETRACTION_CUE.search(window) is not None
 
 
 def _quantity_modifies_value(claim: _SemanticClaim, span: str) -> bool:
@@ -933,11 +970,11 @@ class ProviderAssistedCandidateExtractor:
         # evidence quote itself; the rest of the episode cannot lend a cue to
         # the quoted span, and a negated span cannot support an assertion.
         quote = claim.evidence_quote
-        negated = _RETRACTION_CUE.search(quote) is not None
         if claim.polarity is Polarity.RETRACT:
-            if not negated:
+            if not _retraction_binds(claim, quote):
                 return False
-        elif negated:
+        elif _RETRACTION_CUE.search(quote) is not None:
+            # An asserted claim fails closed on any negation in its evidence.
             return False
         if not _temporal_value_is_grounded(claim.valid_from, quote, _VALID_FROM_CUE):
             return False

@@ -58,10 +58,14 @@ delivery now manages the execution service alongside the API and worker roles.
 - Worker startup and sandbox maintenance now depend on the execution service.
   The worker, async-worker, and maintenance units declare `Requires=` and
   `After=` on `veetbot-execution.service`, so systemd activates the
-  credential-free unit first and orders the dependents after it. Nothing
-  propagates its restarts: `Restart=on-failure` applies to the execution
-  service alone, and a dependent that loses the socket surfaces
-  `ExecutionUnavailable` for that request and reconnects on its next one,
-  because the client opens a connection per call.
+  credential-free unit first and orders the dependents after it. Two restart
+  paths follow. An explicit `systemctl restart` or `stop` of the execution
+  service propagates through `Requires=` to those dependents, which systemd
+  restarts in the same transaction; the release and rollback paths already
+  restart every unit, so they gain nothing and lose nothing there. The
+  service's own automatic `Restart=on-failure` recovery propagates nowhere —
+  no unit binds to it with `BindsTo=` or `PartOf=` — so a dependent that
+  loses the socket surfaces `ExecutionUnavailable` for that request and
+  reconnects on its next one, because the client opens a connection per call.
 - Large workspace reads cross the local socket as bounded frames. Artifact
   export retains its existing maximum size and digest verification.

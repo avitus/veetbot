@@ -1087,6 +1087,19 @@ def test_provider_claim_grounding_rejects_cross_event_subject_value_mixing() -> 
         ("I have a dog until 2026-07-25. I have a daughter.", {"expires_hint": NOW}),
         # A quote without user attribution is not a claim about the user.
         ("My friend has a daughter.", {"evidence_quote": "has a daughter"}),
+        # A negation that belongs to another fact cannot retract this one...
+        (
+            "I do not drink coffee and I have a daughter.",
+            {
+                "polarity": Polarity.RETRACT,
+                "evidence_quote": "I do not drink coffee and I have a daughter",
+            },
+        ),
+        # ...and the asserted reading of that quote still fails closed on it.
+        (
+            "I do not drink coffee and I have a daughter.",
+            {"evidence_quote": "I do not drink coffee and I have a daughter"},
+        ),
     ],
 )
 def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
@@ -1123,6 +1136,17 @@ def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
         (
             "I no longer have a daughter.",
             {"polarity": Polarity.RETRACT, "evidence_quote": "I no longer have a daughter"},
+        ),
+        (
+            "I have no daughter.",
+            {"polarity": Polarity.RETRACT, "evidence_quote": "I have no daughter"},
+        ),
+        (
+            "I drink coffee and I don't have a daughter.",
+            {
+                "polarity": Polarity.RETRACT,
+                "evidence_quote": "I drink coffee and I don't have a daughter",
+            },
         ),
         (
             "Starting 2026-07-25, I have a daughter.",

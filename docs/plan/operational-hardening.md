@@ -32,8 +32,8 @@ Milestone 15 delivers five things, in two independently default-off tranches:
 
 - **Backup and restore** (no dependency on Milestones 12 through 14): a
   scripted, encrypted, off-host daily backup of the database, the artifact
-  store, and the browser-profile ciphertext with a manifest; and a restore
-  rehearsal that restores into a throwaway database, asserts the schema
+  store, and the browser-profile ciphertext with a signed manifest; and a
+  restore rehearsal that restores into a throwaway database, asserts the schema
   revision, probes the data, records a verdict, and runs automatically on the
   host and on demand from the off-host copy.
 - **Health and alerting** (after Milestone 12): a host health check on a
@@ -78,9 +78,10 @@ veetbot-healthcheck.timer --> healthcheck.sh ---- signals ----> ops_alert --> no
 
 This yields four load-bearing invariants:
 
-1. The backup set is declared by a manifest and structurally tested; nothing
-   under the secrets directories, the certificate store, or the release tree
-   ever enters the archive, and plaintext staging never survives a run.
+1. The backup set is declared by a signed manifest and structurally tested;
+   nothing under the secrets directories, the certificate store, or the
+   release tree ever enters the archive, and plaintext staging never survives
+   a run.
 2. A backup that has not been restored is not a backup: every host run
    rehearses its own staging copy before upload, and the owner rehearses the
    off-host copy with the escrowed key on a schedule that is recorded.
@@ -93,7 +94,7 @@ This yields four load-bearing invariants:
 
 ## The backup set
 
-The manifest declares exactly three components:
+The manifest declares exactly three components and is itself signed:
 
 ```text
 postgres.pgdump        pg_dump -Fc of the one database, taken over loopback
@@ -107,15 +108,20 @@ manifest.json          release id, alembic revision, PostgreSQL version,
                        per-component sha256 and size, row-count bands for
                        events, sessions, and runs, timestamp, host, and kind
                        (daily | weekly | pre-release)
+manifest.json.sig      a detached minisign signature over manifest.json by
+                       the host-held signing key; the manifest, and through
+                       it every component hash, is trusted only via this
 ```
 
 Excluded, by rule and by structural gate: `/etc/veetbot/*.env`,
-`/etc/veetbot/secrets/**`, the certificate store, the release tree (which is
-reproducible from the repository and CI), and the proxy configuration (which
-is versioned). Secrets are handled by a documented **manual escrow**: `make
-secret-escrow` streams an `age`-encrypted tarball of the environment files,
-the browser keyring, and the certificate material over SSH to the owner's
-password manager or offline drive and stamps `/etc/veetbot/.escrow-stamp`; the
+`/etc/veetbot/secrets/**` (the backup signing key among them), the
+certificate store, the release tree (which is reproducible from the
+repository and CI), and the proxy configuration (which is versioned).
+Secrets are handled by a documented **manual escrow**: `make secret-escrow`
+streams an `age`-encrypted tarball of the environment files, the browser
+keyring, the backup signing key, and the certificate material over SSH to the
+owner's password manager or offline drive and stamps
+`/etc/veetbot/.escrow-stamp`; the
 health check warns when any secret file is newer than the stamp. The reason is
 blast radius: the bucket's access surface is the cloud account, the host's is
 SSH, and keeping credentials out of the bucket means a bucket compromise is
@@ -159,9 +165,10 @@ identity, and never a member of the `docker` group: deployment.md and ADR-0067
 keep Docker away from application identities and reserve it for the deploy
 and execution identities, and the backup identity is neither — with
 `EnvironmentFile=/etc/veetbot/veetbot-backup.env` only: the database URL, the
-bucket endpoint and scoped key, the age recipient, and the dead-man ping
-address, and never a provider key. The identity holds exactly the access the
-set requires and nothing the application identity has: the database over
+bucket endpoint and scoped key, the age recipient, the signing key path and
+its public half, and the dead-man ping address, and never a provider key. The
+identity holds exactly the access the set requires and nothing the
+application identity has: the database over
 loopback through the host-installed `pg_dump` (it never enters the compose
 container and needs no Docker socket), read-only access to the artifact store
 and to the browser-profile ciphertext granted to that identity alone by ACL
@@ -186,17 +193,36 @@ root-only host copy of the identity applies here too.
 ## Integrity and the restore rehearsal
 
 After the dump, `pg_restore --list` must be non-empty and name
-`alembic_version`; each component is hashed; the manifest is written. After
-upload, the objects are checked against the manifest; only then is plaintext
-staging removed. Without a configured recipient the script refuses to upload
-at all. Success pings the dead-man address.
+`alembic_version`; each component is hashed; the manifest is written and
+signed. After upload, the objects are checked against the manifest; only then
+is plaintext staging removed. Without a configured recipient, or without a
+signing key, the script refuses to upload at all. Success pings the dead-man
+address.
+
+Encryption is not authenticity. `age` authenticates the ciphertext it
+decrypts, not who produced it, and the public recipient sits in the host's
+environment file, so anyone with write access to the bucket — a leaked scoped
+key is enough — could plant a self-consistent forged archive and manifest,
+release id included, that decrypts cleanly. The manifest is therefore signed
+with `minisign` (one static binary, like `age` and `rclone`) by a host-held
+key at `/etc/veetbot/secrets/backup-signing.key`, readable by the backup
+identity alone, escrowed with the other secrets, and never in the set; the
+matching public key lives with the owner beside the `age` identity and in the
+host's backup environment file for the on-host tier. Nothing reads a manifest
+before its signature verifies: an unsigned or mis-signed manifest fails the
+rehearsal — and any restore — with its own reason code, never a warning, and
+the signed hashes are what every component is checked against. Where the
+bucket offers object versioning or retention locks they are enabled as a
+second layer, but the signature, not the bucket, is what a restore trusts.
 
 `restore-rehearsal.sh <backup-dir | object-url>`:
 
 1. Starts a throwaway PostgreSQL from the repository's compose file under a
    distinct project name on a random loopback port, and refuses to run if the
    project name, port, or database URL equals production's.
-2. Restores with `pg_restore --exit-on-error`.
+2. Verifies `manifest.json.sig` with the public key and each component's
+   hash against the signed manifest, then restores with
+   `pg_restore --exit-on-error`.
 3. Asserts `alembic current` equals the manifest's revision — the backup's own
    identity, which a retained backup keeps after later migrations move the
    repository head — and then checks that revision against the code the
@@ -388,8 +414,9 @@ Metrics carry no secret, path, or environment value.
 
 ## Build sequence
 
-1. Add `backup.sh`, the manifest, the retention function, and their shell and
-   property tests against a compose PostgreSQL with seeded data. **M15.**
+1. Add `backup.sh`, the signed manifest, the retention function, and their
+   shell and property tests against a compose PostgreSQL with seeded data.
+   **M15.**
 2. Add `restore-rehearsal.sh`, the verdict, the corruption regressions, and
    the production-refusal guard; wire the CI integration job. **M15.**
 3. Add the backup timer, environment file, release validation, the
@@ -411,8 +438,9 @@ Metrics carry no secret, path, or environment value.
 
 1. **The backup set is exactly the declared set.** The manifest names the
    database dump, the artifact archive, and the browser-profile ciphertext and
-   nothing else; nothing under the secrets directories, the certificate store,
-   or the release tree enters the archive. Registered as
+   nothing else, and carries a signature that verifies; nothing under the
+   secrets directories, the certificate store, or the release tree enters the
+   archive. Registered as
    `gate.ops.backup_set_complete`, structural. **M15.**
 2. **A backup round-trips.** Against a seeded compose PostgreSQL, `backup.sh`
    emits a custom-format dump that passes `pg_restore --list`, names
@@ -423,10 +451,11 @@ Metrics carry no secret, path, or environment value.
    the head of the release the manifest records, count bands and the artifact
    hash hold, the verdict is `passed`, and the throwaway database is torn
    down. Registered as `gate.ops.restore_rehearsal_passes`, case. **M15.**
-4. **The rehearsal detects corruption.** A truncated dump, flipped bytes, and
-   a wrong `alembic_version` each fail with a distinct reason and no passing
-   verdict. Registered as `gate.ops.restore_rehearsal_detects_corruption`,
-   case. **M15.**
+4. **The rehearsal detects corruption and forgery.** A truncated dump,
+   flipped bytes, a wrong `alembic_version`, and a manifest that is unsigned,
+   signed by another key, or altered after signing each fail with a distinct
+   reason and no passing verdict. Registered as
+   `gate.ops.restore_rehearsal_detects_corruption`, case. **M15.**
 5. **Backups are encrypted before they leave the host, and retained ones
    too.** With a recipient the uploaded object is an `age` envelope and
    plaintext staging is removed; a retained pre-release backup is an `age`
