@@ -116,6 +116,7 @@ class ScheduleUnitOfWork(Protocol):
     schedules: ScheduleRepository
     schedule_occurrences: ScheduleOccurrenceRepository
     schedule_admission: ScheduleAdmissionController
+    notification_outbox: NotificationOutbox
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None: ...

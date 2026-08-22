@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import builtins
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
@@ -201,16 +202,18 @@ class InMemoryNotificationOutbox:
         self._notifications: dict[UUID, Notification] = {}
         self._dedupe_keys: set[str] = set()
         self._deliveries: dict[tuple[UUID, UUID, int], NotificationDelivery] = {}
+        self._lock = asyncio.Lock()
 
     async def enqueue(self, notification: NewNotification) -> Notification | None:
-        if notification.dedupe_key in self._dedupe_keys:
-            return None
-        if notification.id in self._notifications:
-            raise ConflictError("notification identifier already exists")
-        stored = _pending_notification(notification)
-        self._notifications[stored.id] = stored
-        self._dedupe_keys.add(stored.dedupe_key)
-        return stored.model_copy(deep=True)
+        async with self._lock:
+            if notification.dedupe_key in self._dedupe_keys:
+                return None
+            if notification.id in self._notifications:
+                raise ConflictError("notification identifier already exists")
+            stored = _pending_notification(notification)
+            self._notifications[stored.id] = stored
+            self._dedupe_keys.add(stored.dedupe_key)
+            return stored.model_copy(deep=True)
 
     async def claim_due(
         self,
@@ -227,43 +230,45 @@ class InMemoryNotificationOutbox:
             raise ValueError("notification claimant cannot be blank")
         if lease_seconds <= 0:
             raise ValueError("notification lease must be positive")
-        due = [
-            value
-            for value in self._notifications.values()
-            if value.status is NotificationStatus.PENDING
-            and value.next_attempt_at <= instant
-            and (value.claimed_until is None or value.claimed_until <= instant)
-        ]
-        due.sort(key=lambda value: (value.next_attempt_at, value.created_at, value.id))
-        claimed: list[Notification] = []
-        for value in due[:limit]:
-            updated = value.model_copy(
-                update={
-                    "attempts": value.attempts + 1,
-                    "claimed_by": claimant,
-                    "claimed_until": instant + timedelta(seconds=lease_seconds),
-                }
-            )
-            self._notifications[value.id] = updated
-            claimed.append(updated.model_copy(deep=True))
-        return claimed
+        async with self._lock:
+            due = [
+                value
+                for value in self._notifications.values()
+                if value.status is NotificationStatus.PENDING
+                and value.next_attempt_at <= instant
+                and (value.claimed_until is None or value.claimed_until <= instant)
+            ]
+            due.sort(key=lambda value: (value.next_attempt_at, value.created_at, value.id))
+            claimed: list[Notification] = []
+            for value in due[:limit]:
+                updated = value.model_copy(
+                    update={
+                        "attempts": value.attempts + 1,
+                        "claimed_by": claimant,
+                        "claimed_until": instant + timedelta(seconds=lease_seconds),
+                    }
+                )
+                self._notifications[value.id] = updated
+                claimed.append(updated.model_copy(deep=True))
+            return claimed
 
     async def record_delivery(self, delivery: NotificationDelivery) -> None:
-        notification = self._notifications.get(delivery.notification_id)
-        device = self._devices._unscoped(delivery.device_id)
-        if (
-            notification is None
-            or device is None
-            or device.tenant_id != notification.tenant_id
-            or device.principal_id != notification.principal_id
-        ):
-            raise NotFoundError("notification delivery owner not found")
-        key = (delivery.notification_id, delivery.device_id, delivery.attempt)
-        if key in self._deliveries or any(
-            value.id == delivery.id for value in self._deliveries.values()
-        ):
-            raise ConflictError("notification delivery already exists")
-        self._deliveries[key] = delivery.model_copy(deep=True)
+        async with self._lock:
+            notification = self._notifications.get(delivery.notification_id)
+            device = self._devices._unscoped(delivery.device_id)
+            if (
+                notification is None
+                or device is None
+                or device.tenant_id != notification.tenant_id
+                or device.principal_id != notification.principal_id
+            ):
+                raise NotFoundError("notification delivery owner not found")
+            key = (delivery.notification_id, delivery.device_id, delivery.attempt)
+            if key in self._deliveries or any(
+                value.id == delivery.id for value in self._deliveries.values()
+            ):
+                raise ConflictError("notification delivery already exists")
+            self._deliveries[key] = delivery.model_copy(deep=True)
 
     async def settle(
         self,
@@ -271,31 +276,32 @@ class InMemoryNotificationOutbox:
         status: NotificationStatus,
         next_attempt_at: datetime | None,
     ) -> None:
-        notification = self._notifications.get(notification_id)
-        if notification is None:
-            raise NotFoundError("notification not found")
-        if status is NotificationStatus.PENDING:
-            if next_attempt_at is None:
-                raise ValueError("pending notification requires next attempt")
-            updated = notification.model_copy(
-                update={
-                    "next_attempt_at": _aware_utc(next_attempt_at),
-                    "claimed_by": None,
-                    "claimed_until": None,
-                }
-            )
-        else:
-            if next_attempt_at is not None:
-                raise ValueError("settled notification cannot have a next attempt")
-            updated = notification.model_copy(
-                update={
-                    "status": status,
-                    "claimed_by": None,
-                    "claimed_until": None,
-                    "settled_at": _aware_utc(self._clock.now()),
-                }
-            )
-        self._notifications[notification_id] = updated
+        async with self._lock:
+            notification = self._notifications.get(notification_id)
+            if notification is None:
+                raise NotFoundError("notification not found")
+            if status is NotificationStatus.PENDING:
+                if next_attempt_at is None:
+                    raise ValueError("pending notification requires next attempt")
+                updated = notification.model_copy(
+                    update={
+                        "next_attempt_at": _aware_utc(next_attempt_at),
+                        "claimed_by": None,
+                        "claimed_until": None,
+                    }
+                )
+            else:
+                if next_attempt_at is not None:
+                    raise ValueError("settled notification cannot have a next attempt")
+                updated = notification.model_copy(
+                    update={
+                        "status": status,
+                        "claimed_by": None,
+                        "claimed_until": None,
+                        "settled_at": _aware_utc(self._clock.now()),
+                    }
+                )
+            self._notifications[notification_id] = updated
 
     async def list(
         self,
@@ -305,20 +311,21 @@ class InMemoryNotificationOutbox:
         cursor: NotificationCursor | None = None,
     ) -> list[Notification]:
         _positive_limit(limit, "notification")
-        values = [
-            value
-            for value in self._notifications.values()
-            if value.tenant_id == principal.tenant_id
-            and value.principal_id == principal.principal_id
-        ]
-        values.sort(key=lambda value: (value.created_at, value.id), reverse=True)
-        if cursor is not None:
+        async with self._lock:
             values = [
                 value
-                for value in values
-                if (value.created_at, value.id) < (cursor.created_at, cursor.id)
+                for value in self._notifications.values()
+                if value.tenant_id == principal.tenant_id
+                and value.principal_id == principal.principal_id
             ]
-        return [value.model_copy(deep=True) for value in values[:limit]]
+            values.sort(key=lambda value: (value.created_at, value.id), reverse=True)
+            if cursor is not None:
+                values = [
+                    value
+                    for value in values
+                    if (value.created_at, value.id) < (cursor.created_at, cursor.id)
+                ]
+            return [value.model_copy(deep=True) for value in values[:limit]]
 
 
 class PostgresDeviceRegistry:

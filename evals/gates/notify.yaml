@@ -4,13 +4,13 @@
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Enqueue is atomic with its trigger.** A crash injected after every write in finalize, accounting, and materialization leaves no outbox row without its event or partial row; the only committed event without an outbox row is one whose enqueue failed inside its savepoint, audited in the same transaction, and that failure never changes the run's terminal state."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_notification_triggers_m12.py::test_postgres_notification_enqueue_is_atomic_for_every_producer
 - id: gate.notify.trigger_catalog
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Exactly the five transitions enqueue, and one named producer besides.** Approval requested, waiting for user, run failed, scheduled run accounted, and scheduled occurrence skipped each enqueue one row; interactive completion, cancellation, tool lifecycle events, message deltas, and surface replies enqueue nothing; the Milestone 15 health check is the only non-transition producer and enqueues only the two ops kinds."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_notification_producer_m12.py::test_exact_transition_catalog_builds_content_free_deduplicated_rows
 - id: gate.notify.dedupe
   milestone: 12
   kind: property

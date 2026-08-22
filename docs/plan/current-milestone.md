@@ -60,16 +60,18 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 — notifications and device identity — build steps 1 and 2 are
-implemented locally. The device and notification domain vocabulary, closed
-content-free payload, documented deduplication-key rules, three-table migration,
-ORM mappings, in-memory and PostgreSQL device and outbox repositories, unit-of-work
-wiring, row-level security, and all three named port-contract modules are present.
-The content-free, durable-deduplication, idempotent-registration, live-token,
-schema, persistence-isolation, clean-migration, and stepwise-migration checks now
-resolve to executable tests. Eight gates are executable and twelve remain pending;
-the push-transport contract stays pending until its fake and APNs adapters land in
-build step 4.
+Milestone 12 — notifications and device identity — build steps 1 through 3 are
+implemented locally. In addition to the domain and persistence foundation, the
+terminal writer, scheduling accountant, and scheduling materializer now invoke one
+shared content-free producer inside their existing transactions. PostgreSQL crash
+injection covers every write boundary on all three paths; an outbox constraint
+failure rolls back to its savepoint and commits the unchanged terminal state with a
+sanitized `notification.enqueue_failed` process event. Session erasure deletes
+pending notification rows and their attempts before the session graph while
+retaining settled content-free audit rows. The atomic-enqueue and exact-trigger
+catalog checks are executable, bringing the milestone to ten executable gates and
+ten pending; the push-transport contract stays pending until its fake and APNs
+adapters land in build step 4.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a

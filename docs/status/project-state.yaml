@@ -234,8 +234,42 @@ verification:
           pass with the eight executable gates for Milestone 12 — Notifications
           and device identity recorded but the cumulative verified ceiling held
           through Milestone 11 — Scheduled runs.
+      - check: transactional notification producers
+        outcome: passed_locally
+        detail: >-
+          The terminal writer, scheduling accountant, and scheduling materializer
+          invoke one content-free notification producer inside their existing unit
+          of work. PostgreSQL crash injection after every write boundary on all
+          three paths proves that a trigger and its outbox row commit together or
+          both roll back. A deliberately invalid outbox insert rolls back inside
+          the repository savepoint while the run reaches its intended terminal
+          status and the same transaction appends a content-free
+          notification.enqueue_failed process event without database or failure
+          text. Replays deduplicate by the specified transition keys.
+      - check: notification erasure semantics
+        outcome: passed_locally
+        detail: >-
+          PostgreSQL and deterministic repository tests prove that session erasure
+          deletes pending notification rows and their delivery attempts before the
+          session graph, while retaining settled content-free notification rows as
+          audit facts. The exact transition catalog rejects interactive completion
+          and missing identifiers and produces only the five declared kinds.
+      - check: third Milestone 12 — Notifications and device identity gate tranche
+        outcome: passed_locally
+        detail: >-
+          gate.notify.enqueue_atomic and gate.notify.trigger_catalog now resolve to
+          exact executable checks. Ten of twenty gates are executable while the
+          cumulative verified ceiling remains at Milestone 11 — Scheduled runs.
+      - check: make check after transactional notification producers
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 531 files, strict mypy over 489 source
+          and test files, 991 static tests, 330 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass. The focused PostgreSQL producer, persistence, materializer, and
+          schedule-lifecycle partition passes all seventeen tests.
     remaining:
-      - Implement the remaining two device and ten notification gates in the
+      - Implement the remaining two device and eight notification gates in the
         specification's build order, followed by the full Milestone 12 —
         Notifications and device identity delivery verification.
 

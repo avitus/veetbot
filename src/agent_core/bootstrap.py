@@ -511,6 +511,7 @@ def _memory_uow_repositories(
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
     devices = InMemoryDeviceRegistry()
+    notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
@@ -532,6 +533,7 @@ def _memory_uow_repositories(
         traces=traces,
         knowledge=knowledge,
         schedules=schedules,
+        notification_outbox=notification_outbox,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -566,7 +568,7 @@ def _memory_uow_repositories(
         schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
         schedule_admission=AllowScheduleAdmissionController(),
         devices=devices,
-        notification_outbox=InMemoryNotificationOutbox(clock, devices),
+        notification_outbox=notification_outbox,
         queue=None,
     )
 
@@ -704,6 +706,7 @@ class _ScheduleUnitOfWork(ScheduleUnitOfWork):
         self.schedule_admission = PostgresScheduleAdmissionController(
             session, self._admission_limits, self._metrics
         )
+        self.notification_outbox = PostgresNotificationOutbox(session, self._clock)
         self.queue = PostgresRunQueue(
             session,
             self._clock,

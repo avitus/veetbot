@@ -17,6 +17,7 @@ SCHEDULER_REPOSITORIES = {
     "schedules",
     "schedule_occurrences",
     "schedule_admission",
+    "notification_outbox",
     "queue",
 }
 FORBIDDEN_REPOSITORIES = {
