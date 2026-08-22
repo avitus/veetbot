@@ -401,7 +401,7 @@ def test_nginx_deployment_test_exercises_declared_gnu_toolchain() -> None:
 def test_documentation_verification_reads_the_resolved_release_identity() -> None:
     deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
 
-    assert 'docs_release="$(readlink -f /opt/veetbot/docs/current)"' in deployment
+    assert 'docs_release="$(readlink -f /opt/veetbot/shared/docs/current)"' in deployment
     assert 'test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"' in deployment
 
 
@@ -415,7 +415,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     readiness_identity = 'tolower($1) == "x-veetbot-release"'
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
-    docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/docs/current'
+    docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -424,7 +424,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
         "veetbot-api",
     )
 
-    assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
+    assert 'docs_target="/opt/veetbot/shared/docs/releases/$target_id"' in manual
     assert 'test -d "$docs_target"' in manual
     assert 'test -f "$docs_target/release.txt"' in manual
     assert app_precondition in manual
@@ -503,7 +503,7 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert "proxy_pass http://127.0.0.1:8081" in nginx
     assert "/etc/letsencrypt/live/browser.veetbot.com/fullchain.pem" in nginx
     assert "proxy_buffering off" in nginx
-    assert "root /opt/veetbot/docs/current" in nginx
+    assert "root /opt/veetbot/shared/docs/current" in nginx
     assert "try_files $uri $uri/ =404" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
@@ -511,6 +511,7 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert "flock -w" in nginx_deploy
     assert "VEETBOT_EXPECTED_RELEASE_ID" in nginx_deploy
     assert "VEETBOT_DOCS_ROOT" in nginx_deploy
+    assert 'DOCS_ROOT="${VEETBOT_DOCS_ROOT:-$DEPLOY_ROOT/shared/docs}"' in nginx_deploy
     assert 'sha256sum "$DOCS_ARCHIVE"' in nginx_deploy
     assert 'mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"' in nginx_deploy
 

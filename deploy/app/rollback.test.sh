@@ -8,7 +8,7 @@ trap 'rm -rf -- "$TEST_ROOT"' EXIT
 
 BIN_DIR="$TEST_ROOT/bin"
 DEPLOY_ROOT="$TEST_ROOT/opt/veetbot"
-DOCS_ROOT="$DEPLOY_ROOT/docs"
+DOCS_ROOT="$DEPLOY_ROOT/shared/docs"
 PROCESS_ROOT="$TEST_ROOT/proc"
 LOG_FILE="$TEST_ROOT/commands.log"
 DOCKER_STATE="$TEST_ROOT/docker-production-image"

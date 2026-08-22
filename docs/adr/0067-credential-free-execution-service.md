@@ -50,7 +50,8 @@ delivery now manages the execution service alongside the API and worker roles.
 ## Consequences
 
 - A compromised application process cannot use Docker to modify
-  `/opt/veetbot`, `/opt/veetbot/docs`, other host files, or other containers.
+  `/opt/veetbot`, `/opt/veetbot/shared/docs`, other host files, or other
+  containers.
 - The execution service remains root-equivalent through Docker on the initial
   single host, but it receives no database, provider, browser, or API
   credentials. A later multi-host deployment can replace the local transport
