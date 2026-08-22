@@ -151,8 +151,11 @@ _DURATION_TOKENS = frozenset(
         "years",
     }
 )
+# The apostrophe class accepts the straight and the typographic form; casefold
+# normalizes neither, and users type both.
 _RETRACTION_CUE = re.compile(
-    r"\b(?:do not|does not|don't|doesn't|gave up|have no|no longer|not|never|quit|stopped)\b",
+    r"\b(?:do not|does not|don['\u2019]t|doesn['\u2019]t|gave up|have no|no longer|not|never"
+    r"|quit|stopped)\b",
     re.IGNORECASE,
 )
 _VALID_FROM_CUE = re.compile(r"\b(?:effective|from|since|starting)\b", re.IGNORECASE)
@@ -295,7 +298,7 @@ def _occupation_is_user_attributed(span: str, value: str) -> bool:
 
     occupation = re.escape(value.casefold())
     negation = r"(?:not\s+|no\s+longer\s+)?"
-    work_negation = r"(?:do\s+not\s+|don't\s+|don\u2019t\s+|no\s+longer\s+|stopped\s+|quit\s+)?"
+    work_negation = r"(?:do\s+not\s+|don['\u2019]t\s+|no\s+longer\s+|stopped\s+|quit\s+)?"
     patterns = (
         rf"\bas\s+(?:an?\s+)?{occupation}\b,?\s+i\b",
         rf"\bi(?:\s+am|'m|\u2019m)\s+{negation}(?:an?\s+)?{occupation}\b",

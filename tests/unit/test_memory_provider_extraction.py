@@ -1165,6 +1165,10 @@ def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
             },
         ),
         (
+            "I don\u2019t have a daughter.",
+            {"polarity": Polarity.RETRACT, "evidence_quote": "I don\u2019t have a daughter"},
+        ),
+        (
             "I do not drink coffee and no longer have a daughter.",
             {
                 "polarity": Polarity.RETRACT,
@@ -2468,6 +2472,7 @@ def test_provider_user_facing_claims_require_user_attribution_in_the_quote(
         ("I am no longer a nurse.", "I am no longer a nurse", True),
         ("I'm not a nurse.", "I'm not a nurse", True),
         ("I do not work as a nurse.", "I do not work as a nurse", True),
+        ("I don\u2019t work as a nurse.", "I don\u2019t work as a nurse", True),
         ("I no longer work as a nurse.", "I no longer work as a nurse", True),
         ("I stopped working as a nurse.", "I stopped working as a nurse", True),
         # Someone else's retraction, and an affirmative quote, retract nothing.
