@@ -26,9 +26,8 @@ mechanism behind it, lands the `Device` table the audit placed
 pairing of untrusted senders, no device-scoped tool, no presence-based routing.
 Those are Milestone 14 and the roadmap.
 
-Milestone 12 is authorized while Milestones 10 and 11 await hosted review. Its
-gates may become green independently, but the verified gate ceiling advances
-only in numerical order.
+Milestones 10 and 11 are complete and the verified gate ceiling is 11.
+Milestone 12 is the active implementation milestone.
 
 ## Scope
 

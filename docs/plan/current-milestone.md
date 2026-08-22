@@ -4,11 +4,9 @@ title: Current Milestone
 
 # Current milestone
 
-- **Active milestone:** Milestone 11 — scheduled runs (implemented locally;
-  hosted CI and the final review remain). Milestone 12 — notifications and
-  device identity — is authorized and specified by
-  [notifications-and-devices.md](notifications-and-devices.md); its twenty
-  gates are registered and implementation may begin. Milestone 13 —
+- **Active milestone:** Milestone 12 — notifications and device identity — is
+  specified by [notifications-and-devices.md](notifications-and-devices.md);
+  its twenty gates are registered and implementation is in progress. Milestone 13 —
   subagents and delegation — is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates and follows Milestone 12. Milestone 14 — inbound surfaces and
@@ -18,21 +16,18 @@ title: Current Milestone
   [operational-hardening.md](operational-hardening.md) with sixteen gates and
   follows Milestone 14; its backup tranche has no dependency on the three
   before it.
-- **Verified gate ceiling:** Milestone 9 (166 gates).
-- **Authorized workstreams:** Milestone 10's four tranches (automatic memory,
-  self-authored skills, public-web access, authenticated browser automation),
-  Milestone 11 scheduling, and Milestones 12 through 15 in order —
-  notifications and device identity, general-purpose subagents and delegation,
-  inbound surfaces and pairing, operational hardening (ADR-0061).
+- **Verified gate ceiling:** Milestone 11 (227 gates).
+- **Authorized workstreams:** Milestones 12 through 15 in order — notifications
+  and device identity, general-purpose subagents and delegation, inbound
+  surfaces and pairing, operational hardening (ADR-0061).
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
-- **Project status:** Milestones 0 through 9 are complete. Milestones 10 and
-  11 are implemented locally; every registered gate passes (227 cumulative),
-  and hosted CI plus the final CodeRabbit review remain for both. Milestones
-  12 through 15 are authorized and specified with twenty, twenty-one,
-  twenty-one, and sixteen registered gates; every authorized milestone has its
-  detailed-design document and ADR.
+- **Project status:** Milestones 0 through 11 are complete: all 227 cumulative
+  gates and the hosted lanes passed on final head `90e9142`, CodeRabbit passed,
+  and every review conversation was resolved. Milestone 12 is in progress;
+  Milestones 13 through 15 remain authorized and specified with twenty-one,
+  twenty-one, and sixteen registered gates.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -43,19 +38,19 @@ The provider-assisted memory extractor's version-bound evidence passed on the
 intended production model and ADR-0057 is accepted. The machine-readable
 [project state](../status/project-state.yaml) records progress and evidence.
 
-Milestone 11 is an independent, logically subsequent milestone because adding
+Milestone 11 was an independent, logically subsequent milestone because adding
 scheduling to Milestone 10 would have changed that milestone's established
 completion contract. Its [scheduled-runs design](scheduling.md) defines a
 versioned schedule, immutable occurrences, deterministic civil time, bounded
 misfires, fresh authorization at firing, and atomic creation of an ordinary
 durable run; all twenty-three schedule registry entries name real checks, the
 production scheduler is a least-privilege role, and scheduling remains
-default-off until the milestone closes. This local evidence does not advance
-the verified gate ceiling.
+default-off until explicitly activated. Hosted CI and the final CodeRabbit
+review passed on head `90e9142`, advancing the verified ceiling through 11.
 
 Milestones 12 through 15 follow the pattern Milestone 11 set: a detailed-design
 document and an ADR land first, register the milestone's gates, and only then
-does implementation begin. Milestone 12's
+does implementation begin. Milestone 12 implementation is now active; its
 [notifications-and-devices.md](notifications-and-devices.md) and ADR-0062 have
 landed with twenty `gate.device.*` and `gate.notify.*` entries, and
 Milestone 13's [subagents-and-delegation.md](subagents-and-delegation.md) and
@@ -64,6 +59,13 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 `gate.surface.*` entries, and Milestone 15's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
+
+Milestone 12 build step 1 is implemented locally. The device and notification
+domain vocabulary, closed content-free payload, and documented deduplication-key
+rules are implemented with focused example and property coverage;
+`gate.notify.content_free` now points at its executable corpus check. The
+deduplication gate remains pending until the outbox repository can prove that
+repeated triggers create exactly one durable row, leaving nineteen pending gates.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -118,19 +120,17 @@ sixteen `gate.ops.*` entries plus the plan's acceptance criteria and the
 
 ## Completion rule
 
-Milestone 10 completes when all thirty-eight Milestone 10 gates and all 204
-cumulative gates pass, all required CI lanes pass on the final head, and the
-final CodeRabbit review has no finding or unresolved conversation. Enabling
+Milestone 10 completed after all thirty-eight Milestone 10 gates and all 204
+cumulative gates passed, all required CI lanes passed on the final head, and the
+final CodeRabbit review had no finding or unresolved conversation. Enabling
 authoring for a tenant is separately governed by the rollout evidence rule and
 is not a completion condition (ADR-0061). Partial work does not advance the
 verified gate ceiling.
 
-Milestone 11 completes only when all twenty-three scheduling gates and all 227
-cumulative gates pass, the PostgreSQL integration and resilience lanes pass,
-the hosted CI lanes pass on the final head, and the final CodeRabbit review has
-no finding or unresolved conversation. Even if its implementation finishes
-first, the verified gate ceiling cannot advance through 11 until Milestone 10
-also completes.
+Milestone 11 completed after all twenty-three scheduling gates and all 227
+cumulative gates passed, the PostgreSQL integration and resilience lanes passed,
+the hosted CI lanes passed on the final head, and the final CodeRabbit review
+had no finding or unresolved conversation.
 
 Milestones 12 through 15 complete, in order, when every gate their specification
 declares and the cumulative registry pass, the PostgreSQL lanes pass where the

@@ -1,0 +1,2 @@
+field: bearer_token
+value: "Bearer eyJhbGciOiJIUzI1NiJ9.secret"

@@ -22,7 +22,7 @@
   kind: corpus
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Payloads are content-free.** A corpus of approvals, questions, failures, and schedule instructions carrying secrets, arguments, message text, and reasoning yields payloads with only the closed key set and a templated title."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_notifications_m12.py::test_notification_payload_is_content_free
   corpus: tests/corpora/notification_content
   minimum_members: 12
 - id: gate.notify.dispatch_once
