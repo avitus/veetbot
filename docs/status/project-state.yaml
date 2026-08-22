@@ -196,5 +196,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-22T23:32:31Z
-last_reviewed_commit: 90e9142
+last_updated: 2026-08-22T23:36:52Z
+last_reviewed_commit: fdeca05
