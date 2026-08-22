@@ -377,6 +377,17 @@ def _read_private_credential_file(raw_path: str) -> str:
     return value
 
 
+def _validate_private_regular_file(path: Path, name: str) -> None:
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise ConfigurationError(f"{name} must be a regular file with mode 0600")
+
+
 def _read_yaml(path: Path) -> dict[str, Any]:
     try:
         loaded: object = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -641,6 +652,25 @@ def validate_settings(
         raise ConfigurationError(
             "notification API and dispatch flags must be enabled or disabled together"
         )
+    apns_values = {
+        "APNS_KEY_FILE": settings.apns_key_file,
+        "APNS_KEY_ID": settings.apns_key_id,
+        "APNS_TEAM_ID": settings.apns_team_id,
+        "APNS_TOPIC": settings.apns_topic,
+    }
+    configured_apns = [name for name, value in apns_values.items() if value is not None]
+    if settings.push_provider is PushProviderKind.APNS:
+        missing_apns = [name for name, value in apns_values.items() if value is None]
+        if missing_apns:
+            raise ConfigurationError("PUSH_PROVIDER=apns requires " + ", ".join(missing_apns))
+        if not settings.notification_dispatch_enabled:
+            raise ConfigurationError(
+                "PUSH_PROVIDER=apns requires notification dispatch to be enabled"
+            )
+        assert settings.apns_key_file is not None
+        _validate_private_regular_file(settings.apns_key_file, "APNS_KEY_FILE")
+    elif configured_apns:
+        raise ConfigurationError(", ".join(configured_apns) + " require PUSH_PROVIDER=apns")
     if require_auth_token and settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if (

@@ -204,6 +204,17 @@ async def assert_notification_delivery_attempt_is_unique(
     )
     await outbox.record_delivery(delivery)
     assert await outbox.list_deliveries(notification.id) == [delivery]
+    second = await outbox.enqueue(
+        new_notification(
+            notification_id=UUID(int=NOTIFICATION_ID.int + 1),
+            dedupe_key="test:delivery-batch-second",
+        )
+    )
+    assert second is not None
+    assert await outbox.list_deliveries_for((notification.id, second.id)) == {
+        notification.id: [delivery],
+        second.id: [],
+    }
     with pytest.raises(ConflictError):
         await outbox.record_delivery(
             delivery.model_copy(update={"id": UUID(int=delivery.id.int + 1)})

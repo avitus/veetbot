@@ -17,13 +17,17 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from agent_core.adapters.notification_wakeup import NOTIFICATION_WAKEUP_CHANNEL
 from agent_core.adapters.persistence.mappers import (
+    device_registration_idempotency_to_domain,
+    device_registration_idempotency_values,
     device_to_domain,
     device_values,
     new_notification_values,
+    notification_delivery_to_domain,
     notification_delivery_values,
     notification_to_domain,
 )
 from agent_core.adapters.persistence.sqlalchemy_models import (
+    DeviceRegistrationIdempotencyRow,
     DeviceRow,
     NotificationDeliveryRow,
     NotificationOutboxRow,
@@ -32,6 +36,7 @@ from agent_core.domain.agents import Principal
 from agent_core.domain.devices import (
     Device,
     DeviceCursor,
+    DeviceRegistrationIdempotencyRecord,
     DeviceStatus,
     PushEnvironment,
     PushProvider,
@@ -126,6 +131,7 @@ class InMemoryDeviceRegistry:
                 "updated_at": instant,
             }
         )
+        revoked = Device.model_validate(revoked.model_dump())
         self._devices[device_id] = revoked
         return revoked.model_copy(deep=True)
 
@@ -151,6 +157,7 @@ class InMemoryDeviceRegistry:
                 "updated_at": instant,
             }
         )
+        invalidated = Device.model_validate(invalidated.model_dump())
         self._devices[device_id] = invalidated
         return invalidated.model_copy(deep=True)
 
@@ -206,10 +213,40 @@ class InMemoryDeviceRegistry:
                     "updated_at": device.updated_at,
                 }
             )
+            self._devices[current.id] = Device.model_validate(
+                self._devices[current.id].model_dump()
+            )
 
     def _unscoped(self, device_id: UUID) -> Device | None:
         device = self._devices.get(device_id)
         return None if device is None else device.model_copy(deep=True)
+
+
+class InMemoryDeviceRegistrationIdempotencyRepository:
+    def __init__(self) -> None:
+        self._records: dict[tuple[str, str, str], DeviceRegistrationIdempotencyRecord] = {}
+
+    async def get(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        key: str,
+    ) -> DeviceRegistrationIdempotencyRecord | None:
+        record = self._records.get((tenant_id, principal_id, key))
+        return None if record is None else record.model_copy(deep=True)
+
+    async def create(
+        self,
+        record: DeviceRegistrationIdempotencyRecord,
+    ) -> DeviceRegistrationIdempotencyRecord:
+        identity = (record.tenant_id, record.principal_id, record.key)
+        existing = self._records.get(identity)
+        if existing is None:
+            self._records[identity] = record.model_copy(deep=True)
+            return record
+        if existing == record:
+            return existing.model_copy(deep=True)
+        raise ConflictError("device registration idempotency key already exists")
 
 
 class InMemoryNotificationOutbox:
@@ -318,6 +355,24 @@ class InMemoryNotificationOutbox:
                 if delivery.notification_id == notification_id
             ]
             return sorted(values, key=lambda delivery: (delivery.attempt, delivery.device_id))
+
+    async def list_deliveries_for(
+        self,
+        notification_ids: tuple[UUID, ...],
+    ) -> dict[UUID, list[NotificationDelivery]]:
+        async with self._lock:
+            missing = set(notification_ids) - self._notifications.keys()
+            if missing:
+                raise NotFoundError("notification not found")
+            grouped: dict[UUID, list[NotificationDelivery]] = {
+                notification_id: [] for notification_id in notification_ids
+            }
+            for delivery in self._deliveries.values():
+                if delivery.notification_id in grouped:
+                    grouped[delivery.notification_id].append(delivery.model_copy(deep=True))
+            for deliveries in grouped.values():
+                deliveries.sort(key=lambda delivery: (delivery.attempt, delivery.device_id))
+            return grouped
 
     async def settle(
         self,
@@ -596,6 +651,40 @@ class PostgresDeviceRegistry:
         return targets
 
 
+class PostgresDeviceRegistrationIdempotencyRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        key: str,
+    ) -> DeviceRegistrationIdempotencyRecord | None:
+        row = await self._session.get(
+            DeviceRegistrationIdempotencyRow,
+            (tenant_id, principal_id, key),
+        )
+        return None if row is None else device_registration_idempotency_to_domain(row)
+
+    async def create(
+        self,
+        record: DeviceRegistrationIdempotencyRecord,
+    ) -> DeviceRegistrationIdempotencyRecord:
+        statement = (
+            pg_insert(DeviceRegistrationIdempotencyRow)
+            .values(**device_registration_idempotency_values(record))
+            .on_conflict_do_nothing()
+            .returning(DeviceRegistrationIdempotencyRow.key)
+        )
+        if await self._session.scalar(statement) is not None:
+            return record
+        existing = await self.get(record.tenant_id, record.principal_id, record.key)
+        if existing == record:
+            return existing
+        raise ConflictError("device registration idempotency key already exists")
+
+
 class PostgresNotificationOutbox:
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
         self._session = session
@@ -719,19 +808,40 @@ class PostgresNotificationOutbox:
                 )
             )
         ).all()
-        return [
-            NotificationDelivery(
-                id=row.id,
-                notification_id=row.notification_id,
-                device_id=row.device_id,
-                attempt=row.attempt,
-                outcome=DeliveryOutcome(row.outcome),
-                provider_reason=row.provider_reason,
-                provider_id=row.provider_id,
-                attempted_at=row.attempted_at,
+        return [notification_delivery_to_domain(row) for row in rows]
+
+    async def list_deliveries_for(
+        self,
+        notification_ids: tuple[UUID, ...],
+    ) -> dict[UUID, list[NotificationDelivery]]:
+        if not notification_ids:
+            return {}
+        existing = set(
+            await self._session.scalars(
+                select(NotificationOutboxRow.id).where(
+                    NotificationOutboxRow.id.in_(notification_ids)
+                )
             )
-            for row in rows
-        ]
+        )
+        if existing != set(notification_ids):
+            raise NotFoundError("notification not found")
+        rows = (
+            await self._session.scalars(
+                select(NotificationDeliveryRow)
+                .where(NotificationDeliveryRow.notification_id.in_(notification_ids))
+                .order_by(
+                    NotificationDeliveryRow.notification_id,
+                    NotificationDeliveryRow.attempt,
+                    NotificationDeliveryRow.device_id,
+                )
+            )
+        ).all()
+        grouped: dict[UUID, list[NotificationDelivery]] = {
+            notification_id: [] for notification_id in notification_ids
+        }
+        for row in rows:
+            grouped[row.notification_id].append(notification_delivery_to_domain(row))
+        return grouped
 
     async def settle(
         self,

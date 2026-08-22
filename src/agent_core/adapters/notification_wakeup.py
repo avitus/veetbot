@@ -107,5 +107,6 @@ class PostgresNotificationWakeup:
             self._listener = None
         async with self._publisher_lock:
             if self._publisher is not None and not self._publisher.is_closed():
-                await self._publisher.close()
+                with suppress(Exception):
+                    await self._publisher.close()
             self._publisher = None

@@ -76,6 +76,44 @@ async def test_two_dispatchers_deliver_one_target_once_and_record_the_attempt() 
         assert delivery.attempt == 1
 
 
+async def test_unexpected_failure_isolated_to_one_claimed_notification() -> None:
+    clock, factory = await memory_uow_factory()
+    ids = SequenceIdFactory()
+
+    class FailFirstTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def deliver(self, target, message):  # type: ignore[no-untyped-def]
+            del target, message
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("unexpected provider failure")
+            return PushOutcome(outcome=DeliveryOutcome.DELIVERED)
+
+    transport = FailFirstTransport()
+    async with factory() as uow:
+        await uow.devices.upsert(device(), principal())
+        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+        assert (
+            await uow.notification_outbox.enqueue(
+                new_notification(
+                    notification_id=UUID(int=902),
+                    dedupe_key="test:second-after-failure",
+                )
+            )
+            is not None
+        )
+
+    assert await _dispatcher(factory, clock, ids, transport).run_once() == 2
+    assert transport.calls == 2
+    async with factory() as uow:
+        rows = await uow.notification_outbox.list(principal(), limit=10)
+        assert next(
+            row for row in rows if row.dedupe_key == "test:second-after-failure"
+        ).status is (NotificationStatus.DISPATCHED)
+
+
 async def test_claim_is_partitioned_by_pending_target_provider() -> None:
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()
@@ -150,7 +188,7 @@ async def test_retry_schedule_is_bounded_and_expired_rows_are_never_sent() -> No
     assert len(transport.calls) == 5
 
 
-async def test_deleted_session_is_superseded_without_transport_call() -> None:
+async def _assert_deleted_session_is_superseded_without_transport_call() -> None:
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()
     producer = NotificationProducer(clock=clock, ids=ids)
@@ -174,7 +212,7 @@ async def test_deleted_session_is_superseded_without_transport_call() -> None:
         assert notification.status is NotificationStatus.SUPERSEDED
 
 
-async def test_resolved_or_expired_approval_is_superseded_without_send() -> None:
+async def _assert_resolved_or_expired_approval_is_superseded_without_send() -> None:
     for expired in (False, True):
         clock, factory = await memory_uow_factory()
         ids = SequenceIdFactory()
@@ -209,7 +247,7 @@ async def test_resolved_or_expired_approval_is_superseded_without_send() -> None
         assert transport.calls == []
 
 
-async def test_answered_question_or_run_no_longer_waiting_is_superseded() -> None:
+async def _assert_answered_question_or_run_no_longer_waiting_is_superseded() -> None:
     for answered in (False, True):
         clock, factory = await memory_uow_factory()
         ids = SequenceIdFactory()
@@ -248,9 +286,9 @@ async def test_answered_question_or_run_no_longer_waiting_is_superseded() -> Non
 
 
 async def test_stale_notification_catalog_is_suppressed_without_transport() -> None:
-    await test_deleted_session_is_superseded_without_transport_call()
-    await test_resolved_or_expired_approval_is_superseded_without_send()
-    await test_answered_question_or_run_no_longer_waiting_is_superseded()
+    await _assert_deleted_session_is_superseded_without_transport_call()
+    await _assert_resolved_or_expired_approval_is_superseded_without_send()
+    await _assert_answered_question_or_run_no_longer_waiting_is_superseded()
 
 
 async def test_unregistered_tokens_invalidate_once_but_transient_failures_do_not() -> None:

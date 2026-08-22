@@ -1182,7 +1182,8 @@ class DeviceRow(Base):
             name="device_push_environment_provider",
         ),
         CheckConstraint(
-            "(kind = 'surface' AND push_provider = 'telegram') OR "
+            "(kind = 'surface' AND "
+            "(push_provider IS NULL OR push_provider = 'telegram')) OR "
             "(kind <> 'surface' AND (push_provider IS NULL OR push_provider <> 'telegram'))",
             name="device_surface_routing",
         ),
@@ -1237,6 +1238,17 @@ class DeviceRow(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DeviceRegistrationIdempotencyRow(Base):
+    __tablename__ = "device_registration_idempotency_keys"
+
+    tenant_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    request_hash: Mapped[str] = mapped_column(String(64))
+    response: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class NotificationOutboxRow(Base):

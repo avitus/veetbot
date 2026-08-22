@@ -204,6 +204,44 @@ import Testing
         #expect(delegate.contains("--ui-testing-conversation-navigation"))
         #expect(delegate.contains("requestAuthorization"))
     }
+
+    @Test @MainActor
+    func testNotificationResponseBeforeModelAttachmentIsRetainedAndReplayed() throws {
+        let payload = try #require(
+            NotificationPushPayload(
+                userInfo: [
+                    "veetbot": [
+                        "version": 1,
+                        "kind": "test",
+                        "title": "Test notification",
+                        "notification_id": UUID().uuidString,
+                    ]
+                ]
+            )
+        )
+        let delegate = NotificationApplicationDelegateBase()
+
+        delegate.received(payload: payload)
+
+        #expect(delegate.pendingResponseCount == 1)
+        delegate.attach(to: ChatViewModel())
+        #expect(delegate.pendingResponseCount == 0)
+    }
+
+    @Test
+    func testConversationViewHandlesExistingNotificationFocusOnAppearance() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let chatView = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ChatView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(chatView.contains(".onAppear {\n                    scroll(proxy)"))
+        #expect(chatView.contains(".onChange(of: model.notificationFocus)"))
+    }
 }
 
 private actor FakeDeviceRegistrationAPI: DeviceRegistrationAPI {

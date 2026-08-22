@@ -7,9 +7,23 @@ from enum import StrEnum
 from hashlib import sha256
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from agent_core.domain.notifications import NotificationKind
+
+
+def _aware_utc(value: datetime, subject: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{subject} must be aware")
+    return value.astimezone(UTC)
 
 
 class DeviceKind(StrEnum):
@@ -52,6 +66,24 @@ class DeviceRegistration(BaseModel):
     muted_kinds: frozenset[NotificationKind] = frozenset()
 
 
+class DeviceRegistrationIdempotencyRecord(BaseModel):
+    """Principal-scoped exact request and safe response snapshot."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tenant_id: str = Field(min_length=1, max_length=255)
+    principal_id: str = Field(min_length=1, max_length=255)
+    key: str = Field(min_length=1, max_length=255)
+    request_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    response: dict[str, JsonValue]
+    created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def created_at_is_aware_utc(cls, value: datetime) -> datetime:
+        return _aware_utc(value, "device idempotency created_at")
+
+
 class Device(BaseModel):
     """Principal-scoped device identity with secret push routing material."""
 
@@ -89,9 +121,7 @@ class Device(BaseModel):
     def instants_are_aware_utc(cls, value: datetime | None) -> datetime | None:
         if value is None:
             return None
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("device instants must be aware")
-        return value.astimezone(UTC)
+        return _aware_utc(value, "device instants")
 
     @field_validator("push_token")
     @classmethod
@@ -112,7 +142,11 @@ class Device(BaseModel):
 
         if self.push_provider is PushProvider.TELEGRAM and self.kind is not DeviceKind.SURFACE:
             raise ValueError("Telegram routing belongs only to a surface device")
-        if self.kind is DeviceKind.SURFACE and self.push_provider is not PushProvider.TELEGRAM:
+        if (
+            self.kind is DeviceKind.SURFACE
+            and self.push_provider is not None
+            and self.push_provider is not PushProvider.TELEGRAM
+        ):
             raise ValueError("surface device requires Telegram routing")
 
         if self.status is DeviceStatus.REVOKED:
@@ -148,9 +182,7 @@ class DeviceCursor(BaseModel):
     @field_validator("created_at")
     @classmethod
     def created_at_is_aware_utc(cls, value: datetime) -> datetime:
-        normalized = Device.instants_are_aware_utc(value)
-        assert normalized is not None
-        return normalized
+        return _aware_utc(value, "device cursor created_at")
 
 
 class PushTarget(BaseModel):

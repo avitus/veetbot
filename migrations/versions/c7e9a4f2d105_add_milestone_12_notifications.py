@@ -93,7 +93,8 @@ def upgrade() -> None:
             name=op.f("ck_devices_device_push_environment_provider"),
         ),
         sa.CheckConstraint(
-            "(kind = 'surface' AND push_provider = 'telegram') OR "
+            "(kind = 'surface' AND "
+            "(push_provider IS NULL OR push_provider = 'telegram')) OR "
             "(kind <> 'surface' AND (push_provider IS NULL OR push_provider <> 'telegram'))",
             name=op.f("ck_devices_device_surface_routing"),
         ),
@@ -132,6 +133,25 @@ def upgrade() -> None:
         ["push_provider", "push_token"],
         unique=True,
         postgresql_where=sa.text("push_token IS NOT NULL AND status = 'active'"),
+    )
+    op.create_table(
+        "device_registration_idempotency_keys",
+        sa.Column("tenant_id", sa.Text(), nullable=False),
+        sa.Column("principal_id", sa.Text(), nullable=False),
+        sa.Column("key", sa.Text(), nullable=False),
+        sa.Column("request_hash", sa.String(length=64), nullable=False),
+        sa.Column(
+            "response",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint(
+            "tenant_id",
+            "principal_id",
+            "key",
+            name=op.f("pk_device_registration_idempotency_keys"),
+        ),
     )
     op.create_table(
         "notification_outbox",
@@ -236,6 +256,7 @@ def upgrade() -> None:
         ),
     )
     _tenant_policy("devices")
+    _tenant_policy("device_registration_idempotency_keys")
     _tenant_policy("notification_outbox")
     _delivery_policy()
 
@@ -243,4 +264,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("notification_deliveries")
     op.drop_table("notification_outbox")
+    op.drop_table("device_registration_idempotency_keys")
     op.drop_table("devices")

@@ -37,12 +37,21 @@ async def test_notification_worker_dispatches_and_wakeup_interrupts_bounded_poll
         wait_for_wakeup=wakeup.wait,
     )
 
-    assert await worker.run_once() == 3
-    waiting = asyncio.create_task(wakeup.wait(30))
-    await asyncio.sleep(0)
-    await wakeup.notify()
-    await asyncio.wait_for(waiting, timeout=1)
+    running = asyncio.create_task(worker.run_forever())
+    for _ in range(20):
+        if calls == 1:
+            break
+        await asyncio.sleep(0)
     assert calls == 1
+    await wakeup.notify()
+    for _ in range(20):
+        if calls == 2:
+            break
+        await asyncio.sleep(0)
+    assert calls == 2
+    worker.stop()
+    await wakeup.notify()
+    await asyncio.wait_for(running, timeout=1)
     await wakeup.close()
 
 

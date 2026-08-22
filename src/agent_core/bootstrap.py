@@ -111,8 +111,10 @@ from agent_core.adapters.persistence.memory_repositories import (
     PostgresTraceStore,
 )
 from agent_core.adapters.persistence.notifications import (
+    InMemoryDeviceRegistrationIdempotencyRepository,
     InMemoryDeviceRegistry,
     InMemoryNotificationOutbox,
+    PostgresDeviceRegistrationIdempotencyRepository,
     PostgresDeviceRegistry,
     PostgresNotificationOutbox,
 )
@@ -592,6 +594,7 @@ def _memory_uow_repositories(
         schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
         schedule_admission=AllowScheduleAdmissionController(),
         devices=devices,
+        device_registration_idempotency=InMemoryDeviceRegistrationIdempotencyRepository(),
         notification_outbox=notification_outbox,
         queue=None,
     )
@@ -668,6 +671,9 @@ def _postgres_repository_factory(
                 session, schedule_admission_limits, schedule_metrics
             ),
             devices=devices,
+            device_registration_idempotency=(
+                PostgresDeviceRegistrationIdempotencyRepository(session)
+            ),
             notification_outbox=PostgresNotificationOutbox(session, clock),
             queue=PostgresRunQueue(
                 session,

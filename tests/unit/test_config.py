@@ -238,18 +238,28 @@ def test_notification_roles_and_provider_default_off() -> None:
     assert settings.apns_key_file is None
 
 
-def test_notification_roles_must_change_together() -> None:
+@pytest.mark.parametrize(
+    ("enabled", "disabled"),
+    [
+        ("AGENT_NOTIFICATION_API_ENABLED", "AGENT_NOTIFICATION_DISPATCH_ENABLED"),
+        ("AGENT_NOTIFICATION_DISPATCH_ENABLED", "AGENT_NOTIFICATION_API_ENABLED"),
+    ],
+)
+def test_notification_roles_must_change_together(enabled: str, disabled: str) -> None:
     with pytest.raises(ConfigurationError, match="notification API and dispatch"):
         load_settings(
             {
                 **base_environment(),
-                "AGENT_NOTIFICATION_API_ENABLED": "1",
+                enabled: "1",
+                disabled: "0",
             }
         )
 
 
 def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
     key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
     values = {
         **base_environment(),
         "DEPLOYMENT_MODE": "production",
@@ -274,6 +284,75 @@ def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) ->
     assert settings.push_provider is PushProviderKind.APNS
     assert settings.apns_key_file == key_file
     assert settings.apns_key_id == "KEY123"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["APNS_KEY_FILE", "APNS_KEY_ID", "APNS_TEAM_ID", "APNS_TOPIC"],
+)
+def test_apns_provider_requires_complete_private_configuration(
+    tmp_path: Path,
+    missing: str,
+) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    values = {
+        **base_environment(),
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(key_file),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+    values.pop(missing)
+
+    with pytest.raises(ConfigurationError, match=missing):
+        load_settings(values)
+
+
+def test_disabled_push_provider_rejects_apns_configuration(tmp_path: Path) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+
+    with pytest.raises(ConfigurationError, match=r"APNS_.*PUSH_PROVIDER=apns"):
+        load_settings({**base_environment(), "APNS_KEY_FILE": str(key_file)})
+
+
+@pytest.mark.parametrize("unsafe", ["relative", "symlink", "permissive"])
+def test_apns_key_file_must_be_absolute_regular_and_private(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe: str,
+) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    configured = key_file
+    if unsafe == "relative":
+        monkeypatch.chdir(tmp_path)
+        configured = Path(key_file.name)
+    elif unsafe == "symlink":
+        configured = tmp_path / "AuthKey_LINK.p8"
+        configured.symlink_to(key_file)
+    else:
+        key_file.chmod(0o640)
+    values = {
+        **base_environment(),
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(configured),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+
+    with pytest.raises(ConfigurationError, match="APNS_KEY_FILE"):
+        load_settings(values)
 
 
 def test_unknown_push_provider_is_refused() -> None:

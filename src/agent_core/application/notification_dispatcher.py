@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
@@ -35,6 +36,11 @@ from agent_core.ports.repositories import (
 )
 
 DispatchProbe = Callable[[str], None]
+logger = logging.getLogger(__name__)
+
+
+class DispatchProbeError(RuntimeError):
+    """Injected crash boundary that must escape the worker scan."""
 
 
 class NotificationDispatchUnitOfWork(Protocol):
@@ -99,7 +105,15 @@ class NotificationDispatcher:
                 self._providers,
             )
         for notification in claimed:
-            await self._dispatch(notification)
+            try:
+                await self._dispatch(notification)
+            except DispatchProbeError:
+                raise
+            except Exception:
+                logger.exception(
+                    "notification dispatch failed notification_id=%s",
+                    notification.id,
+                )
         return len(claimed)
 
     async def _dispatch(self, notification: Notification) -> None:
@@ -165,7 +179,10 @@ class NotificationDispatcher:
         for target in pending_targets:
             outcome = await self._transport.deliver(target, message)
             outcomes.append((target, outcome))
-            self._dispatch_probe("transport_accepted")
+            try:
+                self._dispatch_probe("transport_accepted")
+            except Exception as exc:
+                raise DispatchProbeError(str(exc)) from exc
 
         async with self._uow_factory() as uow:
             saw_retry = False

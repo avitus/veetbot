@@ -170,7 +170,27 @@ def test_schedule_tables_encode_identity_erasure_and_query_constraints() -> None
 
 def test_notification_tables_encode_routing_identity_and_query_constraints() -> None:
     tables = Base.metadata.tables
-    assert {"devices", "notification_outbox", "notification_deliveries"} <= tables.keys()
+    assert {
+        "devices",
+        "device_registration_idempotency_keys",
+        "notification_outbox",
+        "notification_deliveries",
+    } <= tables.keys()
+
+    device_idempotency = tables["device_registration_idempotency_keys"]
+    assert tuple(column.name for column in device_idempotency.primary_key.columns) == (
+        "tenant_id",
+        "principal_id",
+        "key",
+    )
+    assert set(device_idempotency.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "key",
+        "request_hash",
+        "response",
+        "created_at",
+    }
 
     devices = tables["devices"]
     assert {tuple(column.name for column in index.columns) for index in devices.indexes} >= {

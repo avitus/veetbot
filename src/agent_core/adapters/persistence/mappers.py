@@ -10,6 +10,7 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
     ArtifactRow,
+    DeviceRegistrationIdempotencyRow,
     DeviceRow,
     EventRow,
     IdempotencyKeyRow,
@@ -31,6 +32,7 @@ from agent_core.domain.approvals import ApprovalRequest
 from agent_core.domain.devices import (
     Device,
     DeviceKind,
+    DeviceRegistrationIdempotencyRecord,
     DeviceStatus,
     PushEnvironment,
     PushProvider,
@@ -410,6 +412,20 @@ def schedule_idempotency_to_domain(row: ScheduleIdempotencyKeyRow) -> ScheduleId
 
 
 def schedule_idempotency_values(record: ScheduleIdempotencyRecord) -> dict[str, Any]:
+    return record.model_dump(mode="python")
+
+
+def device_registration_idempotency_to_domain(
+    row: DeviceRegistrationIdempotencyRow,
+) -> DeviceRegistrationIdempotencyRecord:
+    return DeviceRegistrationIdempotencyRecord.model_validate(
+        {key: getattr(row, key) for key in DeviceRegistrationIdempotencyRecord.model_fields}
+    )
+
+
+def device_registration_idempotency_values(
+    record: DeviceRegistrationIdempotencyRecord,
+) -> dict[str, Any]:
     return record.model_dump(mode="python")
 
 

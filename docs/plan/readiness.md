@@ -1078,7 +1078,8 @@ confinement; three scopes and seven routes including the offline inbox; the
 Apple client's registration and deep-link duties; process-event lifecycle
 audit; and twenty hard gates across the `device` and `notify` areas. ADR-0062
 records why two ports replace the `NotificationService` name, why the
-broadcaster stays, and why the push key lives in one role.
+broadcaster stays, why registration replay has a separate principal-scoped
+repository, and why the push key lives in one role.
 
 The readiness verdict is therefore **In progress**: there is no unnamed design
 choice between the corpus and the implementation. What remains outside the

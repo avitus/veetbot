@@ -453,11 +453,12 @@ route requires; the table above is the API's half of one namespace.
 ### The Milestone 12 device and notification extension
 
 [notifications-and-devices.md](notifications-and-devices.md) adds seven
-application routes and three exact scopes in the same form, mounted on a
-feature-flagged router and absent from the OpenAPI document until
-`AGENT_NOTIFICATION_API_ENABLED` is set. They extend the executable closed
-vocabulary to twenty-five strings; the exact-match and no-wildcard rules are
-unchanged.
+application routes and three exact scopes in the same form. The three scopes
+extend the executable closed vocabulary to twenty-five strings unconditionally;
+the exact-match and no-wildcard rules are unchanged. The router is mounted only
+when `AGENT_NOTIFICATION_API_ENABLED` is set, so the routes are absent from the
+OpenAPI document while the feature is disabled even though the scope vocabulary
+remains available for configuration validation.
 
 ```text
 POST   /v1/devices                                  device.write

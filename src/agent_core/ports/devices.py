@@ -8,7 +8,12 @@ from typing import Protocol
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
-from agent_core.domain.devices import Device, DeviceCursor, PushTarget
+from agent_core.domain.devices import (
+    Device,
+    DeviceCursor,
+    DeviceRegistrationIdempotencyRecord,
+    PushTarget,
+)
 from agent_core.domain.notifications import NotificationKind
 
 
@@ -43,3 +48,17 @@ class DeviceRegistry(Protocol):
         principal_id: str,
         kind: NotificationKind,
     ) -> builtins.list[PushTarget]: ...
+
+
+class DeviceRegistrationIdempotencyRepository(Protocol):
+    async def get(
+        self,
+        tenant_id: str,
+        principal_id: str,
+        key: str,
+    ) -> DeviceRegistrationIdempotencyRecord | None: ...
+
+    async def create(
+        self,
+        record: DeviceRegistrationIdempotencyRecord,
+    ) -> DeviceRegistrationIdempotencyRecord: ...

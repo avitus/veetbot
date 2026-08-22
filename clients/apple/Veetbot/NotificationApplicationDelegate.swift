@@ -13,10 +13,17 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
     private weak var model: ChatViewModel?
     private var configuredSubscription: AnyCancellable?
     private var requestedServer: URL?
+    private var pendingResponsePayloads: [NotificationPushPayload] = []
+    var pendingResponseCount: Int { pendingResponsePayloads.count }
 
     func attach(to model: ChatViewModel) {
         guard self.model !== model else { return }
         self.model = model
+        let pending = pendingResponsePayloads
+        pendingResponsePayloads.removeAll()
+        for payload in pending {
+            open(payload, on: model)
+        }
         configuredSubscription = model.$baseURL
             .combineLatest(model.$isConfigured)
             .sink { [weak self] baseURL, configured in
@@ -83,7 +90,19 @@ class NotificationApplicationDelegateBase: NSObject, @preconcurrency UNUserNotif
             userInfo: response.notification.request.content.userInfo
         )
         completionHandler()
-        guard let payload, let model else { return }
+        guard let payload else { return }
+        received(payload: payload)
+    }
+
+    func received(payload: NotificationPushPayload) {
+        guard let model else {
+            pendingResponsePayloads.append(payload)
+            return
+        }
+        open(payload, on: model)
+    }
+
+    private func open(_ payload: NotificationPushPayload, on model: ChatViewModel) {
         Task { await model.openNotification(payload) }
     }
 

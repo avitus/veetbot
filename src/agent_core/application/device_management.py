@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from datetime import timedelta
 from uuid import UUID
@@ -13,6 +14,7 @@ from agent_core.domain.devices import (
     Device,
     DeviceCursor,
     DeviceRegistration,
+    DeviceRegistrationIdempotencyRecord,
     DeviceStatus,
     PushEnvironment,
     PushProvider,
@@ -62,73 +64,107 @@ class DeviceManagementService:
         idempotency_key: str | None = None,
     ) -> DeviceRegistrationResult:
         require_scope(principal, "device.write")
-        _optional_idempotency_key(idempotency_key)
+        key = _optional_idempotency_key(idempotency_key)
+        request_hash = None if key is None else _registration_hash(registration)
         now = self._clock.now()
-        async with self._uow_factory() as uow:
-            existing = await uow.devices.get_by_client_device_id(
-                registration.client_device_id,
-                principal,
-            )
-            new_routing = _routing(registration)
-            old_routing = None if existing is None else _device_routing(existing)
-            routing_changed = existing is not None and old_routing != new_routing
-            device = Device(
-                id=self._ids.new_id() if existing is None else existing.id,
-                tenant_id=principal.tenant_id,
-                principal_id=principal.principal_id,
-                client_device_id=registration.client_device_id,
-                name=registration.name,
-                kind=registration.kind,
-                platform=registration.platform,
-                app_bundle_id=registration.app_bundle_id,
-                push_provider=registration.push_provider,
-                push_token=registration.push_token,
-                push_environment=registration.push_environment,
-                push_token_updated_at=(
-                    now
-                    if registration.push_token is not None and (existing is None or routing_changed)
-                    else None
-                    if existing is None
-                    else existing.push_token_updated_at
-                ),
-                push_token_invalidated_at=(
-                    None
-                    if routing_changed
-                    else None
-                    if existing is None
-                    else existing.push_token_invalidated_at
-                ),
-                muted_kinds=registration.muted_kinds,
-                status=DeviceStatus.ACTIVE,
-                revoked_at=None,
-                last_seen_at=now,
-                created_at=now if existing is None else existing.created_at,
-                updated_at=now,
-            )
-            stored = await uow.devices.upsert(device, principal)
-            fingerprint = _fingerprint(stored)
-            if existing is None:
-                await self._append_lifecycle(
-                    uow,
+        try:
+            async with self._uow_factory() as uow:
+                if key is not None:
+                    assert request_hash is not None
+                    replay = await uow.device_registration_idempotency.get(
+                        principal.tenant_id,
+                        principal.principal_id,
+                        key,
+                    )
+                    if replay is not None:
+                        return _registration_replay(replay, request_hash)
+                existing = await uow.devices.get_by_client_device_id(
+                    registration.client_device_id,
                     principal,
-                    stored,
-                    event_type="device.registered",
-                    derivation_key=f"device.registered:{stored.id}",
-                    token_fingerprint=fingerprint,
                 )
-            elif routing_changed:
-                await self._append_lifecycle(
-                    uow,
-                    principal,
-                    stored,
-                    event_type="device.push_token_updated",
-                    derivation_key=f"device.push_token_updated:{stored.id}:{now.isoformat()}",
-                    token_fingerprint=fingerprint,
+                new_routing = _routing(registration)
+                old_routing = None if existing is None else _device_routing(existing)
+                routing_changed = existing is not None and old_routing != new_routing
+                device = Device(
+                    id=self._ids.new_id() if existing is None else existing.id,
+                    tenant_id=principal.tenant_id,
+                    principal_id=principal.principal_id,
+                    client_device_id=registration.client_device_id,
+                    name=registration.name,
+                    kind=registration.kind,
+                    platform=registration.platform,
+                    app_bundle_id=registration.app_bundle_id,
+                    push_provider=registration.push_provider,
+                    push_token=registration.push_token,
+                    push_environment=registration.push_environment,
+                    push_token_updated_at=(
+                        now
+                        if registration.push_token is not None
+                        and (existing is None or routing_changed)
+                        else None
+                        if existing is None
+                        else existing.push_token_updated_at
+                    ),
+                    push_token_invalidated_at=(
+                        None
+                        if routing_changed
+                        else None
+                        if existing is None
+                        else existing.push_token_invalidated_at
+                    ),
+                    muted_kinds=registration.muted_kinds,
+                    status=DeviceStatus.ACTIVE,
+                    revoked_at=None,
+                    last_seen_at=now,
+                    created_at=now if existing is None else existing.created_at,
+                    updated_at=now,
                 )
-        return DeviceRegistrationResult(
-            device=_device_view(stored),
-            replayed=existing is not None,
-        )
+                stored = await uow.devices.upsert(device, principal)
+                fingerprint = _fingerprint(stored)
+                if existing is None:
+                    await self._append_lifecycle(
+                        uow,
+                        principal,
+                        stored,
+                        event_type="device.registered",
+                        derivation_key=f"device.registered:{stored.id}",
+                        token_fingerprint=fingerprint,
+                    )
+                elif routing_changed:
+                    await self._append_lifecycle(
+                        uow,
+                        principal,
+                        stored,
+                        event_type="device.push_token_updated",
+                        derivation_key=(f"device.push_token_updated:{stored.id}:{now.isoformat()}"),
+                        token_fingerprint=fingerprint,
+                    )
+                view = _device_view(stored)
+                if key is not None:
+                    assert request_hash is not None
+                    await uow.device_registration_idempotency.create(
+                        DeviceRegistrationIdempotencyRecord(
+                            tenant_id=principal.tenant_id,
+                            principal_id=principal.principal_id,
+                            key=key,
+                            request_hash=request_hash,
+                            response=view.model_dump(mode="json"),
+                            created_at=now,
+                        )
+                    )
+            return DeviceRegistrationResult(device=view, replayed=existing is not None)
+        except ConflictError:
+            if key is None or request_hash is None:
+                raise
+            async with self._uow_factory() as uow:
+                replay = await uow.device_registration_idempotency.get(
+                    principal.tenant_id,
+                    principal.principal_id,
+                    key,
+                )
+            if replay is None:
+                raise
+            return _registration_replay(replay, request_hash)
 
     async def get(self, principal: Principal, device_id: UUID) -> DeviceView:
         require_scope(principal, "device.read")
@@ -280,10 +316,13 @@ class NotificationInboxService:
                 cursor=parsed,
             )
             visible = rows[:limit]
+            deliveries = await uow.notification_outbox.list_deliveries_for(
+                tuple(row.id for row in visible)
+            )
             items = [
                 NotificationInboxItem(
                     notification=row,
-                    deliveries=await uow.notification_outbox.list_deliveries(row.id),
+                    deliveries=deliveries[row.id],
                 )
                 for row in visible
             ]
@@ -344,9 +383,34 @@ def _device_view(device: Device) -> DeviceView:
     )
 
 
-def _optional_idempotency_key(value: str | None) -> None:
+def _optional_idempotency_key(value: str | None) -> str | None:
     if value is not None and (not value.strip() or len(value) > 255):
         raise ValueError("device idempotency key must contain 1 to 255 characters")
+    return None if value is None else value.strip()
+
+
+def _registration_hash(registration: DeviceRegistration) -> str:
+    payload = registration.model_dump(mode="json")
+    payload["push_token"] = (
+        None if registration.push_token is None else registration.push_token.get_secret_value()
+    )
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _registration_replay(
+    record: DeviceRegistrationIdempotencyRecord,
+    request_hash: str,
+) -> DeviceRegistrationResult:
+    if record.request_hash != request_hash:
+        raise ConflictError(
+            "device idempotency key was reused with different content",
+            reason="device.idempotency_mismatch",
+        )
+    return DeviceRegistrationResult(
+        device=DeviceView.model_validate(record.response),
+        replayed=True,
+    )
 
 
 def _encode_cursor(payload: dict[str, str]) -> str:

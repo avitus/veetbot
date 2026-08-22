@@ -85,7 +85,12 @@ async def test_postgres_enqueue_wakes_only_after_transaction_commit() -> None:
         await listener.close()
 
 
-async def test_lean_production_notification_role_constructs_without_app_credentials() -> None:
+async def test_lean_production_notification_role_constructs_without_app_credentials(
+    tmp_path: Path,
+) -> None:
+    apns_key = tmp_path / "AuthKey_TEST.p8"
+    apns_key.write_text("test APNs private key material", encoding="ascii")
+    apns_key.chmod(0o600)
     settings = replace(
         database_settings(),
         deployment_mode=DeploymentMode.PRODUCTION,
@@ -98,7 +103,7 @@ async def test_lean_production_notification_role_constructs_without_app_credenti
         notification_api_enabled=True,
         notification_dispatch_enabled=True,
         push_provider=PushProviderKind.APNS,
-        apns_key_file=Path("/etc/veetbot/secrets/AuthKey_TEST.p8"),
+        apns_key_file=apns_key,
         apns_key_id="KEYID",
         apns_team_id="TEAMID",
         apns_topic="com.veetbot.app",

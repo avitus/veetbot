@@ -7,6 +7,7 @@ import json
 import stat
 from collections.abc import Mapping
 from datetime import datetime, timedelta
+from hashlib import sha256
 from pathlib import Path
 
 import httpx
@@ -24,6 +25,7 @@ _APNS_HOSTS = {
 }
 _PROVIDER_TOKEN_REFRESH = timedelta(minutes=20)
 _UNREGISTERED_REASONS = {"Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic"}
+_CLIENT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 
 class APNsPushTransport:
@@ -49,7 +51,11 @@ class APNsPushTransport:
         self._provider_token: tuple[str, datetime] | None = None
         if clients is None:
             self._clients = {
-                environment: httpx.AsyncClient(base_url=host, http2=True)
+                environment: httpx.AsyncClient(
+                    base_url=host,
+                    http2=True,
+                    timeout=_CLIENT_TIMEOUT,
+                )
                 for environment, host in _APNS_HOSTS.items()
             }
         else:
@@ -66,7 +72,7 @@ class APNsPushTransport:
             "apns-topic": self._topic,
             "apns-push-type": "alert",
             "apns-priority": "10" if message.priority >= 10 else "5",
-            "apns-collapse-id": message.dedupe_key,
+            "apns-collapse-id": _collapse_id(message.dedupe_key),
         }
         if message.expires_at is not None:
             headers["apns-expiration"] = str(int(message.expires_at.timestamp()))
@@ -171,6 +177,13 @@ def _load_private_key(path: Path) -> ec.EllipticCurvePrivateKey:
 
 def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _collapse_id(dedupe_key: str) -> str:
+    encoded = dedupe_key.encode("utf-8")
+    if len(encoded) <= 64 and dedupe_key.isascii():
+        return dedupe_key
+    return sha256(encoded).hexdigest()
 
 
 def _response_reason(response: httpx.Response) -> str:

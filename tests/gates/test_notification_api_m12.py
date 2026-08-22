@@ -122,6 +122,16 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
             assert replay.status_code == 200
             assert replay.json()["id"] == str(device_id)
 
+            mismatched_replay = await client.post(
+                "/v1/devices",
+                json=_registration(routing_value="different-token"),
+                headers={"Idempotency-Key": "phone-registration"},
+            )
+            assert mismatched_replay.status_code == 409
+            assert mismatched_replay.json()["error"]["details"]["reason"] == (
+                "device.idempotency_mismatch"
+            )
+
             refreshed = await client.post(
                 "/v1/devices",
                 json=_registration(routing_value="fedcba9876543210"),
@@ -129,6 +139,14 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
             assert refreshed.status_code == 200
             assert refreshed.json()["id"] == str(device_id)
             assert refreshed.json()["push_token_fingerprint"] != "9f9f51"
+
+            late_replay = await client.post(
+                "/v1/devices",
+                json=_registration(),
+                headers={"Idempotency-Key": "phone-registration"},
+            )
+            assert late_replay.status_code == 200
+            assert late_replay.json() == device
 
             second = await client.post(
                 "/v1/devices",
@@ -364,7 +382,7 @@ async def test_offline_inbox_paginates_every_kind_with_delivery_outcomes() -> No
         recovered: list[dict[str, Any]] = []
         cursor: str | None = None
         async with _client(composition) as client:
-            while True:
+            for _page_number in range(len(NotificationKind) + 1):
                 response = await client.get(
                     "/v1/notifications",
                     params={"limit": 3, **({"cursor": cursor} if cursor else {})},
@@ -375,6 +393,8 @@ async def test_offline_inbox_paginates_every_kind_with_delivery_outcomes() -> No
                 cursor = page["next_cursor"]
                 if cursor is None:
                     break
+            else:
+                pytest.fail("notification pagination did not terminate within the page bound")
 
         assert {item["notification"]["kind"] for item in recovered} == {
             kind.value for kind in NotificationKind

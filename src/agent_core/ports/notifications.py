@@ -38,6 +38,11 @@ class NotificationOutbox(Protocol):
         self, notification_id: UUID
     ) -> builtins.list[NotificationDelivery]: ...
 
+    async def list_deliveries_for(
+        self,
+        notification_ids: tuple[UUID, ...],
+    ) -> dict[UUID, builtins.list[NotificationDelivery]]: ...
+
     async def settle(
         self,
         notification_id: UUID,

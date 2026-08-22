@@ -431,7 +431,8 @@ Apple app ([apple-client.md](../apple-client.md), ADR-0049). The adapter:
   logged;
 - sends `apns-topic` equal to the configured bundle identifier,
   `apns-push-type: alert`, `apns-priority` 10 for approvals and questions and 5
-  for terminal notices, `apns-collapse-id` equal to the `dedupe_key`, and
+  for terminal notices, `apns-collapse-id` equal to the `dedupe_key` when it
+  fits Apple's 64-byte limit or its SHA-256 digest otherwise, and
   `apns-expiration` equal to the row's `expires_at` where present;
 - maps every response into the closed `DeliveryOutcome` vocabulary above and
   records the provider's reason string and identifier on the delivery row;
@@ -446,7 +447,7 @@ device, because the simulator cannot receive a remote push.
 
 ## Ports
 
-The application layer owns three provider-neutral ports. They live in two new
+The application layer owns four provider-neutral ports. They live in two new
 modules, `ports/devices.py` and `ports/notifications.py`, because the seam
 audit's placement rule is that a port lives in the module named for the
 capability it abstracts and that a port with no neighbours "needs a new module
@@ -463,10 +464,16 @@ class DeviceRegistry(Protocol):
     async def push_targets(self, tenant_id: str, principal_id: str, kind: NotificationKind) -> list[PushTarget]: ...
 
 
+class DeviceRegistrationIdempotencyRepository(Protocol):
+    async def get(self, tenant_id: str, principal_id: str, key: str) -> DeviceRegistrationIdempotencyRecord | None: ...
+    async def create(self, record: DeviceRegistrationIdempotencyRecord) -> DeviceRegistrationIdempotencyRecord: ...
+
+
 class NotificationOutbox(Protocol):
     async def enqueue(self, notification: NewNotification) -> Notification | None: ...
     async def claim_due(self, now: datetime, limit: int, claimant: str, lease_seconds: float, providers: frozenset[PushProvider]) -> list[Notification]: ...
     async def record_delivery(self, delivery: NotificationDelivery) -> None: ...
+    async def list_deliveries_for(self, notification_ids: tuple[UUID, ...]) -> dict[UUID, list[NotificationDelivery]]: ...
     async def settle(self, notification_id: UUID, status: NotificationStatus, next_attempt_at: datetime | None) -> None: ...
     async def list(self, principal: Principal, page: Page) -> Page[Notification]: ...
 
@@ -489,11 +496,12 @@ PostgreSQL.
 The name `NotificationService` is retired rather than given a body. The seam
 audit's open question four asked whether it is one port or two
 (multi-device-and-surfaces.md:441); the answer is two, and the broadcaster is
-a third thing that already exists.
+a third thing that already exists. The request-idempotency repository is the
+fourth port and follows the schedule route's principal-scoped replay pattern.
 
 ## Persistence
 
-Milestone 12 adds three tables:
+Milestone 12 adds four tables:
 
 ```text
 devices
@@ -517,6 +525,15 @@ devices
   created_at TIMESTAMPTZ NOT NULL
   updated_at TIMESTAMPTZ NOT NULL
   UNIQUE (tenant_id, principal_id, client_device_id)
+
+device_registration_idempotency_keys
+  tenant_id TEXT NOT NULL
+  principal_id TEXT NOT NULL
+  key TEXT NOT NULL
+  request_hash TEXT NOT NULL
+  response JSONB NOT NULL
+  created_at TIMESTAMPTZ NOT NULL
+  PRIMARY KEY (tenant_id, principal_id, key)
 
 notification_outbox
   id UUID PRIMARY KEY
@@ -553,6 +570,11 @@ notification_deliveries
   UNIQUE (notification_id, device_id, attempt)
 ```
 
+The device-registration idempotency row is principal scoped and stores the
+canonical request hash plus the exact public `DeviceView` response. It never
+stores the push token: the request hash is computed before persistence and the
+response snapshot contains only the existing six-character token fingerprint.
+
 Check constraints enforce that `push_provider` and `push_token` are null
 together or present together, that `push_environment` is present exactly when
 `push_provider` is `apns`, that `status = revoked` implies `revoked_at` and a
@@ -562,7 +584,7 @@ WHERE push_token IS NOT NULL AND status = 'active'` makes one live token belong
 to at most one active device; a token re-registered from a fresh installation
 moves, and the old row's token is nulled. Indexes support `(status,
 next_attempt_at)` for the dispatcher's due scan and `(tenant_id, principal_id,
-created_at, id)` for the inbox and device listings. All three tables carry the
+created_at, id)` for the inbox and device listings. All four tables carry the
 tenant row-level-security policy the Milestone 11 migration established, the
 delivery table through its parent.
 
@@ -604,7 +626,9 @@ GET    /v1/notifications                            notification.read
 
 `POST /v1/devices` registers or refreshes: the same `client_device_id` for the
 same principal updates the row in place and returns it; `Idempotency-Key` is
-accepted and scoped as the schedule routes scope it. Device views return a
+accepted and scoped as the schedule routes scope it. Replaying the same key and
+request returns the exact original public response; reusing the key with
+different content is a conflict. Device views return a
 token fingerprint, never the token. The test-notification route enqueues a
 `test` kind addressed to one device; it is the setup-verification path and the
 end-to-end evidence that a real phone received a real push. `GET
@@ -736,8 +760,8 @@ content, tokens, or the key.
 
 1. Add the device and notification domain values, the closed payload, and the
    deduplication-key rules with property tests. **M12.**
-2. Add the three-table migration, ORM models, in-memory and PostgreSQL
-   repositories, constraints, RLS, and the three port contracts. **M12.**
+2. Add the four-table migration, ORM models, in-memory and PostgreSQL
+   repositories, constraints, RLS, and the four port contracts. **M12.**
 3. Add the in-transaction enqueue hook on the terminal writer and the
    scheduling accountant and materializer, beginning with the every-write
    crash and trigger-catalog regressions. **M12.**
@@ -775,7 +799,7 @@ content, tokens, or the key.
 5. **The device and notification schema encodes its trust boundaries.**
    Metadata inspection proves primary and foreign keys, the partial unique
    token index, the provider-specific push-field constraints, the dispatch
-   and listing indexes, and row-level security on all three tables. Registered as
+   and listing indexes, and row-level security on all four tables. Registered as
    `gate.device.persistence_schema`, structural. **M12.**
 6. **Device and notification persistence is principal isolated.** Row-level
    security and repository predicates prevent cross-tenant and
@@ -836,9 +860,10 @@ content, tokens, or the key.
     environment, and never logs the key or a token. Registered as
     `gate.notify.apns_auth`, case. **M12.**
 16. **Every notification port has executable adapter contracts.** The device
-    registry, the outbox, and the push transport each have a named shared
-    contract exercised by every registered adapter, including the fake
-    transport. Registered as `gate.notify.port_contracts`, structural.
+    registry, device-registration idempotency repository, outbox, and push
+    transport each have a named shared contract exercised by every registered
+    adapter, including the fake transport. Registered as
+    `gate.notify.port_contracts`, structural.
     **M12.**
 17. **A client can read every notification while offline.** With no transport
     configured, enqueue every kind; the inbox later returns each row with its

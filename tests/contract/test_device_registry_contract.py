@@ -159,6 +159,37 @@ async def assert_device_tokens_move_and_lifecycle_removes_targets(
     with pytest.raises(NotFoundError):
         await registry.get(third.id, principal())
 
+    paired_chat_reference = "paired" + "-chat-reference"
+    surface = device(
+        device_id=UUID(int=DEVICE_ID.int + 3),
+        client_device_id="surface-device",
+        token=paired_chat_reference,
+    ).model_copy(
+        update={
+            "kind": DeviceKind.SURFACE,
+            "push_provider": PushProvider.TELEGRAM,
+            "push_environment": None,
+        }
+    )
+    surface = Device.model_validate(surface.model_dump())
+    await registry.upsert(surface, principal())
+    revoked_surface = await registry.revoke(surface.id, principal(), NOW + timedelta(seconds=5))
+    assert Device.model_validate(revoked_surface.model_dump()) == revoked_surface
+
+    replacement = surface.model_copy(
+        update={
+            "id": UUID(int=DEVICE_ID.int + 4),
+            "client_device_id": "surface-device-2",
+            "push_token": SecretStr(paired_chat_reference + "-2"),
+        }
+    )
+    await registry.upsert(replacement, principal())
+    invalidated_surface = await registry.invalidate_push_token(
+        replacement.id, "Unregistered", NOW + timedelta(seconds=6)
+    )
+    assert invalidated_surface is not None
+    assert Device.model_validate(invalidated_surface.model_dump()) == invalidated_surface
+
 
 async def assert_device_listing_is_stable(registry: DeviceRegistry) -> None:
     values = [

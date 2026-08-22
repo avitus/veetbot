@@ -101,6 +101,9 @@ public struct ChatView: View {
                 .onChange(of: model.notificationFocus) { _ in
                     scroll(proxy)
                 }
+                .onAppear {
+                    scroll(proxy)
+                }
             }
             Divider()
             composer

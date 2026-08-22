@@ -21,6 +21,9 @@ from agent_core.domain.devices import (
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.notifications import DeliveryOutcome, NotificationDelivery
 from tests.contract.support import NOW, TENANT, principal
+from tests.contract.test_device_registration_idempotency_repository_contract import (
+    assert_device_registration_idempotency_replays_exact_response_and_rejects_reuse,
+)
 from tests.contract.test_device_registry_contract import (
     DEVICE_ID,
     assert_device_listing_is_stable,
@@ -129,6 +132,23 @@ async def test_postgres_device_registration_is_idempotent_and_principal_scoped()
                     {"tenant": TENANT},
                 )
                 await assert_device_registration_is_idempotent_and_principal_scoped(uow.devices)
+                raise _RollbackContractError
+
+
+async def test_postgres_device_registration_idempotency_satisfies_shared_contract() -> None:
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await uow.session.execute(
+                    text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                    {"tenant": TENANT},
+                )
+                await (
+                    assert_device_registration_idempotency_replays_exact_response_and_rejects_reuse(
+                        uow.device_registration_idempotency
+                    )
+                )
                 raise _RollbackContractError
 
 
@@ -334,7 +354,8 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
             )
             await uow.session.execute(
                 text(
-                    "GRANT SELECT ON devices, notification_outbox, "
+                    "GRANT SELECT ON devices, device_registration_idempotency_keys, "
+                    "notification_outbox, "
                     "notification_deliveries TO veetbot_notification_rls_probe"
                 )
             )
@@ -344,9 +365,14 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
         )
         counts = [
             await uow.session.scalar(text(f"SELECT count(*) FROM {table}"))
-            for table in ("devices", "notification_outbox", "notification_deliveries")
+            for table in (
+                "devices",
+                "device_registration_idempotency_keys",
+                "notification_outbox",
+                "notification_deliveries",
+            )
         ]
-        assert counts == [0, 0, 0]
+        assert counts == [0, 0, 0, 0]
         rows = (
             await uow.session.execute(
                 text(
@@ -356,6 +382,7 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
                 {
                     "tables": [
                         "devices",
+                        "device_registration_idempotency_keys",
                         "notification_outbox",
                         "notification_deliveries",
                     ]
@@ -364,6 +391,7 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
         ).all()
         assert {row.relname for row in rows} == {
             "devices",
+            "device_registration_idempotency_keys",
             "notification_outbox",
             "notification_deliveries",
         }
@@ -372,7 +400,8 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
             await uow.session.execute(text("RESET ROLE"))
             await uow.session.execute(
                 text(
-                    "REVOKE SELECT ON devices, notification_outbox, "
+                    "REVOKE SELECT ON devices, device_registration_idempotency_keys, "
+                    "notification_outbox, "
                     "notification_deliveries FROM veetbot_notification_rls_probe"
                 )
             )

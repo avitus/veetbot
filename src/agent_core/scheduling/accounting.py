@@ -119,13 +119,14 @@ class ScheduleOutcomeAccountant:
             )
             self._write_probe("process_event")
             if self._notification_producer is not None:
-                await self._notification_producer.for_schedule_run_accounted(
+                produced = await self._notification_producer.for_schedule_run_accounted(
                     uow,
                     schedule=updated,
                     occurrence=occurrence,
                     run=run,
                 )
-                self._write_probe("notification")
+                if produced:
+                    self._write_probe("notification")
             if auto_paused:
                 await uow.process_events.append(
                     ProcessEvent(

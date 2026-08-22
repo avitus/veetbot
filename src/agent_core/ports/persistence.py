@@ -12,7 +12,10 @@ from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
-from agent_core.ports.devices import DeviceRegistry
+from agent_core.ports.devices import (
+    DeviceRegistrationIdempotencyRepository,
+    DeviceRegistry,
+)
 from agent_core.ports.dispatch import RunQueue
 from agent_core.ports.events import EventRepository, ProcessEventRepository
 from agent_core.ports.knowledge import KnowledgeStore
@@ -80,6 +83,7 @@ class RepositoryUnitOfWork(Protocol):
     schedule_idempotency: ScheduleIdempotencyRepository
     schedule_admission: ScheduleAdmissionController
     devices: DeviceRegistry
+    device_registration_idempotency: DeviceRegistrationIdempotencyRepository
     notification_outbox: NotificationOutbox
     queue: RunQueue | None
 

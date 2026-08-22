@@ -41,7 +41,7 @@ def _decode(segment: str) -> bytes:
 
 
 async def test_apns_signs_addresses_and_refreshes_provider_token(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
 ) -> None:
     requests: list[httpx.Request] = []
 
@@ -114,9 +114,86 @@ async def test_apns_signs_addresses_and_refreshes_provider_token(
         f"{encoded_header}.{encoded_claims}".encode("ascii"),
         ec.ECDSA(hashes.SHA256()),
     )
-    assert "fake-device-token" not in caplog.text
-    assert key_path.read_text(encoding="ascii") not in caplog.text
+    assert "fake-device-token" not in repr(transport)
+    assert key_path.read_text(encoding="ascii") not in repr(transport)
     await transport.aclose()
+
+
+@pytest.mark.parametrize(
+    ("dedupe_key", "expected"),
+    [
+        ("x" * 64, "x" * 64),
+        ("x" * 65, None),
+        ("push:✅" * 20, None),
+    ],
+)
+async def test_apns_collapse_identifier_is_bounded_to_64_utf8_bytes(
+    tmp_path: Path,
+    dedupe_key: str,
+    expected: str | None,
+) -> None:
+    requests: list[httpx.Request] = []
+    key_path, _key = _private_key_file(tmp_path)
+
+    def record(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    client = httpx.AsyncClient(
+        base_url="https://api.sandbox.push.apple.com:443",
+        transport=httpx.MockTransport(record),
+    )
+    transport = APNsPushTransport(
+        key_file=key_path,
+        key_id="KEY123",
+        team_id="TEAM123",
+        topic="com.veetbot.app",
+        clock=FixedClock(NOW),
+        clients={PushEnvironment.SANDBOX: client},
+    )
+
+    await transport.deliver(
+        push_target(),
+        push_message().model_copy(update={"dedupe_key": dedupe_key}),
+    )
+
+    collapse_id = requests[0].headers["apns-collapse-id"]
+    assert len(collapse_id.encode("utf-8")) <= 64
+    if expected is not None:
+        assert collapse_id == expected
+    else:
+        assert collapse_id != dedupe_key
+        assert len(collapse_id) == 64
+    await transport.aclose()
+
+
+def test_apns_owned_clients_have_explicit_timeouts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key_path, _key = _private_key_file(tmp_path)
+    created: list[dict[str, object]] = []
+
+    class Client:
+        def __init__(self, **kwargs: object) -> None:
+            created.append(kwargs)
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+
+    APNsPushTransport(
+        key_file=key_path,
+        key_id="KEY123",
+        team_id="TEAM123",
+        topic="com.veetbot.app",
+        clock=FixedClock(NOW),
+    )
+
+    assert len(created) == 2
+    assert all(call["http2"] is True for call in created)
+    assert all(call["timeout"] == httpx.Timeout(10.0, connect=5.0) for call in created)
 
 
 @pytest.mark.parametrize(

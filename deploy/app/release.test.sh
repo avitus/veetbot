@@ -386,7 +386,7 @@ printf '%s\n' \
   'AUTH_TENANT_ID=test' \
   'AUTH_PRINCIPAL_ID=notify' \
   'AUTH_ROLES=notify' \
-  'AUTH_SCOPES=session.read' \
+  'AUTH_SCOPES=notification.read' \
   'AGENT_NOTIFICATION_API_ENABLED=1' \
   'AGENT_NOTIFICATION_DISPATCH_ENABLED=1' \
   'PUSH_PROVIDER=apns' \

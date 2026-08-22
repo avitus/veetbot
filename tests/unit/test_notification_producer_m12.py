@@ -204,6 +204,26 @@ async def test_enqueue_failure_is_audited_without_leaking_exception_text() -> No
         assert "secret-provider-detail" not in event.model_dump_json()
 
 
+async def test_notification_validation_failure_is_audited_without_breaking_transition() -> None:
+    clock, factory = await memory_uow_factory()
+    producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())
+    approval_id = UUID(int=499)
+
+    async with factory() as uow:
+        assert not await producer.for_run_transition(
+            uow,
+            run=run(status=RunStatus.RUNNING),
+            principal_id="principal-a",
+            status=RunStatus.WAITING_FOR_APPROVAL,
+            approval_id=approval_id,
+            approval_expires_at=NOW - timedelta(seconds=1),
+        )
+        [event] = await uow.process_events.list("notification.enqueue_failed")
+        assert event.payload["approval_id"] == str(approval_id)
+        assert event.payload["reason_code"] == "notification.outbox_write_failed"
+        assert await uow.notification_outbox.list(principal(), limit=10) == []
+
+
 async def test_required_trigger_identifiers_fail_closed() -> None:
     clock, factory = await memory_uow_factory()
     producer = NotificationProducer(clock=clock, ids=SequenceIdFactory())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,6 +24,7 @@ from agent_core.domain.devices import (
     push_token_fingerprint,
 )
 from agent_core.domain.notifications import (
+    NOTIFICATION_TITLES,
     DeliveryOutcome,
     Notification,
     NotificationDelivery,
@@ -111,6 +113,30 @@ def test_notification_and_device_vocabularies_are_closed() -> None:
         "surface",
     }
     assert {item.value for item in PushProvider} == {"apns", "telegram"}
+
+
+def test_apple_and_server_notification_titles_cannot_drift() -> None:
+    swift = (ROOT / "clients/apple/Veetbot/Models/NotificationModels.swift").read_text(
+        encoding="utf-8"
+    )
+    title_block = swift.split("private static let titles", 1)[1].split(
+        "private static let requiredIdentifiers", 1
+    )[0]
+    swift_titles = dict(re.findall(r"\.(\w+): \"([^\"]+)\",", title_block))
+    swift_cases = {
+        "approvalRequested": NotificationKind.APPROVAL_REQUESTED,
+        "questionAsked": NotificationKind.QUESTION_ASKED,
+        "runFailed": NotificationKind.RUN_FAILED,
+        "scheduleRunFinished": NotificationKind.SCHEDULE_RUN_FINISHED,
+        "scheduleOccurrenceSkipped": NotificationKind.SCHEDULE_OCCURRENCE_SKIPPED,
+        "opsAlert": NotificationKind.OPS_ALERT,
+        "opsRecovered": NotificationKind.OPS_RECOVERED,
+        "test": NotificationKind.TEST,
+    }
+
+    assert {swift_cases[name]: title for name, title in swift_titles.items()} == dict(
+        NOTIFICATION_TITLES
+    )
 
 
 @pytest.mark.parametrize(
