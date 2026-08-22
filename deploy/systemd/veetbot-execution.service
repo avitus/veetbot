@@ -7,6 +7,7 @@ Before=veetbot-worker.service veetbot-async-worker.service
 [Service]
 Type=simple
 User=veetbot-exec
+DynamicUser=yes
 Group=veetbot
 SupplementaryGroups=docker
 WorkingDirectory=/opt/veetbot/current

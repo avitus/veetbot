@@ -120,6 +120,12 @@ sudo chown -R veetbot:veetbot /var/lib/veetbot
 sudo chmod 0700 /var/lib/veetbot/artifacts
 ```
 
+`veetbot-execution.service` also sets `DynamicUser=yes`. A fully prepared host
+uses the static `veetbot-exec` account above; on an older host that does not yet
+have it, systemd allocates the same dedicated service identity so the atomic
+release can complete without temporarily running the execution service as an
+application user.
+
 The `veetbot-deploy` account owns `/opt/veetbot`, including the documentation
 releases. Nginx and the application group receive read-only traversal through
 the ordinary directory modes. The API and worker identities are not members of

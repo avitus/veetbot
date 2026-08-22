@@ -302,6 +302,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "agent execution-service" in execution
     assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
+    assert "DynamicUser=yes" in execution.splitlines()
     assert "Group=veetbot" in execution.splitlines()
     assert "SupplementaryGroups=docker" in execution
     assert "/run/docker.sock" in execution
