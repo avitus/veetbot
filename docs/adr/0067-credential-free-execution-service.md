@@ -40,10 +40,12 @@ and workspace operations without inheriting the application environment.
    every provision request continues to use the immutable digest.
 
 This decision implements the existing engineering-plan and ADR-0008 boundary.
-It supersedes ADR-0046 decision 2, the worker-owned wording in decision 3, and
-its Docker-group consequence. It also supersedes ADR-0048's count of three
-systemd processes; delivery now manages the execution service alongside the API
-and worker roles.
+It supersedes ADR-0046 decision 2 (three systemd units, with the worker alone
+in the `docker` group), the worker-owned gVisor adapter described in that
+ADR's context, and its Docker-group consequence; ADR-0046 decision 3 —
+generated code runs through Docker's `runsc` runtime — stands under the new
+owner. It also supersedes ADR-0048's count of three systemd processes;
+delivery now manages the execution service alongside the API and worker roles.
 
 ## Consequences
 
@@ -54,7 +56,12 @@ and worker roles.
   credentials. A later multi-host deployment can replace the local transport
   while preserving the `ExecutionEnvironment` port.
 - Worker startup and sandbox maintenance now depend on the execution service.
-  Systemd orders and restarts the credential-free unit before dependent worker
-  roles.
+  The worker, async-worker, and maintenance units declare `Requires=` and
+  `After=` on `veetbot-execution.service`, so systemd activates the
+  credential-free unit first and orders the dependents after it. Nothing
+  propagates its restarts: `Restart=on-failure` applies to the execution
+  service alone, and a dependent that loses the socket surfaces
+  `ExecutionUnavailable` for that request and reconnects on its next one,
+  because the client opens a connection per call.
 - Large workspace reads cross the local socket as bounded frames. Artifact
   export retains its existing maximum size and digest verification.

@@ -302,6 +302,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "agent execution-service" in execution
     assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
+    assert "Group=veetbot" in execution
     assert "SupplementaryGroups=docker" in execution
     assert "/run/docker.sock" in execution
     assert "/var/run/docker.sock" not in execution
@@ -1218,8 +1219,8 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    assert "engineering-plan.md missing 'Milestone 12' section" in check_docs.errors
-    assert "engineering-plan.md missing 'Milestone 15' section" in check_docs.errors
+    for milestone in range(12, 16):
+        assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
 _SUDOERS_RULE = re.compile(r"^(\S+) (\S+)=\((\S+)\) NOPASSWD: (/\S+)( .+)?$")

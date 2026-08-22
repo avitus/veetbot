@@ -207,7 +207,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "marine biologist",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "marine biologist",
+                "evidence_quote": "As a marine biologist, I spend",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "sensitive",
             },
@@ -221,7 +221,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "marine biologist",
+                "evidence_quote": "As a marine biologist, I spend",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "public",
             },
@@ -235,7 +235,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "restore old shortwave radios",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "restore old shortwave radios",
+                "evidence_quote": "I restore old shortwave radios",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -249,7 +249,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "restore old shortwave radios",
+                "evidence_quote": "I restore old shortwave radios",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "public",
             },
@@ -291,7 +291,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "screen reader",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "rely on a screen reader",
+                "evidence_quote": "I rely on a screen reader",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "sensitive",
             },
@@ -319,7 +319,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "Japanese",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "studying Japanese",
+                "evidence_quote": "I've been studying Japanese",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -333,7 +333,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "studying Japanese",
+                "evidence_quote": "I've been studying Japanese",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "public",
             },
@@ -347,7 +347,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "Pacific time",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "in Pacific time",
+                "evidence_quote": "I'm in Pacific time",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -361,7 +361,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "in Pacific time",
+                "evidence_quote": "I'm in Pacific time",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -375,7 +375,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "cats",
                 "context": None,
                 "quantity": 2,
-                "evidence_quote": "two cats",
+                "evidence_quote": "Our two cats",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -389,7 +389,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": 2,
-                "evidence_quote": "two cats",
+                "evidence_quote": "Our two cats",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "public",
             },
@@ -403,7 +403,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "vegan",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "vegan",
+                "evidence_quote": "vegan; that is how I eat",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "sensitive",
             },
@@ -417,7 +417,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "vegan",
+                "evidence_quote": "vegan; that is how I eat",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -431,7 +431,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "short paragraphs and examples",
                 "context": "technical explanations",
                 "quantity": None,
-                "evidence_quote": "short paragraphs and examples",
+                "evidence_quote": "short paragraphs and examples work best for me",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -467,7 +467,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "learn astrophotography",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "learn astrophotography",
+                "evidence_quote": "I'm hoping to learn astrophotography",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -481,7 +481,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": None,
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "learn astrophotography",
+                "evidence_quote": "I'm hoping to learn astrophotography",
                 "proposed_portability": "portable",
                 "sensitivity_guess": "internal",
             },
@@ -495,7 +495,7 @@ def test_evaluation_evidence_rejects_a_downgraded_positive_coverage_floor() -> N
                 "value": "3.5 inches",
                 "context": None,
                 "quantity": None,
-                "evidence_quote": "telescope aperture is 3.5 inches",
+                "evidence_quote": "My telescope aperture is 3.5 inches",
                 "proposed_portability": "contextual",
                 "sensitivity_guess": "internal",
             },
@@ -573,7 +573,7 @@ async def test_provider_keeps_valid_grounded_claims_when_one_claim_cannot_render
                     "value": "3.5 inches",
                     "context": None,
                     "quantity": None,
-                    "evidence_quote": "telescope aperture is 3.5 inches",
+                    "evidence_quote": "My telescope aperture is 3.5 inches",
                     "polarity": "assert",
                     "source_event_ids": [source],
                     "model_confidence": 0.9,
@@ -588,7 +588,7 @@ async def test_provider_keeps_valid_grounded_claims_when_one_claim_cannot_render
                     "value": None,
                     "context": "telescope aperture",
                     "quantity": None,
-                    "evidence_quote": "telescope aperture is 3.5 inches",
+                    "evidence_quote": "My telescope aperture is 3.5 inches",
                     "polarity": "assert",
                     "source_event_ids": [source],
                     "model_confidence": 0.9,
@@ -649,7 +649,7 @@ async def test_provider_canonicalizes_go_hiking_without_losing_the_wife_fallback
                     "value": None,
                     "context": None,
                     "quantity": None,
-                    "evidence_quote": "go hiking most weekends",
+                    "evidence_quote": "I go hiking most weekends",
                     "polarity": "assert",
                     "source_event_ids": [source],
                     "model_confidence": 0.99,
@@ -1022,7 +1022,7 @@ def test_provider_claim_grounding_accepts_decimal_tokens_present_in_the_source()
         value="3.5 inches",
         context=None,
         quantity=None,
-        evidence_quote="telescope aperture is 3.5 inches",
+        evidence_quote="My telescope aperture is 3.5 inches",
         polarity=Polarity.ASSERT,
         source_event_ids=[1],
         model_confidence=0.9,
@@ -1079,19 +1079,29 @@ def test_provider_claim_grounding_rejects_cross_event_subject_value_mixing() -> 
         ("I have a daughter.", {"polarity": Polarity.RETRACT}),
         ("I have a daughter.", {"valid_from": NOW}),
         ("I have a daughter.", {"expires_hint": NOW}),
+        # An asserted claim whose own evidence negates it.
+        ("I do not have a daughter.", {"evidence_quote": "I do not have a daughter"}),
+        # A cue elsewhere in the episode cannot support the quoted claim.
+        ("I no longer have a dog. I have a daughter.", {"polarity": Polarity.RETRACT}),
+        ("Starting 2026-07-25 I have a dog. I have a daughter.", {"valid_from": NOW}),
+        ("I have a dog until 2026-07-25. I have a daughter.", {"expires_hint": NOW}),
+        # A quote without user attribution is not a claim about the user.
+        ("My friend has a daughter.", {"evidence_quote": "has a daughter"}),
     ],
 )
 def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
     source: str,
     updates: dict[str, object],
 ) -> None:
+    """Polarity, validity, expiry, and attribution are judged inside the evidence
+    quote itself; the rest of the episode cannot lend a cue to the quoted span."""
     values: dict[str, object] = {
         "claim_kind": MemoryClaimKind.RELATIONSHIP,
         "subject": "daughter",
         "value": None,
         "context": None,
         "quantity": 1,
-        "evidence_quote": "daughter",
+        "evidence_quote": "I have a daughter",
         "polarity": Polarity.ASSERT,
         "source_event_ids": [1],
         "model_confidence": 0.9,
@@ -1109,22 +1119,33 @@ def test_provider_claim_grounding_rejects_unsupported_meaning_and_metadata(
 @pytest.mark.parametrize(
     ("source", "updates"),
     [
-        ("I no longer have a daughter.", {"polarity": Polarity.RETRACT}),
-        ("Starting 2026-07-25, I have a daughter.", {"valid_from": NOW}),
-        ("I have a daughter until 2026-07-25.", {"expires_hint": NOW}),
+        ("I have a daughter.", {}),
+        (
+            "I no longer have a daughter.",
+            {"polarity": Polarity.RETRACT, "evidence_quote": "I no longer have a daughter"},
+        ),
+        (
+            "Starting 2026-07-25, I have a daughter.",
+            {"valid_from": NOW, "evidence_quote": "Starting 2026-07-25, I have a daughter"},
+        ),
+        (
+            "I have a daughter until 2026-07-25.",
+            {"expires_hint": NOW, "evidence_quote": "I have a daughter until 2026-07-25"},
+        ),
     ],
 )
 def test_provider_claim_grounding_accepts_supported_polarity_and_metadata(
     source: str,
     updates: dict[str, object],
 ) -> None:
+    """The evidence quote carries the cue that supports each piece of metadata."""
     values: dict[str, object] = {
         "claim_kind": MemoryClaimKind.RELATIONSHIP,
         "subject": "daughter",
         "value": None,
         "context": None,
         "quantity": 1,
-        "evidence_quote": "daughter",
+        "evidence_quote": "I have a daughter",
         "polarity": Polarity.ASSERT,
         "source_event_ids": [1],
         "model_confidence": 0.9,
@@ -1718,7 +1739,7 @@ async def test_provider_proposals_still_pass_source_and_secret_gates(tmp_path: P
                     "value": "club service login",
                     "context": None,
                     "quantity": None,
-                    "evidence_quote": "club service login",
+                    "evidence_quote": "My club service login",
                     "polarity": "assert",
                     "source_event_ids": [2],
                     "model_confidence": 0.99,
@@ -1747,7 +1768,7 @@ async def test_provider_proposals_still_pass_source_and_secret_gates(tmp_path: P
                     event_type="user.message.created",
                     actor_type="principal",
                     actor_id=app.principal.principal_id,
-                    payload={"content": "The club service login is api_token=placeholder."},
+                    payload={"content": "My club service login is api_token=placeholder."},
                 )
             )
         result = await app.memory.run(
@@ -2041,20 +2062,24 @@ def test_provider_claim_sensitivity_is_clamped_to_the_claim_kind_floor(
 
 
 @pytest.mark.parametrize(
-    ("quantity", "quote", "grounded"),
+    ("episode", "quantity", "quote", "grounded"),
     [
-        (2, "three cats", False),
-        (3, "three cats", True),
-        (2, "two dogs and three cats", True),
+        ("I have two dogs and three cats.", 2, "three cats", False),
+        ("I have two dogs and three cats.", 3, "I have two dogs and three cats", True),
+        ("I have two dogs and three cats.", 2, "I have two dogs and three cats", False),
+        ("I have two cats.", 2, "I have two cats", True),
+        ("I have two cats.", 2, "I have two", False),
     ],
 )
 async def test_provider_quantity_grounding_is_scoped_to_the_evidence_quote(
+    episode: str,
     quantity: int,
     quote: str,
     grounded: bool,
 ) -> None:
-    """A count is grounded only when the evidence quote itself states it, so a
-    quantity borrowed from elsewhere in the episode cannot render a false count."""
+    """A count is grounded only when the evidence quote itself states it and the
+    count modifies the claimed value there, so a quantity borrowed from elsewhere
+    in the episode or from another item in the quote cannot render a false count."""
     from agent_core.memory.provider_extraction import (
         MemoryClaimKind,
         _SemanticClaim,
@@ -2062,7 +2087,7 @@ async def test_provider_quantity_grounding_is_scoped_to_the_evidence_quote(
     )
 
     _clock, factory, _service, _retriever = await formation_stack()
-    source = await user_event(factory, "I have two dogs and three cats.")
+    source = await user_event(factory, episode)
     claim = _SemanticClaim(
         claim_kind=MemoryClaimKind("pet_ownership"),
         subject="cats",
@@ -2162,7 +2187,8 @@ async def test_provider_render_failure_is_isolated_to_the_malformed_claim() -> N
     ("quote", "grounded"),
     [
         ("I have a sister", False),
-        ("Anna lives in Lisbon", True),
+        ("Anna lives in Lisbon", False),
+        ("I live in Lisbon", True),
     ],
 )
 async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
@@ -2170,7 +2196,8 @@ async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
     grounded: bool,
 ) -> None:
     """A claim cannot borrow its value from a cited episode other than the one
-    its evidence quote comes from."""
+    its evidence quote comes from, and the quoted span must attribute the claim
+    to the user rather than to a third party named in the episode."""
     from agent_core.memory.provider_extraction import (
         MemoryClaimKind,
         _SemanticClaim,
@@ -2180,6 +2207,7 @@ async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
     _clock, factory, _service, _retriever = await formation_stack()
     first = await user_event(factory, "I have a sister.")
     second = await user_event(factory, "My friend Anna lives in Lisbon.")
+    third = await user_event(factory, "I live in Lisbon.")
     claim = _SemanticClaim(
         claim_kind=MemoryClaimKind("home_location"),
         subject="home",
@@ -2188,7 +2216,7 @@ async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
         quantity=None,
         evidence_quote=quote,
         polarity=Polarity("assert"),
-        source_event_ids=[first, second],
+        source_event_ids=[first, second, third],
         model_confidence=0.9,
         proposed_portability=Portability("contextual"),
         sensitivity_guess=Sensitivity("sensitive"),
@@ -2248,3 +2276,76 @@ async def test_provider_grounding_requires_one_episode_to_carry_every_field(
         )
         is grounded
     )
+
+
+@pytest.mark.parametrize(
+    ("claim_kind", "subject", "value", "source", "quote", "grounded"),
+    [
+        ("diet", "diet", "vegan", "I am vegan.", "I am vegan", True),
+        ("diet", "diet", "vegan", "My sister is vegan.", "My sister is vegan", False),
+        ("occupation", "occupation", "nurse", "I am a nurse.", "I am a nurse", True),
+        ("occupation", "occupation", "nurse", "I am a nurse.", "nurse", False),
+        ("pet_ownership", "cats", "cats", "Our cats sleep all day.", "Our cats", True),
+        (
+            "hobby",
+            "hobby",
+            "restore radios",
+            "My neighbor and I restore radios.",
+            "I restore radios",
+            True,
+        ),
+        (
+            "hobby",
+            "hobby",
+            "restore radios",
+            "My neighbors restore radios.",
+            "My neighbors restore radios",
+            False,
+        ),
+        (
+            "user_attribute",
+            "telescope aperture",
+            "3.5 inches",
+            "My telescope aperture is 3.5 inches.",
+            "My telescope aperture is 3.5 inches",
+            True,
+        ),
+        (
+            "project_fact",
+            "meeting room",
+            "B12",
+            "The meeting room is B12.",
+            "The meeting room is B12",
+            True,
+        ),
+    ],
+)
+def test_provider_user_facing_claims_require_user_attribution_in_the_quote(
+    claim_kind: str,
+    subject: str,
+    value: str,
+    source: str,
+    quote: str,
+    grounded: bool,
+) -> None:
+    """A claim rendered as a statement about the user must be attributed to the
+    user inside its own evidence quote — a first-person subject, or a first-person
+    possessive on the claimed subject — not merely share tokens with the episode;
+    project claims carry no such requirement."""
+    claim = _SemanticClaim(
+        claim_kind=MemoryClaimKind(claim_kind),
+        subject=subject,
+        value=value,
+        context=None,
+        quantity=None,
+        evidence_quote=quote,
+        polarity=Polarity.ASSERT,
+        source_event_ids=[1],
+        model_confidence=0.9,
+        proposed_portability=Portability.CONTEXTUAL,
+        sensitivity_guess=Sensitivity.INTERNAL,
+        valid_from=None,
+        expires_hint=None,
+    )
+
+    assert ProviderAssistedCandidateExtractor._claim_is_grounded(claim, {1: source}) is grounded

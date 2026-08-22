@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
+import stat
 import tempfile
 from collections.abc import AsyncIterator, Callable, Iterator, Mapping
 from contextlib import suppress
@@ -103,6 +104,27 @@ async def execution_service(
     await server.start()
     try:
         yield ExecutionServiceClient(socket_path), environment
+    finally:
+        await server.close()
+
+
+@pytest.mark.asyncio
+async def test_execution_service_socket_is_readable_and_writable_only_by_its_group(
+    socket_dir: Path,
+) -> None:
+    """ADR-0067 decision 3: the socket is group-readable and writable only by the
+    application group, so the mode after start() must be exactly 0660."""
+    socket_path = socket_dir / "execution.sock"
+    environment = FakeExecutionEnvironment(FixedClock(NOW), SequenceIdFactory())
+
+    async def resolve(reference: str) -> str:
+        return fake_image_digest()
+
+    server = ExecutionServiceServer(environment, socket_path, resolve_image_digest=resolve)
+    await server.start()
+    try:
+        assert stat.S_ISSOCK(socket_path.lstat().st_mode)
+        assert stat.S_IMODE(socket_path.lstat().st_mode) == 0o660
     finally:
         await server.close()
 

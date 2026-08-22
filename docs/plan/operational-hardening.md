@@ -96,9 +96,9 @@ This yields four load-bearing invariants:
 The manifest declares exactly three components:
 
 ```text
-postgres.pgdump        pg_dump -Fc of the one database, taken through the
-                       compose PostgreSQL container so the client matches the
-                       server; includes alembic_version
+postgres.pgdump        pg_dump -Fc of the one database, taken over loopback
+                       by a host-installed client pinned to the server's
+                       major version; includes alembic_version
 artifacts.tar.zst      the artifact store directory; small by construction
                        under the thirty-day default retention
 browser-profiles.tar   the browser-profile-material volume — already
@@ -153,21 +153,29 @@ consequence: content erased through the deletion contract persists in backups
 for up to thirty-five days.
 
 The runner is `veetbot-backup.timer`, daily at 03:30 UTC with a randomized
-delay and `Persistent=true`, driving a one-shot `veetbot-backup.service` as the
-`veetbot` user with `EnvironmentFile=/etc/veetbot/veetbot-backup.env` only —
-the database URL, the bucket endpoint and scoped key, the age recipient, and
-the dead-man ping address, and never a provider key — and write access only to
-the staging directory. No privilege escalation is needed: the service user is
-already in the `docker` group, owns the artifact store, and reads the
-environment file. Staging is `/var/lib/veetbot/backup/<stamp>/`, mode `0700`,
+delay and `Persistent=true`, driving a one-shot `veetbot-backup.service` as a
+dedicated `veetbot-backup` system identity — not the `veetbot` application
+identity, and never a member of the `docker` group: deployment.md and ADR-0067
+keep Docker away from application identities and reserve it for the deploy
+and execution identities, and the backup identity is neither — with
+`EnvironmentFile=/etc/veetbot/veetbot-backup.env` only: the database URL, the
+bucket endpoint and scoped key, the age recipient, and the dead-man ping
+address, and never a provider key. The identity holds exactly the access the
+set requires and nothing the application identity has: the database over
+loopback through the host-installed `pg_dump` (it never enters the compose
+container and needs no Docker socket), read-only access to the artifact store
+and to the browser-profile ciphertext granted to that identity alone by ACL
+rather than by membership in the application group, and write access only to
+its staging directory. No privilege escalation is needed. Staging is
+`/var/lib/veetbot/backup/<stamp>/`, mode `0700`, owned by the backup identity,
 removed after verified upload.
 
 `release.sh` gains one step: `backup.sh --kind pre-release --no-upload`
 immediately before `alembic upgrade head`. The pre-release backup follows
 every rule above except upload: it is encrypted to the same `age` recipient
 before retention, kept under the protected path
-`/var/lib/veetbot/backup/pre-release/` (mode `0700`, owned by the service
-user), its plaintext staging is removed the same way, and the two most recent
+`/var/lib/veetbot/backup/pre-release/` (mode `0700`, owned by the backup
+identity), its plaintext staging is removed the same way, and the two most recent
 are retained with older ones deleted by the same run. No plaintext dump
 survives this step either. This is the cheap insurance that makes "restore
 the pre-release dump, then roll back the code" a minutes-long operation; the
@@ -189,9 +197,15 @@ at all. Success pings the dead-man address.
    distinct project name on a random loopback port, and refuses to run if the
    project name, port, or database URL equals production's.
 2. Restores with `pg_restore --exit-on-error`.
-3. Asserts `alembic current` equals the manifest's revision and equals the
-   repository head — the same rule the production preflight applies
-   (`scripts/check_production_deployment.py`).
+3. Asserts `alembic current` equals the manifest's revision — the backup's own
+   identity, which a retained backup keeps after later migrations move the
+   repository head — and then checks that revision against the code the
+   rehearsal runs from. The host's pre-upload rehearsal and CI rehearse the
+   backup they just took, so there the revision also equals the checkout's
+   head, the same rule the production preflight applies
+   (`scripts/check_production_deployment.py`); an older retained backup is
+   rehearsed from the release its manifest names, and a revision behind the
+   current head is reported in the verdict, never treated as failure.
 4. Probes: `alembic_version` has one row; each critical table selects; the
    `events`, `sessions`, and `runs` counts fall inside the bands the backup
    recorded before and after the dump; the artifact archive lists and its hash
@@ -405,10 +419,10 @@ Metrics carry no secret, path, or environment value.
    `alembic_version`, and a manifest whose hashes verify. Registered as
    `gate.ops.backup_roundtrip`, case. **M15.**
 3. **The restore rehearsal passes on a good backup.** Restoring into a fresh
-   database yields `alembic current` equal to head and to the manifest, count
-   bands and the artifact hash hold, the verdict is `passed`, and the
-   throwaway database is torn down. Registered as
-   `gate.ops.restore_rehearsal_passes`, case. **M15.**
+   database yields `alembic current` equal to the manifest's revision and to
+   the head of the release the manifest records, count bands and the artifact
+   hash hold, the verdict is `passed`, and the throwaway database is torn
+   down. Registered as `gate.ops.restore_rehearsal_passes`, case. **M15.**
 4. **The rehearsal detects corruption.** A truncated dump, flipped bytes, and
    a wrong `alembic_version` each fail with a distinct reason and no passing
    verdict. Registered as `gate.ops.restore_rehearsal_detects_corruption`,
