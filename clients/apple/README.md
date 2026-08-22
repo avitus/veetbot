@@ -30,10 +30,10 @@ make test-apple-ui
 
 Run the test targets from the repository root. Both require full Xcode so a
 Command Line Tools build cannot be mistaken for an executed Swift Testing run.
-`make test-apple-ui` selects an available iPhone simulator and exercises opening
-a durable historical transcript and starting a new conversation. Its launch
-fixture is debug-only and uses an isolated in-process transport, so it needs no
-server or credential.
+`make test-apple-ui` selects available iPhone and iPad simulators and exercises
+opening and switching durable historical transcripts and starting a new
+conversation. Its launch fixture is debug-only and uses an isolated in-process
+transport, so it needs no server or credential.
 
 SwiftData is used for local history on iOS 17+/macOS 14+. Because SwiftData does
 not exist on the app's minimum OS versions, iOS 15–16 and macOS 12–13 use the
