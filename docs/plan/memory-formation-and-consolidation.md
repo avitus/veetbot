@@ -264,6 +264,16 @@ call (Section 9):
   produced which belief. This capability is the main advantage of deriving memory
   from an episodic log rather than writing it as a lossy side effect.
 
+Milestone 16 builds this stage.
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
+decay a bounded sweep with per-belief-type half-lives, a confidence step, and a
+retirement floor; adds the `AFFIRMED` authority and the working-state facts
+that enter at it; makes an unresolved contradiction a fourth resolver outcome
+that commits flagged and surfaced rather than superseding; and makes
+re-derivation an explicit `--confirm` command. It also supplies the benchmark
+that measures whether any of it helped, which is what the tracked metrics below
+have been waiting for.
+
 ## User corrections are evidence
 
 Beliefs are inspectable, so they are also rejectable. A rejection arrives with the

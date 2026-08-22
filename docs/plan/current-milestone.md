@@ -17,13 +17,19 @@ title: Current Milestone
   hardening — is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates and
   follows Milestone 14; its backup tranche has no dependency on the three
-  before it.
+  before it. Milestone 16 — memory evaluation and lifecycle — is specified by
+  [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
+  with nineteen gates and is a parallel workstream rather than a successor:
+  it shares no file with Milestones 12 through 15 and may proceed alongside
+  them.
 - **Verified gate ceiling:** Milestone 9 (166 gates).
 - **Authorized workstreams:** Milestone 10's four tranches (automatic memory,
   self-authored skills, public-web access, authenticated browser automation),
-  Milestone 11 scheduling, and Milestones 12 through 15 in order —
+  Milestone 11 scheduling, Milestones 12 through 15 in order —
   notifications and device identity, general-purpose subagents and delegation,
-  inbound surfaces and pairing, operational hardening (ADR-0061).
+  inbound surfaces and pairing, operational hardening (ADR-0061) — and
+  Milestone 16 memory evaluation and lifecycle in parallel with them
+  (ADR-0068).
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -31,8 +37,8 @@ title: Current Milestone
   11 are implemented locally; every registered gate passes (227 cumulative),
   and hosted CI plus the final CodeRabbit review remain for both. Milestones
   12 through 15 are authorized and specified with twenty, twenty-one,
-  twenty-one, and sixteen registered gates; every authorized milestone has its
-  detailed-design document and ADR.
+  twenty-one, and sixteen registered gates, and Milestone 16 with nineteen;
+  every authorized milestone has its detailed-design document and ADR.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -63,7 +69,11 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [inbound-surfaces.md](inbound-surfaces.md) and ADR-0064 with twenty-one
 `gate.surface.*` entries, and Milestone 15's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
-`gate.ops.*` entries; no authorized milestone reports a zero row.
+`gate.ops.*` entries; no authorized milestone reports a zero row. Milestone
+16's [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
+and ADR-0068 landed the same way, with nineteen further `gate.memory.*`
+entries in the existing area, and it never showed a zero row because its
+authorization and its specification arrived together.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
@@ -90,6 +100,7 @@ substitute.
 - [Milestone 13 — general-purpose subagents and delegation](engineering-plan.md#milestone-13-general-purpose-subagents-and-delegation)
 - [Milestone 14 — inbound surfaces and pairing](engineering-plan.md#milestone-14-inbound-surfaces-and-pairing)
 - [Milestone 15 — operational hardening](engineering-plan.md#milestone-15-operational-hardening)
+- [Milestone 16 — memory evaluation and lifecycle](engineering-plan.md#milestone-16-memory-evaluation-and-lifecycle)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -114,7 +125,12 @@ activation gated on the capability-scenario evidence; Milestone 14's is its
 twenty-one `gate.surface.*` entries plus the plan's acceptance criteria and
 the [inbound-surfaces design](inbound-surfaces.md); Milestone 15's is its
 sixteen `gate.ops.*` entries plus the plan's acceptance criteria and the
-[operational-hardening design](operational-hardening.md).
+[operational-hardening design](operational-hardening.md); and Milestone 16's
+is its nineteen `gate.memory.*` entries plus the plan's acceptance criteria
+and the
+[memory-evaluation-and-lifecycle design](memory-evaluation-and-lifecycle.md),
+whose benchmark baseline is re-recorded deliberately by every change that
+moves it.
 
 ## Completion rule
 
@@ -137,3 +153,9 @@ declares and the cumulative registry pass, the PostgreSQL lanes pass where the
 milestone touches persistence, hosted CI passes on the final head, and the final
 CodeRabbit review is clean. The verified ceiling advances through each only
 after every earlier milestone has completed.
+
+Milestone 16 completes on the same terms, with its own additional condition:
+the checked-in benchmark baseline equals a fresh deterministic run exactly and
+the provider-assisted extraction evidence has been republished at its new
+policy version. Being a parallel workstream changes nothing about the ceiling,
+which still advances only after every earlier milestone has completed.

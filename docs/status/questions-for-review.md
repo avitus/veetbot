@@ -6642,3 +6642,108 @@ order.
 
 **Reversal cost:** cheap; it is sequencing.
 
+## Milestone 16 memory evaluation and lifecycle (ADR-0068)
+
+### The yardstick lands before anything it measures moves
+
+**Decided:** the benchmark corpus, its metrics, and a checked-in baseline ship
+first; every later change in the milestone re-records that baseline in its own
+change, and the exactness gate makes that mandatory.
+
+**Why:** a benchmark edited alongside the behavior it scores measures nothing,
+and an exact comparison is available because the arm is deterministic.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap; a tolerance could be added, at the cost of the
+property that makes the number trustworthy.
+
+### No model judges an answer
+
+**Decided:** checked-in normalized labels, token-bounded matching against gold
+values, and one exact abstention phrase; token F1 only inside the external
+dataset adapters, because their published metrics use it.
+
+**Why:** a judge makes the yardstick move on its own and puts a provider call
+inside the definition of "better".
+
+**Question for you:** whether a judged arm is ever worth adding as a second,
+clearly-labeled number for comparison against published LongMemEval figures.
+
+**Reversal cost:** moderate; a judged arm would need its own artifact and its
+own ceiling.
+
+### The live arm's ceiling is USD 4.00 per invocation
+
+**Decided:** a pre-admission check that refuses the run which would cross the
+ceiling, plus an abort when the model's catalog price is zero and the ceiling
+would be unenforceable.
+
+**Why:** roughly sixty-four probes run twice each is the shape of the arm, and
+a post-hoc check on a paid loop is not a ceiling.
+
+**Question for you:** the ceiling itself, and whether the twenty-per-cent lift
+floor is right before there is live evidence to calibrate it.
+
+**Reversal cost:** cheap; both are constants, and changing the lift floor
+re-publishes evidence rather than re-recording the baseline.
+
+### Public datasets are loaded from a local path, never vendored
+
+**Decided:** LongMemEval (MIT), LoCoMo (CC BY-NC 4.0), and HaluMem
+(CC BY-NC-ND 4.0) are read from a path the operator supplies; only derived
+metrics leave the run, and CI tests the adapters on synthetic fixtures.
+
+**Why:** two of the three licenses forbid vendoring outright, and local
+non-commercial evaluation is what the terms permit.
+
+**Question for you:** whether the derived metrics should ever be published
+outside your own machine.
+
+**Reversal cost:** none for the mechanism; publishing would need a licence
+review.
+
+### Conflicts are surfaced rather than resolved
+
+**Decided:** an inference contradicting a user-stated belief, or a
+contradiction between equally authoritative statements that nothing orders in
+time, commits flagged and linked in both directions, requests confirmation, and
+surfaces both statements in recall. Authority first, then recency.
+
+**Why:** the retrieval design already says unresolved conflicts are surfaced
+and not silently resolved; today a contradiction always supersedes, which lets
+an inference overwrite something you said.
+
+**Question for you:** none, beyond noticing that recall noise rises by the
+conflict pairs, which is recorded deliberately in the baseline.
+
+**Reversal cost:** cheap; the resolver's fourth outcome is additive.
+
+### Forgetting is a bounded sweep, and usage never raises confidence
+
+**Decided:** decay lowers confidence on provisional or low-confidence beliefs
+idle beyond a per-type half-life and retires those below a floor; citing a
+belief resets decay and raises utility and never confidence.
+
+**Why:** both restate standing decisions in the memory specifications; the
+second exists so a wrong belief that ranks well cannot entrench itself by being
+retrieved.
+
+**Question for you:** the per-type half-lives and the near-duplicate similarity
+threshold, which ship as hand-set defaults and become tunable once the
+benchmark can measure the effect of tuning them.
+
+**Reversal cost:** cheap; they are profile knobs, and moving one re-records the
+baseline.
+
+### Re-derivation stays opt-in and demands a confirmation
+
+**Decided:** `agent memory rederive --confirm`, per session or across all
+sessions, replaying outstanding rejections.
+
+**Why:** the formation design makes re-derivation opt-in per principal, and
+silently re-mining old episodes is exactly the surprise that rule prevents.
+
+**Question for you:** none.
+
+**Reversal cost:** none; it is the standing rule.
