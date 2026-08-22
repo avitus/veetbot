@@ -60,7 +60,7 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 — notifications and device identity — build steps 1 through 4 are
+Milestone 12 — notifications and device identity — build steps 1 through 5 are
 implemented locally. The domain, persistence, and transactional producer foundation
 now feeds a provider-partitioned dispatcher with a PostgreSQL claim lease, closed
 retry schedule, staleness and expiry suppression, per-attempt delivery ledger,
@@ -70,7 +70,10 @@ key, signs and refreshes ES256 provider tokens, selects sandbox or production pe
 device, sends the closed content-free payload over HTTP/2, and maps every provider
 response into the closed outcome vocabulary. Six dispatcher and transport gates are
 newly executable, bringing the milestone to sixteen executable gates and four
-pending; build steps 5 through 8 remain.
+pending. The dedicated notify role now adds a least-privilege repository set,
+transactional PostgreSQL wakeups with a bounded polling fallback, default-off
+settings, conditional trigger composition, a credential-minimized environment,
+and an independently confined systemd unit. Build steps 6 through 8 remain.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a

@@ -291,7 +291,9 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     execution = (units / "veetbot-execution.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
     scheduler = (units / "veetbot-schedule.service").read_text(encoding="utf-8")
+    notify = (units / "veetbot-notify.service").read_text(encoding="utf-8")
     schedule_environment = (deploy / "veetbot-schedule.env.example").read_text(encoding="utf-8")
+    notify_environment = (deploy / "veetbot-notify.env.example").read_text(encoding="utf-8")
     assert "agent api" in api
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
@@ -306,7 +308,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "SupplementaryGroups=docker" in execution
     assert "/run/docker.sock" in execution
     assert "/var/run/docker.sock" not in execution
-    for unit in (api, worker, async_worker, maintenance, scheduler):
+    for unit in (api, worker, async_worker, maintenance, scheduler, notify):
         assert "/run/docker.sock" not in unit
         assert "/var/run/docker.sock" not in unit
     assert "EnvironmentFile=" not in execution
@@ -323,7 +325,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
             for line in lines
         )
     assert "Restart=on-failure" in execution.splitlines()
-    for unit in (api, worker, async_worker, execution, maintenance, scheduler):
+    for unit in (api, worker, async_worker, execution, maintenance, scheduler, notify):
         assert not any(line.startswith(("BindsTo=", "PartOf=")) for line in unit.splitlines())
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
@@ -345,6 +347,31 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "FIRECRAWL_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
     } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
+    assert "agent worker --role notify" in notify
+    assert "EnvironmentFile=/etc/veetbot/veetbot-notify.env" in notify
+    assert "EnvironmentFile=/etc/veetbot/veetbot.env" not in notify
+    assert "SupplementaryGroups=docker" not in notify
+    assert "ReadWritePaths=" not in notify
+    assert "AGENT_NOTIFICATION_API_ENABLED=1" in notify_environment
+    assert "AGENT_NOTIFICATION_DISPATCH_ENABLED=1" in notify_environment
+    assert "PUSH_PROVIDER=apns" in notify_environment
+    assert {
+        "DATABASE_URL",
+        "APNS_KEY_FILE",
+        "APNS_KEY_ID",
+        "APNS_TEAM_ID",
+        "APNS_TOPIC",
+    } <= {line.partition("=")[0] for line in notify_environment.splitlines()}
+    assert not {
+        "AUTH_TOKEN",
+        "VEETBOT_OPENAI_KEY",
+        "ANTHROPIC_API_KEY",
+        "TAVILY_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+        "SANDBOX_MECHANISM",
+        "AGENT_EXECUTION_SERVICE_SOCKET",
+    } & {line.partition("=")[0] for line in notify_environment.splitlines()}
     assert all(
         "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
         for unit in (api, worker, async_worker, maintenance)
@@ -487,6 +514,8 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
+    assert "veetbot-notify" in release
+    assert "AGENT_NOTIFICATION_DISPATCH_ENABLED" in release
 
 
 def test_nginx_configuration_preserves_public_process_boundaries() -> None:

@@ -6,6 +6,7 @@ RELEASE_ID="${1:-}"
 DEPLOY_ROOT="${VEETBOT_ROOT:-/opt/veetbot}"
 ENV_FILE="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
 SCHEDULE_ENV_FILE="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
+NOTIFY_ENV_FILE="${VEETBOT_NOTIFY_ENV_FILE:-/etc/veetbot/veetbot-notify.env}"
 BROWSER_CONTROL_CREDENTIAL_FILE="${VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE:-/etc/veetbot/secrets/browser-control-plane-credential}"
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
@@ -102,12 +103,14 @@ for required in \
   deploy/docker-compose.production.yml \
   deploy/browser-profile-service.Dockerfile \
   deploy/veetbot-schedule.env.example \
+  deploy/veetbot-notify.env.example \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
   deploy/systemd/veetbot-async-worker.service \
   deploy/systemd/veetbot-execution.service \
   deploy/systemd/veetbot-maintenance.service \
   deploy/systemd/veetbot-schedule.service \
+  deploy/systemd/veetbot-notify.service \
   execution/sandbox.Dockerfile \
   scripts/check_production_deployment.py; do
   [[ -f "$STAGE/$required" ]] || fail "staged release is missing $required"
@@ -173,6 +176,22 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
     "schedule worker environment must not be a symlink"
   UNITS=(veetbot-schedule "${UNITS[@]}")
 fi
+[[ "${AGENT_NOTIFICATION_API_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_NOTIFICATION_API_ENABLED must be 0 or 1"
+[[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" =~ ^[01]$ ]] || fail \
+  "AGENT_NOTIFICATION_DISPATCH_ENABLED must be 0 or 1"
+[[ "${AGENT_NOTIFICATION_API_ENABLED:-0}" == \
+  "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" ]] || fail \
+  "notification API and dispatch flags must be enabled or disabled together"
+if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
+  [[ "$NOTIFY_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \
+    "VEETBOT_NOTIFY_ENV_FILE must be an absolute path without whitespace"
+  [[ -f "$NOTIFY_ENV_FILE" ]] || fail \
+    "notification worker environment does not exist: $NOTIFY_ENV_FILE"
+  [[ ! -L "$NOTIFY_ENV_FILE" ]] || fail \
+    "notification worker environment must not be a symlink"
+  UNITS=(veetbot-notify "${UNITS[@]}")
+fi
 COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-veetbot}"
 export BROWSER_PROFILE_SERVICE_IMAGE="$PROFILE_RELEASE_IMAGE"
 docker compose --env-file "$ENV_FILE" \
@@ -196,9 +215,21 @@ if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
   sudo install -m 0644 "$STAGE/.veetbot-schedule.service" \
     "$SYSTEMD_DIR/veetbot-schedule.service"
 fi
+if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
+  awk -v environment_file="$NOTIFY_ENV_FILE" '
+    /^EnvironmentFile=/ { print "EnvironmentFile=" environment_file; next }
+    { print }
+  ' "$STAGE/deploy/systemd/veetbot-notify.service" \
+    >"$STAGE/.veetbot-notify.service"
+  sudo install -m 0644 "$STAGE/.veetbot-notify.service" \
+    "$SYSTEMD_DIR/veetbot-notify.service"
+fi
 sudo systemctl daemon-reload
 if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "0" ]]; then
   sudo systemctl disable --now veetbot-schedule >/dev/null 2>&1 || true
+fi
+if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "0" ]]; then
+  sudo systemctl disable --now veetbot-notify >/dev/null 2>&1 || true
 fi
 
 NEXT_CURRENT="$DEPLOY_ROOT/.current-$RELEASE_ID"

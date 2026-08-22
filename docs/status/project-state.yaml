@@ -306,9 +306,40 @@ verification:
           script tests, 156 citation checks, and both strict documentation builds
           pass. The focused PostgreSQL persistence, producer, dispatcher, and
           accepted-send replay partition passes all thirteen tests.
+      - check: least-privilege notification role and wakeup red-green cycle
+        outcome: passed_locally
+        detail: >-
+          Focused tests first failed because notification production was not
+          composed, outbox commits did not wake a dispatcher, and the dedicated
+          CLI and deployment role did not exist. The notify-only composition now
+          exposes exactly approvals, checkpoints, devices, notification outbox,
+          process events, runs, and sessions; rejects disabled, non-production,
+          credential-bearing, non-PostgreSQL, and incomplete APNs settings; and
+          builds without model, tool, browser, web, sandbox, or API-bearer
+          capability. PostgreSQL NOTIFY is issued in the enqueue transaction and
+          becomes visible only after commit, while the worker retains a bounded
+          polling fallback and graceful stop.
+      - check: notification deployment confinement
+        outcome: passed_locally
+        detail: >-
+          The CLI exposes a dedicated notify role. The notification environment
+          contains only database identity, two enable flags, and the four APNs
+          configuration fields; the systemd unit does not load the application
+          environment, execution service, Docker socket, or writable paths. The
+          release harness proves default-off disablement and enabled-unit
+          environment rewriting and restart behavior. The APNs adapter enforces
+          an absolute regular mode-0600 P-256 key at construction.
+      - check: make check after least-privilege notification role
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 542 files, strict mypy over 500 source
+          and test files, 1023 static tests, 333 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass. The focused notification worker, transport, persistence, and
+          PostgreSQL wakeup partition passes all forty tests.
     remaining:
       - Implement the remaining two device and two notification gates in build
-        steps 5 through 7, followed by the full Milestone 12 — Notifications and
+        steps 6 and 7, followed by the full Milestone 12 — Notifications and
         device identity delivery verification.
 
 documentation:
@@ -348,5 +379,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-22T20:32:12Z
+last_updated: 2026-08-22T22:45:00Z
 last_reviewed_commit: 90e9142

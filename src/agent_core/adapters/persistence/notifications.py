@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
+from agent_core.adapters.notification_wakeup import NOTIFICATION_WAKEUP_CHANNEL
 from agent_core.adapters.persistence.mappers import (
     device_to_domain,
     device_values,
@@ -583,6 +584,10 @@ class PostgresNotificationOutbox:
         try:
             async with self._session.begin_nested():
                 row = (await self._session.scalars(statement)).one_or_none()
+                if row is not None:
+                    await self._session.execute(
+                        select(func.pg_notify(NOTIFICATION_WAKEUP_CHANNEL, "due"))
+                    )
         except IntegrityError as exc:
             raise ConflictError("notification identifier already exists") from exc
         return None if row is None else notification_to_domain(row)

@@ -64,6 +64,11 @@ class BrowserProviderKind(StrEnum):
     HOSTED = "hosted"
 
 
+class PushProviderKind(StrEnum):
+    DISABLED = "disabled"
+    APNS = "apns"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Environment-layer settings; tuning values remain in versioned YAML."""
@@ -85,6 +90,13 @@ class Settings:
     memory_provider_extraction_evidence: Path | None = None
     schedule_api_enabled: bool = False
     schedule_worker_enabled: bool = False
+    notification_api_enabled: bool = False
+    notification_dispatch_enabled: bool = False
+    push_provider: PushProviderKind = PushProviderKind.DISABLED
+    apns_key_file: Path | None = None
+    apns_key_id: str | None = None
+    apns_team_id: str | None = None
+    apns_topic: str | None = None
     artifact_root: Path = Path(".agent/artifacts")
     auth_tenant_id: str = ""
     auth_principal_id: str = ""
@@ -738,6 +750,18 @@ def load_schedule_worker_settings(
     )
 
 
+def load_notification_worker_settings(
+    environ: Mapping[str, str] | None = None,
+) -> Settings:
+    """Load the credential-minimized environment for the notify-only role."""
+
+    return _load_settings(
+        environ,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
+
+
 def _load_settings(
     environ: Mapping[str, str] | None,
     *,
@@ -810,6 +834,18 @@ def _load_settings(
     )
     schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
+    notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
+    notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
+    push_provider = _parse_enum(
+        PushProviderKind,
+        values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
+        "PUSH_PROVIDER",
+    )
+    raw_apns_key_file = values.get("APNS_KEY_FILE", "").strip()
+    apns_key_file = Path(raw_apns_key_file).expanduser() if raw_apns_key_file else None
+    apns_key_id = values.get("APNS_KEY_ID", "").strip() or None
+    apns_team_id = values.get("APNS_TEAM_ID", "").strip() or None
+    apns_topic = values.get("APNS_TOPIC", "").strip() or None
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
@@ -911,6 +947,13 @@ def _load_settings(
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         schedule_api_enabled=schedule_api_enabled,
         schedule_worker_enabled=schedule_worker_enabled,
+        notification_api_enabled=notification_api_enabled,
+        notification_dispatch_enabled=notification_dispatch_enabled,
+        push_provider=push_provider,
+        apns_key_file=apns_key_file,
+        apns_key_id=apns_key_id,
+        apns_team_id=apns_team_id,
+        apns_topic=apns_topic,
         artifact_root=artifact_root,
         auth_tenant_id=auth_tenant_id,
         auth_principal_id=auth_principal_id,

@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from datetime import timedelta
+from pathlib import Path
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
 from agent_core.adapters.push import FakePushTransport
 from agent_core.application.notification_dispatcher import DispatchProbe, NotificationDispatcher
-from agent_core.bootstrap import Composition, build
+from agent_core.application.notification_worker import NotificationWorker
+from agent_core.bootstrap import Composition, build, build_notification_worker
+from agent_core.config import AuthMode, DeploymentMode, PushProviderKind, SandboxMechanism
 from agent_core.domain.devices import PushProvider
 from agent_core.domain.notifications import NotificationStatus
+from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.support import NOW
@@ -56,6 +63,70 @@ async def _seed(composition: Composition) -> None:
     async with composition.uow_factory() as uow:
         await uow.devices.upsert(owned_device, owner)
         assert await uow.notification_outbox.enqueue(owned_notification) is not None
+
+
+async def test_postgres_enqueue_wakes_only_after_transaction_commit() -> None:
+    listener = PostgresNotificationWakeup(database_settings().database_url)
+    try:
+        waiting = asyncio.create_task(listener.wait(5))
+        async with build(settings=database_settings(), storage="postgres") as composition:
+            owned = new_notification().model_copy(
+                update={
+                    "tenant_id": composition.principal.tenant_id,
+                    "principal_id": composition.principal.principal_id,
+                }
+            )
+            async with composition.uow_factory() as uow:
+                assert await uow.notification_outbox.enqueue(owned) is not None
+                await asyncio.sleep(0)
+                assert not waiting.done()
+            await asyncio.wait_for(waiting, timeout=1)
+    finally:
+        await listener.close()
+
+
+async def test_lean_production_notification_role_constructs_without_app_credentials() -> None:
+    settings = replace(
+        database_settings(),
+        deployment_mode=DeploymentMode.PRODUCTION,
+        auth_mode=AuthMode.TOKEN,
+        sandbox=SandboxMechanism.GVISOR,
+        auth_tenant_id="local",
+        auth_principal_id="local-user",
+        auth_roles=frozenset({"notify"}),
+        auth_scopes=PLATFORM_SCOPES,
+        notification_api_enabled=True,
+        notification_dispatch_enabled=True,
+        push_provider=PushProviderKind.APNS,
+        apns_key_file=Path("/etc/veetbot/secrets/AuthKey_TEST.p8"),
+        apns_key_id="KEYID",
+        apns_team_id="TEAMID",
+        apns_topic="com.veetbot.app",
+    )
+    async with build_notification_worker(
+        settings=settings,
+        transport=FakePushTransport(),
+    ) as worker:
+        assert isinstance(worker, NotificationWorker)
+        dispatcher = cast(Any, worker._dispatch_once).__self__
+        async with dispatcher._uow_factory() as uow:
+            assert {
+                "approvals",
+                "checkpoints",
+                "devices",
+                "notification_outbox",
+                "process_events",
+                "runs",
+                "sessions",
+            } <= set(vars(uow))
+            assert not {
+                "agents",
+                "browser_profiles",
+                "events",
+                "mcp_servers",
+                "skills",
+                "usage",
+            } & set(vars(uow))
 
 
 async def test_postgres_concurrent_dispatch_and_accepted_send_replay_are_bounded() -> None:

@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.functions import func
 
+from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.browser.authentications import (
@@ -78,6 +79,7 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.adapters.models.unavailable import MissingCredentialProvider
+from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -183,6 +185,12 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.notification_dispatcher import (
+    NotificationDispatcher,
+    NotificationDispatchUnitOfWorkFactory,
+)
+from agent_core.application.notification_producer import NotificationProducer
+from agent_core.application.notification_worker import NotificationWorker
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -225,9 +233,11 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     MemoryProviderExtractionMode,
+    PushProviderKind,
     Settings,
     WebProviderKind,
     load_config_document,
+    load_notification_worker_settings,
     load_provider_extraction_evidence,
     load_schedule_worker_settings,
     load_settings,
@@ -242,6 +252,7 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.devices import PushProvider
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
@@ -306,6 +317,7 @@ from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
+from agent_core.ports.notifications import PushTransport
 from agent_core.ports.persistence import (
     ScheduleUnitOfWork,
     TransactionCallback,
@@ -778,6 +790,134 @@ class _ScheduleUnitOfWorkFactory:
         return False
 
 
+class _NotificationUnitOfWork:
+    """Least-privilege repository set for the production notify role."""
+
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+        self._session: AsyncSession | None = None
+
+    async def __aenter__(self) -> Self:
+        session = self._maker()
+        self._session = session
+        await session.execute(
+            select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
+        )
+        upcasters = EventUpcasterRegistry()
+        history = PostgresSessionHistoryRepository(session, self._clock, upcasters)
+        self.approvals = PostgresApprovalRepository(session, self._clock)
+        self.checkpoints = PostgresCheckpointRepository(
+            session,
+            self._clock,
+            history,
+        )
+        self.devices = PostgresDeviceRegistry(session)
+        self.notification_outbox = PostgresNotificationOutbox(session, self._clock)
+        self.process_events = PostgresProcessEventRepository(session)
+        self.runs = PostgresRunRepository(session, self._clock)
+        self.sessions = PostgresSessionRepository(session)
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        del exc, traceback
+        if self._session is None:
+            return
+        try:
+            if exc_type is None:
+                await self._session.commit()
+            else:
+                await self._session.rollback()
+        finally:
+            await self._session.close()
+            self._session = None
+
+
+class _NotificationUnitOfWorkFactory:
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+
+    def __call__(self) -> _NotificationUnitOfWork:
+        return _NotificationUnitOfWork(
+            self._maker,
+            tenant_id=self._tenant_id,
+            clock=self._clock,
+        )
+
+
+def _validate_notification_role(settings: Settings) -> Principal:
+    validate_settings(
+        settings,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
+    if not settings.notification_dispatch_enabled:
+        raise ConfigurationError(
+            "notification dispatch is disabled; set AGENT_NOTIFICATION_DISPATCH_ENABLED=1"
+        )
+    if not settings.notification_api_enabled:
+        raise ConfigurationError(
+            "notification API is disabled; set AGENT_NOTIFICATION_API_ENABLED=1 before dispatch"
+        )
+    if settings.deployment_mode is not DeploymentMode.PRODUCTION:
+        raise ConfigurationError("notification worker requires the production process topology")
+    if settings.auth_mode is not AuthMode.TOKEN:
+        raise ConfigurationError("notification worker requires configured non-development identity")
+    if not settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://")):
+        raise ConfigurationError("notification worker requires PostgreSQL storage")
+    if settings.auth_token is not None:
+        raise ConfigurationError("notification worker environment must not contain an API bearer")
+    if settings.credentials:
+        raise ConfigurationError("notification worker environment must not contain provider keys")
+    if settings.push_provider is not PushProviderKind.APNS:
+        raise ConfigurationError("notification worker requires PUSH_PROVIDER=apns")
+    apns_values = {
+        "APNS_KEY_FILE": settings.apns_key_file,
+        "APNS_KEY_ID": settings.apns_key_id,
+        "APNS_TEAM_ID": settings.apns_team_id,
+        "APNS_TOPIC": settings.apns_topic,
+    }
+    missing = [name for name, value in apns_values.items() if value is None]
+    if missing:
+        raise ConfigurationError(
+            "notification worker requires APNs configuration: " + ", ".join(missing)
+        )
+    assert settings.apns_key_file is not None
+    if not settings.apns_key_file.is_absolute():
+        raise ConfigurationError("APNS_KEY_FILE must be an absolute path")
+    unknown = set(settings.auth_scopes) - set(PLATFORM_SCOPES)
+    if unknown:
+        raise ConfigurationError(
+            "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
+        )
+    return Principal(
+        tenant_id=settings.auth_tenant_id,
+        principal_id=settings.auth_principal_id,
+        roles=set(settings.auth_roles),
+        scopes=set(settings.auth_scopes),
+    )
+
+
 def _validate_schedule_role(settings: Settings) -> Principal:
     validate_settings(
         settings,
@@ -880,6 +1020,11 @@ async def build_schedule_worker(
     )
     effective_clock = clock or SystemClock()
     effective_ids = ids or RandomIdFactory()
+    notification_producer = (
+        NotificationProducer(clock=effective_clock, ids=effective_ids)
+        if effective_settings.notification_dispatch_enabled
+        else None
+    )
     wakeup = PostgresScheduleWakeup(effective_settings.database_url)
     metrics = ScheduleMetrics(tenant_hash_key=tenant_hash_key(effective_settings.database_url))
     engine = create_engine(effective_settings.database_url)
@@ -901,6 +1046,7 @@ async def build_schedule_worker(
             ids=effective_ids,
             seed_checkpoint=DurableCheckpointSeeder(effective_clock),
             metrics=metrics,
+            notification_producer=notification_producer,
         )
         yield ScheduleWorker(
             uow_factory=factory,
@@ -914,6 +1060,74 @@ async def build_schedule_worker(
         )
     finally:
         await wakeup.close()
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def build_notification_worker(
+    *,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+    ids: IdFactory | None = None,
+    transport: PushTransport | None = None,
+) -> AsyncIterator[NotificationWorker]:
+    """Build only the resources needed to dispatch durable notifications."""
+
+    effective_settings = settings or load_notification_worker_settings()
+    principal = _validate_notification_role(effective_settings)
+    runtime = load_config_document(effective_settings, "runtime/limits.yaml")
+    notification_limits = runtime["notifications"]
+    effective_clock = clock or SystemClock()
+    effective_ids = ids or RandomIdFactory()
+    effective_transport = transport
+    if effective_transport is None:
+        assert effective_settings.apns_key_file is not None
+        assert effective_settings.apns_key_id is not None
+        assert effective_settings.apns_team_id is not None
+        assert effective_settings.apns_topic is not None
+        try:
+            effective_transport = APNsPushTransport(
+                key_file=effective_settings.apns_key_file,
+                key_id=effective_settings.apns_key_id,
+                team_id=effective_settings.apns_team_id,
+                topic=effective_settings.apns_topic,
+                clock=effective_clock,
+            )
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
+    wakeup = PostgresNotificationWakeup(effective_settings.database_url)
+    engine = create_engine(effective_settings.database_url)
+    try:
+        await assert_schema_revision(engine)
+        factory = _NotificationUnitOfWorkFactory(
+            create_session_factory(engine),
+            tenant_id=principal.tenant_id,
+            clock=effective_clock,
+        )
+        dispatcher = NotificationDispatcher(
+            uow_factory=cast(NotificationDispatchUnitOfWorkFactory, factory),
+            transport=effective_transport,
+            providers=frozenset({PushProvider.APNS}),
+            clock=effective_clock,
+            ids=effective_ids,
+            claimant=f"notify:{os.getpid()}",
+            batch_size=int(notification_limits["claim_batch"]),
+            lease_seconds=float(notification_limits["lease_seconds"]),
+            retry_delays=tuple(
+                float(value) for value in notification_limits["retry_delays_seconds"]
+            ),
+        )
+        yield NotificationWorker(
+            dispatch_once=dispatcher.run_once,
+            clock=effective_clock,
+            fallback_poll_seconds=float(notification_limits["fallback_poll_seconds"]),
+            wait_for_wakeup=wakeup.wait,
+        )
+    finally:
+        await wakeup.close()
+        close_transport = getattr(effective_transport, "aclose", None)
+        if close_transport is not None:
+            await close_transport()
         await engine.dispose()
 
 
@@ -1481,11 +1695,17 @@ async def _compose(
         )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
+        notification_producer = (
+            NotificationProducer(clock=clock, ids=ids)
+            if settings.notification_dispatch_enabled
+            else None
+        )
         schedule_accountant = ScheduleOutcomeAccountant(
             uow_factory=uow_factory,
             clock=clock,
             ids=ids,
             metrics=schedule_metrics,
+            notification_producer=notification_producer,
         )
         principal_resolver = StaticPrincipalResolver(principal)
         skill_reviews: SkillBackgroundReview | None = None
@@ -1553,6 +1773,7 @@ async def _compose(
             identical_call_threshold=identical_call_threshold,
             identical_denial_threshold=identical_denial_threshold,
             max_compactions_per_step=max_compactions_per_step,
+            notification_producer=notification_producer,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -1706,6 +1927,7 @@ async def _compose(
                 ids=ids,
                 seed_checkpoint=checkpoint_seeder,
                 metrics=schedule_metrics,
+                notification_producer=notification_producer,
             )
             return ScheduleWorker(
                 uow_factory=uow_factory,

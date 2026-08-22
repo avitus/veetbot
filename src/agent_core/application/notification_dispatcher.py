@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
@@ -21,10 +23,32 @@ from agent_core.domain.notifications import (
 )
 from agent_core.domain.runs import RunStatus
 from agent_core.ports.determinism import Clock, IdFactory
-from agent_core.ports.notifications import PushTransport
-from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
+from agent_core.ports.devices import DeviceRegistry
+from agent_core.ports.events import ProcessEventRepository
+from agent_core.ports.notifications import NotificationOutbox, PushTransport
+from agent_core.ports.repositories import (
+    ApprovalRepository,
+    CheckpointRepository,
+    RunRepository,
+    SessionRepository,
+)
 
 DispatchProbe = Callable[[str], None]
+
+
+class NotificationDispatchUnitOfWork(Protocol):
+    approvals: ApprovalRepository
+    checkpoints: CheckpointRepository
+    devices: DeviceRegistry
+    notification_outbox: NotificationOutbox
+    process_events: ProcessEventRepository
+    runs: RunRepository
+    sessions: SessionRepository
+
+
+type NotificationDispatchUnitOfWorkFactory = Callable[
+    [], AbstractAsyncContextManager[NotificationDispatchUnitOfWork]
+]
 
 
 class NotificationDispatcher:
@@ -33,7 +57,7 @@ class NotificationDispatcher:
     def __init__(
         self,
         *,
-        uow_factory: UnitOfWorkFactory,
+        uow_factory: NotificationDispatchUnitOfWorkFactory,
         transport: PushTransport,
         providers: frozenset[PushProvider],
         clock: Clock,
@@ -196,7 +220,7 @@ class NotificationDispatcher:
 
     async def _is_stale(
         self,
-        uow: RepositoryUnitOfWork,
+        uow: NotificationDispatchUnitOfWork,
         notification: Notification,
         now: datetime,
     ) -> bool:
@@ -239,7 +263,7 @@ class NotificationDispatcher:
 
     async def _invalidate_token(
         self,
-        uow: RepositoryUnitOfWork,
+        uow: NotificationDispatchUnitOfWork,
         target: PushTarget,
         outcome: PushOutcome,
         now: datetime,
