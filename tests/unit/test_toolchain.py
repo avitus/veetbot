@@ -305,6 +305,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "agent execution-service" in execution
     assert "--runtime" not in execution
     assert "User=veetbot-exec" in execution
+    assert "DynamicUser=yes" in execution.splitlines()
     assert "Group=veetbot" in execution.splitlines()
     assert "SupplementaryGroups=docker" in execution
     assert "/run/docker.sock" in execution
@@ -381,7 +382,10 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
         for unit in (api, worker, async_worker, maintenance)
     )
-    assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
+    assert all(
+        "EnvironmentFile=-/opt/veetbot/current/.release.env" in unit
+        for unit in (api, worker, async_worker, maintenance)
+    )
     credential_source = (
         "LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential"
     )
@@ -429,7 +433,7 @@ def test_nginx_deployment_test_exercises_declared_gnu_toolchain() -> None:
 def test_documentation_verification_reads_the_resolved_release_identity() -> None:
     deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
 
-    assert 'docs_release="$(readlink -f /opt/veetbot/docs/current)"' in deployment
+    assert 'docs_release="$(readlink -f /opt/veetbot/shared/docs/current)"' in deployment
     assert 'test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"' in deployment
 
 
@@ -443,7 +447,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
     readiness_identity = 'tolower($1) == "x-veetbot-release"'
     unit_process_validation = 'test "$process_cwd" = "$target"'
     app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
-    docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/docs/current'
+    docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/shared/docs/current'
     required_units = (
         "veetbot-execution",
         "veetbot-maintenance",
@@ -452,7 +456,7 @@ def test_manual_rollback_keeps_documentation_and_application_releases_aligned() 
         "veetbot-api",
     )
 
-    assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
+    assert 'docs_target="/opt/veetbot/shared/docs/releases/$target_id"' in manual
     assert 'test -d "$docs_target"' in manual
     assert 'test -f "$docs_target/release.txt"' in manual
     assert app_precondition in manual
@@ -533,7 +537,7 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert "proxy_pass http://127.0.0.1:8081" in nginx
     assert "/etc/letsencrypt/live/browser.veetbot.com/fullchain.pem" in nginx
     assert "proxy_buffering off" in nginx
-    assert "root /opt/veetbot/docs/current" in nginx
+    assert "root /opt/veetbot/shared/docs/current" in nginx
     assert "try_files $uri $uri/ =404" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
@@ -541,6 +545,7 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     assert "flock -w" in nginx_deploy
     assert "VEETBOT_EXPECTED_RELEASE_ID" in nginx_deploy
     assert "VEETBOT_DOCS_ROOT" in nginx_deploy
+    assert 'DOCS_ROOT="${VEETBOT_DOCS_ROOT:-$DEPLOY_ROOT/shared/docs}"' in nginx_deploy
     assert 'sha256sum "$DOCS_ARCHIVE"' in nginx_deploy
     assert 'mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"' in nginx_deploy
 
@@ -782,6 +787,27 @@ def test_mkdocs_site_has_its_public_origin() -> None:
 
     assert config["site_url"] == "https://docs.veetbot.com/"
     assert config["theme"]["font"] is False
+
+
+def test_mkdocs_site_uses_veetbot_visual_identity() -> None:
+    config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+    theme = config["theme"]
+    css = (ROOT / "docs" / "assets" / "stylesheets" / "extra.css").read_text(encoding="utf-8")
+    source_icon = (ROOT / "assets" / "brand" / "veetbot-icon.svg").read_text(encoding="utf-8")
+    docs_icon = (ROOT / "docs" / "assets" / "images" / "veetbot-icon.svg").read_text(
+        encoding="utf-8"
+    )
+
+    assert config["site_name"] == "Veetbot Documentation"
+    assert theme["logo"] == "assets/images/veetbot-icon.svg"
+    assert theme["favicon"] == "assets/images/veetbot-icon.svg"
+    assert all(palette["primary"] == "custom" for palette in theme["palette"])
+    assert all(palette["accent"] == "custom" for palette in theme["palette"])
+    assert "--veetbot-turquoise: #00706d" in css
+    assert "--veetbot-orange: #a73e00" in css
+    assert "--veetbot-ink: #0d172a" in css
+    assert "--veetbot-paper: #fafaf7" in css
+    assert source_icon == docs_icon
 
 
 def test_repository_contract_requires_red_green_tdd_evidence() -> None:

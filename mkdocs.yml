@@ -1,5 +1,5 @@
-site_name: Modular General-Purpose AI Agent
-site_description: Engineering documentation for the modular general-purpose AI agent platform.
+site_name: Veetbot Documentation
+site_description: Engineering documentation for Veetbot, a governed general-purpose AI agent platform.
 site_url: https://docs.veetbot.com/
 docs_dir: docs
 site_dir: site
@@ -8,6 +8,8 @@ use_directory_urls: true
 theme:
   name: material
   font: false
+  logo: assets/images/veetbot-icon.svg
+  favicon: assets/images/veetbot-icon.svg
   features:
     - navigation.tracking
     - navigation.top
@@ -18,14 +20,14 @@ theme:
     - search.suggest
   palette:
     - scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode

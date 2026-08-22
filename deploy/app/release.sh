@@ -16,6 +16,7 @@ HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
+EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock
 UNITS=(veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api)
 
 fail() {
@@ -79,6 +80,12 @@ cleanup() {
       rm -rf -- "$STAGE"
     fi
   fi
+  if (( status != 0 && PROMOTED == 1 )); then
+    printf 'post-promotion unit status follows:\n' >&2
+    for unit in "${UNITS[@]}"; do
+      systemctl --no-pager --full status "$unit" >&2 || true
+    done
+  fi
   if (( status != 0 && PROMOTED == 1 )) && [[ -n "$PREVIOUS_RELEASE" ]]; then
     printf 'release failed after promotion; current still points at %s\n' "$STAGE" >&2
     printf 'release was promoted but did not verify; manual rollback target: %s\n' \
@@ -133,7 +140,8 @@ if [[ -L "$CURRENT" ]]; then
 fi
 
 umask 027
-printf 'VEETBOT_RELEASE_ID=%s\n' "$RELEASE_ID" >"$STAGE/.release.env"
+printf 'VEETBOT_RELEASE_ID=%s\nAGENT_EXECUTION_SERVICE_SOCKET=%s\n' \
+  "$RELEASE_ID" "$EXECUTION_SERVICE_SOCKET" >"$STAGE/.release.env"
 
 cd "$STAGE"
 export UV_CACHE_DIR="$SHARED_DIR/uv-cache"
@@ -145,6 +153,7 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+export AGENT_EXECUTION_SERVICE_SOCKET="$EXECUTION_SERVICE_SOCKET"
 export BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE="$BROWSER_CONTROL_CREDENTIAL_FILE"
 [[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
 [[ "${BROWSER_PROFILE_SERVICE_AUTH_FILE:-}" = /* ]] || fail \
@@ -311,6 +320,12 @@ for unit in "${UNITS[@]}"; do
   sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"
   pid="$(sudo systemctl show --property MainPID --value "$unit")"
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "$unit has no main process"
+  if [[ "$unit" == veetbot-execution ]]; then
+    # DynamicUser deliberately prevents the deploy identity from dereferencing
+    # this process's /proc cwd. The checked-in ExecStart uses current, and the
+    # successful restart plus active MainPID proves that systemd re-executed it.
+    continue
+  fi
   process_cwd="$(readlink -f "$PROCESS_ROOT/$pid/cwd" 2>/dev/null || true)"
   [[ "$process_cwd" == "$STAGE" ]] || fail "$unit is not running from $STAGE"
 done

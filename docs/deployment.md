@@ -111,7 +111,7 @@ sudo usermod -aG docker veetbot-deploy
 sudo usermod -aG docker veetbot-exec
 sudo mkdir -p \
   /opt/veetbot/releases \
-  /opt/veetbot/docs/releases \
+  /opt/veetbot/shared/docs/releases \
   /opt/veetbot/shared/uv-cache \
   /etc/veetbot \
   /var/lib/veetbot/artifacts
@@ -119,6 +119,12 @@ sudo chown -R veetbot-deploy:veetbot /opt/veetbot
 sudo chown -R veetbot:veetbot /var/lib/veetbot
 sudo chmod 0700 /var/lib/veetbot/artifacts
 ```
+
+`veetbot-execution.service` also sets `DynamicUser=yes`. A fully prepared host
+uses the static `veetbot-exec` account above; on an older host that does not yet
+have it, systemd allocates the same dedicated service identity so the atomic
+release can complete without temporarily running the execution service as an
+application user.
 
 The `veetbot-deploy` account owns `/opt/veetbot`, including the documentation
 releases. Nginx and the application group receive read-only traversal through
@@ -213,7 +219,11 @@ sudo chmod 0640 /etc/veetbot/veetbot-schedule.env
 ```
 
 Do not add `VEETBOT_RELEASE_ID` to that shared file. The release script writes
-it to `/opt/veetbot/current/.release.env`, which only the API systemd unit loads.
+it and the fixed host-native execution-service socket to
+`/opt/veetbot/current/.release.env`, which every credential-bearing application
+unit loads after the shared environment. This release-local wiring lets an
+existing host adopt the execution service without rewriting the protected
+shared environment before the first compatible release.
 
 ### Browser profile service host prerequisites
 
@@ -328,7 +338,7 @@ four required verification lanes pass:
 - `deploy-app` stages the archive, verifies the checksum, and executes the
   locked server release; and
 - `deploy-nginx` follows a successful application release, takes the same host
-  lock, atomically promotes `/opt/veetbot/docs/current`, and reconciles the
+  lock, atomically promotes `/opt/veetbot/shared/docs/current`, and reconciles the
   versioned virtual hosts. If a newer pipeline has already promoted another
   application release, the older proxy job detects the release-identity
   mismatch, reports a distinct stale outcome, and exits without overwriting the
@@ -349,6 +359,12 @@ session-index route to respond successfully; after it returns, CircleCI polls
 the public readiness endpoint for that exact identity. The Nginx job then
 requires `https://docs.veetbot.com/release.txt` to return the same identity. A
 public probe failure is therefore a post-promotion CircleCI failure boundary.
+The release verifies every application process through its `/proc` working
+directory. The execution service instead relies on its checked-in `ExecStart`,
+the completed restart, and an active main PID because `DynamicUser=yes`
+deliberately prevents the deploy identity from dereferencing that process's
+`/proc` working directory. A post-promotion failure prints bounded systemd
+status for each managed unit before reporting the manual rollback target.
 
 The manual and nightly `live-model` workflows remain tests; they do not deploy.
 
@@ -364,7 +380,7 @@ ssh veetbot-deploy@api.veetbot.com '
   set -eu
   app_release="$(readlink -f /opt/veetbot/current)"
   . "$app_release/.release.env"
-  docs_release="$(readlink -f /opt/veetbot/docs/current)"
+  docs_release="$(readlink -f /opt/veetbot/shared/docs/current)"
   test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"
   printf "%s\n" "$docs_release"
 '
@@ -395,7 +411,7 @@ fi
 
 target_id=YYYYMMDD-HHMMSS-abcdef0
 target="/opt/veetbot/releases/$target_id"
-docs_target="/opt/veetbot/docs/releases/$target_id"
+docs_target="/opt/veetbot/shared/docs/releases/$target_id"
 test -d "$target"
 test -f "$target/.release.env"
 grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"
@@ -403,9 +419,9 @@ test -d "$docs_target"
 test -f "$docs_target/release.txt"
 test "$(cat "$docs_target/release.txt")" = "$target_id"
 test -L /opt/veetbot/current
-test -L /opt/veetbot/docs/current
+test -L /opt/veetbot/shared/docs/current
 previous_target="$(readlink -f /opt/veetbot/current)"
-previous_docs_target="$(readlink -f /opt/veetbot/docs/current)"
+previous_docs_target="$(readlink -f /opt/veetbot/shared/docs/current)"
 docker image inspect "agent-core-sandbox:$target_id" >/dev/null
 previous_production_image="$(
   docker image inspect --format '{{.Id}}' agent-core-sandbox:production
@@ -413,9 +429,9 @@ previous_production_image="$(
 test -n "$previous_production_image"
 
 app_next="/opt/veetbot/.rollback-$target_id-$$"
-docs_next="/opt/veetbot/docs/.rollback-$target_id-$$"
+docs_next="/opt/veetbot/shared/docs/.rollback-$target_id-$$"
 app_restore="/opt/veetbot/.rollback-restore-$$"
-docs_restore="/opt/veetbot/docs/.rollback-restore-$$"
+docs_restore="/opt/veetbot/shared/docs/.rollback-restore-$$"
 health_headers=""
 ln -s "$target" "$app_next"
 ln -s "$docs_target" "$docs_next"
@@ -430,7 +446,7 @@ rollback_on_exit() {
     ln -s "$previous_target" "$app_restore"
     ln -s "$previous_docs_target" "$docs_restore"
     mv -Tf "$app_restore" /opt/veetbot/current
-    mv -Tf "$docs_restore" /opt/veetbot/docs/current
+    mv -Tf "$docs_restore" /opt/veetbot/shared/docs/current
     docker tag "$previous_production_image" agent-core-sandbox:production
     sudo systemctl restart \
       veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
@@ -447,7 +463,7 @@ rollback_pending=1
 docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production
 mv -Tf "$app_next" /opt/veetbot/current
 app_next=""
-mv -Tf "$docs_next" /opt/veetbot/docs/current
+mv -Tf "$docs_next" /opt/veetbot/shared/docs/current
 docs_next=""
 sudo systemctl restart \
   veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
@@ -464,7 +480,7 @@ awk -F ': *' -v expected="$target_id" '
 ' "$health_headers"
 rm -f -- "$health_headers"
 health_headers=""
-test "$(cat /opt/veetbot/docs/current/release.txt)" = "$target_id"
+test "$(cat /opt/veetbot/shared/docs/current/release.txt)" = "$target_id"
 for unit in \
   veetbot-execution \
   veetbot-maintenance \

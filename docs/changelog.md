@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-22 — Documentation adopts Veetbot's visual system
+
+- Replaced the stock indigo Material presentation with Veetbot's turquoise,
+  orange, navy, and warm-paper palette; the rounded typography, soft brand
+  gradient, cards, navigation states, tables, code surfaces, and responsive
+  layout now follow the native Apple client's visual language.
+- Added the bracket-face brand mark as the site logo and favicon and rebuilt the
+  home page around the canonical plan, current milestone, and governed delivery
+  evidence without changing documentation authority or publication behavior.
+
 ## 2026-08-21 — Milestone 15 specified: operational hardening
 
 - Added `docs/plan/operational-hardening.md` and proposed ADR-0065: a

@@ -29,9 +29,11 @@ work without coupling documentation links, search, and assets to a prefix.
    application artifact.
 3. The existing post-application Nginx job transfers the documentation artifact
    and configuration together. The server verifies the checksum and archive
-   paths, extracts the site below `/opt/veetbot/docs/releases/<release-id>`, and
-   atomically promotes `/opt/veetbot/docs/current` under the same deployment lock
-   used by application and Nginx releases.
+   paths, extracts the site below
+   `/opt/veetbot/shared/docs/releases/<release-id>`, and atomically promotes
+   `/opt/veetbot/shared/docs/current` under the same deployment lock used by
+   application and Nginx releases. The shared tree is owned by the deployment
+   identity on both prepared and legacy hosts.
 4. Nginx serves only files from that current symlink. It disables directory
    listing, denies dotfiles, applies browser security headers, and redirects
    plaintext requests to a dedicated TLS virtual host.
