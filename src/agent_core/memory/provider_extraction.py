@@ -191,6 +191,13 @@ _POSSESSIVE_MODIFIER = (
     r"oldest|elder|eldest|younger|youngest|little|big|new|first|second|third)"
 )
 _PROJECT_CLAIM_KINDS = frozenset({MemoryClaimKind.PROJECT_SCHEDULE, MemoryClaimKind.PROJECT_FACT})
+# A subject ahead of the claimed fact that is not the user makes the fact
+# theirs: a third-person pronoun, or a first-person possessive on something
+# other than the claimed subject ("my friend lives in Lisbon and I ...").
+_THIRD_PARTY_PRONOUN = re.compile(
+    r"\b(?:he|she|they|it|you|him|them|his|her|hers|their|theirs|your|yours|its)\b"
+)
+_CLAIMED_STOPWORDS = frozenset({"a", "an", "and", "for", "in", "of", "on", "or", "the", "to"})
 
 
 class _SemanticClaim(BaseModel):
@@ -267,9 +274,11 @@ def _claim_value(claim: _SemanticClaim) -> str | None:
 
 
 def _occupation_is_user_attributed(span: str, value: str) -> bool:
+    """Whether a first person directly binds to the occupation inside the span."""
+
     occupation = re.escape(value.casefold())
     patterns = (
-        rf"\bas\s+(?:an?\s+)?{occupation}\b[^.!?]*\bi\b",
+        rf"\bas\s+(?:an?\s+)?{occupation}\b,?\s+i\b",
         rf"\bi(?:\s+am|'m|\u2019m)\s+(?:an?\s+)?{occupation}\b",
         rf"\bi\s+work(?:ed|ing)?\s+as\s+(?:an?\s+)?{occupation}\b",
         rf"\bmy\s+(?:career|job|occupation|profession)\s+is\s+(?:an?\s+)?{occupation}\b",
@@ -278,24 +287,58 @@ def _occupation_is_user_attributed(span: str, value: str) -> bool:
     return any(re.search(pattern, lowered) is not None for pattern in patterns)
 
 
+def _names_someone_else(text: str) -> bool:
+    if _THIRD_PARTY_PRONOUN.search(text) is not None:
+        return True
+    other_possession = (
+        rf"{_FIRST_PERSON_POSSESSIVE}\s+(?!(?:{_POSSESSIVE_MODIFIER})\b)[a-z0-9'\u2019-]+"
+    )
+    return re.search(other_possession, text) is not None
+
+
 def _claim_is_user_attributed(claim: _SemanticClaim, span: str) -> bool:
-    """Whether the evidence span itself attributes a user-facing claim to the user."""
+    """Whether the evidence span attributes a user-facing claim to the user and
+    binds that attribution to the claimed fact rather than to a neighbour."""
 
     if claim.claim_kind in _PROJECT_CLAIM_KINDS:
         return True
     value = _claim_value(claim)
     if claim.claim_kind is MemoryClaimKind.OCCUPATION:
         return value is not None and _occupation_is_user_attributed(span, value)
-    if grounding_tokens(span) & _FIRST_PERSON_TOKENS:
-        return True
-    owned = grounding_tokens(claim.subject)
+    claimed = grounding_tokens(claim.subject)
     if value is not None:
-        owned |= grounding_tokens(value)
-    if not owned:
+        claimed |= grounding_tokens(value)
+    claimed -= _CLAIMED_STOPWORDS
+    if not claimed:
         return False
-    owned_pattern = "|".join(re.escape(token) for token in sorted(owned, key=len, reverse=True))
-    pattern = rf"{_FIRST_PERSON_POSSESSIVE}(?:\s+{_POSSESSIVE_MODIFIER})?\s+(?:{owned_pattern})\b"
-    return re.search(pattern, span.casefold()) is not None
+    lowered = span.casefold()
+    claimed_pattern = "|".join(re.escape(token) for token in sorted(claimed, key=len, reverse=True))
+    # A first-person possessive directly on the claimed subject binds by itself
+    # ("my daughter", "our two cats", "my telescope aperture").
+    possessed = (
+        rf"{_FIRST_PERSON_POSSESSIVE}(?:\s+{_POSSESSIVE_MODIFIER})?\s+(?:{claimed_pattern})\b"
+    )
+    if re.search(possessed, lowered) is not None:
+        return True
+    fact = re.search(rf"\b(?:{claimed_pattern})\b", lowered)
+    if fact is None:
+        return False
+    before = lowered[: fact.start()]
+    after = lowered[fact.end() :]
+    # A first-person subject ahead of the fact binds ("I live in Lisbon",
+    # "my wife and I go hiking"); someone else's subject ahead of it makes the
+    # fact theirs, whatever follows ("my friend lives in Lisbon and I ...").
+    if grounding_tokens(before) & _FIRST_PERSON_TOKENS:
+        return True
+    if _names_someone_else(before):
+        return False
+    # A first person after the fact binds only while no other subject
+    # intervenes ("Portland is home for me", "vegan; that is how I eat").
+    first_person = "|".join(re.escape(token) for token in sorted(_FIRST_PERSON_TOKENS))
+    cue = re.search(rf"\b(?:{first_person})\b", after)
+    if cue is None:
+        return False
+    return not _names_someone_else(after[: cue.start()])
 
 
 def _quantity_modifies_value(claim: _SemanticClaim, span: str) -> bool:

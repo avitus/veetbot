@@ -2235,8 +2235,16 @@ async def test_provider_grounding_uses_only_the_episode_holding_the_quote(
 @pytest.mark.parametrize(
     ("episodes", "quote", "grounded"),
     [
-        (("I prefer concise answers.", "I use NASA data."), "I", False),
-        (("I prefer concise answers for NASA data.", "I use NASA data."), "I", True),
+        (
+            ("I prefer concise answers.", "I prefer concise summaries of NASA data."),
+            "I prefer concise",
+            False,
+        ),
+        (
+            ("I prefer concise answers for NASA data.", "I prefer concise summaries of NASA data."),
+            "I prefer concise",
+            True,
+        ),
     ],
 )
 async def test_provider_grounding_requires_one_episode_to_carry_every_field(
@@ -2285,6 +2293,54 @@ async def test_provider_grounding_requires_one_episode_to_carry_every_field(
         ("diet", "diet", "vegan", "My sister is vegan.", "My sister is vegan", False),
         ("occupation", "occupation", "nurse", "I am a nurse.", "I am a nurse", True),
         ("occupation", "occupation", "nurse", "I am a nurse.", "nurse", False),
+        (
+            "occupation",
+            "occupation",
+            "nurse",
+            "As a nurse, I work nights.",
+            "As a nurse, I work nights",
+            True,
+        ),
+        (
+            "occupation",
+            "occupation",
+            "nurse",
+            "My friend works as a nurse and I admire her.",
+            "My friend works as a nurse and I admire her",
+            False,
+        ),
+        (
+            "home_location",
+            "home",
+            "Lisbon",
+            "My wife and I live in Lisbon.",
+            "My wife and I live in Lisbon",
+            True,
+        ),
+        (
+            "home_location",
+            "home",
+            "Portland",
+            "Portland is home for me.",
+            "Portland is home for me",
+            True,
+        ),
+        (
+            "home_location",
+            "home",
+            "Lisbon",
+            "My friend lives in Lisbon and I admire her.",
+            "My friend lives in Lisbon and I admire her",
+            False,
+        ),
+        (
+            "home_location",
+            "home",
+            "Lisbon",
+            "My friend lives in Lisbon; I admire her.",
+            "My friend lives in Lisbon; I admire her",
+            False,
+        ),
         ("pet_ownership", "cats", "cats", "Our cats sleep all day.", "Our cats", True),
         (
             "hobby",
@@ -2330,8 +2386,9 @@ def test_provider_user_facing_claims_require_user_attribution_in_the_quote(
 ) -> None:
     """A claim rendered as a statement about the user must be attributed to the
     user inside its own evidence quote — a first-person subject, or a first-person
-    possessive on the claimed subject — not merely share tokens with the episode;
-    project claims carry no such requirement."""
+    possessive on the claimed subject — and that attribution must bind to the
+    claimed fact: a first person that merely follows a third party's fact does not
+    count. Project claims carry no such requirement."""
     claim = _SemanticClaim(
         claim_kind=MemoryClaimKind(claim_kind),
         subject=subject,
