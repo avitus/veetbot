@@ -264,6 +264,15 @@ def test_notification_payload_is_content_free() -> None:
             NotificationPayload.model_validate(values)
 
 
+def test_bearer_token_corpus_member_is_explicitly_redacted() -> None:
+    raw = yaml.safe_load((CORPUS / "11-bearer-token.yaml").read_text(encoding="utf-8"))
+
+    assert raw == {
+        "field": "bearer_token",
+        "value": "<redacted bearer credential>",
+    }
+
+
 @given(
     approval_id=st.uuids(),
     run_id=st.uuids(),
