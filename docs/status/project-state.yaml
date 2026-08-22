@@ -394,6 +394,16 @@ verification:
           builds and the unsigned macOS build pass with the tracked aps-environment
           entitlement. The iPhone simulator UI lane passes with its debug fixture
           suppressing notification authorization.
+      - check: production schedule notification topology audit
+        outcome: passed_locally
+        detail: >-
+          A regression first showed that the credential-minimized schedule
+          environment omitted both notification flags, so enabled production
+          scheduling would silently skip its named notification producers. The
+          schedule template now carries default-off flags and release validation
+          requires them to change together and exactly match the application
+          flags. The schedule role can enqueue outcomes but still never loads the
+          APNs key; the release harness proves a mismatch fails closed.
     remaining:
       - Run the complete Milestone 12 — Notifications and device identity build
         step 8 delivery verification, hosted CI, and CodeRabbit review loop. The

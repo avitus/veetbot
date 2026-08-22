@@ -324,7 +324,9 @@ printf '%s\n' \
   'AUTH_PRINCIPAL_ID=test' \
   'AUTH_SCOPES=session.read,schedule.read,schedule.write,schedule.cancel' \
   'AGENT_SCHEDULE_API_ENABLED=1' \
-  'AGENT_SCHEDULE_WORKER_ENABLED=1' >"$schedule_worker_env"
+  'AGENT_SCHEDULE_WORKER_ENABLED=1' \
+  'AGENT_NOTIFICATION_API_ENABLED=0' \
+  'AGENT_NOTIFICATION_DISPATCH_ENABLED=0' >"$schedule_worker_env"
 printf '%s\n' \
   'AGENT_SCHEDULE_API_ENABLED=1' \
   'AGENT_SCHEDULE_WORKER_ENABLED=1' >>"$schedule_env"
@@ -340,6 +342,29 @@ grep -Fxq "EnvironmentFile=$schedule_worker_env" \
 grep -Fq \
   'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
+
+schedule_notification_mismatch_env="$TEST_ROOT/schedule-notification-mismatch.env"
+schedule_notification_mismatch_worker_env="$TEST_ROOT/schedule-notification-mismatch-worker.env"
+schedule_notification_mismatch_notify_env="$TEST_ROOT/schedule-notification-mismatch-notify.env"
+cp "$schedule_env" "$schedule_notification_mismatch_env"
+cp "$schedule_worker_env" "$schedule_notification_mismatch_worker_env"
+: >"$schedule_notification_mismatch_notify_env"
+printf '%s\n' \
+  'AGENT_NOTIFICATION_API_ENABLED=1' \
+  'AGENT_NOTIFICATION_DISPATCH_ENABLED=1' >>"$schedule_notification_mismatch_env"
+schedule_notification_mismatch_id="20260810-152257-0000002"
+make_stage "$schedule_notification_mismatch_id"
+if VEETBOT_TEST_ENV_FILE="$schedule_notification_mismatch_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_notification_mismatch_worker_env" \
+  VEETBOT_TEST_NOTIFY_ENV_FILE="$schedule_notification_mismatch_notify_env" \
+  run_release "$schedule_notification_mismatch_id" \
+  >"$TEST_ROOT/schedule-notification-mismatch.out" 2>&1; then
+  printf 'release with mismatched schedule notification flags unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq \
+  'schedule worker notification flags must match the application notification flags' \
+  "$TEST_ROOT/schedule-notification-mismatch.out"
 
 notify_env="$TEST_ROOT/notify.env"
 notify_worker_env="$TEST_ROOT/veetbot-notify.env"

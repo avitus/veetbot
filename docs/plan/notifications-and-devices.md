@@ -664,6 +664,13 @@ requires:
 - a positive claim batch, lease, poll interval, and the retry schedule and
   expiry defaults in the versioned limits file.
 
+When the dedicated schedule role is enabled, its credential-minimized
+environment repeats both notification flags and release validation requires
+them to match the application environment. This lets the schedule materializer
+and accountant write their transactional outbox rows while the schedule process
+still receives no APNs key; transport credentials remain exclusive to the
+notify role.
+
 The dispatcher is a new worker role, `agent worker --role notify`, built by a
 least-privilege builder in the sole composition root modeled on the schedule
 worker's, with its own systemd unit and its own environment file. That file

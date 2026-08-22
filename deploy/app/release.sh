@@ -23,6 +23,18 @@ fail() {
   exit 1
 }
 
+environment_flag() {
+  local file="$1"
+  local name="$2"
+  awk -v key="$name" '
+    index($0, key "=") == 1 {
+      value = substr($0, length(key) + 2)
+      found = 1
+    }
+    END { print found ? value : "0" }
+  ' "$file"
+}
+
 [[ "$RELEASE_ID" =~ $RELEASE_PATTERN ]] || fail \
   "release id must be YYYYMMDD-HHMMSS plus a 7-40 character lowercase hex revision"
 [[ "$DEPLOY_ROOT" = /* && "$DEPLOY_ROOT" != / ]] || fail \
@@ -183,6 +195,24 @@ fi
 [[ "${AGENT_NOTIFICATION_API_ENABLED:-0}" == \
   "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" ]] || fail \
   "notification API and dispatch flags must be enabled or disabled together"
+if [[ "${AGENT_SCHEDULE_WORKER_ENABLED:-0}" == "1" ]]; then
+  SCHEDULE_NOTIFICATION_API_FLAG="$(
+    environment_flag "$SCHEDULE_ENV_FILE" AGENT_NOTIFICATION_API_ENABLED
+  )"
+  SCHEDULE_NOTIFICATION_DISPATCH_FLAG="$(
+    environment_flag "$SCHEDULE_ENV_FILE" AGENT_NOTIFICATION_DISPATCH_ENABLED
+  )"
+  [[ "$SCHEDULE_NOTIFICATION_API_FLAG" =~ ^[01]$ ]] || fail \
+    "schedule worker AGENT_NOTIFICATION_API_ENABLED must be 0 or 1"
+  [[ "$SCHEDULE_NOTIFICATION_DISPATCH_FLAG" =~ ^[01]$ ]] || fail \
+    "schedule worker AGENT_NOTIFICATION_DISPATCH_ENABLED must be 0 or 1"
+  [[ "$SCHEDULE_NOTIFICATION_API_FLAG" == \
+    "$SCHEDULE_NOTIFICATION_DISPATCH_FLAG" ]] || fail \
+    "schedule worker notification API and dispatch flags must change together"
+  [[ "$SCHEDULE_NOTIFICATION_API_FLAG" == \
+    "${AGENT_NOTIFICATION_API_ENABLED:-0}" ]] || fail \
+    "schedule worker notification flags must match the application notification flags"
+fi
 if [[ "${AGENT_NOTIFICATION_DISPATCH_ENABLED:-0}" == "1" ]]; then
   [[ "$NOTIFY_ENV_FILE" =~ ^/[^[:space:]]+$ ]] || fail \
     "VEETBOT_NOTIFY_ENV_FILE must be an absolute path without whitespace"
