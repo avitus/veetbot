@@ -185,6 +185,10 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.device_management import (
+    DeviceManagementService,
+    NotificationInboxService,
+)
 from agent_core.application.notification_dispatcher import (
     NotificationDispatcher,
     NotificationDispatchUnitOfWorkFactory,
@@ -210,6 +214,12 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     BrowserProfileService as PublicBrowserProfileServiceContract,
+)
+from agent_core.application.services import (
+    DeviceService as PublicDeviceServiceContract,
+)
+from agent_core.application.services import (
+    NotificationService as PublicNotificationServiceContract,
 )
 from agent_core.application.services import (
     RunService as PublicRunServiceContract,
@@ -378,6 +388,8 @@ class ApplicationServices:
     browser_profiles: PublicBrowserProfileServiceContract
     browser_grants: PublicBrowserGrantServiceContract
     schedules: PublicScheduleServiceContract
+    devices: PublicDeviceServiceContract
+    notifications: PublicNotificationServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -1160,6 +1172,7 @@ async def _compose(
     schedule_fallback_poll_seconds: float,
     schedule_admission_backoff_seconds: float,
     schedule_definition_limits: ScheduleDefinitionLimits,
+    notification_expiry_seconds: float,
     schedule_notify: Callable[[], Awaitable[None]],
     schedule_wait: Callable[[float], Awaitable[None]],
     schedule_metrics: ScheduleMetrics,
@@ -1878,6 +1891,13 @@ async def _compose(
             limits=schedule_definition_limits,
             wake_worker=schedule_notify,
         )
+        device_service = DeviceManagementService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            notification_expiry_seconds=notification_expiry_seconds,
+        )
+        notification_inbox = NotificationInboxService(uow_factory=uow_factory)
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -1908,6 +1928,8 @@ async def _compose(
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
             schedules=schedule_service,
+            devices=device_service,
+            notifications=notification_inbox,
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 
@@ -2185,6 +2207,15 @@ async def build(
         and storage != "postgres"
     ):
         raise ConfigurationError("production scheduling requires PostgreSQL storage")
+    if (
+        effective_settings.deployment_mode is DeploymentMode.PRODUCTION
+        and (
+            effective_settings.notification_api_enabled
+            or effective_settings.notification_dispatch_enabled
+        )
+        and storage != "postgres"
+    ):
+        raise ConfigurationError("production notifications require PostgreSQL storage")
     provider_registry = ProviderRegistry.load(
         PACKAGE_ROOT / "models",
         adapters=ADAPTER_DEFINITIONS,
@@ -2246,6 +2277,7 @@ async def build(
     queue_config = runtime_config["queue"]
     worker_config = runtime_config["worker"]
     scheduling_config = runtime_config["scheduling"]
+    notification_config = runtime_config["notifications"]
     schedule_admission_limits = ScheduleAdmissionLimits.model_validate(
         {
             "max_active_runs_per_tenant": scheduling_config["max_active_runs_per_tenant"],
@@ -2541,6 +2573,7 @@ async def build(
                 scheduling_config["admission_backoff_seconds"]
             ),
             schedule_definition_limits=schedule_definition_limits,
+            notification_expiry_seconds=float(notification_config["terminal_expiry_seconds"]),
             schedule_notify=schedule_wakeup.notify,
             schedule_wait=schedule_wakeup.wait,
             schedule_metrics=schedule_metrics,

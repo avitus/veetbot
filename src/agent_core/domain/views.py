@@ -11,6 +11,17 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent_core.domain.approvals import ApprovalResolutionType
+from agent_core.domain.devices import (
+    DeviceKind,
+    DeviceStatus,
+    PushEnvironment,
+    PushProvider,
+)
+from agent_core.domain.notifications import (
+    Notification,
+    NotificationDelivery,
+    NotificationKind,
+)
 from agent_core.domain.runs import FailureReason, RunStatus
 from agent_core.domain.sessions import SessionStatus
 
@@ -152,6 +163,41 @@ class ApprovalView(BaseModel):
     resolved_at: datetime | None
     resolved_by: str | None
     decision: ApprovalResolutionType | None
+
+
+class DeviceView(BaseModel):
+    id: UUID
+    client_device_id: str
+    name: str
+    kind: DeviceKind
+    platform: str
+    app_bundle_id: str | None
+    push_provider: PushProvider | None
+    push_environment: PushEnvironment | None
+    push_token_fingerprint: str | None
+    push_token_updated_at: datetime | None
+    push_token_invalidated_at: datetime | None
+    muted_kinds: frozenset[NotificationKind]
+    status: DeviceStatus
+    revoked_at: datetime | None
+    last_seen_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+
+class DeviceRegistrationResult(BaseModel):
+    device: DeviceView
+    replayed: bool = Field(default=False, exclude=True)
+
+
+class TestNotificationResult(BaseModel):
+    notification_id: UUID | None
+    replayed: bool = Field(default=False, exclude=True)
+
+
+class NotificationInboxItem(BaseModel):
+    notification: Notification
+    deliveries: list[NotificationDelivery]
 
 
 class Page[T](BaseModel):

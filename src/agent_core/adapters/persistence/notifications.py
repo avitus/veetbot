@@ -82,6 +82,19 @@ class InMemoryDeviceRegistry:
             raise NotFoundError("device not found")
         return device.model_copy(deep=True)
 
+    async def get_by_client_device_id(
+        self, client_device_id: str, principal: Principal
+    ) -> Device | None:
+        device = next(
+            (
+                value
+                for value in self._devices.values()
+                if _owned_by(value, principal) and value.client_device_id == client_device_id
+            ),
+            None,
+        )
+        return None if device is None else device.model_copy(deep=True)
+
     async def list(
         self,
         principal: Principal,
@@ -443,6 +456,20 @@ class PostgresDeviceRegistry:
         if row is None:
             raise NotFoundError("device not found")
         return device_to_domain(row)
+
+    async def get_by_client_device_id(
+        self, client_device_id: str, principal: Principal
+    ) -> Device | None:
+        row = (
+            await self._session.scalars(
+                select(DeviceRow).where(
+                    DeviceRow.tenant_id == principal.tenant_id,
+                    DeviceRow.principal_id == principal.principal_id,
+                    DeviceRow.client_device_id == client_device_id,
+                )
+            )
+        ).one_or_none()
+        return None if row is None else device_to_domain(row)
 
     async def list(
         self,

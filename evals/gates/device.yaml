@@ -16,13 +16,13 @@
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Revocation takes effect before the next claim.** Revoking a device clears its token, appends device.revoked, and a row claimed by the next dispatch targets no revoked device."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_notification_api_m12.py::test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue
 - id: gate.device.lifecycle_audited
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Device lifecycle is audited once and content-free.** Register, token update, revoke, invalidation, and delete each append exactly one process event with a stable derivation key and a token fingerprint, never the token."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_notification_api_m12.py::test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue
 - id: gate.device.persistence_schema
   milestone: 12
   kind: structural

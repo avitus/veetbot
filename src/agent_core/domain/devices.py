@@ -36,6 +36,22 @@ class DeviceStatus(StrEnum):
     REVOKED = "revoked"
 
 
+class DeviceRegistration(BaseModel):
+    """Validated registration material before server-owned lifecycle fields exist."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    client_device_id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+    kind: DeviceKind
+    platform: str = Field(min_length=1, max_length=64)
+    app_bundle_id: str | None = Field(default=None, min_length=1, max_length=255)
+    push_provider: PushProvider | None = None
+    push_token: SecretStr | None = None
+    push_environment: PushEnvironment | None = None
+    muted_kinds: frozenset[NotificationKind] = frozenset()
+
+
 class Device(BaseModel):
     """Principal-scoped device identity with secret push routing material."""
 

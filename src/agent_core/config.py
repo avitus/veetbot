@@ -637,6 +637,10 @@ def validate_settings(
             )
     if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
+    if settings.notification_api_enabled != settings.notification_dispatch_enabled:
+        raise ConfigurationError(
+            "notification API and dispatch flags must be enabled or disabled together"
+        )
     if require_auth_token and settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if (

@@ -40,6 +40,14 @@ class ScheduleValidationError(AgentCoreError):
         self.reason = reason
 
 
+class DeviceValidationError(AgentCoreError):
+    """A device registration failed one stable boundary rule."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class InvalidStateTransition(ConflictError):  # noqa: N818 - normative taxonomy name
     """A resource exists but cannot accept the requested state change."""
 

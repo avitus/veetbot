@@ -66,13 +66,13 @@
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**A client can read every notification while offline.** With no transport configured, every enqueued kind is later returned by the inbox with its status and delivery outcomes through stable pagination."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_notification_api_m12.py::test_offline_inbox_paginates_every_kind_with_delivery_outcomes
 - id: gate.notify.default_off
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Notifications are default-off and credential-confined.** With both flags off no route mounts, no row is written, and no dispatcher builds; release validation requires the flags to change together; only the notify role loads the push key."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_notification_api_m12.py::test_notification_http_surface_and_production_are_default_off
 - id: gate.notify.migration_clean
   milestone: 12
   kind: case

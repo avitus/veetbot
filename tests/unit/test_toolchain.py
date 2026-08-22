@@ -294,6 +294,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     notify = (units / "veetbot-notify.service").read_text(encoding="utf-8")
     schedule_environment = (deploy / "veetbot-schedule.env.example").read_text(encoding="utf-8")
     notify_environment = (deploy / "veetbot-notify.env.example").read_text(encoding="utf-8")
+    shared_environment = (deploy / "veetbot.env.example").read_text(encoding="utf-8")
     assert "agent api" in api
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
@@ -372,6 +373,8 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "SANDBOX_MECHANISM",
         "AGENT_EXECUTION_SERVICE_SOCKET",
     } & {line.partition("=")[0] for line in notify_environment.splitlines()}
+    assert "APNS_KEY_FILE=" not in shared_environment
+    assert "APNS_KEY_FILE=" not in schedule_environment
     assert all(
         "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
         for unit in (api, worker, async_worker, maintenance)

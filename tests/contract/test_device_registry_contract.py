@@ -69,6 +69,9 @@ async def assert_device_registration_is_idempotent_and_principal_scoped(
     assert refreshed.id == original.id
     assert refreshed.created_at == original.created_at
     assert refreshed.name == "Renamed phone"
+    assert await registry.get_by_client_device_id(original.client_device_id, principal()) == (
+        refreshed
+    )
     assert await registry.list(principal(), limit=10) == [refreshed]
 
     stranger = Principal(
@@ -85,6 +88,9 @@ async def assert_device_registration_is_idempotent_and_principal_scoped(
     assert await registry.upsert(stranger_device, stranger) == stranger_device
     with pytest.raises(NotFoundError):
         await registry.get(original.id, stranger)
+    assert await registry.get_by_client_device_id(original.client_device_id, stranger) == (
+        stranger_device
+    )
     with pytest.raises(NotFoundError):
         await registry.upsert(original, stranger)
 

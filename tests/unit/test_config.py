@@ -238,6 +238,16 @@ def test_notification_roles_and_provider_default_off() -> None:
     assert settings.apns_key_file is None
 
 
+def test_notification_roles_must_change_together() -> None:
+    with pytest.raises(ConfigurationError, match="notification API and dispatch"):
+        load_settings(
+            {
+                **base_environment(),
+                "AGENT_NOTIFICATION_API_ENABLED": "1",
+            }
+        )
+
+
 def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
     key_file = tmp_path / "AuthKey_TEST.p8"
     values = {

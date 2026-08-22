@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from uuid import UUID
 
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import text
 
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
+from agent_core.domain.devices import (
+    DeviceKind,
+    DeviceRegistration,
+    PushEnvironment,
+    PushProvider,
+)
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.notifications import DeliveryOutcome, NotificationDelivery
 from tests.contract.support import NOW, TENANT, principal
@@ -32,6 +40,83 @@ from tests.integration.m2_support import database_settings
 
 class _RollbackContractError(Exception):
     pass
+
+
+async def test_postgres_device_lifecycle_service_audits_once_and_recovers_inbox() -> None:
+    settings = replace(
+        database_settings(),
+        notification_api_enabled=True,
+        notification_dispatch_enabled=True,
+    )
+    async with build(settings=settings, storage="postgres") as composition:
+        owner = composition.principal
+        client_device_id = "m12-service-postgres-device"
+        first = await composition.services.devices.register(
+            owner,
+            DeviceRegistration(
+                client_device_id=client_device_id,
+                name="PostgreSQL phone",
+                kind=DeviceKind.MOBILE,
+                platform="ios",
+                app_bundle_id="com.veetbot.app",
+                push_provider=PushProvider.APNS,
+                push_token=SecretStr("m12-postgres-service-token-a"),
+                push_environment=PushEnvironment.SANDBOX,
+            ),
+        )
+        device_id = first.device.id
+        replay = await composition.services.devices.register(
+            owner,
+            DeviceRegistration(
+                client_device_id=client_device_id,
+                name="PostgreSQL phone",
+                kind=DeviceKind.MOBILE,
+                platform="ios",
+                app_bundle_id="com.veetbot.app",
+                push_provider=PushProvider.APNS,
+                push_token=SecretStr("m12-postgres-service-token-a"),
+                push_environment=PushEnvironment.SANDBOX,
+            ),
+        )
+        assert replay.replayed is True
+        refreshed = await composition.services.devices.register(
+            owner,
+            DeviceRegistration(
+                client_device_id=client_device_id,
+                name="PostgreSQL phone",
+                kind=DeviceKind.MOBILE,
+                platform="ios",
+                app_bundle_id="com.veetbot.app",
+                push_provider=PushProvider.APNS,
+                push_token=SecretStr("m12-postgres-service-token-b"),
+                push_environment=PushEnvironment.SANDBOX,
+            ),
+        )
+        assert refreshed.device.id == device_id
+        test_result = await composition.services.devices.enqueue_test_notification(
+            owner,
+            device_id,
+            "m12-postgres-test-delivery",
+        )
+        assert test_result.replayed is False
+        inbox = await composition.services.notifications.list(owner, 10, None)
+        assert any(item.notification.id == test_result.notification_id for item in inbox.items)
+
+        await composition.services.devices.revoke(owner, device_id)
+        await composition.services.devices.delete(owner, device_id)
+        async with composition.uow_factory() as uow:
+            lifecycle = [
+                event
+                for event in await uow.process_events.list()
+                if event.payload.get("device_id") == str(device_id)
+            ]
+        assert [event.event_type for event in lifecycle] == [
+            "device.registered",
+            "device.push_token_updated",
+            "device.revoked",
+            "device.deleted",
+        ]
+        assert all("push_token" not in event.payload for event in lifecycle)
 
 
 async def test_postgres_device_registration_is_idempotent_and_principal_scoped() -> None:

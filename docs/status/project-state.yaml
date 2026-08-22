@@ -337,10 +337,47 @@ verification:
           script tests, 156 citation checks, and both strict documentation builds
           pass. The focused notification worker, transport, persistence, and
           PostgreSQL wakeup partition passes all forty tests.
+      - check: device lifecycle and offline inbox red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The boundary test first observed a not-found response because the
+          feature router and application services did not exist. All seven routes
+          now require the exact device.read, device.write, or notification.read
+          scope; registration refreshes one natural identity, returns only a
+          six-character token fingerprint, rejects malformed provider and routing
+          combinations with stable device reason codes, and paginates by opaque
+          stable cursors. Register, token update, provider invalidation, revoke,
+          and delete each append one content-free process event, while a targeted
+          test notification never reaches a different device and a revoked target
+          is absent before the next dispatch.
+      - check: offline notification recovery and PostgreSQL application service
+        outcome: passed_locally
+        detail: >-
+          With no transport configured, the feature-gated inbox returns all eight
+          closed notification kinds plus status and per-device delivery outcomes
+          through stable pagination. A PostgreSQL integration test registers,
+          replays, updates, test-enqueues, reads, revokes, and deletes a device and
+          observes exactly the four corresponding durable lifecycle events. All
+          sixteen focused PostgreSQL notification tests pass.
+      - check: final Milestone 12 gate registration tranche
+        outcome: passed_locally
+        detail: >-
+          gate.device.revoke_immediate, gate.device.lifecycle_audited,
+          gate.notify.offline_inbox, and gate.notify.default_off now resolve to
+          exact executable checks. All twenty gates are executable while the
+          cumulative verified ceiling remains at Milestone 11 — Scheduled runs
+          until the Apple and hosted delivery lanes complete.
+      - check: make check after device lifecycle and offline inbox
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 544 files, strict mypy over 502 source
+          and test files, 1027 static tests, 333 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass after the seven device and notification routes and all twenty
+          executable gates landed.
     remaining:
-      - Implement the remaining two device and two notification gates in build
-        steps 6 and 7, followed by the full Milestone 12 — Notifications and
-        device identity delivery verification.
+      - Implement the Apple client in build step 7, then run the complete
+        Milestone 12 — Notifications and device identity delivery verification.
 
 documentation:
   canonical_format: markdown

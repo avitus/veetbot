@@ -60,7 +60,7 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 — notifications and device identity — build steps 1 through 5 are
+Milestone 12 — notifications and device identity — build steps 1 through 6 are
 implemented locally. The domain, persistence, and transactional producer foundation
 now feeds a provider-partitioned dispatcher with a PostgreSQL claim lease, closed
 retry schedule, staleness and expiry suppression, per-attempt delivery ledger,
@@ -69,11 +69,15 @@ transports under one shared contract. The APNs adapter verifies a mode-`0600` P-
 key, signs and refreshes ES256 provider tokens, selects sandbox or production per
 device, sends the closed content-free payload over HTTP/2, and maps every provider
 response into the closed outcome vocabulary. Six dispatcher and transport gates are
-newly executable, bringing the milestone to sixteen executable gates and four
-pending. The dedicated notify role now adds a least-privilege repository set,
+newly executable. The dedicated notify role adds a least-privilege repository set,
 transactional PostgreSQL wakeups with a bounded polling fallback, default-off
 settings, conditional trigger composition, a credential-minimized environment,
-and an independently confined systemd unit. Build steps 6 through 8 remain.
+and an independently confined systemd unit. The feature-flagged public surface
+adds all seven exact-scope routes, secret-free device views, stable device and
+inbox pagination, targeted test pushes, content-free lifecycle audit, immediate
+revocation, and offline recovery of every kind and delivery outcome. All twenty
+gates are executable; the Apple client and final delivery verification in build
+steps 7 and 8 remain.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a

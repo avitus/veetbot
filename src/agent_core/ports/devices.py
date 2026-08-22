@@ -17,6 +17,10 @@ class DeviceRegistry(Protocol):
 
     async def get(self, device_id: UUID, principal: Principal) -> Device: ...
 
+    async def get_by_client_device_id(
+        self, client_device_id: str, principal: Principal
+    ) -> Device | None: ...
+
     async def list(
         self,
         principal: Principal,

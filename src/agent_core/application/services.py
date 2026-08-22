@@ -16,6 +16,7 @@ from agent_core.domain.browser import (
     BrowserGrantView,
     BrowserProfileView,
 )
+from agent_core.domain.devices import DeviceRegistration
 from agent_core.domain.schedules import (
     ScheduleDefinition,
     ScheduleOccurrence,
@@ -28,12 +29,16 @@ from agent_core.domain.views import (
     ArtifactView,
     CancelResult,
     ContentBlock,
+    DeviceRegistrationResult,
+    DeviceView,
+    NotificationInboxItem,
     Page,
     RunView,
     SessionMessageView,
     SessionView,
     StreamFrame,
     SubmitResult,
+    TestNotificationResult,
 )
 
 
@@ -239,3 +244,35 @@ class ScheduleService(Protocol):
         limit: int,
         cursor: str | None,
     ) -> Page[ScheduleOccurrence]: ...
+
+
+class DeviceService(Protocol):
+    async def register(
+        self,
+        principal: Principal,
+        registration: DeviceRegistration,
+        idempotency_key: str | None = None,
+    ) -> DeviceRegistrationResult: ...
+
+    async def get(self, principal: Principal, device_id: UUID) -> DeviceView: ...
+
+    async def list(
+        self, principal: Principal, limit: int, cursor: str | None
+    ) -> Page[DeviceView]: ...
+
+    async def revoke(self, principal: Principal, device_id: UUID) -> DeviceView: ...
+
+    async def delete(self, principal: Principal, device_id: UUID) -> None: ...
+
+    async def enqueue_test_notification(
+        self,
+        principal: Principal,
+        device_id: UUID,
+        idempotency_key: str,
+    ) -> TestNotificationResult: ...
+
+
+class NotificationService(Protocol):
+    async def list(
+        self, principal: Principal, limit: int, cursor: str | None
+    ) -> Page[NotificationInboxItem]: ...

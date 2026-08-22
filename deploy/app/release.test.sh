@@ -33,7 +33,7 @@ printf '%s\n' \
   'AUTH_TOKEN=synthetic-test-token' \
   'AUTH_TENANT_ID=test' \
   'AUTH_PRINCIPAL_ID=test' \
-  'AUTH_SCOPES=session.read' \
+  'AUTH_SCOPES=notification.read' \
   'SANDBOX_MECHANISM=gvisor' \
   'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   'AGENT_ARTIFACT_ROOT=/tmp' \
