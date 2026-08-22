@@ -375,9 +375,31 @@ verification:
           script tests, 156 citation checks, and both strict documentation builds
           pass after the seven device and notification routes and all twenty
           executable gates landed.
+      - check: native Apple registration and deep-link red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The coordinator test first failed because no registration API,
+          installation identity store, closed push model, or deep-link reducer
+          existed. The client now mints one nonsynchronizing Data Protection
+          Keychain identity, uploads every APNs token with the build-derived
+          environment, revokes on disconnect, and treats a missing device router
+          as an older compatible server. A notification tap restores the durable
+          transcript, attaches to the payload's exact run, and focuses the named
+          approval or question without persisting notification state.
+      - check: native Apple build and test lanes
+        outcome: passed_locally
+        detail: >-
+          All 104 Swift transport, coordinator, reducer, history, and presentation
+          tests pass under full Xcode. Debug and release unsigned iOS Simulator
+          builds and the unsigned macOS build pass with the tracked aps-environment
+          entitlement. The iPhone simulator UI lane passes with its debug fixture
+          suppressing notification authorization.
     remaining:
-      - Implement the Apple client in build step 7, then run the complete
-        Milestone 12 — Notifications and device identity delivery verification.
+      - Run the complete Milestone 12 — Notifications and device identity build
+        step 8 delivery verification, hosted CI, and CodeRabbit review loop. The
+        owner must separately enable the Apple application identifier's push
+        capability, regenerate provisioning profiles, and provide the production
+        APNs key before a physical-device live push can be exercised.
 
 documentation:
   canonical_format: markdown

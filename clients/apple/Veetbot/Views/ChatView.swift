@@ -46,6 +46,11 @@ public struct ChatView: View {
                                         artifactSelection = ArtifactSelection(id: artifactID)
                                     }
                                 )
+                                .id(
+                                    activity.approvalID.map {
+                                        NotificationFocus.approval($0).scrollID
+                                    } ?? activity.id
+                                )
                             case .toolBundle(let bundle):
                                 ToolActivityBundleCard(
                                     bundle: bundle,
@@ -69,6 +74,7 @@ public struct ChatView: View {
                                     )
                                 }
                             }
+                            .id(NotificationFocus.approval(approval.id).scrollID)
                         }
                         if state.runStatus == .running || state.runStatus == .queued {
                             HStack(spacing: 8) {
@@ -82,6 +88,7 @@ public struct ChatView: View {
                             ClarifyingQuestionCard(prompt: prompt) { answer in
                                 await model.answerQuestion(prompt, answer: answer)
                             }
+                            .id(NotificationFocus.question(prompt.questionID).scrollID)
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchorID)
                     }
@@ -89,7 +96,10 @@ public struct ChatView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .onChange(of: scrollChangeToken) { _ in
-                    withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+                    scroll(proxy)
+                }
+                .onChange(of: model.notificationFocus) { _ in
+                    scroll(proxy)
                 }
             }
             Divider()
@@ -161,7 +171,17 @@ public struct ChatView: View {
     private var scrollChangeToken: String {
         // Follow newly inserted activity, but leave the viewport fixed while an
         // existing assistant message grows so its beginning remains readable.
-        "\(state.timeline.count):\(state.tools.count)"
+        "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none")"
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy) {
+        withAnimation {
+            if let focus = model.notificationFocus {
+                proxy.scrollTo(focus.scrollID, anchor: .center)
+            } else {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            }
+        }
     }
 
     private func submitDraft() {

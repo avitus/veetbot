@@ -60,7 +60,7 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 — notifications and device identity — build steps 1 through 6 are
+Milestone 12 — notifications and device identity — build steps 1 through 7 are
 implemented locally. The domain, persistence, and transactional producer foundation
 now feeds a provider-partitioned dispatcher with a PostgreSQL claim lease, closed
 retry schedule, staleness and expiry suppression, per-attempt delivery ledger,
@@ -75,9 +75,12 @@ settings, conditional trigger composition, a credential-minimized environment,
 and an independently confined systemd unit. The feature-flagged public surface
 adds all seven exact-scope routes, secret-free device views, stable device and
 inbox pagination, targeted test pushes, content-free lifecycle audit, immediate
-revocation, and offline recovery of every kind and delivery outcome. All twenty
-gates are executable; the Apple client and final delivery verification in build
-steps 7 and 8 remain.
+revocation, and offline recovery of every kind and delivery outcome. The native
+Apple client now mints its installation identity in Keychain, uploads and revokes
+APNs routing through the versioned API, accepts only the closed push payload,
+restores the authoritative transcript before exact-run navigation, and focuses
+approval or question cards without persisting notification state. All twenty gates
+are executable; final delivery verification in build step 8 remains.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
