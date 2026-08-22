@@ -30,37 +30,37 @@
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Concurrent dispatch is safe and replay is bounded.** Two dispatchers racing on one pending row deliver it to each target once under the claim lease and write one delivery row per attempt; a crash between a transport accept and the ledger write re-sends under the same collapse identifier and records a further attempt — at-least-once, never a lost or unrecorded send."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_notification_dispatcher_postgres_m12.py::test_postgres_concurrent_dispatch_and_accepted_send_replay_are_bounded
 - id: gate.notify.retry_bounded
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Retry is bounded and expiry is honoured.** Transient outcomes follow the declared backoff and stop at the ceiling as failed; a row past its expiry is settled expired and never sent."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_notification_dispatcher_m12.py::test_retry_schedule_is_bounded_and_expired_rows_are_never_sent
 - id: gate.notify.stale_suppressed
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Stale notifications are suppressed.** A resolved or expired approval, an answered question, a run no longer waiting, or a deleted session settles superseded with no transport call, and session erasure deletes pending rows in the same transaction."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_notification_dispatcher_m12.py::test_stale_notification_catalog_is_suppressed_without_transport
 - id: gate.notify.token_revoked_on_410
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**An unregistered token is invalidated once.** Unregistered and BadDeviceToken invalidate the device's token, append the invalidation event, and remove the device from the next targets; a 5xx or 429 does neither."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_notification_dispatcher_m12.py::test_unregistered_tokens_invalidate_once_but_transient_failures_do_not
 - id: gate.notify.apns_auth
   milestone: 12
   kind: case
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**The APNs adapter authenticates and addresses correctly.** Against a fake server the adapter signs ES256 provider tokens from the configured key file, re-mints inside the window, sends the required headers, selects the host per device environment, and never logs the key or a token."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_apns_m12.py::test_apns_signs_addresses_and_refreshes_provider_token
 - id: gate.notify.port_contracts
   milestone: 12
   kind: structural
   spec: docs/plan/notifications-and-devices.md#hard-gates
   statement: "**Every notification port has executable adapter contracts.** The device registry, the outbox, and the push transport each have a named shared contract exercised by every registered adapter."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_notification_ports_m12.py::test_notification_ports_have_executable_contracts_for_every_adapter
 - id: gate.notify.offline_inbox
   milestone: 12
   kind: case

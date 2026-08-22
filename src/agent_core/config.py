@@ -120,7 +120,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 121 operator-reviewable knobs. Metadata such as
+# The design corpus declares 126 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -238,6 +238,11 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "scheduling.max_materializations_per_minute",
             "scheduling.daily_cost",
             "scheduling.monthly_cost",
+            "notifications.claim_batch",
+            "notifications.lease_seconds",
+            "notifications.fallback_poll_seconds",
+            "notifications.retry_delays_seconds",
+            "notifications.terminal_expiry_seconds",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -287,6 +292,10 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:scheduling.max_materializations_per_minute": 1,
         "runtime/limits.yaml:scheduling.daily_cost": 0.01,
         "runtime/limits.yaml:scheduling.monthly_cost": 0.01,
+        "runtime/limits.yaml:notifications.claim_batch": 1,
+        "runtime/limits.yaml:notifications.lease_seconds": 1,
+        "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
+        "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
         "tools/limits.yaml:circuit_breaker.identical_denied_threshold": 1,
         "tools/limits.yaml:circuit_breaker.uncertain_threshold": 1,
@@ -432,6 +441,23 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "runtime/limits.yaml":
+        retry_delays = merged["notifications"]["retry_delays_seconds"]
+        if (
+            not isinstance(retry_delays, list)
+            or not retry_delays
+            or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(value)
+                or value <= 0
+                for value in retry_delays
+            )
+        ):
+            raise ConfigurationError(
+                "runtime/limits.yaml:notifications.retry_delays_seconds "
+                "must contain positive numbers"
+            )
     if relative == "sandbox/limits.yaml":
         resources = merged["resources"]
         for name, value in resources.items():

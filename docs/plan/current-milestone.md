@@ -60,18 +60,17 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row.
 
-Milestone 12 — notifications and device identity — build steps 1 through 3 are
-implemented locally. In addition to the domain and persistence foundation, the
-terminal writer, scheduling accountant, and scheduling materializer now invoke one
-shared content-free producer inside their existing transactions. PostgreSQL crash
-injection covers every write boundary on all three paths; an outbox constraint
-failure rolls back to its savepoint and commits the unchanged terminal state with a
-sanitized `notification.enqueue_failed` process event. Session erasure deletes
-pending notification rows and their attempts before the session graph while
-retaining settled content-free audit rows. The atomic-enqueue and exact-trigger
-catalog checks are executable, bringing the milestone to ten executable gates and
-ten pending; the push-transport contract stays pending until its fake and APNs
-adapters land in build step 4.
+Milestone 12 — notifications and device identity — build steps 1 through 4 are
+implemented locally. The domain, persistence, and transactional producer foundation
+now feeds a provider-partitioned dispatcher with a PostgreSQL claim lease, closed
+retry schedule, staleness and expiry suppression, per-attempt delivery ledger,
+accepted-send crash replay, immediate token invalidation, and fake and APNs push
+transports under one shared contract. The APNs adapter verifies a mode-`0600` P-256
+key, signs and refreshes ES256 provider tokens, selects sandbox or production per
+device, sends the closed content-free payload over HTTP/2, and maps every provider
+response into the closed outcome vocabulary. Six dispatcher and transport gates are
+newly executable, bringing the milestone to sixteen executable gates and four
+pending; build steps 5 through 8 remain.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a

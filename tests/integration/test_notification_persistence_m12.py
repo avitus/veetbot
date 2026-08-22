@@ -21,6 +21,7 @@ from tests.contract.test_device_registry_contract import (
     device,
 )
 from tests.contract.test_notification_outbox_contract import (
+    assert_notification_claim_is_partitioned_by_provider,
     assert_notification_claim_settle_and_pagination,
     assert_notification_delivery_attempt_is_unique,
     assert_notification_enqueue_deduplicates_and_lists_by_principal,
@@ -96,6 +97,18 @@ async def test_postgres_notification_outbox_satisfies_shared_contracts() -> None
                     {"tenant": TENANT},
                 )
                 await assert_notification_delivery_attempt_is_unique(
+                    uow.notification_outbox, uow.devices
+                )
+                raise _RollbackContractError
+
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await uow.session.execute(
+                    text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                    {"tenant": TENANT},
+                )
+                await assert_notification_claim_is_partitioned_by_provider(
                     uow.notification_outbox, uow.devices
                 )
                 raise _RollbackContractError

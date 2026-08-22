@@ -8,10 +8,12 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from pydantic import SecretStr
-from sqlalchemy import and_, delete, or_, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from agent_core.adapters.persistence.mappers import (
     device_to_domain,
@@ -36,6 +38,7 @@ from agent_core.domain.devices import (
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.notifications import (
+    DeliveryOutcome,
     NewNotification,
     Notification,
     NotificationCursor,
@@ -223,21 +226,42 @@ class InMemoryNotificationOutbox:
         lease_seconds: float,
         providers: frozenset[PushProvider],
     ) -> list[Notification]:
-        del providers
         instant = _aware_utc(now)
         _positive_limit(limit, "notification claim")
         if not claimant.strip():
             raise ValueError("notification claimant cannot be blank")
         if lease_seconds <= 0:
             raise ValueError("notification lease must be positive")
+        if not providers:
+            raise ValueError("notification claim requires at least one provider")
         async with self._lock:
-            due = [
-                value
-                for value in self._notifications.values()
-                if value.status is NotificationStatus.PENDING
-                and value.next_attempt_at <= instant
-                and (value.claimed_until is None or value.claimed_until <= instant)
-            ]
+            due: list[Notification] = []
+            for value in self._notifications.values():
+                if (
+                    value.status is not NotificationStatus.PENDING
+                    or value.next_attempt_at > instant
+                    or (value.claimed_until is not None and value.claimed_until > instant)
+                ):
+                    continue
+                targets = await self._devices.push_targets(
+                    value.tenant_id,
+                    value.principal_id,
+                    value.kind,
+                )
+                terminal_devices = {
+                    delivery.device_id
+                    for delivery in self._deliveries.values()
+                    if delivery.notification_id == value.id
+                    and delivery.outcome is not DeliveryOutcome.RETRY
+                }
+                pending_targets = [
+                    target for target in targets if target.device_id not in terminal_devices
+                ]
+                if pending_targets and not any(
+                    target.provider in providers for target in pending_targets
+                ):
+                    continue
+                due.append(value)
             due.sort(key=lambda value: (value.next_attempt_at, value.created_at, value.id))
             claimed: list[Notification] = []
             for value in due[:limit]:
@@ -269,6 +293,17 @@ class InMemoryNotificationOutbox:
             ):
                 raise ConflictError("notification delivery already exists")
             self._deliveries[key] = delivery.model_copy(deep=True)
+
+    async def list_deliveries(self, notification_id: UUID) -> list[NotificationDelivery]:
+        async with self._lock:
+            if notification_id not in self._notifications:
+                raise NotFoundError("notification not found")
+            values = [
+                delivery.model_copy(deep=True)
+                for delivery in self._deliveries.values()
+                if delivery.notification_id == notification_id
+            ]
+            return sorted(values, key=lambda delivery: (delivery.attempt, delivery.device_id))
 
     async def settle(
         self,
@@ -560,12 +595,14 @@ class PostgresNotificationOutbox:
         lease_seconds: float,
         providers: frozenset[PushProvider],
     ) -> list[Notification]:
-        del providers
         instant = _aware_utc(now)
         if not claimant.strip():
             raise ValueError("notification claimant cannot be blank")
         if lease_seconds <= 0:
             raise ValueError("notification lease must be positive")
+        if not providers:
+            raise ValueError("notification claim requires at least one provider")
+        provider_values = {provider.value for provider in providers}
         locked = (
             await self._session.scalars(
                 select(NotificationOutboxRow)
@@ -575,6 +612,10 @@ class PostgresNotificationOutbox:
                     or_(
                         NotificationOutboxRow.claimed_until.is_(None),
                         NotificationOutboxRow.claimed_until <= instant,
+                    ),
+                    or_(
+                        ~_pending_target_exists(),
+                        _pending_target_exists(provider_values),
                     ),
                 )
                 .order_by(
@@ -629,6 +670,36 @@ class PostgresNotificationOutbox:
                 )
         except IntegrityError as exc:
             raise ConflictError("notification delivery already exists") from exc
+
+    async def list_deliveries(self, notification_id: UUID) -> list[NotificationDelivery]:
+        exists = await self._session.scalar(
+            select(NotificationOutboxRow.id).where(NotificationOutboxRow.id == notification_id)
+        )
+        if exists is None:
+            raise NotFoundError("notification not found")
+        rows = (
+            await self._session.scalars(
+                select(NotificationDeliveryRow)
+                .where(NotificationDeliveryRow.notification_id == notification_id)
+                .order_by(
+                    NotificationDeliveryRow.attempt,
+                    NotificationDeliveryRow.device_id,
+                )
+            )
+        ).all()
+        return [
+            NotificationDelivery(
+                id=row.id,
+                notification_id=row.notification_id,
+                device_id=row.device_id,
+                attempt=row.attempt,
+                outcome=DeliveryOutcome(row.outcome),
+                provider_reason=row.provider_reason,
+                provider_id=row.provider_id,
+                attempted_at=row.attempted_at,
+            )
+            for row in rows
+        ]
 
     async def settle(
         self,
@@ -693,6 +764,30 @@ class PostgresNotificationOutbox:
             )
         ).all()
         return [notification_to_domain(row) for row in rows]
+
+
+def _pending_target_exists(provider_values: set[str] | None = None) -> ColumnElement[bool]:
+    device = aliased(DeviceRow)
+    delivery = aliased(NotificationDeliveryRow)
+    terminal_delivery = exists(
+        select(delivery.id).where(
+            delivery.notification_id == NotificationOutboxRow.id,
+            delivery.device_id == device.id,
+            delivery.outcome != DeliveryOutcome.RETRY.value,
+        )
+    ).correlate(NotificationOutboxRow, device)
+    conditions: list[ColumnElement[bool]] = [
+        device.tenant_id == NotificationOutboxRow.tenant_id,
+        device.principal_id == NotificationOutboxRow.principal_id,
+        device.status == DeviceStatus.ACTIVE.value,
+        device.push_provider.is_not(None),
+        device.push_token.is_not(None),
+        ~device.muted_kinds.op("@>")(func.jsonb_build_array(NotificationOutboxRow.kind)),
+        ~terminal_delivery,
+    ]
+    if provider_values is not None:
+        conditions.append(device.push_provider.in_(provider_values))
+    return exists(select(device.id).where(*conditions)).correlate(NotificationOutboxRow)
 
 
 def _owned_by(device: Device, principal: Principal) -> bool:

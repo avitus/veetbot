@@ -34,6 +34,10 @@ class NotificationOutbox(Protocol):
 
     async def record_delivery(self, delivery: NotificationDelivery) -> None: ...
 
+    async def list_deliveries(
+        self, notification_id: UUID
+    ) -> builtins.list[NotificationDelivery]: ...
+
     async def settle(
         self,
         notification_id: UUID,

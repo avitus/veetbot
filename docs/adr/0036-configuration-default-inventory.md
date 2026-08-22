@@ -32,6 +32,10 @@ maximum steps, model calls, tool calls, and cost per run, and one reserved slot
 for each interactive and async work. The original 106-path classification
 remains unchanged; ADR-0059 authorizes the added scheduling surface.
 
+Milestone 12 amends the inventory additively to 126 paths. Its five additions
+are the notification claim batch, claim lease, fallback poll interval, closed
+retry schedule, and terminal-notice expiry; ADR-0062 authorizes that surface.
+
 Schema versions, profile and rule identifiers, conditions, model-catalog data,
 and the frozen hardline rules are not knobs and therefore do not enter the count.
 They remain validated configuration, but they cannot inflate the declared total.
@@ -48,7 +52,7 @@ reviewed YAML change when operational evidence exists.
 
 ## Consequences
 
-- The current 121-knob claim fails closed when a path disappears or becomes null.
+- The current 126-knob claim fails closed when a path disappears or becomes null.
 - Changing a dotted path requires updating the inventory in the same review.
 - The five selected defaults are explicit decisions rather than undocumented
   implementation guesses.

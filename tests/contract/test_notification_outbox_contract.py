@@ -13,7 +13,7 @@ from agent_core.adapters.persistence.notifications import (
     InMemoryNotificationOutbox,
 )
 from agent_core.domain.agents import Principal
-from agent_core.domain.devices import PushProvider
+from agent_core.domain.devices import Device, DeviceKind, PushProvider
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.notifications import (
     DeliveryOutcome,
@@ -124,6 +124,44 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
     assert settled[0].settled_at is not None
 
 
+async def assert_notification_claim_is_partitioned_by_provider(
+    outbox: NotificationOutbox,
+    registry: DeviceRegistry,
+) -> None:
+    surface_values = device(token=None).model_dump()
+    surface_values.update(
+        {
+            "kind": DeviceKind.SURFACE,
+            "platform": "telegram",
+            "app_bundle_id": None,
+            "push_provider": PushProvider.TELEGRAM,
+            "push_token": "paired-chat-reference",
+        }
+    )
+    await registry.upsert(Device.model_validate(surface_values), principal())
+    assert await outbox.enqueue(new_notification()) is not None
+
+    assert (
+        await outbox.claim_due(
+            NOW,
+            1,
+            "notify-a",
+            30,
+            frozenset({PushProvider.APNS}),
+        )
+        == []
+    )
+    [claimed] = await outbox.claim_due(
+        NOW,
+        1,
+        "surface-a",
+        30,
+        frozenset({PushProvider.TELEGRAM}),
+    )
+    assert claimed.attempts == 1
+    assert claimed.claimed_by == "surface-a"
+
+
 async def assert_notification_delivery_attempt_is_unique(
     outbox: NotificationOutbox,
     registry: DeviceRegistry,
@@ -165,6 +203,7 @@ async def assert_notification_delivery_attempt_is_unique(
         attempted_at=NOW,
     )
     await outbox.record_delivery(delivery)
+    assert await outbox.list_deliveries(notification.id) == [delivery]
     with pytest.raises(ConflictError):
         await outbox.record_delivery(
             delivery.model_copy(update={"id": UUID(int=delivery.id.int + 1)})
@@ -188,5 +227,12 @@ async def test_notification_claim_settle_and_pagination() -> None:
 async def test_notification_delivery_attempt_is_unique() -> None:
     registry = InMemoryDeviceRegistry()
     await assert_notification_delivery_attempt_is_unique(
+        InMemoryNotificationOutbox(FixedClock(NOW), registry), registry
+    )
+
+
+async def test_notification_claim_is_partitioned_by_provider() -> None:
+    registry = InMemoryDeviceRegistry()
+    await assert_notification_claim_is_partitioned_by_provider(
         InMemoryNotificationOutbox(FixedClock(NOW), registry), registry
     )

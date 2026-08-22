@@ -513,6 +513,11 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
             r"run_defaults must be a mapping",
         ),
         (
+            "runtime/limits.yaml",
+            "notifications:\n  retry_delays_seconds: []\n",
+            r"notifications\.retry_delays_seconds must contain positive numbers",
+        ),
+        (
             "tools/limits.yaml",
             "circuit_breaker:\n  identical_call_threshold: 1\n",
             r"identical_call_threshold must be at least 2",
@@ -656,11 +661,11 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_121_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_126_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 121
+    assert len(qualified_paths) == 126
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
