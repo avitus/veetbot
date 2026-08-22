@@ -17,6 +17,7 @@ from agent_core.evals.memory_benchmark import (
     ProbeCategory,
 )
 from agent_core.evals.memory_benchmark_driver import run_deterministic_scenario
+from agent_core.memory.formation import DeterministicCandidateExtractor
 from tests.integration.m2_support import memory_settings
 
 _START = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
@@ -220,6 +221,7 @@ async def test_bench_single_scenario_forms_and_recalls(tmp_path: Path) -> None:
     result = await run_deterministic_scenario(settings, _driven_scenario(), corpus=_corpus())
 
     assert result.scenario_id == "mb-gate-driver-001"
+    assert result.extractor_name == DeterministicCandidateExtractor.name
     assert [counts.session_id for counts in result.consolidations] == ["s01", "s02"]
     assert [counts.scope for counts in result.consolidations] == ["general", "general"]
     assert [counts.committed for counts in result.consolidations] == [2, 1]

@@ -49,10 +49,27 @@ from agent_core.evals.memory_benchmark import (
     score_probe,
 )
 from agent_core.evals.memory_benchmark_driver import MemoryBenchmarkResult
+from agent_core.memory.formation import FORMATION_POLICY_VERSION
+from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
+from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION
 from tests.contract.memory_fixtures import memory, recalled, trace
+from tests.integration.m2_support import memory_settings
 
 _START = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 _FORTY_DAYS = 40 * 24 * 60 * 60
+
+
+class _StoppedClock:
+    """A Clock that never moves, so a recorded timestamp is assertable."""
+
+    def __init__(self, at: datetime) -> None:
+        self._at = at
+
+    def now(self) -> datetime:
+        return self._at
+
+    async def sleep(self, seconds: float) -> None:
+        raise NotImplementedError("the benchmark's recording clock never sleeps")
 
 
 class _LiveStandIn(BaseModel):
@@ -620,6 +637,7 @@ def test_score_probe_counts_noise_returned_in_both_moments_once() -> None:
         [
             DeterministicScenarioResult(
                 scenario_id="mb-bench-001",
+                extractor_name="memory-extractor@1",
                 formation=FormationMetrics(
                     expected=1,
                     supported=1,
@@ -750,6 +768,7 @@ def _scenario_results() -> list[DeterministicScenarioResult]:
     return [
         DeterministicScenarioResult(
             scenario_id="mb-bench-001",
+            extractor_name="memory-extractor@1",
             formation=FormationMetrics(
                 expected=3, supported=2, formed=4, fabricated=1, stale_live=1, policy_failures=1
             ),
@@ -783,6 +802,7 @@ def _scenario_results() -> list[DeterministicScenarioResult]:
         ),
         DeterministicScenarioResult(
             scenario_id="mb-bench-002",
+            extractor_name="memory-extractor@1",
             formation=FormationMetrics(
                 expected=2, supported=2, formed=2, fabricated=0, stale_live=0, policy_failures=0
             ),
@@ -1068,15 +1088,9 @@ async def test_run_benchmark_fails_on_regression_and_writes_baseline_when_asked(
     ) -> DeterministicBenchmarkResult:
         return regressed
 
-    async def resolve_run_identity(
-        _settings: object = None, **_kwargs: object
-    ) -> tuple[str, datetime]:
-        return regressed.extractor_name, _START
-
     monkeypatch.setattr(
         memory_benchmark_driver, "run_deterministic_benchmark", run_deterministic_benchmark
     )
-    monkeypatch.setattr(memory_benchmark_driver, "resolve_run_identity", resolve_run_identity)
     output = tmp_path / "recorded.json"
 
     result = await memory_benchmark_driver.run_benchmark(
@@ -1087,6 +1101,7 @@ async def test_run_benchmark_fails_on_regression_and_writes_baseline_when_asked(
         build_ref="0123456789ab",
         output=None,
         baseline_output=output,
+        clock=_StoppedClock(_START),
     )
 
     assert result is not None
@@ -1118,6 +1133,7 @@ async def test_run_benchmark_fails_on_regression_and_writes_baseline_when_asked(
             build_ref="0123456789ab",
             output=None,
             baseline_output=output,
+            clock=_StoppedClock(_START),
         )
 
 
@@ -1221,3 +1237,70 @@ def test_probe_prompt_appends_the_instruction_only_for_the_live_arm() -> None:
     assert memory_benchmark_driver.probe_prompt(probe, corpus, live=True) == (
         f"{probe.question}\n{corpus.probe_instruction}"
     )
+
+
+async def test_run_deterministic_benchmark_stamps_the_identity_it_ran_under(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / CORPUS_PATH.parent).mkdir(parents=True)
+    (repository / CORPUS_PATH).write_text(_corpus().model_dump_json(), encoding="utf-8")
+    observed: list[str] = []
+
+    async def run_deterministic_scenario(
+        _settings: object, scenario: BenchmarkScenario, **_kwargs: object
+    ) -> DeterministicScenarioResult:
+        observed.append(scenario.id)
+        return DeterministicScenarioResult(
+            scenario_id=scenario.id,
+            extractor_name="provider-assisted-test-v1",
+            formation=FormationMetrics(
+                expected=0, supported=0, formed=0, fabricated=0, stale_live=0, policy_failures=0
+            ),
+        )
+
+    monkeypatch.setattr(
+        memory_benchmark_driver, "run_deterministic_scenario", run_deterministic_scenario
+    )
+
+    result = await memory_benchmark_driver.run_deterministic_benchmark(
+        repository, settings=memory_settings()
+    )
+
+    assert observed == [scenario.id for scenario in _corpus().scenarios]
+    assert result.extractor_name == "provider-assisted-test-v1"
+    assert result.formation_policy_version == FORMATION_POLICY_VERSION
+    assert result.provider_formation_policy_version == PROVIDER_FORMATION_POLICY_VERSION
+    assert result.retrieval_policy_version == RETRIEVAL_POLICY_VERSION
+    assert result.benchmark_version == BENCHMARK_VERSION
+    assert result.corpus_sha256 == load_corpus(repository)[1]
+    assert result.metrics.scenario_count == 12
+
+
+async def test_run_benchmark_defaults_its_recording_clock_to_the_composition_root(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    async def run_deterministic_benchmark(
+        _root: Path, **_kwargs: object
+    ) -> DeterministicBenchmarkResult:
+        return _result()
+
+    monkeypatch.setattr(
+        memory_benchmark_driver, "run_deterministic_benchmark", run_deterministic_benchmark
+    )
+    output = tmp_path / "recorded.json"
+
+    await memory_benchmark_driver.run_benchmark(
+        tmp_path,
+        deterministic_only=True,
+        model_policy="balanced",
+        policy_profile="default",
+        build_ref="0123456789ab",
+        output=None,
+        baseline_output=output,
+    )
+
+    recorded = MemoryBenchmarkBaseline.model_validate_json(output.read_text(encoding="utf-8"))
+
+    assert recorded.recorded_at.tzinfo is not None
+    assert recorded.recorded_at.utcoffset() == timedelta(0)

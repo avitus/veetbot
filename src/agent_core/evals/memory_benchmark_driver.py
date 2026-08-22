@@ -59,6 +59,7 @@ from agent_core.memory.formation import FORMATION_POLICY_VERSION
 from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
 from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from agent_core.ports.determinism import Clock
 
 EVALUATION_PRINCIPAL = Principal(
     tenant_id="evaluation",
@@ -145,62 +146,26 @@ async def _benchmark(
     *,
     policy_profile: str,
 ) -> DeterministicBenchmarkResult:
-    extractor_name, _asked_at = await resolve_run_identity(settings, policy_profile=policy_profile)
     scenarios = [
         await run_deterministic_scenario(
             settings, scenario, corpus=corpus, policy_profile=policy_profile
         )
         for scenario in corpus.scenarios
     ]
+    if not scenarios:
+        raise ValueError("a benchmark run needs at least one scenario to name its extractor")
     return DeterministicBenchmarkResult(
         benchmark_version=BENCHMARK_VERSION,
         corpus_sha256=corpus_sha256,
         formation_policy_version=FORMATION_POLICY_VERSION,
         provider_formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
-        extractor_name=extractor_name,
+        # Every scenario composes from the same settings, so the first one's
+        # extractor is the run's extractor.
+        extractor_name=scenarios[0].extractor_name,
         scenarios=scenarios,
         metrics=aggregate_deterministic(scenarios),
     )
-
-
-async def resolve_run_identity(
-    settings: Settings | None = None, *, policy_profile: str = "default"
-) -> tuple[str, datetime]:
-    """Name the composed memory candidate extractor, and stamp the moment.
-
-    The extractor names part of a baseline's identity, and the composition root
-    chooses it from settings, so assuming the deterministic one would let a
-    result claim an identity it does not have.  A consolidation run with no
-    session does no work and returns a run whose `model` is the composed
-    extractor's name, which is the cheapest public way to ask.  The same
-    composition supplies the instant a baseline records, because evaluation
-    code reads the wall clock through the Clock port and never ambiently.
-    """
-
-    if settings is None:
-        with tempfile.TemporaryDirectory(prefix="agent-memory-benchmark-") as temporary_root:
-            return await _ask_identity(_borrowed_settings(temporary_root), policy_profile)
-    return await _ask_identity(settings, policy_profile)
-
-
-async def _ask_identity(settings: Settings, policy_profile: str) -> tuple[str, datetime]:
-    # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
-    bootstrap = importlib.import_module("agent_core.bootstrap")
-    async with bootstrap.build(
-        settings=settings,
-        storage="memory",
-        principal=EVALUATION_PRINCIPAL,
-        policy_profile=policy_profile,
-    ) as composition:
-        identity = await composition.memory.run(
-            trigger="benchmark_identity", scope=DEFAULT_SCOPE, session_id=None
-        )
-        name = identity.run.model
-        asked_at: datetime = composition.clock.now()
-    if not isinstance(name, str) or not name:
-        raise ValueError("the composition did not name its memory candidate extractor")
-    return name, asked_at
 
 
 def write_baseline(
@@ -243,6 +208,7 @@ async def run_benchmark(
     build_ref: str,
     output: Path | None,
     baseline_output: Path | None,
+    clock: Clock | None = None,
 ) -> MemoryBenchmarkResult | None:
     """Run the benchmark the command asked for and judge it.
 
@@ -252,7 +218,8 @@ async def run_benchmark(
     opt-in skips cleanly and asking for it with the opt-in says so plainly
     rather than quietly reporting a deterministic-only result as a live one.
     `model_policy` and `output` belong to that arm and are unused until it
-    lands.
+    lands.  `clock` stamps a recorded baseline and defaults to the composition
+    root's wall clock, because evaluation code never reads the ambient one.
     """
 
     del model_policy, output
@@ -267,11 +234,13 @@ async def run_benchmark(
     recorded = load_baseline(repository_root)
     comparison = None if recorded is None else compare_to_baseline(result, recorded)
     if baseline_output is not None:
-        _extractor, recorded_at = await resolve_run_identity(policy_profile=policy_profile)
+        # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
+        bootstrap = importlib.import_module("agent_core.bootstrap")
+        recording_clock: Clock = clock or bootstrap.system_clock()
         write_baseline(
             result,
             build_ref=build_ref,
-            recorded_at=recorded_at,
+            recorded_at=recording_clock.now(),
             path=baseline_output,
         )
     failures = [] if comparison is None else [*comparison.drift, *comparison.regressions]
@@ -338,10 +307,12 @@ async def run_deterministic_scenario(
         await composition.maintenance_factory().run_once()
         for probe in scenario.probes:
             probes.append(await _probe(composition, clock, scenario, probe, corpus))
+        extractor_name: str = composition.memory.extractor_name
         live: list[MemoryRecord] = await composition.memory.list_memories()
         every: list[MemoryRecord] = await composition.memory.list_memories(include_inactive=True)
     return DeterministicScenarioResult(
         scenario_id=scenario.id,
+        extractor_name=extractor_name,
         formation=score_formation(scenario, live, every),
         consolidations=consolidations,
         probes=probes,

@@ -439,11 +439,18 @@ class ProbeRetrievalResult(BaseModel):
 
 
 class DeterministicScenarioResult(BaseModel):
-    """One scenario's formation, consolidation, and probe results."""
+    """One scenario's formation, consolidation, and probe results.
+
+    `extractor_name` names the candidate extractor the composition wired for
+    this scenario, which is the identity a baseline records; it is carried per
+    scenario because the driver that owns the composition is the only place
+    that can read it.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     scenario_id: str = Field(min_length=1)
+    extractor_name: str = Field(min_length=1)
     formation: FormationMetrics
     consolidations: list[ConsolidationCounts] = Field(default_factory=list)
     probes: list[ProbeRetrievalResult] = Field(default_factory=list)

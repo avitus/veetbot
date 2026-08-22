@@ -14,6 +14,7 @@ from datetime import timedelta
 
 import pytest
 
+from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.domain.errors import ConflictError, ToolValidationError
 from agent_core.domain.events import EventEnvelope
@@ -395,3 +396,15 @@ async def test_formation_events_carry_the_belief_payload() -> None:
     assert isinstance(payload_belief, dict)
     assert payload_belief["id"] == str(belief.id)
     assert formed[0].actor_type == "principal"
+
+
+async def test_service_names_the_candidate_extractor_it_was_configured_with() -> None:
+    clock, factory, service, _retriever = await formation_stack()
+    renamed = DeterministicCandidateExtractor()
+    renamed.name = "provider-assisted-test-v1"
+    configured = GovernedMemoryService(
+        factory, clock, SequenceIdFactory(), principal(), extractor=renamed
+    )
+
+    assert service.extractor_name == DeterministicCandidateExtractor.name
+    assert configured.extractor_name == "provider-assisted-test-v1"

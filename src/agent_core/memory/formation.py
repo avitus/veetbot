@@ -495,6 +495,12 @@ class GovernedMemoryService:
         self._extractor = extractor or DeterministicCandidateExtractor()
         self._policy_version = policy_version
 
+    @property
+    def extractor_name(self) -> str:
+        """Name the configured candidate extractor, as a consolidation records it."""
+
+        return self._extractor.name
+
     async def remember(
         self,
         *,
