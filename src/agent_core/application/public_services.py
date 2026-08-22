@@ -25,6 +25,7 @@ from agent_core.domain.approvals import (
     ApprovalStatus,
 )
 from agent_core.domain.artifacts import StoredArtifactRef
+from agent_core.domain.browser import BrowserProfileStatus
 from agent_core.domain.canonical import canonical_json
 from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
@@ -45,7 +46,13 @@ from agent_core.domain.messages import (
 from agent_core.domain.persistence import IdempotencyRecord
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunStatus
-from agent_core.domain.sessions import Session, SessionCursor, SessionStatus, conversation_title
+from agent_core.domain.sessions import (
+    SESSION_BROWSER_PROFILE_METADATA_KEY,
+    Session,
+    SessionCursor,
+    SessionStatus,
+    conversation_title,
+)
 from agent_core.domain.tools import ToolInvocationStatus, ToolOutcome, ToolOutcomeStatus
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.domain.views import (
@@ -348,14 +355,28 @@ class PublicSessionService:
         principal: Principal,
         agent_id: str,
         metadata: dict[str, object],
+        browser_profile_id: UUID | None = None,
     ) -> SessionView:
         require_scope(principal, "session.write")
-        encoded = canonical_json(metadata).encode("utf-8")
+        if SESSION_BROWSER_PROFILE_METADATA_KEY in metadata:
+            raise ValueError("session metadata key is reserved for trusted browser binding")
+        bound_metadata = dict(metadata)
+        if browser_profile_id is not None:
+            require_scope(principal, "browser.profile.read")
+            bound_metadata[SESSION_BROWSER_PROFILE_METADATA_KEY] = str(browser_profile_id)
+        encoded = canonical_json(bound_metadata).encode("utf-8")
         if len(encoded) > 8 * 1024:
             raise ValueError("session metadata exceeds 8 KiB")
         now = self._clock.now()
         async with self._uow_factory() as uow:
             agent = await self._resolve_agent(uow, agent_id)
+            if browser_profile_id is not None:
+                profile = await uow.browser_profiles.get(browser_profile_id, principal)
+                if profile.status is not BrowserProfileStatus.READY:
+                    raise InvalidStateTransition(
+                        "browser profile is not ready",
+                        reason="browser_profile_not_ready",
+                    )
             session_id, catalog = await bootstrap_session(
                 uow,
                 self._ids,
@@ -371,7 +392,7 @@ class PublicSessionService:
                 agent_id=agent.id,
                 agent_version=agent.version,
                 status=SessionStatus.ACTIVE,
-                metadata=dict(metadata),
+                metadata=bound_metadata,
                 created_at=now,
                 updated_at=now,
             )

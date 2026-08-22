@@ -99,6 +99,21 @@ def test_hosted_browser_provider_requires_trusted_profile_and_service_configurat
     assert "browser_profile_control_plane" in settings.credentials
 
 
+def test_hosted_browser_provider_supports_principal_selected_session_profiles() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        }
+    )
+
+    assert settings.browser_provider.value == "hosted"
+    assert settings.browser_profile_id is None
+    assert settings.browser_allowed_origins == ()
+
+
 @pytest.mark.parametrize(
     ("missing", "message"),
     [

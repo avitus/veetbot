@@ -621,13 +621,11 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 439 source and test
-          files, 717 static tests, 296 contracts, deployment-script checks,
-          121 citation checks, and strict documentation builds pass on the
-          integrated head. The static count includes the 25-case evaluation
-          front end relocated from the DB-gated integration directory. The
-          gate registry contains 200 entries and retains 166 as the verified
-          ceiling through Milestone 9.
+          Ruff formatting and linting, strict mypy over 476 source and test
+          files, 970 static tests, 325 contracts, deployment-script checks,
+          156 citation checks, and strict documentation builds pass on the
+          current head. The gate registry contains 305 reconciled entries and
+          retains 166 as the verified ceiling through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
@@ -680,6 +678,10 @@ verification:
           authentication, and grant routes enforce their dedicated scopes; the
           execution pipeline re-runs deterministic policy before honoring a
           matching grant and records the authorization kind and reference.
+          Authenticated session creation may bind one principal-owned READY
+          profile by opaque UUID. Reserved metadata prevents client
+          impersonation, and hosted composition resolves that binding per
+          session before acquiring a lease or applying its exact origin policy.
           Profile material remains outside PostgreSQL in versioned AES-256-GCM
           envelopes whose authenticated metadata binds tenant, principal,
           profile generation, origin scope, format, revocation, and key version.
@@ -707,7 +709,9 @@ verification:
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 82 Swift Testing cases passed, including complete historical
+          All 98 Swift Testing cases passed, including direct isolated website
+          login setup, secret-free browser-profile selection for new sessions,
+          complete historical
           transcript restoration, sidebar conversation navigation,
           forward-compatible message-role decoding, system composer sizing,
           connection-settings layout, and the missing-keychain-entitlement
@@ -1272,10 +1276,10 @@ verification:
         outcome: passed_locally
         detail: >-
           Ruff formatting and linting over 546 files, strict mypy over 504 source
-          and test files, 1044 static tests, 334 adapter contracts, all deployment
+          and test files, 1051 static tests, 335 adapter contracts, all deployment
           script tests, strict documentation and 156 citation checks pass. The
           PostgreSQL integration and resilience lane passes all 124 tests; clean
-          and stepwise migration plus metadata-drift checks pass. All 105 Apple
+          and stepwise migration plus metadata-drift checks pass. All 107 Apple
           package tests, iPhone and iPad simulator UI lanes, and unsigned Release
           iOS Simulator and macOS builds pass.
       - check: hosted CircleCI and CodeRabbit for pull request 38

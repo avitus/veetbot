@@ -158,6 +158,59 @@ public struct SessionView: Codable, Identifiable, Sendable {
     }
 }
 
+public enum BrowserProfileStatus: String, Codable, Hashable, Sendable {
+    case provisioning
+    case authenticationRequired = "authentication_required"
+    case ready
+    case needsUser = "needs_user"
+    case revoked
+}
+
+public struct BrowserProfileView: Codable, Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let allowedOrigins: [String]
+    public let status: BrowserProfileStatus
+    public let generation: Int
+    public let createdAt: Date
+    public let updatedAt: Date
+    public let lastUsedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, generation
+        case allowedOrigins = "allowed_origins"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+        case lastUsedAt = "last_used_at"
+    }
+}
+
+public enum BrowserAuthenticationStatus: String, Codable, Hashable, Sendable {
+    case authenticationRequired = "authentication_required"
+    case needsUser = "needs_user"
+    case ready
+    case expired
+    case cancelled
+
+    public var isTerminal: Bool {
+        self == .ready || self == .expired || self == .cancelled
+    }
+}
+
+public struct BrowserAuthenticationView: Codable, Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public let profileID: UUID
+    public let status: BrowserAuthenticationStatus
+    public let expiresAt: Date
+    public let launchURL: URL?
+
+    enum CodingKeys: String, CodingKey {
+        case id, status
+        case profileID = "profile_id"
+        case expiresAt = "expires_at"
+        case launchURL = "launch_url"
+    }
+}
+
 public enum SessionMessageRole: Hashable, Sendable {
     case user
     case assistant

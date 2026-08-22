@@ -523,6 +523,100 @@ import Testing
         #expect(model.selectedSessionID == nil)
     }
 
+    @Test
+    func testSelectedWebsiteProfileIsBoundWhenANewConversationIsCreated() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b1")
+        )
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b2")
+        )
+        let runID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b3")
+        )
+        let lock = NSLock()
+        var createSessionRequest: URLRequest?
+        let model = try configuredModel { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/browser-profiles"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"ready","generation":2,"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:01:00Z","last_used_at":null}],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/sessions"):
+                lock.withLock { createSessionRequest = request }
+                return try response(
+                    for: request,
+                    statusCode: 201,
+                    body: #"{"id":"\#(sessionID.uuidString)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"browser_profile_id":"\#(profileID.uuidString)"},"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:00:00Z","active_run_id":null,"last_run_id":null}"#
+                )
+            case ("POST", "/v1/sessions/\(sessionID.uuidString)/messages"):
+                return try response(
+                    for: request,
+                    statusCode: 202,
+                    body: #"{"run_id":"\#(runID.uuidString)","status":"QUEUED"}"#
+                )
+            case ("GET", "/v1/runs/\(runID.uuidString)/events"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "",
+                    headers: ["Content-Type": "text/event-stream"]
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+        await model.refreshBrowserProfiles()
+        await model.selectBrowserProfile(profileID)
+
+        #expect(await model.send("Use my account") == true)
+        model.newSession()
+
+        let request = try #require(lock.withLock { createSessionRequest })
+        let json = try requestJSONObject(request)
+        #expect(json["browser_profile_id"] as? String == profileID.uuidString)
+        #expect(json["username"] == nil)
+        #expect(json["password"] == nil)
+    }
+
+    private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
+        let data: Data
+        if let body = request.httpBody {
+            data = body
+        } else {
+            let stream = try #require(request.httpBodyStream)
+            stream.open()
+            defer { stream.close() }
+            var bytes = Data()
+            var buffer = [UInt8](repeating: 0, count: 1_024)
+            while stream.hasBytesAvailable {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                guard count >= 0 else {
+                    throw stream.streamError ?? HTTPTransportError.invalidResponse
+                }
+                if count == 0 { break }
+                bytes.append(buffer, count: count)
+            }
+            data = bytes
+        }
+        return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
     private func configuredModel(
         handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)
     ) throws -> ChatViewModel {

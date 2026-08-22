@@ -58,6 +58,75 @@ import Testing
     }
 
     @Test
+    func testWebsiteAccessUsesProfileIdentifiersAndDirectAuthenticationCeremonies() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000a1")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000a2")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let path = request.url?.path ?? ""
+            let body: String
+            let statusCode: Int
+            switch (request.httpMethod, path) {
+            case ("POST", "/v1/browser-profiles"):
+                statusCode = 201
+                body = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:00:00Z","last_used_at":null}"#
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                statusCode = 201
+                body = #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-08-22T12:05:00Z","launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque"}"#
+            case ("POST", "/v1/sessions"):
+                statusCode = 201
+                body = #"{"id":"00000000-0000-0000-0000-0000000000a3","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"browser_profile_id":"\#(profileID.uuidString)"},"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:00:00Z","active_run_id":null,"last_run_id":null}"#
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "") \(path)")
+                statusCode = 500
+                body = "{}"
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: statusCode,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+
+        let client = try makeClient(token: "valid")
+        let profile = try await client.createBrowserProfile(
+            allowedOrigins: ["https://example.org"],
+            idempotencyKey: "profile-create"
+        )
+        let ceremony = try await client.beginBrowserAuthentication(
+            profileID: profile.id,
+            loginURL: "https://example.org/login"
+        )
+        _ = try await client.createSession(browserProfileID: profile.id)
+
+        #expect(ceremony.launchURL?.fragment == "capability=opaque")
+        let captured = lock.withLock { requests }
+        #expect(captured.count == 3)
+        #expect(
+            captured[0].value(forHTTPHeaderField: "Idempotency-Key") == "profile-create"
+        )
+        let profileJSON = try requestJSONObject(captured[0])
+        #expect(profileJSON["allowed_origins"] as? [String] == ["https://example.org"])
+        let ceremonyJSON = try requestJSONObject(captured[1])
+        #expect(ceremonyJSON["login_url"] as? String == "https://example.org/login")
+        let sessionJSON = try requestJSONObject(captured[2])
+        #expect(sessionJSON["browser_profile_id"] as? String == profileID.uuidString)
+        #expect(sessionJSON["username"] == nil)
+        #expect(sessionJSON["password"] == nil)
+    }
+
+    @Test
     func testKeychainStoreUsesLocalDataProtectionKeychain() {
         let query = KeychainTokenStore.makeBaseQuery(
             service: "com.veetbot.test",

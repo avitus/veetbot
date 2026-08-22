@@ -44,7 +44,11 @@ from agent_core.domain.views import (
 
 class SessionService(Protocol):
     async def create(
-        self, principal: Principal, agent_id: str, metadata: dict[str, object]
+        self,
+        principal: Principal,
+        agent_id: str,
+        metadata: dict[str, object],
+        browser_profile_id: UUID | None = None,
     ) -> SessionView: ...
 
     async def get(self, principal: Principal, session_id: UUID) -> SessionView: ...
