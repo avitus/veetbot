@@ -35,11 +35,11 @@ printf '%s\n' \
   'AUTH_PRINCIPAL_ID=test' \
   'AUTH_SCOPES=session.read' \
   'SANDBOX_MECHANISM=gvisor' \
+  'AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock' \
   'AGENT_ARTIFACT_ROOT=/tmp' \
   'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' \
   "BROWSER_PROFILE_SERVICE_AUTH_FILE=$PROFILE_AUTH_FILE" \
   "BROWSER_PROFILE_SESSION_SECRET_FILE=$PROFILE_SESSION_FILE" \
-  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=$PROFILE_AUTH_FILE" \
   'BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.example.test' \
   "BROWSER_PROFILE_KEY_DIR=$PROFILE_KEY_DIR" >"$ENV_FILE"
 
@@ -103,7 +103,8 @@ write_stub curl '
   if [[ -n "$headers" ]]; then
     printf "curl health\n" >>"$VEETBOT_TEST_LOG"
     if [[ "${VEETBOT_TEST_FAIL_HEALTH:-0}" == 1 ]]; then exit 1; fi
-    printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" "$VEETBOT_TEST_RELEASE" >"$headers"
+    printf "HTTP/1.1 200 OK\r\nX-Veetbot-Release: %s\r\n\r\n" \
+      "$VEETBOT_TEST_READY_RELEASE" >"$headers"
   else
     cat >"$VEETBOT_TEST_AUTH_HEADERS"
     printf "curl session-index %s\n" "$request_url" >>"$VEETBOT_TEST_LOG"
@@ -135,6 +136,7 @@ make_stage() {
     veetbot-api \
     veetbot-worker \
     veetbot-async-worker \
+    veetbot-execution \
     veetbot-maintenance \
     veetbot-schedule; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
@@ -160,6 +162,7 @@ run_release() {
   VEETBOT_ROOT="$DEPLOY_ROOT" \
   VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
   VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
+  VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE="$PROFILE_AUTH_FILE" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
   VEETBOT_KEEP_RELEASES=2 \
@@ -167,6 +170,7 @@ run_release() {
   VEETBOT_TEST_LOG="$LOG_FILE" \
   VEETBOT_TEST_AUTH_HEADERS="$TEST_ROOT/session-index-headers" \
   VEETBOT_TEST_RELEASE="$release_id" \
+  VEETBOT_TEST_READY_RELEASE="${VEETBOT_TEST_READY_RELEASE:-$release_id}" \
   VEETBOT_API_BASE_URL="${VEETBOT_TEST_API_BASE_URL:-http://127.0.0.1:8000/}" \
     "$RELEASE_SCRIPT" "$release_id"
 }
@@ -202,7 +206,7 @@ grep -Fq 'docker build -f deploy/browser-profile-service.Dockerfile' "$LOG_FILE"
 grep -Fq 'docker compose --env-file' "$LOG_FILE"
 grep -Fq -- '--project-name veetbot' "$LOG_FILE"
 grep -Fq \
-  'systemctl restart veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
 grep -Fq 'systemctl disable --now veetbot-schedule' "$LOG_FILE"
 grep -Fq 'curl session-index' "$LOG_FILE"
@@ -325,7 +329,19 @@ VEETBOT_TEST_ENV_FILE="$schedule_env" \
 grep -Fxq "EnvironmentFile=$schedule_worker_env" \
   "$SYSTEMD_DIR/veetbot-schedule.service"
 grep -Fq \
-  'systemctl restart veetbot-schedule veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
+
+case_mismatch_id="20260810-152257-abcdef0"
+make_stage "$case_mismatch_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$case_mismatch_id" "$PROCESS_ROOT/4242/cwd"
+if VEETBOT_TEST_READY_RELEASE=20260810-152257-ABCDEF0 run_release "$case_mismatch_id" \
+  >"$TEST_ROOT/case-mismatch.out" 2>&1; then
+  printf 'release with a case-mismatched readiness identity unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq "local readiness probe did not report $case_mismatch_id" \
+  "$TEST_ROOT/case-mismatch.out"
 
 printf 'release script tests passed\n'

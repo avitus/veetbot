@@ -413,15 +413,16 @@ def test_token_auth_requires_token() -> None:
 def test_schedule_worker_identity_does_not_require_the_api_bearer_token() -> None:
     values = {
         **base_environment(),
+        "DEPLOYMENT_MODE": "production",
         "AUTH_MODE": "token",
         "AUTH_TENANT_ID": "tenant-a",
         "AUTH_PRINCIPAL_ID": "principal-a",
         "AUTH_SCOPES": "schedule.read",
-        "SANDBOX_MECHANISM": "gvisor",
     }
     settings = load_schedule_worker_settings(values)
     assert settings.auth_token is None
     assert settings.auth_principal_id == "principal-a"
+    assert settings.execution_service_socket is None
 
 
 @pytest.mark.parametrize("mechanism", ["docker", "fake"])
@@ -435,6 +436,29 @@ def test_production_refuses_development_sandboxes(mechanism: str) -> None:
     }
     with pytest.raises(ConfigurationError, match="refuses"):
         load_settings(values)
+
+
+def test_production_requires_the_credential_free_execution_service() -> None:
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TOKEN": "local-test-token-value",
+        "AUTH_TENANT_ID": "tenant-production",
+        "AUTH_PRINCIPAL_ID": "operator",
+        "AUTH_SCOPES": "session.read,run.read",
+        "SANDBOX_MECHANISM": "gvisor",
+    }
+
+    with pytest.raises(ConfigurationError, match="AGENT_EXECUTION_SERVICE_SOCKET"):
+        load_settings(values)
+    with pytest.raises(ConfigurationError, match="must be an absolute path"):
+        load_settings({**values, "AGENT_EXECUTION_SERVICE_SOCKET": "execution.sock"})
+
+    settings = load_settings(
+        {**values, "AGENT_EXECUTION_SERVICE_SOCKET": "/run/veetbot/execution.sock"}
+    )
+    assert settings.execution_service_socket == Path("/run/veetbot/execution.sock")
 
 
 def test_hardline_overlay_is_refused(tmp_path: Path) -> None:
@@ -578,6 +602,7 @@ def test_production_refuses_evaluation_identity() -> None:
         "AUTH_PRINCIPAL_ID": "operator",
         "AUTH_SCOPES": "session.read,run.read",
         "SANDBOX_MECHANISM": "microvm",
+        "AGENT_EXECUTION_SERVICE_SOCKET": "/run/veetbot/execution.sock",
     }
     settings = load_settings(values)
     with pytest.raises(ConfigurationError, match="evaluation identity"):

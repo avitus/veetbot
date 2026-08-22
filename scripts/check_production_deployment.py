@@ -47,8 +47,9 @@ def _browser_credential_failures(environment: Mapping[str, str]) -> list[str]:
     """Reject the shared-path browser credential misconfiguration.
 
     The profile service requires its auth file to be owned by uid 65532 while
-    the agent units read the control-plane credential as the service account;
-    both readers require mode 0600, so one file can never serve both.
+    systemd copies the deploy-owned control-plane source into each application
+    unit's private credential directory. Both sources require mode 0600, so one
+    file can never serve both boundaries.
     """
 
     credential = environment.get("BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE", "").strip()
@@ -58,8 +59,8 @@ def _browser_credential_failures(environment: Mapping[str, str]) -> list[str]:
             "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE and "
             "BROWSER_PROFILE_SERVICE_AUTH_FILE must name different files: the "
             "containerized profile service owns its auth file as uid 65532 while "
-            "the agent units read the credential as the service account, and a "
-            "0600 file cannot serve both readers"
+            "systemd copies the deploy-owned control-plane source into the "
+            "application units, and a 0600 file cannot serve both boundaries"
         ]
     return []
 

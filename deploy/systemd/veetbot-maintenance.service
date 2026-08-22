@@ -1,7 +1,8 @@
 [Unit]
 Description=Veetbot maintenance worker
-After=network-online.target
+After=network-online.target veetbot-execution.service
 Wants=network-online.target
+Requires=veetbot-execution.service
 
 [Service]
 Type=simple
@@ -9,6 +10,8 @@ User=veetbot
 Group=veetbot
 WorkingDirectory=/opt/veetbot/current
 EnvironmentFile=/etc/veetbot/veetbot.env
+LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential
+Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane
 ExecStart=/opt/veetbot/current/.venv/bin/agent worker --role maintenance
 Restart=on-failure
 RestartSec=5s

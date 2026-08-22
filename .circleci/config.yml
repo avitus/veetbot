@@ -122,25 +122,32 @@ jobs:
 
   package-release:
     docker:
-      - image: cimg/base:stable
+      - image: cimg/python:3.12
     resource_class: small
     steps:
       - checkout
+      - install_uv
       - run:
-          name: Package immutable source release
+          name: Package immutable application and documentation release
           command: |
             mkdir -p build/release
-            git archive --format=tar.gz \
-              --output=build/release/veetbot-server.tar.gz "$CIRCLE_SHA1"
             release_id="$(date -u +%Y%m%d-%H%M%S)-${CIRCLE_SHA1:0:7}"
             printf '%s\n' "$release_id" > build/release/release-id
+            git archive --format=tar.gz \
+              --output=build/release/veetbot-server.tar.gz "$CIRCLE_SHA1"
+            uv run --frozen --only-group docs mkdocs build --strict
+            printf '%s\n' "$release_id" > site/release.txt
+            tar -czf build/release/veetbot-docs.tar.gz -C site .
             cd build/release
             sha256sum veetbot-server.tar.gz > veetbot-server.tar.gz.sha256
+            sha256sum veetbot-docs.tar.gz > veetbot-docs.tar.gz.sha256
       - persist_to_workspace:
           root: build/release
           paths:
             - veetbot-server.tar.gz
             - veetbot-server.tar.gz.sha256
+            - veetbot-docs.tar.gz
+            - veetbot-docs.tar.gz.sha256
             - release-id
 
   deploy-app:
@@ -255,14 +262,68 @@ jobs:
             [[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]
             remote_config="/tmp/veetbot-nginx-$CIRCLE_SHA1.conf"
             remote_script="/tmp/veetbot-nginx-$CIRCLE_SHA1.sh"
+            remote_docs_dir="/tmp/veetbot-docs-$CIRCLE_SHA1"
+            remote_docs="$remote_docs_dir/veetbot-docs.tar.gz"
+            remote_docs_checksum="$remote_docs.sha256"
+            deployment_outcome="/tmp/veetbot-release/nginx-deployment-outcome"
+            rm -f "$deployment_outcome"
             scp -P "${DEPLOY_PORT:-22}" nginx/veetbot.conf \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_config"
             scp -P "${DEPLOY_PORT:-22}" deploy/nginx/deploy.sh \
               "$DEPLOY_USER@$DEPLOY_HOST:$remote_script"
             ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
+              "install -d -m 0700 '$remote_docs_dir'"
+            scp -P "${DEPLOY_PORT:-22}" \
+              /tmp/veetbot-release/veetbot-docs.tar.gz \
+              "$DEPLOY_USER@$DEPLOY_HOST:$remote_docs"
+            scp -P "${DEPLOY_PORT:-22}" \
+              /tmp/veetbot-release/veetbot-docs.tar.gz.sha256 \
+              "$DEPLOY_USER@$DEPLOY_HOST:$remote_docs_checksum"
+            if ssh -p "${DEPLOY_PORT:-22}" "$DEPLOY_USER@$DEPLOY_HOST" \
               "VEETBOT_EXPECTED_RELEASE_ID='$expected_release_id' \
-               bash '$remote_script' '$remote_config'; \
-               status=\$?; rm -f '$remote_script' '$remote_config'; exit \$status"
+                 bash '$remote_script' '$remote_config' '$remote_docs' \
+                   '$remote_docs_checksum'; \
+               status=\$?; \
+               rm -f '$remote_script' '$remote_config' '$remote_docs' \
+                 '$remote_docs_checksum'; \
+               rmdir '$remote_docs_dir' 2>/dev/null || true; \
+               exit \$status"; then
+              printf 'published\n' >"$deployment_outcome"
+            else
+              deployment_status=$?
+              if [[ "$deployment_status" == 3 ]]; then
+                printf 'stale\n' >"$deployment_outcome"
+              else
+                exit "$deployment_status"
+              fi
+            fi
+      - run:
+          name: Verify public documentation release
+          command: |
+            expected_release_id="$(cat /tmp/veetbot-release/release-id)"
+            deployment_outcome="$(cat /tmp/veetbot-release/nginx-deployment-outcome)"
+            if [[ "$deployment_outcome" == stale ]]; then
+              echo "Skipping documentation identity probe for stale release $expected_release_id"
+              exit 0
+            fi
+            [[ "$deployment_outcome" == published ]]
+            docs_url="${DOCS_URL:-https://docs.veetbot.com}"
+            attempt=0
+            max_attempts=10
+            while (( attempt < max_attempts )); do
+              attempt=$((attempt + 1))
+              if release_id="$(curl --fail --silent --show-error \
+                   --connect-timeout 5 --max-time 15 \
+                   "$docs_url/release.txt")" \
+                 && [[ "$release_id" == "$expected_release_id" ]]; then
+                exit 0
+              fi
+              if (( attempt < max_attempts )); then
+                sleep 5
+              fi
+            done
+            echo "documentation did not report release $expected_release_id" >&2
+            exit 1
 
 workflows:
   verify:

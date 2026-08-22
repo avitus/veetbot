@@ -1,15 +1,17 @@
 [Unit]
 Description=Veetbot durable worker
-After=network-online.target docker.service
-Wants=network-online.target docker.service
+After=network-online.target veetbot-execution.service
+Wants=network-online.target
+Requires=veetbot-execution.service
 
 [Service]
 Type=simple
 User=veetbot
 Group=veetbot
-SupplementaryGroups=docker
 WorkingDirectory=/opt/veetbot/current
 EnvironmentFile=/etc/veetbot/veetbot.env
+LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential
+Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane
 ExecStart=/opt/veetbot/current/.venv/bin/agent worker --role interactive
 Restart=on-failure
 RestartSec=5s
@@ -18,7 +20,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/veetbot/artifacts /var/run/docker.sock
+ReadWritePaths=/var/lib/veetbot/artifacts
 UMask=0077
 
 [Install]

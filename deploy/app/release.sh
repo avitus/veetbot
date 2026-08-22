@@ -6,6 +6,7 @@ RELEASE_ID="${1:-}"
 DEPLOY_ROOT="${VEETBOT_ROOT:-/opt/veetbot}"
 ENV_FILE="${VEETBOT_ENV_FILE:-/etc/veetbot/veetbot.env}"
 SCHEDULE_ENV_FILE="${VEETBOT_SCHEDULE_ENV_FILE:-/etc/veetbot/veetbot-schedule.env}"
+BROWSER_CONTROL_CREDENTIAL_FILE="${VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE:-/etc/veetbot/secrets/browser-control-plane-credential}"
 SYSTEMD_DIR="${VEETBOT_SYSTEMD_DIR:-/etc/systemd/system}"
 PROCESS_ROOT="${VEETBOT_PROCESS_ROOT:-/proc}"
 KEEP_RELEASES="${VEETBOT_KEEP_RELEASES:-5}"
@@ -14,7 +15,7 @@ HEALTH_URL="${VEETBOT_HEALTH_URL:-http://127.0.0.1:8000/health/ready}"
 API_BASE_URL="${VEETBOT_API_BASE_URL:-http://127.0.0.1:8000}"
 HEALTH_TIMEOUT_SECS="${VEETBOT_HEALTH_TIMEOUT_SECS:-60}"
 RELEASE_PATTERN='^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$'
-UNITS=(veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api)
+UNITS=(veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api)
 
 fail() {
   printf 'release failed: %s\n' "$*" >&2
@@ -104,6 +105,7 @@ for required in \
   deploy/systemd/veetbot-api.service \
   deploy/systemd/veetbot-worker.service \
   deploy/systemd/veetbot-async-worker.service \
+  deploy/systemd/veetbot-execution.service \
   deploy/systemd/veetbot-maintenance.service \
   deploy/systemd/veetbot-schedule.service \
   execution/sandbox.Dockerfile \
@@ -128,6 +130,7 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
+export BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE="$BROWSER_CONTROL_CREDENTIAL_FILE"
 [[ -n "${AUTH_TOKEN:-}" ]] || fail "AUTH_TOKEN is required for the API contract probe"
 [[ "${BROWSER_PROFILE_SERVICE_AUTH_FILE:-}" = /* ]] || fail \
   "BROWSER_PROFILE_SERVICE_AUTH_FILE must be an absolute path"
@@ -141,12 +144,12 @@ set +a
   "BROWSER_PROFILE_SESSION_SECRET_FILE must name an existing regular file"
 [[ ! -L "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]] || fail \
   "BROWSER_PROFILE_SESSION_SECRET_FILE must not be a symlink"
-[[ "${BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE:-}" = /* ]] || fail \
-  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must be an absolute path"
-[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]] || fail \
-  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must name an existing regular file"
-[[ ! -L "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]] || fail \
-  "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE must not be a symlink"
+[[ "$BROWSER_CONTROL_CREDENTIAL_FILE" = /* ]] || fail \
+  "VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE must be an absolute path: $BROWSER_CONTROL_CREDENTIAL_FILE"
+[[ -f "$BROWSER_CONTROL_CREDENTIAL_FILE" ]] || fail \
+  "VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE must name an existing regular file: $BROWSER_CONTROL_CREDENTIAL_FILE"
+[[ ! -L "$BROWSER_CONTROL_CREDENTIAL_FILE" ]] || fail \
+  "VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE must not be a symlink: $BROWSER_CONTROL_CREDENTIAL_FILE"
 [[ "${BROWSER_PROFILE_CEREMONY_BASE_URL:-}" =~ ^https://[^/?#[:space:]]+/?$ ]] || fail \
   "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin"
 [[ "${BROWSER_PROFILE_KEY_DIR:-}" = /* ]] || fail \
@@ -216,7 +219,6 @@ for ((attempt = 1; attempt <= HEALTH_TIMEOUT_SECS; attempt++)); do
     --dump-header "$HEALTH_HEADERS" --output /dev/null \
     "$HEALTH_URL"; then
     if awk -F ': *' -v expected="$RELEASE_ID" '
-      BEGIN { IGNORECASE = 1 }
       tolower($1) == "x-veetbot-release" {
         sub(/\r$/, "", $2)
         if ($2 == expected) found = 1

@@ -74,3 +74,5 @@ implementation without one.
 - [ADR-0063 — Milestone 13 general-purpose subagents and delegation (Proposed)](0063-milestone-13-subagents-and-delegation.md)
 - [ADR-0064 — Milestone 14 inbound surfaces and pairing (Proposed)](0064-milestone-14-inbound-surfaces-and-pairing.md)
 - [ADR-0065 — Milestone 15 operational hardening (Proposed)](0065-milestone-15-operational-hardening.md)
+- [ADR-0066 — Atomic publication of the documentation site](0066-atomic-documentation-publication.md)
+- [ADR-0067 — Credential-free production execution service](0067-credential-free-execution-service.md)

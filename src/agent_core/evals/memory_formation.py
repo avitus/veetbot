@@ -23,7 +23,10 @@ from agent_core.config import (
 )
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import NewEvent
-from agent_core.domain.memory import ProviderExtractionEvaluationEvidence
+from agent_core.domain.memory import (
+    ProviderExtractionEvaluationEvidence,
+    minimum_supported_case_count,
+)
 from agent_core.memory.provider_extraction import (
     PROVIDER_EXTRACTOR_VERSION,
     PROVIDER_FORMATION_POLICY_VERSION,
@@ -362,7 +365,7 @@ async def run_live_evaluation(
     corpus, corpus_sha256 = load_corpus(repository_root)
     base_settings = load_settings()
     positive_case_count = sum(bool(case.expected) for case in corpus.cases)
-    minimum_supported_case_count = (positive_case_count * 4 + 4) // 5
+    supported_case_floor = minimum_supported_case_count(positive_case_count)
     deterministic_supported_cases = 0
     deterministic_supported = 0
     deterministic_fabricated = 0
@@ -444,10 +447,10 @@ async def run_live_evaluation(
         raise ValueError("provider evaluation corpus is empty")
     provider_name, model_name, policy_version = identities.pop()
     failures: list[str] = []
-    if provider_supported_cases < minimum_supported_case_count:
+    if provider_supported_cases < supported_case_floor:
         failures.append(
             f"positive coverage {provider_supported_cases}/{positive_case_count} "
-            f"(minimum={minimum_supported_case_count}, "
+            f"(minimum={supported_case_floor}, "
             f"missing_cases={','.join(missing_expected_case_ids) or 'none'})"
         )
     if provider_supported <= deterministic_supported:
@@ -490,7 +493,7 @@ async def run_live_evaluation(
         corpus_sha256=corpus_sha256,
         sample_count=len(corpus.cases),
         positive_case_count=positive_case_count,
-        minimum_supported_case_count=minimum_supported_case_count,
+        minimum_supported_case_count=supported_case_floor,
         deterministic_supported_case_count=deterministic_supported_cases,
         provider_supported_case_count=provider_supported_cases,
         deterministic_supported_candidates=deterministic_supported,

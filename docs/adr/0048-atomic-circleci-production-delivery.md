@@ -3,6 +3,10 @@
 - **Status:** Accepted
 - **Date:** 2026-08-10
 
+> **Updated by ADR-0067:** delivery also installs, starts, verifies, and restarts
+> the credential-free execution service; references to three systemd processes
+> are superseded.
+
 ## Context
 
 ADR-0046 selected immutable releases below `/opt/veetbot`, a `current` symlink,

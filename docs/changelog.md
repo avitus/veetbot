@@ -146,6 +146,17 @@ title: Changelog
   both deploy scripts by a static test so grant drift fails CI rather than the
   production release.
 
+## 2026-08-20 — Public documentation site delivery
+
+- Added an immutable, checksummed MkDocs artifact to the existing production
+  release and served it from `docs.veetbot.com` through a dedicated static Nginx
+  virtual host.
+- Made documentation promotion share the application deployment lock and Nginx
+  rollback boundary, retained five releases, and verified the public release
+  identity after deployment.
+- Recorded DigitalOcean DNS and Let's Encrypt certificate provisioning as
+  one-time operator prerequisites rather than storing infrastructure credentials
+  in the repository or CircleCI.
 ## 2026-08-19 — Reading lanes, state-file split, and census reconciliation
 
 - Added three reading lanes to the `AGENTS.md` operating contract: the full

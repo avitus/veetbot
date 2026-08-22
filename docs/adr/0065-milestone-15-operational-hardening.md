@@ -36,7 +36,10 @@ and the memory store is the owner's own.
 3. **Off-host object storage, encrypted client-side, with provider snapshots
    as a complement.** S3-compatible object storage in another region via
    `rclone`; `age` X25519 with the private identity held only by the owner;
-   seven daily and four weekly objects enforced by a property-tested retention
+   the manifest signed with `minisign` by a host-held key whose public half
+   the owner keeps, because `age` authenticates the ciphertext it decrypts
+   and not who produced it, and nothing trusts an unsigned manifest; seven
+   daily and four weekly objects enforced by a property-tested retention
    function and mirrored by lifecycle rules; provider weekly snapshots for fast
    host rebuild.
 4. **A backup that has not been restored is not a backup.** Every host run

@@ -97,6 +97,12 @@ class MemoryCandidate(BaseModel):
     expires_hint: datetime | None = None
 
 
+def minimum_supported_case_count(positive_case_count: int) -> int:
+    """Return the exact eighty-percent positive-coverage floor."""
+
+    return (positive_case_count * 4 + 4) // 5
+
+
 class ProviderExtractionEvaluationEvidence(BaseModel):
     """Version-bound evidence required before provider extraction can activate."""
 
@@ -133,7 +139,7 @@ class ProviderExtractionEvaluationEvidence(BaseModel):
             raise ValueError("positive case count exceeds the evaluation sample count")
         if self.minimum_supported_case_count > self.positive_case_count:
             raise ValueError("minimum supported case count exceeds positive cases")
-        required_coverage = (self.positive_case_count * 4 + 4) // 5
+        required_coverage = minimum_supported_case_count(self.positive_case_count)
         if self.minimum_supported_case_count != required_coverage:
             raise ValueError("minimum supported case count must equal eighty percent coverage")
         if (

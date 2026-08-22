@@ -8,6 +8,10 @@ This repository is building the modular, general-purpose AI agent platform
 defined by the [engineering plan](plan/engineering-plan.md). This site is the
 navigable documentation for that project.
 
+The production delivery path publishes this complete site at
+[`docs.veetbot.com`](https://docs.veetbot.com/) after its one-time DNS and TLS
+prerequisites are provisioned.
+
 ## Authoritative sources
 
 Markdown and YAML are canonical. HTML under `site/` and `dist/` is **generated**

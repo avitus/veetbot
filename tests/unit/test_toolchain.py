@@ -145,18 +145,16 @@ def test_production_environment_preserves_process_boundaries() -> None:
     assert "BROWSER_PROVIDER=disabled" in environment
     assert "BROWSER_PROFILE_SERVICE_URL=https://browser.veetbot.com" in environment
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL=https://browser.veetbot.com" in environment
-    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" in environment
-    # The container requires the service-auth file to be owned by uid 65532,
-    # while the agent units read the control-plane credential as the veetbot
-    # user; both are mode 0600, so one file cannot serve both readers.
+    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=" not in environment
+    assert "AGENT_EXECUTION_SERVICE_SOCKET=/run/veetbot/execution.sock" in environment
     example_values = dict(
         line.split("=", 1)
         for line in environment.splitlines()
         if "=" in line and not line.startswith("#")
     )
-    assert (
-        example_values["BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE"]
-        != example_values["BROWSER_PROFILE_SERVICE_AUTH_FILE"]
+    assert "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" not in example_values
+    assert example_values["BROWSER_PROFILE_SERVICE_AUTH_FILE"].endswith(
+        "browser-profile-service-auth"
     )
     template_lines = environment.splitlines()
     assert "TAVILY_API_KEY=" in template_lines
@@ -290,6 +288,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     api = (units / "veetbot-api.service").read_text(encoding="utf-8")
     worker = (units / "veetbot-worker.service").read_text(encoding="utf-8")
     async_worker = (units / "veetbot-async-worker.service").read_text(encoding="utf-8")
+    execution = (units / "veetbot-execution.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
     scheduler = (units / "veetbot-schedule.service").read_text(encoding="utf-8")
     schedule_environment = (deploy / "veetbot-schedule.env.example").read_text(encoding="utf-8")
@@ -297,13 +296,41 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
     assert "agent worker --role interactive" in worker
-    assert "SupplementaryGroups=docker" in worker
+    assert "SupplementaryGroups=docker" not in worker
     assert "agent worker --role async" in async_worker
-    assert "SupplementaryGroups=docker" in async_worker
+    assert "SupplementaryGroups=docker" not in async_worker
+    assert "agent execution-service" in execution
+    assert "--runtime" not in execution
+    assert "User=veetbot-exec" in execution
+    assert "Group=veetbot" in execution.splitlines()
+    assert "SupplementaryGroups=docker" in execution
+    assert "/run/docker.sock" in execution
+    assert "/var/run/docker.sock" not in execution
+    for unit in (api, worker, async_worker, maintenance, scheduler):
+        assert "/run/docker.sock" not in unit
+        assert "/var/run/docker.sock" not in unit
+    assert "EnvironmentFile=" not in execution
+    assert "veetbot-execution.service" in worker
+    assert "veetbot-execution.service" in async_worker
+    # ADR-0067: dependents require and order after the execution service; an
+    # explicit restart of it propagates through Requires=, while its own
+    # on-failure recovery propagates nowhere because nothing binds to it.
+    for dependent in (worker, async_worker, maintenance):
+        lines = dependent.splitlines()
+        assert "Requires=veetbot-execution.service" in lines
+        assert any(
+            line.startswith("After=") and "veetbot-execution.service" in line.split()
+            for line in lines
+        )
+    assert "Restart=on-failure" in execution.splitlines()
+    for unit in (api, worker, async_worker, execution, maintenance, scheduler):
+        assert not any(line.startswith(("BindsTo=", "PartOf=")) for line in unit.splitlines())
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
     assert "agent worker --role schedule" in scheduler
     assert "SupplementaryGroups=docker" not in scheduler
+    assert "SANDBOX_MECHANISM=" not in schedule_environment
+    assert "AGENT_EXECUTION_SERVICE_SOCKET=" not in schedule_environment
     assert "ReadWritePaths=" not in scheduler
     assert "EnvironmentFile=/etc/veetbot/veetbot-schedule.env" in scheduler
     assert "EnvironmentFile=/etc/veetbot/veetbot.env" not in scheduler
@@ -323,6 +350,118 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         for unit in (api, worker, async_worker, maintenance)
     )
     assert "EnvironmentFile=-/opt/veetbot/current/.release.env" in api
+    credential_source = (
+        "LoadCredential=browser-control-plane:/etc/veetbot/secrets/browser-control-plane-credential"
+    )
+    credential_environment = (
+        "Environment=BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE=%d/browser-control-plane"
+    )
+    assert all(
+        credential_source in unit and credential_environment in unit
+        for unit in (api, worker, async_worker, maintenance)
+    )
+    assert credential_source not in execution
+    assert credential_environment not in execution
+
+
+def test_deployment_accounts_and_documentation_are_separated() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    normalized = " ".join(deployment.split())
+
+    assert "useradd --system --create-home --shell /bin/bash veetbot-deploy" in deployment
+    assert "useradd --system --no-create-home --shell /usr/sbin/nologin veetbot" in deployment
+    assert "useradd --system --no-create-home --shell /usr/sbin/nologin veetbot-exec" in deployment
+    assert "usermod -aG docker veetbot-deploy" in deployment
+    assert "usermod -aG docker veetbot-exec" in deployment
+    assert "usermod -aG docker veetbot\n" not in deployment
+    assert "chown -R veetbot-deploy:veetbot /opt/veetbot" in deployment
+    assert "application services have no Docker-socket access" in normalized
+    assert (
+        "replace `/run/veetbot/execution.sock` with an authenticated network "
+        "transport while preserving the `ExecutionEnvironment` port"
+    ) in normalized
+    assert "without changing the port" not in deployment
+    assert "public key for the `veetbot-deploy` account" in deployment
+
+
+def test_nginx_deployment_test_exercises_declared_gnu_toolchain() -> None:
+    harness = (ROOT / "deploy" / "nginx" / "deploy.test.sh").read_text(encoding="utf-8")
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+
+    for command in ("MV", "SHA256SUM", "TAR", "FIND", "FLOCK"):
+        assert f"GNU_{command}=" in harness
+        assert f"VEETBOT_TEST_GNU_{command}" in harness
+    assert "brew install coreutils gnu-tar findutils util-linux" in deployment
+
+
+def test_documentation_verification_reads_the_resolved_release_identity() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+
+    assert 'docs_release="$(readlink -f /opt/veetbot/docs/current)"' in deployment
+    assert 'test "$(cat "$docs_release/release.txt")" = "$VEETBOT_RELEASE_ID"' in deployment
+
+
+def test_manual_rollback_keeps_documentation_and_application_releases_aligned() -> None:
+    deployment = (ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    manual = deployment.partition("## Manual rollback")[2].partition("## Accepted limitations")[0]
+    app_precondition = 'grep -Fqx "VEETBOT_RELEASE_ID=$target_id" "$target/.release.env"'
+    docs_precondition = 'test "$(cat "$docs_target/release.txt")" = "$target_id"'
+    image_validation = 'docker image inspect "agent-core-sandbox:$target_id"'
+    image_tag = 'docker tag "agent-core-sandbox:$target_id" agent-core-sandbox:production'
+    readiness_identity = 'tolower($1) == "x-veetbot-release"'
+    unit_process_validation = 'test "$process_cwd" = "$target"'
+    app_switch = 'mv -Tf "$app_next" /opt/veetbot/current'
+    docs_switch = 'mv -Tf "$docs_next" /opt/veetbot/docs/current'
+    required_units = (
+        "veetbot-execution",
+        "veetbot-maintenance",
+        "veetbot-worker",
+        "veetbot-async-worker",
+        "veetbot-api",
+    )
+
+    assert 'docs_target="/opt/veetbot/docs/releases/$target_id"' in manual
+    assert 'test -d "$docs_target"' in manual
+    assert 'test -f "$docs_target/release.txt"' in manual
+    assert app_precondition in manual
+    assert docs_precondition in manual
+    assert image_validation in manual
+    assert image_tag in manual
+    assert readiness_identity in manual
+    assert "IGNORECASE" not in manual
+    assert unit_process_validation in manual
+    assert 'ln -s "$docs_target" "$docs_next"' in manual
+    assert docs_switch in manual
+    unit_validation_start = manual.index("for unit in \\")
+    unit_validation = manual[unit_validation_start : manual.index("done", unit_validation_start)]
+    for unit in required_units:
+        assert f"  {unit}" in unit_validation
+    assert manual.index(image_validation) < manual.index(app_switch)
+    assert manual.index(image_validation) < manual.index(docs_switch)
+    assert manual.index(image_tag) < manual.index(app_switch)
+    assert manual.index(image_tag) < manual.index(docs_switch)
+    assert manual.index(app_precondition) < manual.index(app_switch)
+    assert manual.index(app_precondition) < manual.index(docs_switch)
+    assert manual.index(docs_precondition) < manual.index(app_switch)
+    assert manual.index(docs_precondition) < manual.index(docs_switch)
+    restart_position = manual.rindex("sudo systemctl restart")
+    validation_position = manual.index(unit_process_validation)
+    assert manual.index(app_switch) < restart_position < validation_position
+    assert manual.index(docs_switch) < restart_position < validation_position
+    assert manual.index(unit_process_validation) < manual.rindex("rollback_pending=0")
+
+
+def test_manual_rollback_has_failure_injection_coverage() -> None:
+    harness = (ROOT / "deploy" / "app" / "rollback.test.sh").read_text(encoding="utf-8")
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+
+    assert "VEETBOT_TEST_FAIL_DOCS_SWITCH_ONCE" in harness
+    assert "VEETBOT_TEST_READY_RELEASE" in harness
+    assert "rollback with a mismatched readiness identity unexpectedly succeeded" in harness
+    assert "application pointer was not restored" in harness
+    assert "documentation pointer was not restored" in harness
+    assert "production image tag was not restored" in harness
+    assert "deploy/app/rollback.test.sh" in makefile
 
 
 def test_release_script_preserves_release_boundaries() -> None:
@@ -331,6 +470,7 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert "flock -w" in release
     assert '"$STAGE/.venv/bin/alembic" upgrade head' in release
     assert "X-Veetbot-Release" not in release
+    assert "IGNORECASE" not in release
     assert "VEETBOT_RELEASE_ID" in release
     assert "systemctl enable --now" in release
     assert "VEETBOT_KEEP_RELEASES:-5" in release
@@ -340,7 +480,9 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert '[[ -f "$BROWSER_PROFILE_SERVICE_AUTH_FILE" ]]' in release
     assert '[[ -f "$BROWSER_PROFILE_SESSION_SECRET_FILE" ]]' in release
     assert '[[ -d "$BROWSER_PROFILE_KEY_DIR" ]]' in release
-    assert '[[ -f "$BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE" ]]' in release
+    assert '[[ -f "$BROWSER_CONTROL_CREDENTIAL_FILE" ]]' in release
+    assert release.count("VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE must") == 3
+    assert release.count(": $BROWSER_CONTROL_CREDENTIAL_FILE") == 3
     assert "BROWSER_PROFILE_CEREMONY_BASE_URL must be one HTTPS origin" in release
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
     assert "veetbot-async-worker" in release
@@ -351,16 +493,22 @@ def test_nginx_configuration_preserves_public_process_boundaries() -> None:
     deploy = ROOT / "deploy"
     nginx = (ROOT / "nginx" / "veetbot.conf").read_text(encoding="utf-8")
     assert "server_name api.veetbot.com" in nginx
+    assert "server_name docs.veetbot.com" in nginx
     assert "proxy_pass http://127.0.0.1:8000" in nginx
     assert "server_name browser.veetbot.com" in nginx
     assert "proxy_pass http://127.0.0.1:8081" in nginx
     assert "/etc/letsencrypt/live/browser.veetbot.com/fullchain.pem" in nginx
     assert "proxy_buffering off" in nginx
+    assert "root /opt/veetbot/docs/current" in nginx
+    assert "try_files $uri $uri/ =404" in nginx
     nginx_deploy = (deploy / "nginx" / "deploy.sh").read_text(encoding="utf-8")
     assert "nginx -t" in nginx_deploy
     assert "rollback" in nginx_deploy
     assert "flock -w" in nginx_deploy
     assert "VEETBOT_EXPECTED_RELEASE_ID" in nginx_deploy
+    assert "VEETBOT_DOCS_ROOT" in nginx_deploy
+    assert 'sha256sum "$DOCS_ARCHIVE"' in nginx_deploy
+    assert 'mv -Tf "$NEXT_DOCS_CURRENT" "$DOCS_ROOT/current"' in nginx_deploy
 
 
 def test_production_preflight_normalizes_missing_executable(
@@ -461,9 +609,7 @@ def test_ci_has_the_required_partitions() -> None:
             assert job["resource_class"] == "m4pro.medium"
             continue
         expected_image = (
-            "cimg/base:stable"
-            if name in {"package-release", "deploy-app", "deploy-nginx"}
-            else "cimg/python:3.12"
+            "cimg/base:stable" if name in {"deploy-app", "deploy-nginx"} else "cimg/python:3.12"
         )
         assert job["docker"][0]["image"] == expected_image
 
@@ -497,12 +643,19 @@ def test_ci_has_the_required_partitions() -> None:
     assert "make test-apple-ui" in commands["apple"]
     assert "make test-live" in commands["live"]
     assert any("git archive --format=tar.gz" in command for command in commands["package-release"])
+    assert any(
+        "uv run --frozen --only-group docs mkdocs build --strict" in command
+        and "veetbot-docs.tar.gz" in command
+        for command in commands["package-release"]
+    )
     package_workspace = next(
         step["persist_to_workspace"]
         for step in jobs["package-release"]["steps"]
         if isinstance(step, dict) and "persist_to_workspace" in step
     )
     assert "release-id" in package_workspace["paths"]
+    assert "veetbot-docs.tar.gz" in package_workspace["paths"]
+    assert "veetbot-docs.tar.gz.sha256" in package_workspace["paths"]
     assert any("deploy/app/release.sh" in command for command in commands["deploy-app"])
     assert any(
         "X-Veetbot-Release" not in command and "x-veetbot-release" in command
@@ -515,8 +668,27 @@ def test_ci_has_the_required_partitions() -> None:
     )
     assert any("deploy/nginx/deploy.sh" in command for command in commands["deploy-nginx"])
     assert any(
+        "veetbot-docs.tar.gz" in command and "veetbot-docs.tar.gz.sha256" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
         "VEETBOT_EXPECTED_RELEASE_ID" in command
         and '[[ "$expected_release_id" =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{7,40}$ ]]' in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "https://docs.veetbot.com" in command and "documentation did not report release" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "nginx-deployment-outcome" in command
+        and '[[ "$deployment_status" == 3 ]]' in command
+        and "printf 'stale\\n'" in command
+        for command in commands["deploy-nginx"]
+    )
+    assert any(
+        "nginx-deployment-outcome" in command
+        and "Skipping documentation identity probe for stale release" in command
         for command in commands["deploy-nginx"]
     )
     assert "EE3+mp97" not in (ROOT / ".circleci" / "config.yml").read_text(encoding="utf-8")
@@ -569,6 +741,13 @@ def test_ci_has_the_required_partitions() -> None:
     assert config["commands"]["install_uv"]["steps"][0]["restore_cache"]["keys"][0].endswith(
         '{{ checksum "uv.lock" }}'
     )
+
+
+def test_mkdocs_site_has_its_public_origin() -> None:
+    config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+
+    assert config["site_url"] == "https://docs.veetbot.com/"
+    assert config["theme"]["font"] is False
 
 
 def test_repository_contract_requires_red_green_tdd_evidence() -> None:
@@ -1053,8 +1232,8 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    assert "engineering-plan.md missing 'Milestone 12' section" in check_docs.errors
-    assert "engineering-plan.md missing 'Milestone 15' section" in check_docs.errors
+    for milestone in range(12, 16):
+        assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
 _SUDOERS_RULE = re.compile(r"^(\S+) (\S+)=\((\S+)\) NOPASSWD: (/\S+)( .+)?$")
