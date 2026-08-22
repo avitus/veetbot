@@ -85,7 +85,13 @@ write_stub sudo '
 '
 write_stub systemctl '
   printf "systemctl %s\n" "$*" >>"$VEETBOT_TEST_LOG"
-  if [[ "${1:-}" == show ]]; then printf "4242\n"; fi
+  if [[ "${1:-}" == show ]]; then
+    if [[ " $* " == *" veetbot-execution "* ]]; then
+      printf "4343\n"
+    else
+      printf "4242\n"
+    fi
+  fi
 '
 write_stub curl '
   headers=""
@@ -288,6 +294,7 @@ unhealthy_id="20260810-152255-cdef012"
 make_stage "$unhealthy_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
 ln -s "$DEPLOY_ROOT/releases/$unhealthy_id" "$PROCESS_ROOT/4242/cwd"
+: >"$LOG_FILE"
 if VEETBOT_TEST_FAIL_HEALTH=1 run_release "$unhealthy_id" \
   >"$TEST_ROOT/unhealthy.out" 2>&1; then
   printf 'unhealthy promoted release unexpectedly succeeded\n' >&2
@@ -297,6 +304,7 @@ fi
 [[ "$(readlink -f "$DEPLOY_ROOT/current")" == "$DEPLOY_ROOT/releases/$unhealthy_id" ]]
 grep -Fq "manual rollback target: $DEPLOY_ROOT/releases/$redirect_id" \
   "$TEST_ROOT/unhealthy.out"
+grep -Fq 'systemctl --no-pager --full status veetbot-execution' "$LOG_FILE"
 
 equal_timestamp_id="20260810-152255-0000000"
 make_stage "$equal_timestamp_id"

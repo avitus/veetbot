@@ -359,6 +359,12 @@ session-index route to respond successfully; after it returns, CircleCI polls
 the public readiness endpoint for that exact identity. The Nginx job then
 requires `https://docs.veetbot.com/release.txt` to return the same identity. A
 public probe failure is therefore a post-promotion CircleCI failure boundary.
+The release verifies every application process through its `/proc` working
+directory. The execution service instead relies on its checked-in `ExecStart`,
+the completed restart, and an active main PID because `DynamicUser=yes`
+deliberately prevents the deploy identity from dereferencing that process's
+`/proc` working directory. A post-promotion failure prints bounded systemd
+status for each managed unit before reporting the manual rollback target.
 
 The manual and nightly `live-model` workflows remain tests; they do not deploy.
 

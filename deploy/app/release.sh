@@ -67,6 +67,12 @@ cleanup() {
       rm -rf -- "$STAGE"
     fi
   fi
+  if (( status != 0 && PROMOTED == 1 )); then
+    printf 'post-promotion unit status follows:\n' >&2
+    for unit in "${UNITS[@]}"; do
+      systemctl --no-pager --full status "$unit" >&2 || true
+    done
+  fi
   if (( status != 0 && PROMOTED == 1 )) && [[ -n "$PREVIOUS_RELEASE" ]]; then
     printf 'release failed after promotion; current still points at %s\n' "$STAGE" >&2
     printf 'release was promoted but did not verify; manual rollback target: %s\n' \
@@ -253,6 +259,12 @@ for unit in "${UNITS[@]}"; do
   sudo systemctl is-active --quiet "$unit" || fail "$unit is not active"
   pid="$(sudo systemctl show --property MainPID --value "$unit")"
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "$unit has no main process"
+  if [[ "$unit" == veetbot-execution ]]; then
+    # DynamicUser deliberately prevents the deploy identity from dereferencing
+    # this process's /proc cwd. The checked-in ExecStart uses current, and the
+    # successful restart plus active MainPID proves that systemd re-executed it.
+    continue
+  fi
   process_cwd="$(readlink -f "$PROCESS_ROOT/$pid/cwd" 2>/dev/null || true)"
   [[ "$process_cwd" == "$STAGE" ]] || fail "$unit is not running from $STAGE"
 done
