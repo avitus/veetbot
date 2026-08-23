@@ -699,6 +699,64 @@ import Testing
         }
     }
 
+    @Test
+    func testDeviceRegistrationListAndRevocationUseExactWireContract() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let deviceID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000777")
+        )
+        let deviceJSON = """
+            {"id":"\(deviceID.uuidString)","client_device_id":"installation","name":"Owner's iPhone","kind":"mobile","platform":"ios","app_bundle_id":"com.veetbot.apple","push_provider":"apns","push_environment":"sandbox","push_token_fingerprint":"abcdef","push_token_updated_at":"2026-08-22T00:00:00Z","push_token_invalidated_at":null,"muted_kinds":[],"status":"active","revoked_at":null,"last_seen_at":"2026-08-22T00:00:00Z","created_at":"2026-08-22T00:00:00Z","updated_at":"2026-08-22T00:00:00Z"}
+            """
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let body = request.url?.path == "/v1/devices" && request.httpMethod == "GET"
+                ? "{\"items\":[\(deviceJSON)],\"next_cursor\":null}"
+                : deviceJSON
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid")
+        let registration = AppleDeviceRegistration(
+            clientDeviceID: "installation",
+            name: "Owner's iPhone",
+            kind: .mobile,
+            platform: "ios",
+            appBundleID: "com.veetbot.apple",
+            pushToken: "00abff",
+            pushEnvironment: .sandbox
+        )
+
+        #expect(
+            try await client.registerDevice(
+                registration,
+                idempotencyKey: "installation"
+            ).id == deviceID
+        )
+        #expect(try await client.listDevices(limit: 500, cursor: "next").items.count == 1)
+        #expect(try await client.revokeDevice(deviceID).status == .active)
+
+        let captured = lock.withLock { requests }
+        #expect(captured.map(\.httpMethod) == ["POST", "GET", "POST"])
+        #expect(captured[0].url?.path == "/v1/devices")
+        #expect(captured[0].value(forHTTPHeaderField: "Idempotency-Key") == "installation")
+        let registrationJSON = try requestJSONObject(captured[0])
+        #expect(registrationJSON["client_device_id"] as? String == "installation")
+        #expect(registrationJSON["push_token"] as? String == "00abff")
+        #expect(captured[1].url?.query?.contains("limit=200") == true)
+        #expect(captured[1].url?.query?.contains("cursor=next") == true)
+        #expect(captured[2].url?.path == "/v1/devices/\(deviceID.uuidString)/revoke")
+    }
+
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
         let data: Data
         if let body = request.httpBody {

@@ -16,9 +16,11 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     MemoryProviderExtractionMode,
+    PushProviderKind,
     SandboxMechanism,
     WebProviderKind,
     load_config_document,
+    load_notification_worker_settings,
     load_schedule_worker_settings,
     load_settings,
     validate_runtime_identity,
@@ -241,6 +243,136 @@ def test_schedule_roles_require_independent_explicit_enablement() -> None:
     )
     assert settings.schedule_api_enabled is True
     assert settings.schedule_worker_enabled is True
+
+
+def test_notification_roles_and_provider_default_off() -> None:
+    settings = load_settings(base_environment())
+    assert settings.notification_api_enabled is False
+    assert settings.notification_dispatch_enabled is False
+    assert settings.push_provider is PushProviderKind.DISABLED
+    assert settings.apns_key_file is None
+
+
+@pytest.mark.parametrize(
+    ("enabled", "disabled"),
+    [
+        ("AGENT_NOTIFICATION_API_ENABLED", "AGENT_NOTIFICATION_DISPATCH_ENABLED"),
+        ("AGENT_NOTIFICATION_DISPATCH_ENABLED", "AGENT_NOTIFICATION_API_ENABLED"),
+    ],
+)
+def test_notification_roles_must_change_together(enabled: str, disabled: str) -> None:
+    with pytest.raises(ConfigurationError, match="notification API and dispatch"):
+        load_settings(
+            {
+                **base_environment(),
+                enabled: "1",
+                disabled: "0",
+            }
+        )
+
+
+def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TENANT_ID": "tenant-a",
+        "AUTH_PRINCIPAL_ID": "notify-a",
+        "AUTH_SCOPES": "notification.read",
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(key_file),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+
+    settings = load_notification_worker_settings(values)
+
+    assert settings.auth_token is None
+    assert settings.notification_api_enabled is True
+    assert settings.notification_dispatch_enabled is True
+    assert settings.push_provider is PushProviderKind.APNS
+    assert settings.apns_key_file == key_file
+    assert settings.apns_key_id == "KEY123"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["APNS_KEY_FILE", "APNS_KEY_ID", "APNS_TEAM_ID", "APNS_TOPIC"],
+)
+def test_apns_provider_requires_complete_private_configuration(
+    tmp_path: Path,
+    missing: str,
+) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    values = {
+        **base_environment(),
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(key_file),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+    values.pop(missing)
+
+    with pytest.raises(ConfigurationError, match=missing):
+        load_settings(values)
+
+
+def test_disabled_push_provider_rejects_apns_configuration(tmp_path: Path) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+
+    with pytest.raises(ConfigurationError, match=r"APNS_.*PUSH_PROVIDER=apns"):
+        load_settings({**base_environment(), "APNS_KEY_FILE": str(key_file)})
+
+
+@pytest.mark.parametrize("unsafe", ["relative", "symlink", "permissive"])
+def test_apns_key_file_must_be_absolute_regular_and_private(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe: str,
+) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    configured = key_file
+    if unsafe == "relative":
+        monkeypatch.chdir(tmp_path)
+        configured = Path(key_file.name)
+    elif unsafe == "symlink":
+        configured = tmp_path / "AuthKey_LINK.p8"
+        configured.symlink_to(key_file)
+    else:
+        key_file.chmod(0o640)
+    values = {
+        **base_environment(),
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(configured),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+
+    with pytest.raises(ConfigurationError, match="APNS_KEY_FILE"):
+        load_settings(values)
+
+
+def test_unknown_push_provider_is_refused() -> None:
+    with pytest.raises(ConfigurationError, match="PUSH_PROVIDER"):
+        load_settings({**base_environment(), "PUSH_PROVIDER": "surprise"})
 
 
 def test_web_provider_selection_is_per_capability() -> None:
@@ -528,6 +660,11 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
             r"run_defaults must be a mapping",
         ),
         (
+            "runtime/limits.yaml",
+            "notifications:\n  retry_delays_seconds: []\n",
+            r"notifications\.retry_delays_seconds must contain positive numbers",
+        ),
+        (
             "tools/limits.yaml",
             "circuit_breaker:\n  identical_call_threshold: 1\n",
             r"identical_call_threshold must be at least 2",
@@ -671,11 +808,11 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_121_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_126_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 121
+    assert len(qualified_paths) == 126
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))

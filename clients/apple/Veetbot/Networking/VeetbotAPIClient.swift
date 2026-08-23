@@ -198,6 +198,44 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    public func registerDevice(
+        _ body: AppleDeviceRegistration,
+        idempotencyKey: String
+    ) async throws -> DeviceView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices",
+                body: try JSONEncoder.server.encode(body),
+                headers: ["Idempotency-Key": idempotencyKey],
+                retryAttempts: 3
+            )
+        )
+    }
+
+    public func listDevices(
+        limit: Int = 200,
+        cursor: String? = nil
+    ) async throws -> Page<DeviceView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(
+            TransportRequest(method: .get, path: "/v1/devices", queryItems: query)
+        )
+    }
+
+    public func revokeDevice(_ deviceID: UUID) async throws -> DeviceView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices/\(deviceID.uuidString)/revoke",
+                retryAttempts: 2
+            )
+        )
+    }
+
     public func getArtifact(_ artifactID: UUID) async throws -> ArtifactView {
         try await transport.send(
             TransportRequest(method: .get, path: "/v1/artifacts/\(artifactID.uuidString)")

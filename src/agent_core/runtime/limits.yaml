@@ -38,3 +38,9 @@ scheduling:
   max_materializations_per_minute: 60
   daily_cost: 25
   monthly_cost: 250
+notifications:
+  claim_batch: 100
+  lease_seconds: 30
+  fallback_poll_seconds: 30
+  retry_delays_seconds: [30, 120, 600, 3600]
+  terminal_expiry_seconds: 86400

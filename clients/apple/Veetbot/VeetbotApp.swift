@@ -4,6 +4,13 @@ import SwiftUI
 struct VeetbotApp: App {
     @StateObject private var model: ChatViewModel
     @StateObject private var appearance = AppearancePreferences()
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(NotificationApplicationDelegate.self)
+    private var notificationDelegate
+    #elseif os(macOS)
+    @NSApplicationDelegateAdaptor(NotificationApplicationDelegate.self)
+    private var notificationDelegate
+    #endif
 
     init() {
         #if DEBUG && os(iOS)
@@ -21,6 +28,7 @@ struct VeetbotApp: App {
         // Keep WindowGroup's child as a stable name rather than an inline modifier chain.
         WindowGroup {
             VeetbotSceneRoot(model: model, appearance: appearance)
+                .onAppear { notificationDelegate.attach(to: model) }
         }
     }
 }

@@ -77,6 +77,8 @@ class RunContext:
     token: CancellationToken
     dispatch_tools: ToolDispatch
     add_open_question: AddOpenQuestion
+    notification_producer: Any | None = None
+    finalization_write_probe: Callable[[str], None] | None = None
     on_model_event: ModelEventCallback | None = None
     max_internal_attempts: int = 3
     identical_call_threshold: int = 5

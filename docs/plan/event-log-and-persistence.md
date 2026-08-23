@@ -191,7 +191,7 @@ INDEX (session_id) WHERE status NOT IN (...)` constrains the `runs` table to one
 non-terminal run per session, which is a statement about runs and not about
 appenders. The second is that a session therefore has only one appender. It does
 not — the submit handler appends the user message from its own transaction,
-alongside the run insert (`http-api-and-streaming.md:760`), while a worker may
+alongside the run insert (`http-api-and-streaming.md:762`), while a worker may
 be appending to the same session. That is safe, and it is safe because both
 writers allocate the same way, not because either the index or the one-active-run
 default forbids the concurrency.
@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1143-1151`) run over every message body,
+   (`bootstrap-and-composition.md:1145-1153`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1156-1158`).
+(`bootstrap-and-composition.md:1158-1160`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -568,7 +568,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:980`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:982`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s five
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an

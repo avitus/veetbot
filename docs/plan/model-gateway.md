@@ -686,7 +686,7 @@ class ModelCapabilities(BaseModel):
     streaming: bool = True
 ```
 
-This is not the `ModelCapabilities` of `engineering-plan.md:619`. Two
+This is not the `ModelCapabilities` of `engineering-plan.md:623`. Two
 fields are renamed, one moves into `ModelLimits` below, and three are
 added, so the two declarations are a divergence rather than an extension.
 They are reconciled field by field further down, under "The two
@@ -773,7 +773,7 @@ This section is that shape.
 ### Where a profile lives, and the two files it is not
 
 The routing section above says the registry is a YAML file per provider
-profile. `bootstrap-and-composition.md:364-365` places `models/policies.yaml`
+profile. `bootstrap-and-composition.md:366-367` places `models/policies.yaml`
 ("model_policies and provider profiles") and `models/catalog.yaml`
 ("aliases, limits, context windows, prices") inside the package. Read
 together those describe two layouts, and the difference is not cosmetic: one
@@ -794,7 +794,7 @@ src/agent_core/models/
 `policies.yaml` keeps `model_policies` unchanged and satisfies its "and
 provider profiles" half with the list of profile names this deployment
 loads; a profile's body is a file of its own. `catalog.yaml` keeps exactly
-the four things `bootstrap-and-composition.md:365` names it for and becomes
+the four things `bootstrap-and-composition.md:367` names it for and becomes
 the target of Section 10.5's fourth declaration, the model-catalog import,
 rather than a second place models are defined. A profile either declares a
 model inline or imports a catalog entry for it, never both.
@@ -939,7 +939,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1120-1157` is
+family of the secret scanner at `bootstrap-and-composition.md:1119-1160` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1038,13 +1038,13 @@ capability intersection, one layer up.
 
 ### The two `ModelCapabilities` declarations
 
-`engineering-plan.md:619` declares `ModelCapabilities` with eight fields and
+`engineering-plan.md:623` declares `ModelCapabilities` with eight fields and
 this document declares it with ten. That is a divergence rather than an
 addition, and this is where it gets reconciled instead of being left for an
 implementer to discover.
 
 ```text
-engineering-plan.md:619   here                     what changed
+engineering-plan.md:623   here                     what changed
 ------------------------  -----------------------  ------------
 tool_calling              native_tool_calling      narrowed
 parallel_tool_calls       parallel_tool_calls      unchanged
@@ -1073,7 +1073,7 @@ bounded by the adapter's ceiling, and a field subject to both rules has no
 correct home. The three additions are things the gateway branches on that
 the plan had no reason to name before adapters existed.
 
-Where the row for a field and `engineering-plan.md:619` conflict the plan
+Where the row for a field and `engineering-plan.md:623` conflict the plan
 wins, per this document's preamble, and the conflict is a defect here. The
 renaming is recorded as an open question rather than fixed by editing a plan
 sentence.
@@ -1231,7 +1231,7 @@ yet.
 | key | source | why it earns a key |
 | --- | --- | --- |
 | `provider_api` | the profile | one adapter fronts three APIs, and a row that does not say which is a row that cannot be compared |
-| `response_id` | the response body | `engineering-plan.md:1270` requires the OpenAI adapter to capture it |
+| `response_id` | the response body | `engineering-plan.md:1277` requires the OpenAI adapter to capture it |
 | `request_id` | a response header | the only identifier a vendor support ticket can be opened against |
 | `resolved_model` | the response body | an alias resolves to a dated model, and reproducibility needs the dated one |
 | `previous_response_id` | the request | which continuation this attempt resumed, which is the first thing to check when a reasoning chain breaks |
@@ -1449,7 +1449,7 @@ renames are.
 
 ### The PLATFORM default is a privilege inversion, and it is bounded here
 
-`engineering-plan.md:619` defaults `ProviderReasoningItem.trust_level` to
+`engineering-plan.md:616` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
 `policy-and-approvals.md:859-888` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as
@@ -1655,7 +1655,7 @@ Section 2.3's provider list at `engineering-plan.md:171-175` is controlling
 where the later list disagrees: OpenAI, Anthropic, and an OpenAI-compatible
 `chat_completions` endpoint, plus the fake. Milestone 3
 (`engineering-plan.md:2571`) requires "the same contract suite against OpenAI,
-Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2315`
+Anthropic, and a chat_completions endpoint", while `engineering-plan.md:2319`
 names only OpenAI fixtures. The suite runs against all three plus the fake and
 the recorded adapter; that fixture asymmetry is an incomplete enumeration, not
 a narrower requirement, and this document resolves it in favour of the
@@ -1894,7 +1894,7 @@ These are decisions taken to keep the plan moving. Each is recorded in
    the two declarations and cannot edit the plan's. The reconciliation table
    makes the divergence readable; it does not make it go away.
 7. Is one file per provider profile right, given that
-   `bootstrap-and-composition.md:364` describes a single `models/policies.yaml`
+   `bootstrap-and-composition.md:366` describes a single `models/policies.yaml`
    holding both policies and profiles? One file per profile is what ADR-0012's
    "without editing core" requires of an overlay, and merging the two back is
    a compatible change in the other direction.

@@ -64,6 +64,11 @@ class BrowserProviderKind(StrEnum):
     HOSTED = "hosted"
 
 
+class PushProviderKind(StrEnum):
+    DISABLED = "disabled"
+    APNS = "apns"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Environment-layer settings; tuning values remain in versioned YAML."""
@@ -85,6 +90,13 @@ class Settings:
     memory_provider_extraction_evidence: Path | None = None
     schedule_api_enabled: bool = False
     schedule_worker_enabled: bool = False
+    notification_api_enabled: bool = False
+    notification_dispatch_enabled: bool = False
+    push_provider: PushProviderKind = PushProviderKind.DISABLED
+    apns_key_file: Path | None = None
+    apns_key_id: str | None = None
+    apns_team_id: str | None = None
+    apns_topic: str | None = None
     artifact_root: Path = Path(".agent/artifacts")
     auth_tenant_id: str = ""
     auth_principal_id: str = ""
@@ -120,7 +132,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 121 operator-reviewable knobs. Metadata such as
+# The design corpus declares 126 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -238,6 +250,11 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "scheduling.max_materializations_per_minute",
             "scheduling.daily_cost",
             "scheduling.monthly_cost",
+            "notifications.claim_batch",
+            "notifications.lease_seconds",
+            "notifications.fallback_poll_seconds",
+            "notifications.retry_delays_seconds",
+            "notifications.terminal_expiry_seconds",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -287,6 +304,10 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:scheduling.max_materializations_per_minute": 1,
         "runtime/limits.yaml:scheduling.daily_cost": 0.01,
         "runtime/limits.yaml:scheduling.monthly_cost": 0.01,
+        "runtime/limits.yaml:notifications.claim_batch": 1,
+        "runtime/limits.yaml:notifications.lease_seconds": 1,
+        "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
+        "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
         "tools/limits.yaml:circuit_breaker.identical_denied_threshold": 1,
         "tools/limits.yaml:circuit_breaker.uncertain_threshold": 1,
@@ -354,6 +375,17 @@ def _read_private_credential_file(raw_path: str) -> str:
     if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
         raise ConfigurationError("browser control-plane credential file is invalid")
     return value
+
+
+def _validate_private_regular_file(path: Path, name: str) -> None:
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise ConfigurationError(f"{name} must be a regular file with mode 0600")
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -432,6 +464,23 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "runtime/limits.yaml":
+        retry_delays = merged["notifications"]["retry_delays_seconds"]
+        if (
+            not isinstance(retry_delays, list)
+            or not retry_delays
+            or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(value)
+                or value <= 0
+                for value in retry_delays
+            )
+        ):
+            raise ConfigurationError(
+                "runtime/limits.yaml:notifications.retry_delays_seconds "
+                "must contain positive numbers"
+            )
     if relative == "sandbox/limits.yaml":
         resources = merged["resources"]
         for name, value in resources.items():
@@ -599,6 +648,29 @@ def validate_settings(
             )
     if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
+    if settings.notification_api_enabled != settings.notification_dispatch_enabled:
+        raise ConfigurationError(
+            "notification API and dispatch flags must be enabled or disabled together"
+        )
+    apns_values = {
+        "APNS_KEY_FILE": settings.apns_key_file,
+        "APNS_KEY_ID": settings.apns_key_id,
+        "APNS_TEAM_ID": settings.apns_team_id,
+        "APNS_TOPIC": settings.apns_topic,
+    }
+    configured_apns = [name for name, value in apns_values.items() if value is not None]
+    if settings.push_provider is PushProviderKind.APNS:
+        missing_apns = [name for name, value in apns_values.items() if value is None]
+        if missing_apns:
+            raise ConfigurationError("PUSH_PROVIDER=apns requires " + ", ".join(missing_apns))
+        if not settings.notification_dispatch_enabled:
+            raise ConfigurationError(
+                "PUSH_PROVIDER=apns requires notification dispatch to be enabled"
+            )
+        assert settings.apns_key_file is not None
+        _validate_private_regular_file(settings.apns_key_file, "APNS_KEY_FILE")
+    elif configured_apns:
+        raise ConfigurationError(", ".join(configured_apns) + " require PUSH_PROVIDER=apns")
     if require_auth_token and settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if (
@@ -720,6 +792,18 @@ def load_schedule_worker_settings(
     )
 
 
+def load_notification_worker_settings(
+    environ: Mapping[str, str] | None = None,
+) -> Settings:
+    """Load the credential-minimized environment for the notify-only role."""
+
+    return _load_settings(
+        environ,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
+
+
 def _load_settings(
     environ: Mapping[str, str] | None,
     *,
@@ -792,6 +876,18 @@ def _load_settings(
     )
     schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
+    notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
+    notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
+    push_provider = _parse_enum(
+        PushProviderKind,
+        values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
+        "PUSH_PROVIDER",
+    )
+    raw_apns_key_file = values.get("APNS_KEY_FILE", "").strip()
+    apns_key_file = Path(raw_apns_key_file).expanduser() if raw_apns_key_file else None
+    apns_key_id = values.get("APNS_KEY_ID", "").strip() or None
+    apns_team_id = values.get("APNS_TEAM_ID", "").strip() or None
+    apns_topic = values.get("APNS_TOPIC", "").strip() or None
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
@@ -893,6 +989,13 @@ def _load_settings(
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         schedule_api_enabled=schedule_api_enabled,
         schedule_worker_enabled=schedule_worker_enabled,
+        notification_api_enabled=notification_api_enabled,
+        notification_dispatch_enabled=notification_dispatch_enabled,
+        push_provider=push_provider,
+        apns_key_file=apns_key_file,
+        apns_key_id=apns_key_id,
+        apns_team_id=apns_team_id,
+        apns_topic=apns_topic,
         artifact_root=artifact_root,
         auth_tenant_id=auth_tenant_id,
         auth_principal_id=auth_principal_id,

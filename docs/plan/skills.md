@@ -1278,9 +1278,9 @@ propagate. Four documents — `policy-and-approvals.md:137`,
 `docs/status/questions-for-review.md:391` — attribute the
 policy-and-approval gating requirement to Section 30.4. The plan
 states it in Section 30.3; Section 30.4 is loading and lifecycle. And
-`readiness.md:735` cited `engineering-plan.md:2767` for the
+`readiness.md:734-735` cited `engineering-plan.md:2771` for the
 version-pinning acceptance criterion, which is at
-`engineering-plan.md:2767`; the line it named is an MCP
+`engineering-plan.md:2771`; the line it named is an MCP
 trust-labelling bullet. The ADR and the questions file are
 historical records and are not edited. The two live statements are.
 Both numbers moved by two after an `#### Acceptance criteria` heading

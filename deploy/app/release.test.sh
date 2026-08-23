@@ -33,7 +33,7 @@ printf '%s\n' \
   'AUTH_TOKEN=synthetic-test-token' \
   'AUTH_TENANT_ID=test' \
   'AUTH_PRINCIPAL_ID=test' \
-  'AUTH_SCOPES=session.read' \
+  'AUTH_SCOPES=notification.read' \
   'SANDBOX_MECHANISM=gvisor' \
   'AGENT_ARTIFACT_ROOT=/tmp' \
   'VEETBOT_OPENAI_KEY=synthetic-test-provider-key' \
@@ -135,6 +135,7 @@ make_stage() {
     "$stage/deploy/docker-compose.production.yml" \
     "$stage/deploy/browser-profile-service.Dockerfile" \
     "$stage/deploy/veetbot-schedule.env.example" \
+    "$stage/deploy/veetbot-notify.env.example" \
     "$stage/execution/sandbox.Dockerfile" \
     "$stage/scripts/check_production_deployment.py"
   for unit in \
@@ -143,7 +144,8 @@ make_stage() {
     veetbot-async-worker \
     veetbot-execution \
     veetbot-maintenance \
-    veetbot-schedule; do
+    veetbot-schedule \
+    veetbot-notify; do
     printf '[Service]\nWorkingDirectory=/opt/veetbot/current\n' \
       >"$stage/deploy/systemd/$unit.service"
   done
@@ -152,6 +154,11 @@ make_stage() {
     'WorkingDirectory=/opt/veetbot/current' \
     'EnvironmentFile=/etc/veetbot/veetbot-schedule.env' \
     >"$stage/deploy/systemd/veetbot-schedule.service"
+  printf '%s\n' \
+    '[Service]' \
+    'WorkingDirectory=/opt/veetbot/current' \
+    'EnvironmentFile=/etc/veetbot/veetbot-notify.env' \
+    >"$stage/deploy/systemd/veetbot-notify.service"
   printf '#!/usr/bin/env bash\nprintf "alembic %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\n' \
     >"$stage/.venv/bin/alembic"
   printf '#!/usr/bin/env bash\nprintf "python %%s\\n" "$*" >>"$VEETBOT_TEST_LOG"\nprintf "execution socket %%s\\n" "${AGENT_EXECUTION_SERVICE_SOCKET:-missing}" >>"$VEETBOT_TEST_LOG"\n' \
@@ -167,6 +174,7 @@ run_release() {
   VEETBOT_ROOT="$DEPLOY_ROOT" \
   VEETBOT_ENV_FILE="${VEETBOT_TEST_ENV_FILE:-$ENV_FILE}" \
   VEETBOT_SCHEDULE_ENV_FILE="${VEETBOT_TEST_SCHEDULE_ENV_FILE:-$TEST_ROOT/veetbot-schedule.env}" \
+  VEETBOT_NOTIFY_ENV_FILE="${VEETBOT_TEST_NOTIFY_ENV_FILE:-$TEST_ROOT/veetbot-notify.env}" \
   VEETBOT_BROWSER_CONTROL_PLANE_CREDENTIAL_FILE="$PROFILE_AUTH_FILE" \
   VEETBOT_SYSTEMD_DIR="$SYSTEMD_DIR" \
   VEETBOT_PROCESS_ROOT="$PROCESS_ROOT" \
@@ -217,6 +225,7 @@ grep -Fq \
   'systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
 grep -Fq 'systemctl disable --now veetbot-schedule' "$LOG_FILE"
+grep -Fq 'systemctl disable --now veetbot-notify' "$LOG_FILE"
 grep -Fq 'curl session-index' "$LOG_FILE"
 grep -Fq 'curl session-index http://127.0.0.1:8000/v1/sessions?limit=1' "$LOG_FILE"
 auth_scheme='Bearer'
@@ -325,7 +334,9 @@ printf '%s\n' \
   'AUTH_PRINCIPAL_ID=test' \
   'AUTH_SCOPES=session.read,schedule.read,schedule.write,schedule.cancel' \
   'AGENT_SCHEDULE_API_ENABLED=1' \
-  'AGENT_SCHEDULE_WORKER_ENABLED=1' >"$schedule_worker_env"
+  'AGENT_SCHEDULE_WORKER_ENABLED=1' \
+  'AGENT_NOTIFICATION_API_ENABLED=0' \
+  'AGENT_NOTIFICATION_DISPATCH_ENABLED=0' >"$schedule_worker_env"
 printf '%s\n' \
   'AGENT_SCHEDULE_API_ENABLED=1' \
   'AGENT_SCHEDULE_WORKER_ENABLED=1' >>"$schedule_env"
@@ -342,11 +353,68 @@ grep -Fq \
   'systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
   "$LOG_FILE"
 
-case_mismatch_id="20260810-152257-abcdef0"
+schedule_notification_mismatch_env="$TEST_ROOT/schedule-notification-mismatch.env"
+schedule_notification_mismatch_worker_env="$TEST_ROOT/schedule-notification-mismatch-worker.env"
+schedule_notification_mismatch_notify_env="$TEST_ROOT/schedule-notification-mismatch-notify.env"
+cp "$schedule_env" "$schedule_notification_mismatch_env"
+cp "$schedule_worker_env" "$schedule_notification_mismatch_worker_env"
+: >"$schedule_notification_mismatch_notify_env"
+printf '%s\n' \
+  'AGENT_NOTIFICATION_API_ENABLED=1' \
+  'AGENT_NOTIFICATION_DISPATCH_ENABLED=1' >>"$schedule_notification_mismatch_env"
+schedule_notification_mismatch_id="20260810-152257-0000002"
+make_stage "$schedule_notification_mismatch_id"
+if VEETBOT_TEST_ENV_FILE="$schedule_notification_mismatch_env" \
+  VEETBOT_TEST_SCHEDULE_ENV_FILE="$schedule_notification_mismatch_worker_env" \
+  VEETBOT_TEST_NOTIFY_ENV_FILE="$schedule_notification_mismatch_notify_env" \
+  run_release "$schedule_notification_mismatch_id" \
+  >"$TEST_ROOT/schedule-notification-mismatch.out" 2>&1; then
+  printf 'release with mismatched schedule notification flags unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -Fq \
+  'schedule worker notification flags must match the application notification flags' \
+  "$TEST_ROOT/schedule-notification-mismatch.out"
+
+notify_env="$TEST_ROOT/notify.env"
+notify_worker_env="$TEST_ROOT/veetbot-notify.env"
+cp "$ENV_FILE" "$notify_env"
+printf '%s\n' \
+  "DATABASE_URL=$test_database_url" \
+  'DEPLOYMENT_MODE=production' \
+  'AUTH_MODE=token' \
+  'AUTH_TENANT_ID=test' \
+  'AUTH_PRINCIPAL_ID=notify' \
+  'AUTH_ROLES=notify' \
+  'AUTH_SCOPES=notification.read' \
+  'AGENT_NOTIFICATION_API_ENABLED=1' \
+  'AGENT_NOTIFICATION_DISPATCH_ENABLED=1' \
+  'PUSH_PROVIDER=apns' \
+  'APNS_KEY_FILE=/etc/veetbot/secrets/AuthKey_TEST.p8' \
+  'APNS_KEY_ID=KEYID' \
+  'APNS_TEAM_ID=TEAMID' \
+  'APNS_TOPIC=com.veetbot.app' >"$notify_worker_env"
+printf '%s\n' \
+  'AGENT_NOTIFICATION_API_ENABLED=1' \
+  'AGENT_NOTIFICATION_DISPATCH_ENABLED=1' >>"$notify_env"
+notify_id="20260810-152258-0000002"
+make_stage "$notify_id"
+rm -f -- "$PROCESS_ROOT/4242/cwd"
+ln -s "$DEPLOY_ROOT/releases/$notify_id" "$PROCESS_ROOT/4242/cwd"
+VEETBOT_TEST_ENV_FILE="$notify_env" \
+  VEETBOT_TEST_NOTIFY_ENV_FILE="$notify_worker_env" \
+  run_release "$notify_id"
+grep -Fxq "EnvironmentFile=$notify_worker_env" \
+  "$SYSTEMD_DIR/veetbot-notify.service"
+grep -Fq \
+  'systemctl restart veetbot-notify veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api' \
+  "$LOG_FILE"
+
+case_mismatch_id="20260810-152259-abcdef0"
 make_stage "$case_mismatch_id"
 rm -f -- "$PROCESS_ROOT/4242/cwd"
 ln -s "$DEPLOY_ROOT/releases/$case_mismatch_id" "$PROCESS_ROOT/4242/cwd"
-if VEETBOT_TEST_READY_RELEASE=20260810-152257-ABCDEF0 run_release "$case_mismatch_id" \
+if VEETBOT_TEST_READY_RELEASE=20260810-152259-ABCDEF0 run_release "$case_mismatch_id" \
   >"$TEST_ROOT/case-mismatch.out" 2>&1; then
   printf 'release with a case-mismatched readiness identity unexpectedly succeeded\n' >&2
   exit 1

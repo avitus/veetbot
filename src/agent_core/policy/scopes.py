@@ -30,6 +30,9 @@ PLATFORM_SCOPES = frozenset(
         "schedule.read",
         "schedule.write",
         "schedule.cancel",
+        "device.read",
+        "device.write",
+        "notification.read",
     }
 )
 _SCOPE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")

@@ -272,6 +272,10 @@ three positive worker batch and timing limits, and two reserved-capacity limits
 in versioned runtime YAML. Its two default-off deployment feature flags remain
 environment controls rather than tuning knobs.
 
+Milestone 12 extends the inventory additively to 126 with the notification
+claim batch, claim lease, fallback poll, closed retry schedule, and terminal
+expiry in the same versioned runtime YAML.
+
 Use a `src` layout.
 
 ```text
