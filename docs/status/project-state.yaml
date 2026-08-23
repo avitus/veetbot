@@ -176,7 +176,7 @@ milestones:
         detail: >-
           Ruff formatting over 558 files and Ruff linting pass, strict mypy
           reports no issue in 514 source files, the static partition passes
-          1204 tests, the contract partition passes 350, the release, manual
+          1213 tests, the contract partition passes 350, the release, manual
           rollback, and nginx deployment-script tests pass, and the strict
           documentation build passes with 171 citations checked. The gate
           registry reconciles 324 entries with 247 active through Milestone 12.
@@ -294,6 +294,37 @@ milestones:
           publication proof, which passes. Whether to relax the absolute
           incomplete-runs condition, have the arm retry a failed run, or record
           the terminal error class is a design decision for the owner.
+      - check: live memory-benchmark arm, third attempt
+        outcome: passed_locally
+        detail: >-
+          The arm was hardened first and then run once more. Each probe arm now
+          records the terminal error class the runtime already carries, an arm
+          that fails outside the run becomes a failed arm named by its
+          exception type rather than ending the invocation, and a probe arm
+          whose run terminates without an answer is retried exactly once
+          against a freshly built composition through the same pre-admission
+          ceiling check. No published pass condition changed. One live run of
+          agent eval memory-benchmark --no-deterministic-only at build
+          192a0161d881837218c0ed125c55a121663f8eda passed every condition and
+          published
+          evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json.
+          Incomplete runs were 0 of 132 and the failure-class histogram is
+          therefore empty. Four probe arms failed their first attempt and
+          completed on the retry, so retried_runs is 4; all four were
+          without-memory arms of a p02 probe, in four different scenarios,
+          which is a narrower pattern than random transport noise and is worth
+          a look. Lift was 45 against a derived minimum of 11, from 57 correct
+          with-memory answers against 12 without memory over 54 answerable
+          probes. Recoverable correctness was 45 of 48 against a minimum of 39.
+          Abstention correctness was 12 of 12 against a minimum of 10.
+          Protected leaks in answers were 0. With-memory policy failures were 0
+          and did not exceed the without-memory arm's 0. The ceiling was never
+          hit and the arm never stopped early. Spend was USD 1.144445 of the USD
+          4.00 pre-admission ceiling, and the three attempts together cost USD
+          3.384145. Latency was 2676 ms at p50 and 4835 ms at p95, over 6
+          minutes 6 seconds of wall time. The tuple was OpenAI gpt-5.6-sol,
+          model policy balanced, policy profile default, compiled policy
+          default@8905b6f85895+hb03f69cf, formation@7 and retrieval@2.
       - check: benchmark baseline exactness
         outcome: passed_locally
         detail: >-
@@ -355,5 +386,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T09:05:40Z
-last_reviewed_commit: 3b3c972
+last_updated: 2026-08-23T09:41:00Z
+last_reviewed_commit: 192a016

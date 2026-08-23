@@ -7,6 +7,32 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-23 — Live benchmark failures made diagnosable, and the arm published
+
+- Made a failed probe arm say why it failed. Every arm of the live memory
+  benchmark now records the terminal error class the runtime already carries —
+  or the exception type when the arm failed outside the run — beside the
+  terminal status, model calls, and cost it already recorded, and the command
+  prints one content-free line per incomplete run beside its unchanged one-line
+  summary. A failure landing outside the run no longer ends the whole
+  invocation; it becomes a failed arm named by its exception type.
+- Gave each probe arm one retry. An arm whose run terminates without an answer
+  is asked once more against a freshly built composition, admitted through the
+  same pre-admission cost check as any other run; an arm that completed is
+  never asked again, a second failure is kept, and a first attempt that failed
+  after a billed call still counts its cost. The artifact gains `retried_runs`
+  and an aggregate `failure_classes` histogram. No published pass condition
+  changed: `incomplete_runs == 0` still means what it meant.
+- **The live benchmark arm published its artifact.** After two failed attempts,
+  the third run passed every condition: lift forty-five against a derived
+  minimum of eleven, recoverable correctness forty-five of forty-eight against
+  thirty-nine, abstention twelve of twelve against ten, no protected leak, no
+  policy regression, no ceiling hit, USD 1.144445 of a USD 4.00 ceiling, and
+  zero incomplete runs of a hundred and thirty-two. Four arms failed their
+  first attempt and completed on the retry — all four the without-memory arm of
+  a `p02` probe, in four different scenarios, which is a narrower pattern than
+  random transport noise and is worth a look.
+
 ## 2026-08-23 — Provider memory evidence republished at `formation@8`
 
 - Republished the bundled provider-memory activation artifact at
