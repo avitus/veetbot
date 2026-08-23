@@ -19,7 +19,7 @@ The plan designed subagents under Milestone 10 and deferred them behind a gate:
 "add subagents only when evaluation evidence shows that a single agent fails"
 for one of five reasons — independent parallel work, context isolation,
 specialized permissions, specialized tools, or independent verification
-(engineering-plan.md:2971-2981). This document honours that gate as written.
+(engineering-plan.md:2974-2984). This document honours that gate as written.
 Construction is authorized now; tenant activation requires the evidence the
 gate names, and the evidence is part of the milestone rather than a
 precondition for starting it, because the platform has to be able to delegate
@@ -39,7 +39,7 @@ instruction and recalls under its own, smaller, recall class
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
-The readiness review measured what was left (readiness.md:978): the
+The readiness review measured what was left (readiness.md:980): the
 objective had a carrier and no schema, the child budget was additive with no
 rule deriving a child's own limits, the separate trace and the artifact
 references were picked up by no specification, and a child run could not be
@@ -71,8 +71,8 @@ materializes bounded child runs. It includes:
   failures.
 
 The milestone does not include handoffs (the parent retains the user
-interaction and the final response, engineering-plan.md:2969); role-named
-agents for planning, writing, or criticism (engineering-plan.md:2981);
+interaction and the final response, engineering-plan.md:2972); role-named
+agents for planning, writing, or criticism (engineering-plan.md:2984);
 delegation deeper than one level; cross-tenant or cross-principal delegation;
 any change to model routing; a new `WAITING_FOR_CHILD` run status; a child that
 may itself call `delegate.run` or `skill.manage`; or push notification of child
@@ -278,7 +278,7 @@ completes once and the parent re-queues once.
 ## Limits, budget, and deadline
 
 The plan requires a child budget and a child deadline and says fan-out usage
-is additive (engineering-plan.md:570). The rule that derives a child's own
+is additive (engineering-plan.md:573). The rule that derives a child's own
 limits — the partial the readiness review named — is:
 
 ```text
@@ -359,7 +359,7 @@ A child run cannot be inserted into its parent's session: the partial unique
 index that keeps one active run per session admits no row while the parent
 waits in `WAITING_FOR_APPROVAL`, and Section 27.6's "parent's session or a
 dedicated child session per policy" had no policy written
-(readiness.md:997). The resolution is the one the review log recorded as
+(readiness.md:998). The resolution is the one the review log recorded as
 a weak preference and ADR-0061 adopted: a dedicated child session, always. The
 index is untouched, which is the point; the branch is deleted rather than
 policed. Child sessions are principal-owned rows carrying the delegation

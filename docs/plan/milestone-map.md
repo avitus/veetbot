@@ -173,9 +173,13 @@ slug  lowercase, underscore-separated, unique within its area
 The area is not the filename. `structure` exists because three gates —
 the import-boundary walk, the transaction-hygiene check, and the secret
 scanner — are structural statements about the repository that no single
-subject spec owns, and `memory` covers both memory specs because
-formation and
-retrieval share a harness and their gates cross-reference each other.
+subject spec owns, and `memory` covers all three memory specs because
+formation, retrieval, and the Milestone 16 benchmark share a harness and
+their gates cross-reference each other. It is the only area a third
+specification joined:
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
+measures the subject the area already names, and its gates read the same
+beliefs and the same traces the other two declare gates over.
 
 `sandbox` is the twelfth and it follows the `memory` precedent rather
 than the `structure` one: one spec owns all thirteen, and they are
@@ -305,9 +309,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 21 subject specifications declare 299 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 308
-declarations, 305 registry entries once the 3 aliases are subtracted.
+The 22 subject specifications declare 318 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 327
+declarations, 324 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1117,6 +1121,49 @@ schema, unit and sudoers files, and firewall and proxy declarations. The
 remaining eleven are boundary cases over the scripts, a throwaway database,
 the outbox, and the release tree.
 
+### Memory evaluation and lifecycle, nineteen gates
+
+Nineteen gates, all new, in the existing `memory` area and all at Milestone
+16. Nine cover the benchmark — the corpus shape, reproducibility, the two
+baseline comparisons, protected content, supersession currency, live evidence
+publication, the cost ceiling, and the external dataset adapters — and ten
+cover the lifecycle the two older memory specifications describe and the code
+lacks: the profile document, trace retention, decay, usage feedback, the
+recall delta, correction lines, established facts, conflict surfacing, the
+resolver's ordering, and re-derivation.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.memory.bench_corpus_shape                  structural   16
+2   gate.memory.bench_reproducible                  property     16
+3   gate.memory.bench_no_regression                 case         16
+4   gate.memory.bench_baseline_current              case         16
+5   gate.memory.bench_protected_never_rendered      case         16
+6   gate.memory.bench_supersession_current          case         16
+7   gate.memory.bench_evidence_publish              case         16
+8   gate.memory.bench_cost_ceiling                  case         16
+9   gate.memory.bench_external_adapters             structural   16
+10  gate.memory.profiles_wired                      structural   16
+11  gate.memory.trace_retention                     case         16
+12  gate.memory.decay_lifecycle                     case         16
+13  gate.memory.usage_feedback                      case         16
+14  gate.memory.recall_delta                        case         16
+15  gate.memory.correction_lines                    case         16
+16  gate.memory.established_facts_form              case         16
+17  gate.memory.conflict_surfaced                   case         16
+18  gate.memory.authority_recency                   property     16
+19  gate.memory.rederive_opt_in                     case         16
+```
+
+Gates 2 and 18 are properties because reproducibility and the resolver's
+ordering are claims over generated inputs rather than over one scenario; gates
+1, 9, and 10 are structural because they inspect a checked-in document, a set
+of adapters and what the repository does not contain, and a configuration
+document against its models. The remaining fourteen are boundary cases over
+the benchmark run, the belief store, the recall trace, the context builder,
+and the command line.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1192,6 +1239,9 @@ milestone  new gates  cumulative  the earliest of them
 15                16         305  the declared backup set, the
                                   rehearsal, alerts, rollback, the
                                   public boundary, the watchdog
+16                19         324  the benchmark corpus, the baseline,
+                                  live evidence, decay, usage feedback,
+                                  the recall delta, conflicts
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1212,23 +1262,24 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and five gates are green before
+2.  **Forty-one of three hundred and twenty-four gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and five, which is every
-registry entry, at Milestone 15. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and twenty-four, which is every
+registry entry, at Milestone 16. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
 Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
-`gate.surface.*`, and Milestone 15's sixteen are `gate.ops.*`. Every
-authorized milestone now has a specification that declares its gates; the
-roadmap's items add none until the owner authorizes one and a specification
-lands for it. Routing remains deferred and adds none.
+`gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, and Milestone
+16's nineteen are `gate.memory.*` again, in the area those two specs already
+shared. Every authorized milestone now has a specification that declares its
+gates; the roadmap's items add none until the owner authorizes one and a
+specification lands for it. Routing remains deferred and adds none.
 
 ## Build-sequence milestones
 
@@ -1391,7 +1442,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     `docs/plan/<file>.md#hard-gates` anchor exists in the built site.
     **M0.**
 5.  **Every gate identifier matches the grammar** and its area is one
-    of the sixteen. **M0.**
+    of the twenty-two. **M0.**
 6.  **The census is derived, not written.** A test computes the
     per-milestone counts from the registry and compares them against
     the table in this document, so the table cannot drift. **M0.**
@@ -1491,7 +1542,9 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     stands for the next milestone that shows a zero. Milestones 12
     through 15 each showed one on the day they were authorized and
     each closed it the way the decision implies, with a specification
-    that had gates to declare.
+    that had gates to declare. Milestone 16 never showed one: its
+    authorization and its specification landed in the same change, so
+    the row it added was already nineteen.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

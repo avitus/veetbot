@@ -320,3 +320,134 @@ def test_eval_memory_formation_normalizes_failed_gate(
     assert result.exit_code == 1
     assert "memory-formation evaluation failed" in result.stderr
     assert "fabricated candidates" in result.stderr
+
+
+def _benchmark_module(
+    observed: list[dict[str, object]],
+    *,
+    passed: bool = True,
+    failure_summary: str | None = None,
+    skipped: bool = False,
+) -> SimpleNamespace:
+    document = f'{{"passed":{str(passed).lower()}}}'
+
+    async def run_benchmark(
+        _root: object,
+        *,
+        deterministic_only: bool,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path | None,
+        baseline_output: Path | None,
+    ) -> SimpleNamespace | None:
+        observed.append(
+            {
+                "deterministic_only": deterministic_only,
+                "model_policy": model_policy,
+                "policy_profile": policy_profile,
+                "build_ref": build_ref,
+                "output": output,
+                "baseline_output": baseline_output,
+            }
+        )
+        if skipped:
+            return None
+        return SimpleNamespace(
+            passed=passed,
+            failure_summary=failure_summary,
+            model_dump_json=lambda **_kwargs: document,
+        )
+
+    return SimpleNamespace(run_benchmark=run_benchmark)
+
+
+def _build_ref_module() -> SimpleNamespace:
+    return SimpleNamespace(
+        resolve_build_ref=lambda _root, explicit: explicit or "resolved-from-git"
+    )
+
+
+def test_eval_memory_benchmark_deterministic_only_prints_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(observed),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+    baseline = tmp_path / "baseline.json"
+
+    explicit = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--deterministic-only",
+            "--build-ref",
+            "abc123",
+            "--write-baseline",
+            str(baseline),
+        ],
+    )
+    resolved = CliRunner().invoke(app, ["eval", "memory-benchmark"])
+
+    assert explicit.exit_code == 0
+    assert '"passed":true' in explicit.stdout
+    assert resolved.exit_code == 0
+    assert observed == [
+        {
+            "deterministic_only": True,
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "abc123",
+            "output": None,
+            "baseline_output": baseline,
+        },
+        {
+            "deterministic_only": True,
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "resolved-from-git",
+            "output": None,
+            "baseline_output": None,
+        },
+    ]
+
+
+def test_eval_memory_benchmark_reports_opt_in_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(observed, skipped=True),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    result = CliRunner().invoke(
+        app, ["eval", "memory-benchmark", "--no-deterministic-only", "--build-ref", "abc123"]
+    )
+
+    assert result.exit_code == 0
+    assert "skipped: set RUN_LIVE_MODEL_TESTS=1" in result.stdout
+    assert observed[0]["deterministic_only"] is False
+
+
+def test_eval_memory_benchmark_returns_failure_for_a_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module([], passed=False, failure_summary="needed_recalled regressed"),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    result = CliRunner().invoke(app, ["eval", "memory-benchmark", "--build-ref", "abc123"])
+
+    assert result.exit_code == 1
+    assert '"passed":false' in result.stdout
+    assert "needed_recalled regressed" in result.stderr

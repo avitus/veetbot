@@ -1290,18 +1290,18 @@ verification:
         outcome: passed_locally
         detail: >-
           Ruff formatting and linting over 546 files, strict mypy over 504 source
-          and test files, 1054 static tests, 335 adapter contracts, all deployment
+          and test files, 1086 static tests, 335 adapter contracts, all deployment
           script tests, strict documentation and 156 citation checks pass. The
           PostgreSQL integration and resilience lane passes all 124 tests; clean
           and stepwise migration plus metadata-drift checks pass. All 107 Apple
           package tests, iPhone and iPad simulator UI lanes, and unsigned Release
           iOS Simulator and macOS builds pass.
-      - check: hosted CircleCI and CodeRabbit for pull request 38
+      - check: hosted CircleCI and direct dev delivery
         outcome: passed
         detail: >-
-          The final pull-request head passed the static, contract, PostgreSQL
+          Candidate 4f0c7c4 passed the static, contract, PostgreSQL
           integration, real-Docker sandbox, Apple, and GitGuardian hosted checks.
-          CodeRabbit completed successfully on that same head with no unresolved
-          review conversation after every valid inline, outside-diff, summary,
-          and incremental finding was addressed.
+          All previously reported review conversations were resolved. The final
+          integration was delivered directly to dev; code review is reserved for
+          the final merge into main.
     remaining: []

@@ -106,6 +106,15 @@ correction: [m:8f21] no longer holds as of 2026-07-24;
 The prefix is never rewritten. The stable platform text tells the model that
 corrections and the current user turn outrank the memory block.
 
+Milestone 16 implements the delta and the correction line.
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) makes
+the watermark the store head rather than the highest position a recall
+happened to return, adds a minimum-position bound to the recall query, and
+places the correction lines in the fixed body where budget pressure cannot
+yield them. The same document implements the usage feedback below and the time
+decay it feeds, and it supplies the benchmark that measures the metrics this
+document names.
+
 ## Sizing the snapshot
 
 The binding constraint on the snapshot is not token cost. It sits in the cached prefix

@@ -24,8 +24,9 @@ title: Current Milestone
   until the owner says so and a specification with gates exists for it.
 - **Project status:** Milestones 0 through 12 are complete: all 247 cumulative
   gates, the full local and PostgreSQL lanes, Apple package and simulator lanes,
-  hosted CI, and the required CodeRabbit review passed on the final pull-request
-  head with every conversation resolved. Milestones 13 through 15 remain
+  hosted CI passed on the candidate head, and the completed integration was
+  delivered directly to `dev`; code review is reserved for the final merge into
+  `main`. Milestones 13 through 15 remain
   authorized and specified with twenty-one, twenty-one, and sixteen registered
   gates; none has started.
 
@@ -62,7 +63,11 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [inbound-surfaces.md](inbound-surfaces.md) and ADR-0064 with twenty-one
 `gate.surface.*` entries, and Milestone 15's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
-`gate.ops.*` entries; no authorized milestone reports a zero row.
+`gate.ops.*` entries; no authorized milestone reports a zero row. Milestone
+16's [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
+and ADR-0069 landed the same way, with nineteen further `gate.memory.*`
+entries in the existing area, and it never showed a zero row because its
+authorization and its specification arrived together.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -72,8 +77,8 @@ offline inbox, and native Apple registration and deep-link restoration. Review
 hardening made registration request identity deterministic, preserves partial
 per-target delivery outcomes, and executes queued navigation plus initial and
 changed focus behavior. All twenty gates and all 247 cumulative gates pass;
-PostgreSQL, Apple package, iPhone and iPad UI, unsigned Release builds, hosted CI,
-and the required CodeRabbit loop pass on the final pull-request head. Production
+PostgreSQL, Apple package, iPhone and iPad UI, unsigned Release builds, and hosted
+CI pass; the completed integration is delivered directly to `dev`. Production
 APNs activation remains default-off until the owner supplies the external Apple
 capability, provisioning profiles, and provider key.
 
@@ -102,6 +107,7 @@ substitute.
 - [Milestone 13 — general-purpose subagents and delegation](engineering-plan.md#milestone-13-general-purpose-subagents-and-delegation)
 - [Milestone 14 — inbound surfaces and pairing](engineering-plan.md#milestone-14-inbound-surfaces-and-pairing)
 - [Milestone 15 — operational hardening](engineering-plan.md#milestone-15-operational-hardening)
+- [Milestone 16 — memory evaluation and lifecycle](engineering-plan.md#milestone-16-memory-evaluation-and-lifecycle)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -126,7 +132,12 @@ activation gated on the capability-scenario evidence; Milestone 14's is its
 twenty-one `gate.surface.*` entries plus the plan's acceptance criteria and
 the [inbound-surfaces design](inbound-surfaces.md); Milestone 15's is its
 sixteen `gate.ops.*` entries plus the plan's acceptance criteria and the
-[operational-hardening design](operational-hardening.md).
+[operational-hardening design](operational-hardening.md); and Milestone 16's
+is its nineteen `gate.memory.*` entries plus the plan's acceptance criteria
+and the
+[memory-evaluation-and-lifecycle design](memory-evaluation-and-lifecycle.md),
+whose benchmark baseline is re-recorded deliberately by every change that
+moves it.
 
 ## Completion rule
 
@@ -147,3 +158,9 @@ declares and the cumulative registry pass, the PostgreSQL lanes pass where the
 milestone touches persistence, hosted CI passes on the final head, and the final
 CodeRabbit review is clean. The verified ceiling advances through each only
 after every earlier milestone has completed.
+
+Milestone 16 completes on the same terms, with its own additional condition:
+the checked-in benchmark baseline equals a fresh deterministic run exactly and
+the provider-assisted extraction evidence has been republished at its new
+policy version. Being a parallel workstream changes nothing about the ceiling,
+which still advances only after every earlier milestone has completed.

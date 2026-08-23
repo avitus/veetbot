@@ -317,7 +317,9 @@ async def _evaluate_case(
     )
 
 
-def _write_evidence(output: Path, evidence: ProviderExtractionEvaluationEvidence) -> None:
+def _write_evidence(output: Path, evidence: BaseModel) -> None:
+    """Publish one evaluation document, never overwriting an existing file."""
+
     output = output.resolve()
     if output.exists():
         raise ValueError(f"refusing to overwrite existing evaluation evidence: {output}")

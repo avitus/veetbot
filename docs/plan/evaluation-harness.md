@@ -1366,7 +1366,7 @@ thing it gates, and both are worth stopping for. If a property gate flakes, its
 generator found a real failure at a rare seed, which is the generator working.
 ## Running it
 
-Section 17's CLI already lists `agent eval run`. Five subcommands complete it,
+Section 17's CLI already lists `agent eval run`. Six subcommands complete it,
 and the constraint from Section 17 applies unchanged: the CLI calls the same
 application services, and there is no second runtime loop inside the harness.
 
@@ -1377,6 +1377,7 @@ agent eval run --case NAME      one case, verbose
 agent eval gates                gate status by milestone
 agent eval capability --suite research    the live track
 agent eval memory-formation     paired provider-memory activation evidence
+agent eval memory-benchmark --deterministic-only    the memory benchmark
 agent eval record --provider anthropic    a recorded fixture
 agent eval promote <run-id>     trajectory to case
 ```
@@ -1397,6 +1398,14 @@ Milestone 5                    11 gates   0 pass  0 fail  11 pending
 
 Pending is printed, never hidden. A milestone review that cannot see the eleven
 gates arriving next is a review of a partial picture.
+
+`agent eval memory-benchmark` is specified by
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) and
+obeys every rule this document sets: its deterministic arm runs in CI and never
+calls a provider, its live arm skips cleanly without the opt-in variable, its
+ceilings are enforced before admission rather than after the fact, and its
+tracked metrics carry no threshold. Its thresholds live on gates, and its
+evidence artifact re-validates every one of them.
 
 ### What fails the build, and what fails a run
 
