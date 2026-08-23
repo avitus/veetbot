@@ -593,8 +593,8 @@ interactive snapshot knobs leave this document, because `context/plan.yaml` is
 already the authority the planner reads for an interactive session and two
 sources for one number is a bug waiting for an overlay. That removes three
 knobs and adds fourteen, taking the memory profile document from seventeen
-knobs to twenty-eight and the shipped operator-reviewable inventory from 121 to
-132; the derivation paragraph and the table in
+knobs to twenty-eight and the shipped operator-reviewable inventory from 126 to
+137; the derivation paragraph and the table in
 [bootstrap-and-composition.md](bootstrap-and-composition.md) move with it.
 
 `SESSION_IDLE_SECONDS` stays a constant and does not become a knob. The idle

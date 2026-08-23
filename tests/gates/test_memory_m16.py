@@ -6,10 +6,14 @@ from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from agent_core.adapters.determinism import FixedClock
+from agent_core.bootstrap import build
 from agent_core.config import Settings
+from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.evals.memory_benchmark import (
     PROBE_CATEGORIES,
     BenchmarkProbe,
@@ -30,7 +34,14 @@ from agent_core.evals.memory_benchmark_driver import (
     run_deterministic_benchmark,
     run_deterministic_scenario,
 )
-from agent_core.memory.formation import DeterministicCandidateExtractor
+from agent_core.memory.formation import SESSION_IDLE_SECONDS, DeterministicCandidateExtractor
+from agent_core.memory.profiles import (
+    FormationProfile,
+    MemoryProfiles,
+    RetrievalProfile,
+    SnapshotProfiles,
+)
+from agent_core.runtime.worker import MaintenanceWorker
 from tests.integration.m2_support import memory_settings
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -398,3 +409,89 @@ async def test_bench_formed_updates_never_render_superseded(benchmark_settings: 
     assert len(corrections) >= 2 * _MINIMUM_PROBES_PER_CATEGORY
     for probe in corrections:
         assert probe.currency_violations == 0
+
+
+async def test_memory_profiles_are_loaded_and_mirror_shipped_defaults(tmp_path: Path) -> None:
+    """The composition reads `memory/profiles.yaml`, defaults included."""
+
+    shipped_settings = replace(memory_settings(), artifact_root=tmp_path / "artifacts")
+    async with build(
+        settings=shipped_settings,
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=FixedClock(_START),
+    ) as composition:
+        assert composition.memory_profiles == MemoryProfiles()
+        assert composition.memory_retriever.retrieval_profile == RetrievalProfile()
+        assert composition.memory.formation_profile == FormationProfile()
+
+    config_dir = tmp_path / "config"
+    overlay = config_dir / "memory" / "profiles.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("retrieval:\n  reciprocal_rank_fusion_k: 7\n", encoding="utf-8")
+    overlaid_settings = replace(shipped_settings, config_dir=config_dir)
+
+    async with build(
+        settings=overlaid_settings,
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=FixedClock(_START),
+    ) as composition:
+        assert composition.memory_profiles.retrieval.reciprocal_rank_fusion_k == 7
+        assert composition.memory_retriever.retrieval_profile.reciprocal_rank_fusion_k == 7
+        assert composition.memory_profiles.formation == FormationProfile()
+        assert composition.memory_profiles.snapshots == SnapshotProfiles()
+
+
+def _session_boundary_settings(tmp_path: Path, *, enabled: bool) -> Settings:
+    """Settings whose memory profile switches the session-boundary consolidations."""
+
+    settings = replace(memory_settings(), artifact_root=tmp_path / "artifacts")
+    if enabled:
+        return settings
+    config_dir = tmp_path / "config"
+    overlay = config_dir / "memory" / "profiles.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("formation:\n  session_boundary_enabled: false\n", encoding="utf-8")
+    return replace(settings, config_dir=config_dir)
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_session_boundary_switch_governs_both_consolidation_paths(
+    tmp_path: Path, enabled: bool
+) -> None:
+    """`session_boundary_enabled` false stops the close hook and the idle sweep.
+
+    Two sessions state two different things, so each consolidation path is
+    observed on its own: the first is consolidated by closing it, the second by
+    the maintenance sweep once it has been idle long enough.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=_session_boundary_settings(tmp_path, enabled=enabled),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="Noted.")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        assert composition.memory_profiles.formation.session_boundary_enabled is enabled
+        closed = await composition.runs.get(await composition.runs.submit("I have an Apple Watch."))
+        idle = await composition.runs.get(await composition.runs.submit("I have a BMW X3."))
+        assert closed.session_id != idle.session_id
+
+        # The terminal-run flag is not part of the switch; it is recorded either way.
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(idle.session_id, 0, composition.principal)
+        assert [
+            event.event_type for event in events if event.event_type == "memory.formation.requested"
+        ] == ["memory.formation.requested"]
+
+        await composition.services.sessions.close(composition.principal, closed.session_id)
+        after_close = {belief.subject for belief in await composition.memory.list_memories()}
+        assert after_close == ({"Apple Watch"} if enabled else set())
+
+        clock.advance(timedelta(seconds=SESSION_IDLE_SECONDS))
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+        after_sweep = {belief.subject for belief in await composition.memory.list_memories()}
+        assert after_sweep == ({"Apple Watch", "BMW X3"} if enabled else set())

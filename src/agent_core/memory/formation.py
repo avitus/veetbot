@@ -35,6 +35,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
+from agent_core.memory.profiles import DEFAULT_FORMATION_PROFILE, FormationProfile
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
@@ -563,6 +564,7 @@ class GovernedMemoryService:
         resolver: DeterministicConflictResolver | None = None,
         extractor: MemoryCandidateExtractor | None = None,
         policy_version: str = FORMATION_POLICY_VERSION,
+        formation_profile: FormationProfile = DEFAULT_FORMATION_PROFILE,
     ) -> None:
         if not policy_version:
             raise ValueError("memory formation policy version must not be empty")
@@ -574,6 +576,13 @@ class GovernedMemoryService:
         self._resolver = resolver or DeterministicConflictResolver()
         self._extractor = extractor or DeterministicCandidateExtractor()
         self._policy_version = policy_version
+        self._profile = formation_profile
+
+    @property
+    def formation_profile(self) -> FormationProfile:
+        """Expose the formation profile the composition wired in."""
+
+        return self._profile
 
     @property
     def extractor_name(self) -> str:

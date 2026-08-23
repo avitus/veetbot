@@ -307,6 +307,7 @@ from agent_core.memory.formation import (
     DeterministicCandidateExtractor,
     GovernedMemoryService,
 )
+from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
@@ -428,6 +429,7 @@ class Composition:
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
     memory_retriever: HybridMemoryRetriever
+    memory_profiles: MemoryProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
 
@@ -1202,6 +1204,7 @@ async def _compose(
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
+    memory_profiles: MemoryProfiles,
     mcp_config: Mapping[str, object],
     max_compactions_per_step: int,
     skill_store: SkillPackageStore,
@@ -1321,7 +1324,14 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
-    memory_retriever = HybridMemoryRetriever(uow_factory, clock, ids, principal)
+    memory_retriever = HybridMemoryRetriever(
+        uow_factory,
+        clock,
+        ids,
+        principal,
+        profile=memory_profiles.retrieval,
+        trace_retention=memory_profiles.traces,
+    )
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
     registry = StaticToolRegistry()
@@ -1568,6 +1578,7 @@ async def _compose(
         principal,
         extractor=memory_extractor,
         policy_version=memory_policy_version,
+        formation_profile=memory_profiles.formation,
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
@@ -1676,6 +1687,8 @@ async def _compose(
             return len(await memory_service.expire())
 
         async def sweep_memory_consolidation() -> int:
+            if not memory_profiles.formation.session_boundary_enabled:
+                return 0
             ready_at = clock.now()
             async with uow_factory() as uow:
                 sessions = await uow.maintenance.pending_memory_sessions(
@@ -1871,6 +1884,8 @@ async def _compose(
         )
 
         async def consolidate_closed_session(session_id: UUID) -> None:
+            if not memory_profiles.formation.session_boundary_enabled:
+                return
             await memory_service.run(
                 trigger="session_close",
                 scope="general",
@@ -2059,6 +2074,7 @@ async def _compose(
                 tool_pipeline=pipeline,
                 memory=memory_service,
                 memory_retriever=memory_retriever,
+                memory_profiles=memory_profiles,
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
             ),
@@ -2315,6 +2331,9 @@ async def build(
                 f"{ruleset.profile_name!r}"
             )
     context_config = load_config_document(effective_settings, "context/plan.yaml")
+    memory_profiles = MemoryProfiles.from_document(
+        load_config_document(effective_settings, "memory/profiles.yaml")
+    )
     run_defaults = runtime_config["run_defaults"]
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
@@ -2624,6 +2643,7 @@ async def build(
             ruleset=ruleset,
             live_events=live_events,
             context_config=context_config,
+            memory_profiles=memory_profiles,
             mcp_config=tool_config["mcp"],
             max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
             skill_store=skill_store,

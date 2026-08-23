@@ -238,7 +238,7 @@
   kind: structural
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Memory profiles are loaded and mirror the shipped defaults.** The shipped profile document validates to exactly the default models, an operator overlay changes the value the retriever uses, unknown keys are rejected, and the session idle boundary is not in the document."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_memory_profiles_are_loaded_and_mirror_shipped_defaults
 - id: gate.memory.trace_retention
   milestone: 16
   kind: case

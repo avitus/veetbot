@@ -289,11 +289,15 @@ import table and are absent from the Section 4 tree, which lists `unit`,
 
 ### The problem the settings object actually has
 
-The corpus now declares **126 configuration knobs** across the specifications;
+The corpus now declares **137 configuration knobs** across the specifications;
 the original 106 are joined by Milestone 11's four scheduling-admission
 ceilings, six definition ceilings, three schedule-worker timing and batch
 limits, and two reserved-capacity limits, plus Milestone 12's notification
-claim batch, lease, fallback poll, retry schedule, and terminal expiry. The
+claim batch, lease, fallback poll, retry schedule, and terminal expiry, plus
+Milestone 16's memory lifecycle knobs — five decay time constants, two ranking
+penalties, two usage deltas, the established-facts switch, the three decay
+sweep bounds, and the operator trace retention — less the three interactive
+snapshot caps that leave `memory/profiles.yaml` for `context/plan.yaml`. The
 plan originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
@@ -313,13 +317,13 @@ decision the engine makes. An environment variable that changed an effective
 rule would leave the hash untouched and the audit trail lying. The plan says
 the same thing in prose at Section 15: "Policy rules themselves are
 version-controlled files, not rows." Generalize it and the rule that sorts all
-126 falls out.
+137 falls out.
 
 **A value belongs in the environment if and only if it differs between two
 deployments of the same revision and cannot be committed.** Everything else is
 a checked-in file. The test is mechanical, and it puts credentials, the
 database address, and the deployment's identity in the environment, and all
-126 tuning knobs in YAML.
+137 tuning knobs in YAML.
 
 ### The three layers, and why only one of them is a precedence chain
 
@@ -327,7 +331,7 @@ Configuration is assembled in three layers, and the interesting property is
 that **the environment never overrides a file**.
 
 1.  **Shipped defaults.** YAML committed inside the package, next to the
-    module that owns it. This is where all 126 knobs live, at the values the
+    module that owns it. This is where all 137 knobs live, at the values the
     specs state.
 2.  **The operator overlay.** An optional directory, named by
     `AGENT_CONFIG_DIR`, whose files are merged over the shipped defaults by
@@ -368,7 +372,7 @@ src/agent_core/
   context/plan.yaml        region caps, reserves, the 15,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
-  memory/profiles.yaml     snapshot caps, RRF k, recall profiles
+  memory/profiles.yaml     RRF k, decay and usage knobs, snapshot caps
 ```
 
 The two under `policy/` are already named by
@@ -379,7 +383,7 @@ for — none of them introduces a knob that does not already exist.
 The count is executable rather than prose. `SHIPPED_KNOB_PATHS` in
 `agent_core.config` names every operator-reviewable dotted path, and a static
 test resolves every path from its shipped YAML document, rejects null values,
-and asserts the total is 126. Schema versions, profile names, rule identifiers,
+and asserts the total is 137. Schema versions, profile names, rule identifiers,
 model-catalog records, conditions, and frozen hardline predicates are metadata
 or invariants rather than knobs and are not counted.
 
@@ -390,8 +394,19 @@ or invariants rather than knobs and are not counted.
 | `context/plan.yaml` | 26 |
 | `tools/limits.yaml` | 20 |
 | `runtime/limits.yaml` | 36 |
-| `memory/profiles.yaml` | 17 |
-| **Total** | **126** |
+| `memory/profiles.yaml` | 28 |
+| **Total** | **137** |
+
+Milestone 16 wires `memory/profiles.yaml` into the composition root, which is
+where its knob count moves from seventeen to twenty-eight: the memory lifecycle
+knobs — decay time constants, ranking penalties, usage deltas, the decay sweep's
+bounds, the established-facts switch, and the operator trace retention — arrive,
+and the interactive snapshot caps leave, because the planner already reads that
+ceiling from `context/plan.yaml` and two sources for one number is a bug waiting
+for an overlay. The session idle boundary is deliberately not a knob:
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
+keeps it a constant so that two beliefs formed under the same recorded
+formation policy stay comparable.
 
 Five required operational defaults had no numeric value in the corpus. ADR-0036
 sets the initial values: a 4 MiB global tool-output ceiling, a 30-second worker
@@ -454,10 +469,10 @@ property of the type rather than a rule people have to remember.
 
 The plan makes this file a definition-of-done item for every milestone: "New
 configuration appears in `.env.example`." That is satisfied for the environment
-layer by this file and for the 126 file-layer knobs by their
+layer by this file and for the 137 file-layer knobs by their
 appearance in a committed default — the requirement is that no configuration
 is undocumented, and both layers meet it. The alternative reading, that all
-126 knobs become environment variables, contradicts the `policy_version` hash
+137 knobs become environment variables, contradicts the `policy_version` hash
 and Section 15's "version-controlled files, not rows", so it cannot be the
 intended one.
 
@@ -1204,7 +1219,7 @@ the plan's text stands with an annotation rather than a replacement.
     tree names one module; [runtime-loop.md](runtime-loop.md) splits it in
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
-2.  **`.env.example` versus 126 file-layer knobs.** The definition of done
+2.  **`.env.example` versus 137 file-layer knobs.** The definition of done
     says new configuration appears in `.env.example`. Read as "no
     configuration is undocumented", both layers satisfy it. Read as "every
     knob is an environment variable", it contradicts the `policy_version`
@@ -1225,7 +1240,7 @@ the plan's text stands with an annotation rather than a replacement.
    and fake-for-OpenAI configuration changes rather than code changes.
 2. **A value is an environment variable if and only if it differs between
    two deployments of the same revision and cannot be committed.** That
-   sorts all 126 declared knobs into files and leaves ten fields in
+   sorts all 137 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
    named points.** A blanket override would let a deployment change an

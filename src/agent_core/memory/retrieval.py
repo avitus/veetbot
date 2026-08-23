@@ -29,10 +29,17 @@ from agent_core.domain.memory import (
     Sensitivity,
 )
 from agent_core.domain.runs import Run
+from agent_core.memory.profiles import (
+    DEFAULT_RETRIEVAL_PROFILE,
+    DEFAULT_TRACE_PROFILE,
+    RetrievalProfile,
+    TraceProfile,
+)
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 RETRIEVAL_POLICY_VERSION = "retrieval@1"
+_DURABLE_TYPES = frozenset({BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR})
 _INJECTION = re.compile(
     r"(?:ignore\s+(?:all\s+)?previous|system\s+prompt|developer\s+message|"
     r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
@@ -98,12 +105,22 @@ class HybridMemoryRetriever:
         principal: Principal,
         *,
         ranker: HandWeightedRanker | None = None,
+        profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
+        trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
         self._ids = ids
         self._principal = principal
         self._ranker = ranker or HandWeightedRanker()
+        self._profile = profile
+        self._trace_retention = trace_retention
+
+    @property
+    def retrieval_profile(self) -> RetrievalProfile:
+        """Expose the ranking profile the composition wired in."""
+
+        return self._profile
 
     async def recall(
         self,
@@ -134,10 +151,16 @@ class HybridMemoryRetriever:
         else:
             async with self._uow_factory() as uow:
                 records = await uow.memories.query(query)
-        recalled = [
-            candidate for record in records if (candidate := _score(record, effective_query))
-        ]
-        recalled = _rrf_fuse(recalled)
+        recalled: list[RecalledBelief] = []
+        durable_ids: set[UUID] = set()
+        for record in records:
+            candidate = _score(record, effective_query, profile=self._profile)
+            if candidate is None:
+                continue
+            if _is_durable(record):
+                durable_ids.add(record.id)
+            recalled.append(candidate)
+        recalled = _rrf_fuse(recalled, k=self._profile.reciprocal_rank_fusion_k)
         ranked = self._ranker.rank(recalled, effective_query)
         collapsed: list[RecalledBelief] = []
         subjects: defaultdict[str, int] = defaultdict(int)
@@ -152,15 +175,29 @@ class HybridMemoryRetriever:
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
         used_tokens = 0
-        for item in collapsed:
+        reserve = _durable_reserve(
+            effective_query,
+            collapsed,
+            durable_ids,
+            share=self._profile.durable_item_share,
+        )
+        durable_ahead = _durable_ahead(collapsed, durable_ids)
+        durable_selected = 0
+        for index, item in enumerate(collapsed):
             estimate = _token_estimate(_line(item))
+            durable = item.belief_id in durable_ids
+            # A slot is held for a durable belief further down the ranking only
+            # while one is actually still pending, so the reservation never
+            # shrinks a snapshot that has no durable belief left to seat.
+            held = 0 if durable else min(max(reserve - durable_selected, 0), durable_ahead[index])
             if (
-                len(selected) >= effective_query.max_items
+                len(selected) + held >= effective_query.max_items
                 or used_tokens + estimate > effective_query.budget_tokens
             ):
                 dropped.append(item.belief_id)
                 continue
             selected.append(item)
+            durable_selected += int(durable)
             used_tokens += estimate
         rendered = render_memory(selected, as_of=effective_query.as_of or self._clock.now())
         rendered_bytes = rendered.encode("utf-8")
@@ -187,7 +224,9 @@ class HybridMemoryRetriever:
             beliefs=[item.model_copy(deep=True) for item in selected],
             retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
             created_at=self._clock.now(),
-            operator_fields_expire_at=self._clock.now() + timedelta(days=30),
+            operator_fields_expire_at=(
+                self._clock.now() + timedelta(days=self._trace_retention.operator_retention_days)
+            ),
         )
         async with self._uow_factory() as uow:
             await uow.traces.record(trace)
@@ -287,7 +326,43 @@ def _payload_contains(payload: object, needle: str, *, field: str | None = None)
     )
 
 
-def _score(record: MemoryRecord, query: RecallQuery) -> RecalledBelief | None:
+def _is_durable(record: MemoryRecord) -> bool:
+    """Name the beliefs the snapshot reserves its durable share for."""
+
+    return record.belief_type in _DURABLE_TYPES or record.scope == "user"
+
+
+def _durable_reserve(
+    query: RecallQuery,
+    candidates: list[RecalledBelief],
+    durable_ids: set[UUID],
+    *,
+    share: float,
+) -> int:
+    """Reserve the CORE snapshot's durable share, bounded by what is available."""
+
+    if query.profile is not RecallProfile.CORE:
+        return 0
+    available = sum(1 for item in candidates if item.belief_id in durable_ids)
+    return min(math.ceil(share * query.max_items), query.max_items, available)
+
+
+def _durable_ahead(candidates: list[RecalledBelief], durable_ids: set[UUID]) -> list[int]:
+    """Count the durable beliefs at or after each position in the ranking."""
+
+    ahead = [0] * (len(candidates) + 1)
+    for index in range(len(candidates) - 1, -1, -1):
+        durable = candidates[index].belief_id in durable_ids
+        ahead[index] = ahead[index + 1] + int(durable)
+    return ahead[:-1]
+
+
+def _score(
+    record: MemoryRecord,
+    query: RecallQuery,
+    *,
+    profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
+) -> RecalledBelief | None:
     text_terms = _terms(query.text or "")
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_text = f"{record.subject} {record.statement}".casefold()
@@ -301,22 +376,14 @@ def _score(record: MemoryRecord, query: RecallQuery) -> RecalledBelief | None:
     if lexical:
         arms.append("lexical")
     if query.profile is RecallProfile.CORE:
-        match = (
-            0.5
-            if record.belief_type
-            in {
-                BeliefType.PREFERENCE,
-                BeliefType.USER_MODEL_ATTR,
-            }
-            or record.scope == "user"
-            else 0.15
-        )
+        match = 0.5 if _is_durable(record) else 0.15
         arms = ["structured"]
     else:
         match = max(structured, lexical)
         if match == 0:
             return None
-    lifecycle = 1.0 if record.status is MemoryStatus.ACTIVE else 0.4
+    weights = profile.lifecycle_weights
+    lifecycle = weights.active if record.status is MemoryStatus.ACTIVE else weights.provisional
     confidence = record.confidence * lifecycle
     reinforce = min(1.0, math.log1p(record.corroboration_count) / math.log(11))
     authority = {
