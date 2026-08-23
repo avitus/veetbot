@@ -2,23 +2,44 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
+from agent_core.config import Settings
 from agent_core.evals.memory_benchmark import (
+    PROBE_CATEGORIES,
     BenchmarkProbe,
     BenchmarkScenario,
     BenchmarkSession,
     BenchmarkTurn,
+    DeterministicBenchmarkResult,
     LabeledBelief,
     MemoryBenchmarkCorpus,
     ProbeAnswer,
     ProbeCategory,
+    baseline_probe_rows,
+    compare_to_baseline,
+    load_baseline,
+    load_corpus,
 )
-from agent_core.evals.memory_benchmark_driver import run_deterministic_scenario
+from agent_core.evals.memory_benchmark_driver import (
+    run_deterministic_benchmark,
+    run_deterministic_scenario,
+)
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from tests.integration.m2_support import memory_settings
+
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_SCENARIO_COUNT = 16
+_PROBE_CAP = 80
+_MINIMUM_CROSS_PROJECT_SCENARIOS = 4
+_MINIMUM_PROTECTED_SCENARIOS = 4
+_MINIMUM_PROBES_PER_CATEGORY = 3
+_BENCHMARK_RUNS: dict[str, DeterministicBenchmarkResult] = {}
 
 _START = datetime(2026, 3, 2, 9, 0, tzinfo=UTC)
 _ONE_DAY = 24 * 60 * 60
@@ -244,3 +265,136 @@ async def test_bench_single_scenario_forms_and_recalls(tmp_path: Path) -> None:
         assert probe.distinct_prefixes == 1
         assert probe.policy_failures == 0
         assert probe.forbidden_rendered == 0
+
+
+@pytest.fixture(scope="module")
+def benchmark_settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
+    """Settings every gate in this file shares, over one scratch artifact root."""
+
+    return replace(memory_settings(), artifact_root=tmp_path_factory.mktemp("memory-benchmark"))
+
+
+async def _benchmark(settings: Settings) -> DeterministicBenchmarkResult:
+    """Run the checked-in corpus once and serve that run to every gate below.
+
+    The deterministic arm is a pure function of the corpus and the code, so one
+    run answers every question the gates ask of it and the whole file costs
+    about one benchmark pass; only the reproducibility gate pays for a second.
+    """
+
+    if "run" not in _BENCHMARK_RUNS:
+        _BENCHMARK_RUNS["run"] = await run_deterministic_benchmark(
+            _REPOSITORY_ROOT, settings=settings
+        )
+    return _BENCHMARK_RUNS["run"]
+
+
+def test_bench_corpus_shape() -> None:
+    corpus, digest = load_corpus(_REPOSITORY_ROOT)
+
+    assert len(digest) == 64
+    assert len(corpus.scenarios) == _SCENARIO_COUNT
+    assert len({scenario.start_at for scenario in corpus.scenarios}) == _SCENARIO_COUNT
+    probes = [probe for scenario in corpus.scenarios for probe in scenario.probes]
+    assert len(probes) <= _PROBE_CAP
+    for scenario in corpus.scenarios:
+        assert len(scenario.sessions) >= 2
+        assert 3 <= len(scenario.probes) <= 5
+    counts = Counter(probe.category for probe in probes)
+    thin = [
+        category for category in PROBE_CATEGORIES if counts[category] < _MINIMUM_PROBES_PER_CATEGORY
+    ]
+    assert thin == []
+    protected = [
+        scenario
+        for scenario in corpus.scenarios
+        if scenario.protected_statements
+        and any(probe.category == "abstention" for probe in scenario.probes)
+    ]
+    assert len(protected) >= _MINIMUM_PROTECTED_SCENARIOS
+    cross_project = [
+        scenario
+        for scenario in corpus.scenarios
+        if len({session.project_scope for session in scenario.sessions} - {None}) >= 2
+    ]
+    assert len(cross_project) >= _MINIMUM_CROSS_PROJECT_SCENARIOS
+
+
+async def test_bench_deterministic_arm_is_reproducible(benchmark_settings: Settings) -> None:
+    first = await _benchmark(benchmark_settings)
+
+    second = await run_deterministic_benchmark(_REPOSITORY_ROOT, settings=benchmark_settings)
+
+    assert second.metrics == first.metrics
+    assert baseline_probe_rows(second) == baseline_probe_rows(first)
+    assert second.corpus_sha256 == first.corpus_sha256
+    assert second.extractor_name == first.extractor_name
+    assert first.metrics.max_distinct_prefixes_per_probe == 1
+    assert first.metrics.probe_runs_completed == first.metrics.probe_count
+    assert first.metrics.run_policy_failures == 0
+
+
+async def test_bench_deterministic_metrics_do_not_regress_baseline(
+    benchmark_settings: Settings,
+) -> None:
+    result = await _benchmark(benchmark_settings)
+    baseline = load_baseline(_REPOSITORY_ROOT)
+    assert baseline is not None
+
+    comparison = compare_to_baseline(result, baseline)
+
+    assert comparison.drift == []
+    assert comparison.regressions == []
+
+
+async def test_bench_baseline_matches_current_run_exactly(benchmark_settings: Settings) -> None:
+    result = await _benchmark(benchmark_settings)
+    baseline = load_baseline(_REPOSITORY_ROOT)
+    assert baseline is not None
+
+    assert result.metrics == baseline.metrics
+    assert baseline_probe_rows(result) == baseline.probes
+    assert result.benchmark_version == baseline.benchmark_version
+    assert result.corpus_sha256 == baseline.corpus_sha256
+    assert result.formation_policy_version == baseline.formation_policy_version
+    assert result.provider_formation_policy_version == baseline.provider_formation_policy_version
+    assert result.retrieval_policy_version == baseline.retrieval_policy_version
+    assert result.extractor_name == baseline.extractor_name
+    assert compare_to_baseline(result, baseline).improvements == []
+
+
+async def test_bench_protected_content_never_forms_or_renders(
+    benchmark_settings: Settings,
+) -> None:
+    corpus, _digest = load_corpus(_REPOSITORY_ROOT)
+    result = await _benchmark(benchmark_settings)
+
+    assert result.metrics.formation_policy_failures == 0
+    assert result.metrics.abstention_leaks == 0
+    protected = {
+        scenario.id: [fragment.casefold() for fragment in scenario.protected_statements]
+        for scenario in corpus.scenarios
+    }
+    for scenario_result in result.scenarios:
+        fragments = protected[scenario_result.scenario_id]
+        for belief in scenario_result.beliefs:
+            statement = belief.statement.casefold()
+            assert [fragment for fragment in fragments if fragment in statement] == []
+        for probe in scenario_result.probes:
+            if probe.category == "abstention":
+                assert probe.forbidden_rendered == 0
+
+
+async def test_bench_formed_updates_never_render_superseded(benchmark_settings: Settings) -> None:
+    result = await _benchmark(benchmark_settings)
+
+    assert result.metrics.currency_violations == 0
+    corrections = [
+        probe
+        for scenario in result.scenarios
+        for probe in scenario.probes
+        if probe.category in {"update", "correction"}
+    ]
+    assert len(corrections) >= 2 * _MINIMUM_PROBES_PER_CATEGORY
+    for probe in corrections:
+        assert probe.currency_violations == 0

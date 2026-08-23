@@ -184,37 +184,37 @@
   kind: structural
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The corpus is shaped as declared.** Loading the checked-in corpus yields at least twelve scenarios, every scenario at least two sessions, at least three probes in every category, and at least four protected-abstention scenarios; every category rule, identifier uniqueness rule, and label reference resolves, and a corpus violating any of them is refused."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_bench_corpus_shape
 - id: gate.memory.bench_reproducible
   milestone: 16
   kind: property
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The deterministic arm is reproducible.** Two runs of the same commit over the same corpus produce identical aggregate metrics and identical per-probe rows, and no probe records more than one distinct cacheable prefix."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_bench_deterministic_arm_is_reproducible
 - id: gate.memory.bench_no_regression
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The benchmark does not regress.** Comparing a fresh deterministic run against the checked-in baseline reports no drift and no regression, where regression is any higher-is-better count falling, any lower-is-better count rising, or any probe losing a recalled label."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_bench_deterministic_metrics_do_not_regress_baseline
 - id: gate.memory.bench_baseline_current
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The baseline is current.** A fresh deterministic run equals the checked-in baseline exactly, so a behavior change cannot land without re-recording it in the same change."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_bench_baseline_matches_current_run_exactly
 - id: gate.memory.bench_protected_never_rendered
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Protected content never forms and never renders.** Across the corpus, no belief of any status contains a protected fragment, no recall trace renders one, and no abstention probe leaks one."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_bench_protected_content_never_forms_or_renders
 - id: gate.memory.bench_supersession_current
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**A formed update never renders what it superseded.** For every update and correction probe whose superseding belief formed, the superseded statement appears in no trace, and the unformed case is counted separately rather than reported as a currency failure."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_bench_formed_updates_never_render_superseded
 - id: gate.memory.bench_evidence_publish
   milestone: 16
   kind: case
