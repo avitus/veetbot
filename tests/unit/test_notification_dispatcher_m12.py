@@ -158,6 +158,65 @@ async def test_old_pending_notification_for_an_unconfigured_provider_is_reported
     )
 
 
+async def test_pending_backlog_warning_has_a_per_notification_cooldown(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock, factory = await memory_uow_factory()
+    assert isinstance(clock, FixedClock)
+    surface = device(token=None).model_copy(
+        update={
+            "id": UUID(int=906),
+            "client_device_id": "telegram-cooldown-surface",
+            "name": "Telegram cooldown surface",
+            "kind": DeviceKind.SURFACE,
+            "platform": "telegram",
+            "push_provider": PushProvider.TELEGRAM,
+            "push_token": SecretStr("paired-chat-cooldown-reference"),
+        }
+    )
+    async with factory() as uow:
+        await uow.devices.upsert(surface, principal())
+        assert (
+            await uow.notification_outbox.enqueue(
+                _targeted_test_notification(
+                    device_id=surface.id,
+                    key="backlog-cooldown-regression",
+                )
+            )
+            is not None
+        )
+    clock.advance(timedelta(minutes=6))
+    dispatcher = _dispatcher(
+        factory,
+        clock,
+        SequenceIdFactory(),
+        FakePushTransport(),
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert await dispatcher.run_once() == 0
+        assert await dispatcher.run_once() == 0
+
+    warnings = [
+        record
+        for record in caplog.records
+        if record.message == "notification pending backlog exceeded threshold"
+        and getattr(record, "notification_id", None) == str(new_notification().id)
+    ]
+    assert len(warnings) == 1
+
+    clock.advance(timedelta(minutes=5))
+    with caplog.at_level(logging.WARNING):
+        assert await dispatcher.run_once() == 0
+    warnings = [
+        record
+        for record in caplog.records
+        if record.message == "notification pending backlog exceeded threshold"
+        and getattr(record, "notification_id", None) == str(new_notification().id)
+    ]
+    assert len(warnings) == 2
+
+
 async def test_two_dispatchers_deliver_one_target_once_and_record_the_attempt() -> None:
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()

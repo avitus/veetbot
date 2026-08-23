@@ -25,6 +25,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryCandidate,
+    MemoryExtractionResult,
     Polarity,
     Portability,
     ProviderExtractionEvaluationEvidence,
@@ -40,12 +41,14 @@ from agent_core.domain.messages import (
     ModelUsage,
     ResolvedModel,
     ScriptedTurn,
+    TextDeltaEvent,
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
     MemoryClaimKind,
     ProviderAssistedCandidateExtractor,
+    ProviderExtractionBudget,
     _merge_candidates,
     _SemanticClaim,
     provider_extraction_evidence_matches,
@@ -73,6 +76,42 @@ class _BlockingProvider:
         await asyncio.Event().wait()
         if False:  # pragma: no cover - keeps this an async generator.
             yield
+
+    async def close(self) -> None:
+        return None
+
+
+class _PartialStreamFailureProvider:
+    name = "partial-stream-failure"
+
+    def __init__(self, *, timeout: bool) -> None:
+        self._timeout = timeout
+
+    async def stream(
+        self,
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attempt: ModelAttempt,
+    ) -> AsyncIterator[ModelEvent]:
+        del request, resolved
+        yield TextDeltaEvent(
+            attempt_id=attempt.attempt_id,
+            run_id=attempt.run_id,
+            step_number=attempt.step_number,
+            sequence=0,
+            item_index=0,
+            text="{",
+        )
+        if self._timeout:
+            await asyncio.Event().wait()
+        yield TextDeltaEvent(
+            attempt_id=attempt.attempt_id,
+            run_id=attempt.run_id,
+            step_number=attempt.step_number,
+            sequence=2,
+            item_index=0,
+            text="}",
+        )
 
     async def close(self) -> None:
         return None
@@ -1373,7 +1412,7 @@ async def test_provider_extractor_refuses_unaffordable_input_before_provider_io(
     assert audits[0].payload["outcome"] == "cost_budget_exceeded"
 
 
-async def test_provider_reported_cost_cannot_be_lowered_by_catalog_pricing() -> None:
+async def test_provider_reported_budget_violation_is_permanent() -> None:
     clock, factory, _service, _retriever = await formation_stack()
     await user_event(factory, "The astronomy club was my daughter's idea.")
     provider = FakeModelProvider(
@@ -1413,16 +1452,70 @@ async def test_provider_reported_cost_cannot_be_lowered_by_catalog_pricing() -> 
         fallback=DeterministicCandidateExtractor(),
     )
 
-    await extractor.extract(
+    result = await extractor.extract(
         await session_events(factory),
         principal=principal(),
         scope="project-a",
     )
 
+    assert isinstance(result, MemoryExtractionResult)
+    assert result.provider_failure is not None
+    assert result.provider_failure.failure_kind == "permanent"
+    assert result.provider_failure.retryable is False
     async with factory() as uow:
         failures = await uow.process_events.list("memory.provider_extraction.failed")
     assert len(failures) == 1
     assert failures[0].payload["usage"]["cost"] == "0.06"
+    assert failures[0].payload["failure_kind"] == "permanent"
+    assert failures[0].payload["retryable"] is False
+
+
+@pytest.mark.parametrize(
+    ("timeout", "expected_failure_kind"),
+    [(False, "protocol"), (True, "transient")],
+)
+async def test_provider_partial_stream_failure_records_output(
+    timeout: bool,
+    expected_failure_kind: str,
+) -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    await user_event(factory, "The astronomy club was my daughter's idea.")
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=_PartialStreamFailureProvider(timeout=timeout),
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(8_300, 8_400)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+    if timeout:
+        extractor._budget = ProviderExtractionBudget(timeout_seconds=0.01)
+
+    result = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert isinstance(result, MemoryExtractionResult)
+    assert result.provider_failure is not None
+    assert result.provider_failure.failure_kind == expected_failure_kind
+    assert result.provider_failure.stream_had_output is True
+    async with factory() as uow:
+        failures = await uow.process_events.list("memory.provider_extraction.failed")
+    assert len(failures) == 1
+    assert failures[0].payload["stream_had_output"] is True
 
 
 @pytest.mark.parametrize(

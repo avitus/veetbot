@@ -623,7 +623,9 @@ Prompt and response bodies and exception messages are never stored there; only
 their SHA-256 hashes are retained. A failed, timed-out, malformed, or over-budget
 call records failure and returns deterministic proposals. Retryable failure keeps
 the prefix pending under the bounded schedule above; permanent failure and
-exhausted retry advance it.
+exhausted retry advance it. A recorded usage violation is a local permanent
+budget failure and never enters the provider retry schedule; replaying the same
+over-budget response would not change that policy outcome.
 A cancelled call records the cancellation and propagates it rather than disguising
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through

@@ -224,8 +224,9 @@ async def run_benchmark(
     sibling module imported lazily here so that the pure driver never depends
     on it.  The deterministic arm writes no evidence, so an `--output` path
     handed to it is a mistake rather than something to ignore, and it is
-    compared against the recorded baseline when there is one; drift and
-    regression both fail the run.  `clock` stamps a recorded baseline and
+    compared against the recorded baseline when there is one; any difference
+    (drift, regression, improvement, or shift) fails the run.  `clock` stamps a
+    recorded baseline and
     defaults to the composition root's wall clock, because evaluation code
     never reads the ambient one.
     """

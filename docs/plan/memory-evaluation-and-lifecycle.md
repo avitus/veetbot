@@ -21,7 +21,7 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:685).
+recall of consequential facts (memory-formation-and-consolidation.md:687).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
@@ -32,7 +32,7 @@ utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:712) are
+that is opt-in per principal (memory-formation-and-consolidation.md:714) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -897,7 +897,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:712), so it is a command and it demands
+(memory-formation-and-consolidation.md:714), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

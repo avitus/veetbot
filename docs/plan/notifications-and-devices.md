@@ -416,9 +416,11 @@ Correctness is the table scan.
 Every dispatcher scan also reads a bounded oldest-first view of notifications
 that have remained `pending` for more than five minutes and emits a
 content-free warning carrying the notification identifier, kind, creation
-instant, and claimant. This makes a row whose only remaining targets belong to
-an as-yet undeployed provider visible even though that dispatcher correctly
-cannot claim or settle it.
+instant, and claimant. A long-lived dispatcher emits that warning at most once
+per notification in each five-minute cooldown, using bounded in-process state;
+a process restart may emit it again. This makes a row whose only remaining
+targets belong to an as-yet undeployed provider visible even though that
+dispatcher correctly cannot claim or settle it.
 
 Revocation is immediate in the only sense that matters here: the dispatcher
 resolves targets at claim time, so a device revoked before the next claim

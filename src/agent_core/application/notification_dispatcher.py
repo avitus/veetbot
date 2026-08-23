@@ -7,6 +7,7 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
 from typing import Protocol
+from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
@@ -38,6 +39,7 @@ from agent_core.ports.repositories import (
 DispatchProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
 _PENDING_BACKLOG_ALERT_AFTER = timedelta(minutes=5)
+_PENDING_BACKLOG_WARNING_COOLDOWN = timedelta(minutes=5)
 
 
 class DispatchProbeError(RuntimeError):
@@ -94,6 +96,7 @@ class NotificationDispatcher:
         self._lease_seconds = lease_seconds
         self._retry_delays = retry_delays
         self._dispatch_probe = dispatch_probe or (lambda _boundary: None)
+        self._backlog_warning_at: dict[UUID, datetime] = {}
 
     async def run_once(self) -> int:
         now = self._clock.now()
@@ -109,7 +112,15 @@ class NotificationDispatcher:
                 self._lease_seconds,
                 self._providers,
             )
+        warning_cutoff = now - _PENDING_BACKLOG_WARNING_COOLDOWN
+        self._backlog_warning_at = {
+            notification_id: warned_at
+            for notification_id, warned_at in self._backlog_warning_at.items()
+            if warned_at > warning_cutoff
+        }
         for notification in backlog:
+            if notification.id in self._backlog_warning_at:
+                continue
             logger.warning(
                 "notification pending backlog exceeded threshold",
                 extra={
@@ -119,6 +130,7 @@ class NotificationDispatcher:
                     "claimant": self._claimant,
                 },
             )
+            self._backlog_warning_at[notification.id] = now
         for notification in claimed:
             try:
                 await self._dispatch(notification)
