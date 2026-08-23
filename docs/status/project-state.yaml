@@ -8,7 +8,8 @@ project:
   current_milestone: 9
   active_milestone: 11
   # Milestones 12 through 15 were authorized in order on 2026-08-20
-  # (ADR-0061); each begins with its detailed-design document and ADR.
+  # (ADR-0061) and Milestone 16 on 2026-08-22 as a parallel workstream
+  # (ADR-0069); each begins with its detailed-design document and ADR.
   authorized_milestones:
     - 0
     - 1
@@ -26,6 +27,7 @@ project:
     - 13
     - 14
     - 15
+    - 16
 
 milestones:
   "0":
@@ -151,6 +153,24 @@ milestones:
     deferred_scope:
       - high availability, off-host database, load balancer, rolling deploys
       - Kubernetes, microservices, a second queue
+  "16":
+    title: Memory evaluation and lifecycle
+    status: authorized
+    authorized_on: 2026-08-22
+    design: docs/plan/memory-evaluation-and-lifecycle.md
+    adr: docs/adr/0069-milestone-16-memory-evaluation-and-lifecycle.md
+    gates_registered: 19
+    authorized_scope:
+      - multi-session benchmark corpus, deterministic arm, exact baseline
+      - opt-in live arm with cost ceiling and self-validating evidence
+      - opt-in loaders for three public datasets, never vendored
+      - memory profiles as configuration, trace expiry, lexical parity
+      - decay sweep, usage feedback, recall delta, correction lines
+      - established facts at affirmed authority, surfaced conflicts, rederive
+    deferred_scope:
+      - semantic arm and pgvector, external memory provider, persona surface
+      - temporal entity graph, session history and artifacts as sources
+      - belief merge and global consolidation, HTTP memory surface
 
 # Evidence for completed milestones 0 through 9 lives in
 # docs/status/verification-history.yaml; an in-progress milestone's
@@ -670,7 +690,10 @@ readiness:
     notifications-and-devices.md with twenty registered gates, Milestone
     13 by subagents-and-delegation.md with twenty-one, Milestone 14 by
     inbound-surfaces.md with twenty-one, and Milestone 15 by
-    operational-hardening.md with sixteen; every authorized milestone has a
+    operational-hardening.md with sixteen. On 2026-08-22 the owner authorized
+    Milestone 16 memory evaluation and lifecycle as a parallel workstream
+    (ADR-0069), specified by memory-evaluation-and-lifecycle.md with nineteen
+    registered gates; every authorized milestone has a
     design document and the census reports no zero row.
     Model routing remains deferred
     on the plan's roadmap. Every plan subject through Milestone 11 has a
@@ -678,8 +701,8 @@ readiness:
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-21T04:00:00Z
-last_reviewed_commit: ce71aba
+last_updated: 2026-08-22T00:00:00Z
+last_reviewed_commit: 59d44a0

@@ -4,6 +4,36 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-22 — Milestone 16 specified: memory evaluation and lifecycle
+
+- Added `docs/plan/memory-evaluation-and-lifecycle.md` and proposed ADR-0069: a
+  checked-in multi-session benchmark corpus of labeled beliefs and probes
+  across eight categories; a deterministic in-CI arm that drives real formation
+  and real retrieval through the composition root under a fixed clock, a
+  scripted model, and sequential identifiers; a checked-in baseline compared
+  exactly, so a behavior change re-records it in the same change; an opt-in
+  live arm pairing with-memory and without-memory runs, scored without a model
+  judge, bounded by a pre-admission ceiling of USD 4.00, and publishing
+  self-validating evidence that is never overwritten; opt-in loaders for
+  LongMemEval, LoCoMo, and HaluMem read from a local path and never vendored;
+  and the lifecycle the Milestone 9 memory specifications describe — memory
+  profiles as configuration, operator-tier trace expiry, lexical parity between
+  the store adapters, episode paging, project scope on the consolidation and
+  query-former paths, time-decayed reinforcement with a forgetting sweep, usage
+  feedback that never raises confidence, the recall delta and its correction
+  lines, established facts at affirmed authority, surfaced conflicts, and
+  opt-in re-derivation; nineteen hard gates.
+- Registered the nineteen gates in the existing `memory` area, which now spans
+  three declaring specifications: the registry bound and declaring-spec census,
+  the milestone-map area paragraph, per-spec table, gate-table digits (22
+  specs, 318 subject gates, 327 declarations, 324 entries), census row for
+  Milestone 16 and its Decision 9 note, readiness verdict, current milestone,
+  project state, AGENTS.md routing row and scope bullet, mkdocs nav, ADR index,
+  forward-looking notes in the two memory specifications, the evaluation
+  harness, and the context engine, the review log, and the changelog. Narrowed
+  roadmap item B6 to the residue this milestone does not take, and raised the
+  plan to version 2.5.
+
 ## 2026-08-22 — Retryable and diagnosable memory formation
 
 - Added exact ordinary-language formation for a newly started soprano-saxophone

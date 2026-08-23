@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.4"
+version: "2.5"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -61,6 +61,13 @@ Version 2.4 (roadmap pass, 2026-08-20):
 - Section 21 gains a roadmap subsection that converts every remaining deferral into a ranked, owner-visible backlog item, as Section 24 requires.
 - Milestone 10's completion is construction-scoped: tenant activation of self-authored skills and of provider-assisted memory extraction stays evidence-gated and is tracked on the roadmap rather than as a completion condition (ADR-0061).
 - Section 27.6 settles the child-run placement question: a child run always belongs to a dedicated child session.
+
+Version 2.5 (memory evaluation pass, 2026-08-22):
+
+- Section 21 gains Milestone 16 — memory evaluation and lifecycle — authorized by the repository owner as a parallel workstream alongside Milestones 12 through 15 and specified by a detailed-design document that declares its nineteen gates before implementation begins (ADR-0069).
+- Memory acquires a yardstick: a checked-in multi-session benchmark with a deterministic in-CI arm, an exact baseline, an opt-in live arm with a cost ceiling and self-validating evidence, and opt-in loaders for three public long-horizon datasets that are never vendored. No model judges an answer.
+- The memory lifecycle the Milestone 9 specifications describe — decay, usage feedback, the recall delta and its correction lines, established facts as a formation input, surfaced conflicts, opt-in re-derivation, and the memory profile document — becomes implemented behavior rather than described behavior.
+- Roadmap item B6 narrows to the residue Milestone 16 does not take, and each remaining item's entry condition becomes that milestone's benchmark evidence.
 
 ## 1. Mission
 
@@ -2358,7 +2365,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - three hundred and eight gate declarations, comprising two hundred and ninety-nine across twenty-one detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and five registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 15; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and five registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - three hundred and twenty-seven gate declarations, comprising three hundred and eighteen across twenty-two detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and twenty-four registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 16; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and twenty-four registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -3255,6 +3262,66 @@ Acceptance criteria:
 - Backup, health check, and watchdog behaviour are default-off and activate
   only with explicit flags and their own environment files.
 
+### Milestone 16: Memory evaluation and lifecycle
+
+The owner authorized this milestone on 2026-08-22 (ADR-0069) as a parallel
+workstream alongside Milestones 12 through 15. Memory carries twenty-nine
+registered gates and every one of them is a safety statement; nothing measures
+how well memory works, so roadmap item B6's entry condition — evaluation
+evidence per item, under Milestone 9's rule that `pgvector` and its successors
+arrive only when evaluations show a material benefit — has had nothing to read.
+The same specifications describe a lifecycle that is written and unbuilt. This
+milestone supplies the yardstick and then the lifecycle, in that order. The
+detailed design is
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) and
+ADR-0069; the design declares this milestone's nineteen gates.
+
+Implement:
+
+- A checked-in multi-session benchmark corpus of labeled beliefs and probes
+  across eight categories, with a deterministic arm that drives real formation
+  and real retrieval under a fixed clock in CI and a checked-in baseline it is
+  compared against exactly.
+- An opt-in live arm that pairs a with-memory and a without-memory run over the
+  same probes, scores answers without a model judge, enforces a pre-admission
+  cost ceiling, and publishes a self-validating evidence artifact that is never
+  overwritten.
+- Opt-in loaders for three public long-horizon datasets, read from a local path
+  and never vendored, reporting derived metrics including
+  evidence-provenance recall.
+- The memory profile document as validated configuration, operator-tier trace
+  expiry, lexical parity between the two store adapters, episode paging, and
+  project scope on the consolidation and query-former paths.
+- Time-decayed reinforcement with a bounded forgetting sweep, usage feedback
+  from cited beliefs that never raises confidence, the recall delta and its
+  correction lines, established working-state facts entering formation at
+  affirmed authority, conflicts committed flagged and surfaced, and an opt-in
+  re-derivation command.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- The deterministic arm is reproducible and its metrics equal the checked-in
+  baseline exactly, so a behavior change re-records the baseline in the same
+  change.
+- No protected content forms or renders anywhere in the corpus, and a formed
+  update never renders what it superseded.
+- A live evaluation publishes evidence only when every pass condition derived
+  from the run's own counts holds, and it stops before crossing its cost
+  ceiling.
+- No model judges an answer, and no public dataset file enters the repository.
+- Unused provisional beliefs decay and retire, citing a belief resists decay
+  without raising its confidence, and a lower-authority contradiction is
+  surfaced rather than silently resolved.
+- Re-derivation requires an explicit confirmation and never resurrects a
+  rejected belief.
+
+The milestone does not include the semantic recall arm or `pgvector`, an
+external memory provider, a persona surface, a temporal entity graph, session
+history or artifacts as retrieval sources, belief merge or global
+consolidation, an HTTP memory surface, or experiential and strategy memory.
+Those remain roadmap item B6, each entering on this milestone's evidence.
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3270,7 +3337,7 @@ owner's current ranking, not a schedule.
 | B3 | Slack and email Surfaces, inline-keyboard approvals, group and thread session keys | Additive adapters on the Milestone 14 ports |
 | B4 | Email and webhook notification transports | Additive adapters on the Milestone 12 push-transport port |
 | B5 | Scheduling extensions: monthly rules, arbitrary cron, continuous-session recurrence, dependency graphs | A separate ADR; not alternate implementations of Milestone 11 |
-| B6 | Memory residue: expiration sweep, session history and artifacts as retrieval sources, an external memory provider, the persona surface, `pgvector`, a temporal entity graph | Evaluation evidence for each, per Milestone 9's entry gate |
+| B6 | Memory residue after Milestone 16: the semantic arm and `pgvector`, an external memory provider, the persona surface, a temporal entity graph, session history and artifacts as retrieval sources, belief merge and global consolidation | Milestone 16 benchmark evidence per item, per Milestone 9's entry gate |
 | B7 | The rest of Section 29: the device channel, device-scoped tools, presence-based routing, hand-off | A concrete use case, after Milestones 12 and 14 |
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |

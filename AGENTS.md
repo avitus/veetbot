@@ -72,6 +72,7 @@ validates the floor, and no trailer means lane A.
 | Subagents, delegation, child runs | `subagents-and-delegation.md` |
 | Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
 | Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
+| Memory evaluation, the benchmark, and lifecycle maintenance | `memory-evaluation-and-lifecycle.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -88,16 +89,15 @@ validates the floor, and no trailer means lane A.
 
 ## Scope control
 
-- Work only on the **active** milestone or an explicitly authorized one (see project state).
-- Do not begin later milestones speculatively.
+- Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
 - Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
   12 through 15 — notifications and device identity, subagents and delegation,
   inbound surfaces and pairing, operational hardening — are authorized in that
-  order (ADR-0061); model routing and the plan's roadmap items are not.
+  order (ADR-0061), and Milestone 16 memory evaluation and lifecycle in
+  parallel (ADR-0069); model routing and the plan's roadmap items are not.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
-- Prefer the smallest coherent implementation that satisfies the active
-  acceptance criteria.
+- Prefer the smallest coherent implementation that satisfies the active acceptance criteria.
 
 ## Verification
 
