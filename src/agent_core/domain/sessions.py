@@ -26,7 +26,7 @@ def project_scope(metadata: Mapping[str, Any]) -> str:
 
     scope = metadata.get(SESSION_PROJECT_SCOPE_METADATA_KEY)
     if isinstance(scope, str) and scope.strip():
-        return scope
+        return scope.strip()
     return DEFAULT_PROJECT_SCOPE
 
 

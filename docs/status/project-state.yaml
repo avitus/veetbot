@@ -290,8 +290,9 @@ milestones:
           call — so incompleteness is a reproducible failure rate of about 1.5
           per cent across the 132 runs rather than a single transport blip. The
           arm records run status but not the terminal error class, so its own
-          diagnostics cannot name the cause. No third run was made. This
-          artifact is milestone evidence and not a CI input:
+          diagnostics cannot name the cause. No third run had been made before
+          the retry hardening recorded below. This artifact is milestone
+          evidence and not a CI input:
           gate.memory.bench_evidence_publish is satisfied by the unit-level
           publication proof, which passes. Whether to relax the absolute
           incomplete-runs condition, have the arm retry a failed run, or record

@@ -262,7 +262,16 @@ async def run_benchmark(
             recorded_at=recording_clock.now(),
             path=baseline_output,
         )
-    failures = [] if comparison is None else [*comparison.drift, *comparison.regressions]
+    failures = (
+        []
+        if comparison is None
+        else [
+            *comparison.drift,
+            *comparison.regressions,
+            *comparison.improvements,
+            *comparison.shifts,
+        ]
+    )
     return MemoryBenchmarkResult(
         passed=not failures,
         failure_summary="; ".join(failures) if failures else None,

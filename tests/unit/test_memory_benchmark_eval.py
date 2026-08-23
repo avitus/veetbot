@@ -1151,6 +1151,42 @@ async def test_run_benchmark_fails_on_regression_and_writes_baseline_when_asked(
         )
 
 
+async def test_run_benchmark_fails_when_current_result_improves_or_shifts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / BASELINE_PATH.parent).mkdir(parents=True)
+    (repository / BASELINE_PATH).write_text(
+        _baseline_of(_result(_worse_results())).model_dump_json(), encoding="utf-8"
+    )
+    current = _result()
+
+    async def run_deterministic_benchmark(
+        _root: Path, **_kwargs: object
+    ) -> DeterministicBenchmarkResult:
+        return current
+
+    monkeypatch.setattr(
+        memory_benchmark_driver, "run_deterministic_benchmark", run_deterministic_benchmark
+    )
+
+    result = await memory_benchmark_driver.run_benchmark(
+        repository,
+        deterministic_only=True,
+        model_policy="balanced",
+        policy_profile="default",
+        build_ref="0123456789ab",
+        output=None,
+        baseline_output=None,
+    )
+
+    assert result is not None
+    assert result.passed is False
+    assert result.failure_summary is not None
+    assert "improved" in result.failure_summary
+    assert "shifted" in result.failure_summary
+
+
 async def test_run_benchmark_passes_when_no_baseline_is_recorded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

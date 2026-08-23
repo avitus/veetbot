@@ -86,7 +86,10 @@ async def assert_notification_enqueue_deduplicates_and_lists_by_principal(
     assert len(await outbox.list(stranger, limit=10)) == 1
 
 
-async def assert_notification_claim_settle_and_pagination(outbox: NotificationOutbox) -> None:
+async def assert_notification_claim_settle_and_pagination(
+    outbox: NotificationOutbox,
+    clock: FixedClock,
+) -> None:
     values = [
         new_notification(
             notification_id=UUID(int=NOTIFICATION_ID.int + offset),
@@ -104,8 +107,9 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
     )
     assert [notification.id for notification in backlog] == [values[0].id]
 
+    clock.advance(timedelta(seconds=3))
     claimed = await outbox.claim_due(
-        NOW + timedelta(seconds=3),
+        clock.now(),
         1,
         "dispatcher-a",
         30,
@@ -135,7 +139,7 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
     assert settled[0].settled_at is not None
 
     remaining = await outbox.claim_due(
-        NOW + timedelta(seconds=3),
+        clock.now(),
         2,
         "dispatcher-a",
         30,
@@ -156,15 +160,17 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
         created_at=NOW + timedelta(seconds=20),
     )
     assert await outbox.enqueue(fenced) is not None
+    clock.advance(timedelta(seconds=17))
     [first_claim] = await outbox.claim_due(
-        NOW + timedelta(seconds=20),
+        clock.now(),
         1,
         "dispatcher-a",
         30,
         frozenset({PushProvider.APNS}),
     )
+    clock.advance(timedelta(seconds=31))
     [second_claim] = await outbox.claim_due(
-        NOW + timedelta(seconds=51),
+        clock.now(),
         1,
         "dispatcher-b",
         30,
@@ -189,6 +195,33 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
         NotificationStatus.DISPATCHED,
         None,
     )
+
+    expired = new_notification(
+        notification_id=UUID(int=NOTIFICATION_ID.int + 21),
+        dedupe_key="test:expired-settlement",
+        created_at=NOW + timedelta(seconds=90),
+    )
+    clock.advance(timedelta(seconds=39))
+    assert await outbox.enqueue(expired) is not None
+    [expired_claim] = await outbox.claim_due(
+        clock.now(),
+        1,
+        "dispatcher-a",
+        30,
+        frozenset({PushProvider.APNS}),
+    )
+    clock.advance(timedelta(seconds=31))
+    assert not await outbox.settle(
+        expired.id,
+        expired_claim.attempts,
+        NotificationStatus.DISPATCHED,
+        None,
+    )
+    [still_expired_claim] = [
+        item for item in await outbox.list(principal(), limit=10) if item.id == expired.id
+    ]
+    assert still_expired_claim.status is NotificationStatus.PENDING
+    assert still_expired_claim.claimed_by == "dispatcher-a"
 
 
 async def assert_notification_claim_is_partitioned_by_provider(
@@ -308,8 +341,10 @@ async def test_notification_enqueue_deduplicates_and_lists_by_principal() -> Non
 
 async def test_notification_claim_settle_and_pagination() -> None:
     registry = InMemoryDeviceRegistry()
+    clock = FixedClock(NOW)
     await assert_notification_claim_settle_and_pagination(
-        InMemoryNotificationOutbox(FixedClock(NOW), registry)
+        InMemoryNotificationOutbox(clock, registry),
+        clock,
     )
 
 

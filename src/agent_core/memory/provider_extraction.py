@@ -773,7 +773,7 @@ class ProviderAssistedCandidateExtractor:
         *,
         principal: Principal,
         scope: str,
-    ) -> list[MemoryCandidate]:
+    ) -> list[MemoryCandidate] | MemoryExtractionResult:
         if principal != self._principal:
             raise ValueError("provider memory extractor principal does not match its job")
         deterministic = await self._fallback.extract(

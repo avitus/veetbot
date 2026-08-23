@@ -20,6 +20,7 @@ from agent_core.domain.memory import (
     MemoryCandidate,
     MemoryCorrection,
     MemoryEdit,
+    MemoryExtractionResult,
     MemoryRecord,
     Polarity,
     RecalledBelief,
@@ -126,7 +127,7 @@ class MemoryCandidateExtractor(Protocol):
         *,
         principal: Principal,
         scope: str,
-    ) -> list[MemoryCandidate]: ...
+    ) -> list[MemoryCandidate] | MemoryExtractionResult: ...
 
 
 class Salience(Protocol):

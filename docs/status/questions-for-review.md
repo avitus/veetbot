@@ -6738,8 +6738,8 @@ baseline.
 
 ### Re-derivation stays opt-in and demands a confirmation
 
-**Decided:** `agent memory rederive --confirm`, per session or across all
-sessions, replaying outstanding rejections.
+**Decided:** `agent memory replay --session <id> --confirm` reprocesses one
+named session and replays outstanding rejections.
 
 **Why:** the formation design makes re-derivation opt-in per principal, and
 silently re-mining old episodes is exactly the surprise that rule prevents.
@@ -6748,7 +6748,6 @@ silently re-mining old episodes is exactly the surprise that rule prevents.
 
 **Reversal cost:** none; it is the standing rule.
 
-**Update:** ADR-0068 built this surface as `agent memory replay --session
-<id> --confirm` rather than the differently spelled command named above;
-Milestone 16 verified it against this standing rule (registered as
-`gate.memory.rederive_opt_in`) instead of adding a second command.
+ADR-0068 built this surface, and Milestone 16 verified it against the standing
+rule as `gate.memory.rederive_opt_in`; there is no all-session mode or second
+command.

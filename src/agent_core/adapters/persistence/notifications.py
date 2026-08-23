@@ -404,6 +404,7 @@ class InMemoryNotificationOutbox:
     ) -> bool:
         if attempt <= 0:
             raise ValueError("notification settlement attempt must be positive")
+        instant = _aware_utc(self._clock.now())
         async with self._lock:
             notification = self._notifications.get(notification_id)
             if notification is None:
@@ -412,6 +413,8 @@ class InMemoryNotificationOutbox:
                 notification.status is not NotificationStatus.PENDING
                 or notification.attempts != attempt
                 or notification.claimed_by is None
+                or notification.claimed_until is None
+                or notification.claimed_until <= instant
             ):
                 return False
             if status is NotificationStatus.PENDING:
@@ -901,6 +904,7 @@ class PostgresNotificationOutbox:
     ) -> bool:
         if attempt <= 0:
             raise ValueError("notification settlement attempt must be positive")
+        instant = _aware_utc(self._clock.now())
         values: dict[str, object]
         if status is NotificationStatus.PENDING:
             if next_attempt_at is None:
@@ -926,6 +930,7 @@ class PostgresNotificationOutbox:
                 NotificationOutboxRow.status == NotificationStatus.PENDING.value,
                 NotificationOutboxRow.attempts == attempt,
                 NotificationOutboxRow.claimed_by.is_not(None),
+                NotificationOutboxRow.claimed_until > instant,
             )
             .values(**values)
             .returning(NotificationOutboxRow.id)

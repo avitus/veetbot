@@ -32,8 +32,8 @@ title: Changelog
   first attempt and completed on the retry — all four the without-memory arm of
   the four `multi_hop` probes at position `p02`, while the other two `multi_hop`
   probes and all sixty non-`multi_hop` without-memory arms completed first
-  time. The pattern is content-correlated rather than positional, and it is not
-  diagnosed.
+  time. The failures are concentrated in the without-memory arm of four
+  `multi_hop` probes at position `p02`; the cause is not diagnosed.
 
 ## 2026-08-23 — Provider memory evidence republished at `formation@8`
 

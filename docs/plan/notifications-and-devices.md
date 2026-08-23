@@ -403,10 +403,11 @@ it writes the delivery row, the next claimant cannot distinguish that accepted
 send from no send and re-sends. The transport's collapse identifier (the
 `dedupe_key`) makes that replay invisible on the device as a best-effort
 reduction, not a guarantee, and the ledger shows the extra attempt.
-Settlement is fenced to the claimed attempt: every terminal or retry update
-compares the row's current attempt and active claim, returns `False` after a
-newer worker has reclaimed or settled the row, and leaves that newer state
-untouched.
+Settlement is fenced to the claimed attempt and lease: every terminal or retry
+update compares the row's current attempt and requires an active claim whose
+`claimed_until` is later than the settlement instant. It returns `False` after
+the lease expires or a newer worker reclaims or settles the row, leaving the
+stored state untouched.
 
 Wake-up is `LISTEN`/`NOTIFY` on a fixed channel after the enqueuing
 transaction commits, over a bounded poll, exactly as the schedule worker does.
