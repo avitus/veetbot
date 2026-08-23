@@ -14,6 +14,18 @@ import Testing
             ]
         )
     }
+
+    @Test
+    func testBuildIdentityMakesInstalledClientVersionVisible() {
+        let identity = ClientBuildIdentity(
+            infoDictionary: [
+                "CFBundleShortVersionString": "0.1.1",
+                "CFBundleVersion": "2",
+            ]
+        )
+
+        #expect(identity.displayName == "Version 0.1.1 (2)")
+    }
 }
 
 #if os(macOS)

@@ -58,6 +58,16 @@ import Testing
     }
 
     @Test
+    func testSessionTokenStoreDoesNotReopenKeychainForEveryRequest() async throws {
+        let durable = OneSuccessfulReadTokenStore(token: "device-token")
+        let store = SessionTokenStore(durable: durable)
+
+        #expect(try await store.readToken() == "device-token")
+        #expect(try await store.readToken() == "device-token")
+        #expect(await durable.readCount == 1)
+    }
+
+    @Test
     func testWebsiteAccessUsesProfileIdentifiersAndDirectAuthenticationCeremonies() async throws {
         defer { StubURLProtocol.handler = nil }
         let profileID = try #require(
@@ -802,6 +812,29 @@ import Testing
         )
         return VeetbotAPIClient(transport: transport)
     }
+}
+
+private actor OneSuccessfulReadTokenStore: TokenStore {
+    private let token: String
+    private(set) var readCount = 0
+
+    init(token: String) {
+        self.token = token
+    }
+
+    func readToken() throws -> String? {
+        readCount += 1
+        guard readCount == 1 else {
+            throw KeychainTokenStoreError.operationFailed(13)
+        }
+        return token
+    }
+
+    func saveToken(_ token: String) throws {
+        _ = token
+    }
+
+    func deleteToken() throws {}
 }
 
 private final class StubURLProtocol: URLProtocol {

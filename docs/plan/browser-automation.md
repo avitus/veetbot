@@ -418,6 +418,16 @@ passkey, MFA, CAPTCHA, and consent interaction occurs inside that browser
 surface. The orchestration API sees neither keystrokes nor browser protocol
 frames and has no generic proxy endpoint.
 
+The trusted client presents the returned launch URL behind a user-initiated
+continue action and treats a rejected platform handoff as a failed setup. It
+cancels the ceremony and revokes and deletes the unused profile so retry does
+not collide with abandoned state. The direct surface explains the screenshot
+and focused-field interaction, disables its credential controls until the
+runtime connects, and tells the user to return to the client and start over
+when the non-persisted fragment capability is missing or expired. Submitted
+text is cleared immediately and is never placed in diagnostics or durable
+client state.
+
 Only the isolated runtime determines completion. It may report `ready`,
 `needs_user`, `authentication_required`, `expired`, or `cancelled`; a caller
 cannot submit a credential or assert success. CAPTCHA, MFA, reauthentication,

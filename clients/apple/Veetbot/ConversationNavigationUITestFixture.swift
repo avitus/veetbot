@@ -41,17 +41,21 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
         }
 
         let body: String
+        let statusCode: Int
         switch (request.httpMethod, url.path) {
         case ("GET", "/v1/sessions"):
+            statusCode = 200
             body = """
                 {"items":[\(Self.firstSessionJSON),\(Self.secondSessionJSON)],"next_cursor":null}
                 """
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)"):
+            statusCode = 200
             body = Self.firstSessionJSON
         case (
             "GET",
             "/v1/sessions/\(ConversationNavigationUITestFixture.firstSessionID)/messages"
         ):
+            statusCode = 200
             body = """
                 {"items":[
                   {"sequence":1,"role":"user","content":[{"type":"text","text":"Historical question"}]},
@@ -59,16 +63,32 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                 ],"next_cursor":null}
                 """
         case ("GET", "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)"):
+            statusCode = 200
             body = Self.secondSessionJSON
         case (
             "GET",
             "/v1/sessions/\(ConversationNavigationUITestFixture.secondSessionID)/messages"
         ):
+            statusCode = 200
             body = """
                 {"items":[
                   {"sequence":1,"role":"user","content":[{"type":"text","text":"Second historical question"}]},
                   {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Second historical answer loaded"}]}
                 ],"next_cursor":null}
+                """
+        case ("GET", "/v1/browser-profiles"):
+            statusCode = 200
+            body = #"{"items":[],"next_cursor":null}"#
+        case ("POST", "/v1/browser-profiles"):
+            statusCode = 201
+            body = Self.browserProfileJSON
+        case (
+            "POST",
+            "/v1/browser-profiles/\(Self.browserProfileID)/authentication-ceremonies"
+        ):
+            statusCode = 201
+            body = """
+                {"id":"\(Self.authenticationID)","profile_id":"\(Self.browserProfileID)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":"https://browser.example/authentication/\(Self.authenticationID)#capability=opaque"}
                 """
         default:
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))
@@ -77,7 +97,7 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
         guard let response = HTTPURLResponse(
             url: url,
-            statusCode: 200,
+            statusCode: statusCode,
             httpVersion: nil,
             headerFields: ["Content-Type": "application/json"]
         ) else {
@@ -97,6 +117,12 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let secondSessionJSON = """
         {"id":"\(ConversationNavigationUITestFixture.secondSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Second historical chat","metadata":{},"created_at":"2026-08-13T00:00:00Z","updated_at":"2026-08-13T00:04:00Z","active_run_id":null,"last_run_id":null}
+        """
+
+    private static let browserProfileID = "00000000-0000-0000-0000-000000000789"
+    private static let authenticationID = "00000000-0000-0000-0000-000000000790"
+    private static let browserProfileJSON = """
+        {"id":"\(browserProfileID)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}
         """
 }
 #endif

@@ -709,13 +709,16 @@ verification:
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 98 Swift Testing cases passed, including direct isolated website
-          login setup, secret-free browser-profile selection for new sessions,
-          complete historical
-          transcript restoration, sidebar conversation navigation,
-          forward-compatible message-role decoding, system composer sizing,
-          connection-settings layout, and the missing-keychain-entitlement
-          regression.
+          All 115 Swift Testing cases passed, including session-only bearer-token
+          caching, failed-handoff cleanup, partial-profile rollback, direct
+          isolated website login setup, secret-free browser-profile selection
+          for new sessions, complete historical transcript restoration, sidebar
+          conversation navigation, forward-compatible message-role decoding,
+          system composer sizing, connection-settings layout, and the
+          missing-keychain-entitlement regression. Three UI scenarios also pass
+          on both iPhone and iPad simulators; the Website Access scenario opens
+          Settings, creates a stubbed ceremony from public URLs, exposes the
+          recoverable browser handoff, and verifies the visible client build.
       - check: real-Docker sandbox security partition
         outcome: passed
         detail: All 10 sandbox security tests passed against a freshly built image.

@@ -40,7 +40,9 @@ target's Signing & Capabilities settings. A
 macOS upgrade from the earlier file-based Keychain item is attempted without
 displaying an authentication prompt; if its ad-hoc signature no longer has
 access, the user must enter the token once in the signed build. The transport
-refuses redirects, uses the operating system trust store, and maps `401` to
+keeps an already-unlocked token only in process memory for the current app
+session, so ordinary API requests do not repeatedly reopen Keychain. It refuses
+redirects, uses the operating system trust store, and maps `401` to
 re-authentication while preserving `403` as an authorization failure.
 
 Once a connection is configured, the application-delegate adaptor requests
@@ -79,15 +81,25 @@ semantic colors for errors, approvals, and tool risk.
 
 Website Access lists the authenticated principal's browser profiles and lets the
 user choose one `READY` profile for new conversations. Adding access sends only
-the exact public-HTTPS origin and login-page URL to Veetbot, then opens the
-server's five-minute, single-use browser ceremony. The user enters usernames,
+the exact public-HTTPS origin and login-page URL to Veetbot, then presents a
+separate Continue in web browser action for the server's five-minute, single-use
+browser ceremony. A rejected system-browser handoff cancels the ceremony and
+removes its unused profile; a ceremony-creation failure also rolls its partial
+profile back. The user enters usernames,
 passwords, passkeys, and MFA directly in that isolated browser surface; the app
 has no website-credential fields and receives no keystrokes, cookies, storage
 state, or provider material. It polls only the secret-free ceremony status.
+The direct surface gives numbered focused-field instructions and identifies a
+closed, reloaded, incomplete, or expired one-time link. The app exposes Start
+over to remove that setup and obtain a fresh ceremony.
 The selected opaque profile UUID is a device preference, is cleared when the
 server connection changes or credentials are forgotten, and is included only
 when the client creates a new session. The server revalidates ownership and
 readiness before persisting that binding.
+
+Data & Privacy displays the installed marketing version and build number. The
+first build with recoverable Website Access is version 0.1.1 (2), so an older
+installed binary can be identified without comparing source revisions.
 
 ## Runtime behavior
 

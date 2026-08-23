@@ -863,6 +863,179 @@ import Testing
         #expect(await configurationStore.loadBrowserProfileID() == nil)
     }
 
+    @Test
+    func testFailedWebsiteAuthenticationLaunchCancelsAndDeletesUnusedProfile() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000c1")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000c2")
+        )
+        let lock = NSLock()
+        var requests: [(String, String)] = []
+        var deleted = false
+        let profile = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}"#
+        let model = try configuredModel { request in
+            let method = request.httpMethod ?? ""
+            let path = request.url?.path ?? ""
+            lock.withLock { requests.append((method, path)) }
+            switch (method, path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-profiles"):
+                return try response(for: request, statusCode: 201, body: profile)
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                return try response(
+                    for: request,
+                    statusCode: 201,
+                    body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque"}"#
+                )
+            case ("GET", "/v1/browser-profiles"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: deleted ? #"{"items":[],"next_cursor":null}"# : #"{"items":[\#(profile)],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"cancelled","expires_at":"2026-08-23T12:05:00Z","launch_url":null}"#
+                )
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/revoke"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: profile.replacingOccurrences(
+                        of: #""status":"authentication_required""#,
+                        with: #""status":"revoked""#
+                    )
+                )
+            case ("DELETE", "/v1/browser-profiles/\(profileID.uuidString)"):
+                lock.withLock { deleted = true }
+                return try response(for: request, statusCode: 204, body: "")
+            default:
+                Issue.record("unexpected request: \(method) \(path)")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        let launchURL = await model.createWebsiteAccess(
+            origin: "https://example.org",
+            loginURL: "https://example.org/login"
+        )
+        #expect(launchURL?.fragment == "capability=opaque")
+
+        await model.websiteAuthenticationLaunchFailed()
+
+        let captured = lock.withLock { requests }
+        #expect(
+            captured.contains {
+                $0 == (
+                    "POST",
+                    "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+                )
+            }
+        )
+        #expect(
+            captured.contains {
+                $0 == ("POST", "/v1/browser-profiles/\(profileID.uuidString)/revoke")
+            }
+        )
+        #expect(
+            captured.contains {
+                $0 == ("DELETE", "/v1/browser-profiles/\(profileID.uuidString)")
+            }
+        )
+        #expect(model.browserAuthentication == nil)
+        #expect(model.browserProfiles.isEmpty)
+        #expect(model.errorMessage?.contains("couldn’t open the secure login page") == true)
+        #expect(model.errorMessage?.contains("try again") == true)
+    }
+
+    @Test
+    func testAuthenticationCreationFailureDeletesPartiallyCreatedProfile() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000d1")
+        )
+        let lock = NSLock()
+        var requests: [(String, String)] = []
+        let profile = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}"#
+        let model = try configuredModel { request in
+            let method = request.httpMethod ?? ""
+            let path = request.url?.path ?? ""
+            lock.withLock { requests.append((method, path)) }
+            switch (method, path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-profiles"):
+                return try response(for: request, statusCode: 201, body: profile)
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                return try response(
+                    for: request,
+                    statusCode: 503,
+                    body: #"{"error":{"code":"internal_error","message":"browser temporarily unavailable","details":{},"request_id":"browser-down"}}"#
+                )
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/revoke"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: profile.replacingOccurrences(
+                        of: #""status":"authentication_required""#,
+                        with: #""status":"revoked""#
+                    )
+                )
+            case ("DELETE", "/v1/browser-profiles/\(profileID.uuidString)"):
+                return try response(for: request, statusCode: 204, body: "")
+            default:
+                Issue.record("unexpected request: \(method) \(path)")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "replacement-token"
+            )
+        )
+
+        #expect(
+            await model.createWebsiteAccess(
+                origin: "https://example.org",
+                loginURL: "https://example.org/login"
+            ) == nil
+        )
+
+        let captured = lock.withLock { requests }
+        #expect(
+            captured.contains {
+                $0 == ("POST", "/v1/browser-profiles/\(profileID.uuidString)/revoke")
+            }
+        )
+        #expect(
+            captured.contains {
+                $0 == ("DELETE", "/v1/browser-profiles/\(profileID.uuidString)")
+            }
+        )
+        #expect(model.browserProfiles.isEmpty)
+        #expect(model.browserAuthentication == nil)
+        #expect(model.errorMessage == "browser temporarily unavailable")
+    }
+
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
         let data: Data
         if let body = request.httpBody {

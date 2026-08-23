@@ -98,7 +98,7 @@ public final class ChatViewModel: ObservableObject {
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil
     ) {
-        self.tokenStore = tokenStore
+        self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
         self.artifactCache = artifactCache
@@ -707,10 +707,12 @@ public final class ChatViewModel: ObservableObject {
         }
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
+        var createdProfileID: UUID?
         do {
             let profile = try await api.createBrowserProfile(
                 allowedOrigins: [normalizedOrigin]
             )
+            createdProfileID = profile.id
             let ceremony = try await api.beginBrowserAuthentication(
                 profileID: profile.id,
                 loginURL: normalizedLoginURL
@@ -726,9 +728,39 @@ public final class ChatViewModel: ObservableObject {
             }
             return ceremony.launchURL
         } catch {
-            present(error)
+            let creationError = error
+            if let createdProfileID {
+                let cleanupError = await discardUnusedBrowserProfile(
+                    using: api,
+                    profileID: createdProfileID,
+                    authenticationID: nil
+                )
+                browserProfiles.removeAll { $0.id == createdProfileID }
+                if browserAuthentication?.profileID == createdProfileID {
+                    browserAuthentication = nil
+                }
+                if let cleanupError {
+                    errorMessage =
+                        "\(displayMessage(for: creationError)) The unused browser profile could not be fully removed: \(displayMessage(for: cleanupError))"
+                } else {
+                    present(creationError)
+                }
+            } else {
+                present(creationError)
+            }
             return nil
         }
+    }
+
+    public func websiteAuthenticationLaunchFailed() async {
+        await discardCurrentWebsiteAccess(
+            successMessage:
+                "Veetbot couldn’t open the secure login page. The unused login was removed; try again."
+        )
+    }
+
+    public func cancelWebsiteAccessSetup() async {
+        await discardCurrentWebsiteAccess(successMessage: nil)
     }
 
     public func refreshBrowserAuthentication() async {
@@ -786,6 +818,68 @@ public final class ChatViewModel: ObservableObject {
         } catch {
             present(error)
         }
+    }
+
+    private func discardCurrentWebsiteAccess(successMessage: String?) async {
+        guard let api, let authentication = browserAuthentication else {
+            if let successMessage { errorMessage = successMessage }
+            return
+        }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        let profileID = authentication.profileID
+        let cleanupError = await discardUnusedBrowserProfile(
+            using: api,
+            profileID: profileID,
+            authenticationID: authentication.status.isTerminal ? nil : authentication.id
+        )
+        browserAuthentication = nil
+        browserProfiles.removeAll { $0.id == profileID }
+        if selectedBrowserProfileID == profileID {
+            selectedBrowserProfileID = nil
+            await configurationStore.saveBrowserProfileID(nil)
+        }
+        do {
+            try await reloadBrowserProfiles(using: api)
+        } catch {
+            if cleanupError == nil {
+                present(error)
+                return
+            }
+        }
+        if let cleanupError {
+            errorMessage =
+                "The login setup could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
+        } else {
+            errorMessage = successMessage
+        }
+    }
+
+    private func discardUnusedBrowserProfile(
+        using api: VeetbotAPIClient,
+        profileID: UUID,
+        authenticationID: UUID?
+    ) async -> Error? {
+        var firstError: Error?
+        if let authenticationID {
+            do {
+                _ = try await api.cancelBrowserAuthentication(authenticationID)
+            } catch {
+                firstError = error
+            }
+        }
+        do {
+            _ = try await api.revokeBrowserProfile(profileID)
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+        do {
+            try await api.deleteBrowserProfile(profileID)
+            return nil
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+        return firstError
     }
 
     private func reloadBrowserProfiles(using api: VeetbotAPIClient) async throws {
@@ -992,6 +1086,10 @@ public final class ChatViewModel: ObservableObject {
             requiresReauthentication = true
         }
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    private func displayMessage(for error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }
 
