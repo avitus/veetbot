@@ -22,13 +22,18 @@ title: Changelog
   act. The whole diff is the build reference and the recording timestamp: the
   aggregate metrics and all sixty-six probe rows are unchanged, so no metric
   moved.
-- Ran the live benchmark arm once. It measured a lift of forty-five against a
-  derived minimum of eleven, recoverable correctness of forty-five in
-  forty-eight, abstention correctness of twelve in twelve, no protected leak, no
-  policy regression, and USD 1.111295 of the USD 4.00 pre-admission ceiling —
-  but two of its hundred and thirty-two probe runs failed after zero model
-  calls, so it failed its incomplete-runs condition and, as designed, published
-  nothing. `gate.memory.bench_evidence_publish` is satisfied by the unit-level
+- Ran the live benchmark arm twice, and neither run published an artifact. Both
+  measured what the arm exists to measure and passed every substantive
+  condition with margin — lift forty-five then forty-four against a derived
+  minimum of eleven, recoverable correctness forty-five then forty-four in
+  forty-eight, abstention correctness twelve in twelve, no protected leak, no
+  policy regression, USD 1.111295 then USD 1.128405 against a per-invocation
+  ceiling of USD 4.00 — and both failed the absolute incomplete-runs condition
+  with two failed runs in a hundred and thirty-two. The failures landed on
+  different probes and different arms each time, so the incompleteness is a
+  reproducible rate of about one and a half per cent rather than one transport
+  blip, and the arm records no terminal error class to name its cause.
+  `gate.memory.bench_evidence_publish` is satisfied by the unit-level
   publication proof and is unaffected; the live artifact is milestone evidence.
 - Recorded Milestone 16's verification evidence in project state, which stays
   `authorized` pending hosted CI on the final head and the CodeRabbit review

@@ -248,12 +248,12 @@ milestones:
           the extractor's fixed USD 0.05 per-call budget; the command publishes
           no aggregate spend field, so the exact figure is not recorded. The
           superseded formation@4 artifact was deleted in the same change.
-      - check: live memory-benchmark arm
+      - check: live memory-benchmark arm, first attempt
         outcome: failed_gate
         detail: >-
           One live run of agent eval memory-benchmark --no-deterministic-only at
           build 3b3c972b3003cdca6881d857b931401999f49545 failed its
-          incomplete-runs condition with 2 incomplete runs and therefore
+          incomplete-runs condition with 2 incomplete runs of 132 and therefore
           published no artifact, which is the designed behavior: a failing run
           prints diagnostics and writes nothing. Every other published pass
           condition was met with margin. Lift was 45 against a derived minimum
@@ -265,13 +265,35 @@ milestones:
           ceiling was never hit and the arm was never stopped. Total spend was
           USD 1.111295 of the USD 4.00 pre-admission ceiling. Latency was 3169
           ms at p50 and 6399 ms at p95 and wall time was 7 minutes 22 seconds
-          over 66 probes in two arms. The two incomplete runs were both
-          without-memory arms that failed after zero model calls at zero cost in
-          about five seconds, the signature of a transient transport failure
-          rather than a quality result. This artifact is milestone evidence and
-          not a CI input: gate.memory.bench_evidence_publish is satisfied by the
-          unit-level publication proof, which passes. Republishing costs another
-          live invocation and is an owner decision.
+          over 66 probes in two arms. Both incomplete runs were without-memory
+          arms that failed after zero model calls at zero cost in about five
+          seconds.
+      - check: live memory-benchmark arm, second attempt
+        outcome: failed_gate
+        detail: >-
+          A second live run, authorized after the first, used the identical
+          command, flags, build reference, and output path and failed the same
+          incomplete-runs condition with 2 incomplete runs of 132, publishing no
+          artifact. Every other condition passed again with margin: lift 44
+          against a minimum of 11, from 56 correct with-memory answers against
+          12 without memory; recoverable correctness 44 of 48 against 39;
+          abstention correctness 12 of 12 against 10; 0 protected leaks; 0
+          with-memory policy failures against 0 without; no ceiling hit and no
+          early stop. Spend was USD 1.128405, and the two attempts together cost
+          USD 2.239700 against a per-invocation ceiling of USD 4.00. Latency was
+          3593 ms at p50 and 10499 ms at p95 over 9 minutes 54 seconds. The two
+          incomplete runs fell on different probes than the first attempt's and
+          on different arms — one with-memory arm failing after zero model calls
+          at zero cost, one without-memory arm failing after one billed model
+          call — so incompleteness is a reproducible failure rate of about 1.5
+          per cent across the 132 runs rather than a single transport blip. The
+          arm records run status but not the terminal error class, so its own
+          diagnostics cannot name the cause. No third run was made. This
+          artifact is milestone evidence and not a CI input:
+          gate.memory.bench_evidence_publish is satisfied by the unit-level
+          publication proof, which passes. Whether to relax the absolute
+          incomplete-runs condition, have the arm retry a failed run, or record
+          the terminal error class is a design decision for the owner.
       - check: benchmark baseline exactness
         outcome: passed_locally
         detail: >-
@@ -333,5 +355,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T08:47:50Z
+last_updated: 2026-08-23T09:05:40Z
 last_reviewed_commit: 3b3c972
