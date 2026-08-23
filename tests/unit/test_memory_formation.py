@@ -718,7 +718,7 @@ async def test_record_usage_marks_cited_raises_utility_and_reinforcement_not_con
     used = await service.get_memory(cited.id)
     assert used.utility == pytest.approx(0.1)
     assert used.last_reinforced_at == clock.now()
-    assert used.store_position > cited.store_position
+    assert used.store_position == cited.store_position
     assert used.confidence == cited.confidence
     assert used.status is cited.status
     assert used.corroboration_count == cited.corroboration_count
@@ -735,7 +735,8 @@ async def test_record_usage_lowers_utility_for_returned_but_uncited() -> None:
     Nothing in the answer cites either recalled belief, so both fall by the
     profile's uncited delta with their confidence and reinforcement instants
     untouched; two further completions under a profile that overshoots the
-    floor show the fall bottoming out at -1 rather than running away.
+    floor show the fall bottoming out at -1 rather than running away, and the
+    completion that finds both already at the floor writes nothing at all.
     """
 
     clock, factory, _stack, retriever = await formation_stack()
@@ -776,14 +777,28 @@ async def test_record_usage_lowers_utility_for_returned_but_uncited() -> None:
         principal(),
         usage=UsageDeltas(uncited_utility_delta=-1.0),
     )
+    steps = []
     for run_id in (UUID(int=9_202), UUID(int=9_203)):
         await _recall_turn(retriever, run_id)
-        await steep.record_usage(
-            session_id=SESSION_ID, run_id=run_id, final_text="Still nothing to cite."
+        steps.append(
+            await steep.record_usage(
+                session_id=SESSION_ID, run_id=run_id, final_text="Still nothing to cite."
+            )
         )
+    floored = {belief.id: belief for belief in await service.list_memories()}
 
-    assert (await service.get_memory(first.id)).utility == pytest.approx(-1.0)
-    assert (await service.get_memory(second.id)).utility == pytest.approx(-1.0)
+    assert floored[first.id].utility == pytest.approx(-1.0)
+    assert floored[second.id].utility == pytest.approx(-1.0)
+    # The floor is where the write stops too: the second overshoot would have
+    # changed nothing, so it is not written and not counted.
+    assert [(step.uncited, step.ambiguous) for step in steps] == [(2, 0), (0, 0)]
+
+    await _recall_turn(retriever, UUID(int=9_204))
+    inert = await steep.record_usage(
+        session_id=SESSION_ID, run_id=UUID(int=9_204), final_text="Nothing again."
+    )
+    assert (inert.cited, inert.uncited) == (0, 0)
+    assert {belief.id: belief for belief in await service.list_memories()} == floored
 
 
 async def test_record_usage_is_idempotent_across_repeated_completion() -> None:
@@ -900,3 +915,130 @@ async def test_record_usage_reads_the_session_snapshot_trace_too() -> None:
     assert (feedback.cited, feedback.uncited, feedback.traces) == (1, 0, 1)
     assert (await service.get_memory(remembered.id)).utility == pytest.approx(0.1)
     assert (await service.get_recall_trace(snapshot.trace_id)).cited == [remembered.id]
+
+
+async def test_record_usage_leaves_store_positions_where_it_found_them() -> None:
+    """Usage moves utility, and a utility move is not news for the recall delta.
+
+    The delta query treats a position above the session's watermark as a
+    belief formed or corrected since the snapshot, so handing a belief a fresh
+    position for having been read would republish it to the next turn as
+    though it had changed. Neither side of the feedback may do that.
+    """
+
+    clock, factory, _stack, retriever = await formation_stack()
+    service = GovernedMemoryService(factory, clock, _citable_ids(), principal())
+    cited = await _form(
+        factory,
+        service,
+        "User prefers concise answers",
+        subject="answer style",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    uncited = await _form(
+        factory,
+        service,
+        "User prefers dark themes",
+        subject="theme",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    run_id = UUID(int=9_601)
+    await _recall_turn(retriever, run_id)
+
+    clock.advance(timedelta(days=1))
+    await service.record_usage(
+        session_id=SESSION_ID,
+        run_id=run_id,
+        final_text=f"[m:{str(cited.id)[:8]}] it is.",
+    )
+
+    moved = await service.get_memory(cited.id)
+    fallen = await service.get_memory(uncited.id)
+    assert moved.utility == pytest.approx(0.1)
+    assert moved.last_reinforced_at == clock.now()
+    assert moved.store_position == cited.store_position
+    assert fallen.utility == pytest.approx(-0.05)
+    assert fallen.store_position == uncited.store_position
+
+
+def _twin_prefixed_ids() -> SequenceIdFactory:
+    """Identifiers where the first two beliefs render the same eight hex digits.
+
+    Formation mints the audit identifier before the belief's own, so every
+    second value here is a belief; the two beliefs that share a prefix are what
+    an ambiguous citation looks like, and the sequential identifiers the
+    evaluation harness issues are the degenerate case of it.
+    """
+
+    twin = 0xAA000001
+    return SequenceIdFactory(
+        [
+            UUID(int=(0xAA000900 << 96) | 900),
+            UUID(int=(twin << 96) | 1),
+            UUID(int=(0xAA000901 << 96) | 901),
+            UUID(int=(twin << 96) | 2),
+            UUID(int=(0xAA000902 << 96) | 902),
+            UUID(int=(0xAA0000FF << 96) | 3),
+            *(UUID(int=((0xAA000000 + value) << 96) | value) for value in range(10, 200)),
+        ]
+    )
+
+
+async def test_record_usage_credits_nothing_for_an_ambiguous_short_identifier() -> None:
+    """A citation that names two returned beliefs at once names neither.
+
+    Eight hex digits identify a belief only while the run's returned set holds
+    one belief that starts with them; the evaluation harness's sequential
+    identifiers all render `[m:00000000]`, and crediting every returned belief
+    for one citation would manufacture the usage evidence a live arm is meant
+    to measure. The ambiguous pair is left exactly as it was — neither
+    credited nor charged for going unused — and counted as ambiguous, while a
+    citation of an unambiguous belief is honoured in the same breath.
+    """
+
+    clock, factory, _stack, retriever = await formation_stack()
+    service = GovernedMemoryService(factory, clock, _twin_prefixed_ids(), principal())
+    twin = await _form(
+        factory,
+        service,
+        "User prefers concise answers",
+        subject="answer style",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    other_twin = await _form(
+        factory,
+        service,
+        "User prefers short summaries",
+        subject="summary length",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    distinct = await _form(
+        factory,
+        service,
+        "User prefers dark themes",
+        subject="theme",
+        belief_type=BeliefType.PREFERENCE,
+    )
+    assert str(twin.id)[:8] == str(other_twin.id)[:8]
+    assert str(distinct.id)[:8] != str(twin.id)[:8]
+    run_id = UUID(int=9_701)
+    result = await _recall_turn(retriever, run_id)
+    assert {item.belief_id for item in result.items} == {twin.id, other_twin.id, distinct.id}
+
+    feedback = await service.record_usage(
+        session_id=SESSION_ID,
+        run_id=run_id,
+        final_text=f"Both [m:{str(twin.id)[:8]}] and [m:{str(distinct.id)[:8]}] apply.",
+    )
+
+    assert (feedback.cited, feedback.uncited, feedback.ambiguous) == (1, 0, 1)
+    assert (await service.get_memory(distinct.id)).utility == pytest.approx(0.1)
+    assert (await service.get_memory(twin.id)).utility == 0
+    assert (await service.get_memory(other_twin.id)).utility == 0
+    assert (await service.get_recall_trace(result.trace_id)).cited == [distinct.id]
+    async with factory() as uow:
+        events = await uow.events.list_after(SESSION_ID, 0, principal())
+    citation = next(event for event in events if event.event_type == "memory.cited")
+    assert citation.payload["cited"] == [str(distinct.id)]
+    assert citation.payload["uncited"] == []
+    assert citation.payload["ambiguous"] == 1

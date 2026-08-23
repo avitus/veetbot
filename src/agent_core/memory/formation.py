@@ -1430,7 +1430,8 @@ class GovernedMemoryService:
         The answer names beliefs in the eight-hex form the renderer emits, so
         the citations are read out of the final message and matched against
         what the run's traces actually returned: an identifier the recall never
-        offered is an invention and moves nothing. A cited belief gains utility
+        offered is an invention and moves nothing, and one that fits two of the
+        returned beliefs is evidence about neither. A cited belief gains utility
         and a fresh reinforcement instant, which is what makes it resist decay;
         a belief returned and never used loses utility, so it stops winning the
         ranking it kept winning for nothing.
@@ -1464,13 +1465,25 @@ class GovernedMemoryService:
                 # recalls deserve their feedback.
                 with suppress(NotFoundError):
                     traces.append(await uow.traces.get(snapshot_trace_id, self._principal))
-            cited: set[UUID] = set()
+            # Eight hex digits name a belief only while the run's returned set
+            # holds one belief starting with them. A citation that fits two is
+            # evidence about neither, so it credits neither and charges
+            # neither: crediting both would manufacture usage the answer never
+            # expressed, and the deterministic identifiers the evaluation
+            # harness issues make every belief render `[m:00000000]`.
+            matched: dict[str, set[UUID]] = {short: set() for short in short_ids}
             returned: set[UUID] = set()
             for trace in traces:
                 returned.update(trace.returned)
-                cited.update(
-                    belief_id for belief_id in trace.returned if str(belief_id)[:8] in short_ids
-                )
+                for belief_id in trace.returned:
+                    candidates = matched.get(str(belief_id)[:8])
+                    if candidates is not None:
+                        candidates.add(belief_id)
+            cited = {
+                next(iter(candidates)) for candidates in matched.values() if len(candidates) == 1
+            }
+            unresolved = [candidates for candidates in matched.values() if len(candidates) > 1]
+            ambiguous = {belief_id for candidates in unresolved for belief_id in candidates}
             if not returned:
                 # Nothing was recalled, so there is no feedback to record and
                 # nothing a repeated completion could double-count.
@@ -1484,8 +1497,9 @@ class GovernedMemoryService:
                 if fresh:
                     await uow.traces.mark_cited(trace.id, self._principal, fresh)
             # A belief the answer cited is never also charged for going unused,
-            # however many of the run's traces returned it.
-            uncited = returned - cited
+            # however many of the run's traces returned it, and neither is one
+            # an ambiguous citation may have meant.
+            uncited = returned - cited - ambiguous
             moved_cited = await self._move_utility(
                 uow, sorted(cited, key=str), self._usage.cited_utility_delta, instant, cited=True
             )
@@ -1507,11 +1521,17 @@ class GovernedMemoryService:
                         "trace_ids": [str(trace.id) for trace in traces],
                         "cited": [str(belief_id) for belief_id in sorted(cited, key=str)],
                         "uncited": [str(belief_id) for belief_id in sorted(uncited, key=str)],
+                        "ambiguous": len(unresolved),
                     },
                     derivation_key=derivation_key,
                 )
             )
-        return UsageFeedback(cited=moved_cited, uncited=moved_uncited, traces=len(traces))
+        return UsageFeedback(
+            cited=moved_cited,
+            uncited=moved_uncited,
+            traces=len(traces),
+            ambiguous=len(unresolved),
+        )
 
     async def _move_utility(
         self,
@@ -1527,6 +1547,12 @@ class GovernedMemoryService:
         A citation also moves `last_reinforced_at`, which is the whole point of
         the mark: decay measures idleness from it. The unused side deliberately
         leaves it alone, so ignoring a belief can never postpone its decay.
+
+        Neither side takes a fresh store position. The recall delta reads a
+        position above the session's snapshot watermark as a belief formed or
+        corrected since the snapshot, so republishing a belief to the next turn
+        for having been read would report a change that never happened. A move
+        the clamp flattens to nothing is not written at all.
         """
 
         moved = 0
@@ -1536,13 +1562,13 @@ class GovernedMemoryService:
             except NotFoundError:
                 # The belief was deleted between the recall and the completion.
                 continue
-            update: dict[str, object] = {
-                "utility": min(1.0, max(-1.0, record.utility + delta)),
-                "store_position": await uow.memories.next_position(),
-            }
+            update: dict[str, object] = {"utility": min(1.0, max(-1.0, record.utility + delta))}
             if cited:
                 update.update({"last_reinforced_at": instant, "updated_at": instant})
-            await uow.memories.reinforce(record.model_copy(update=update, deep=True))
+            updated = record.model_copy(update=update, deep=True)
+            if updated == record:
+                continue
+            await uow.memories.reinforce(updated)
             moved += 1
         return moved
 

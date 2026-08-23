@@ -631,6 +631,10 @@ async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
         assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
         assert beliefs[uncited.id].utility < 0
         assert beliefs[uncited.id].confidence == uncited.confidence
+        # The unique store position survives the in-place update, and neither
+        # belief is republished to the recall delta for having been read.
+        assert beliefs[cited.id].store_position == cited.store_position
+        assert beliefs[uncited.id].store_position == uncited.store_position
 
         async with composition.uow_factory() as uow:
             widened = await uow.traces.mark_cited(
