@@ -244,7 +244,7 @@ public struct NotificationPushPayload: Codable, Equatable, Sendable {
         .runFailed: ["FAILED"],
         .scheduleRunFinished: ["COMPLETED", "FAILED", "CANCELLED"],
         .scheduleOccurrenceSkipped: [
-            "missed", "skipped_overlap", "authorization_failed", "configuration_failed",
+            "MISSED", "SKIPPED_OVERLAP", "AUTHORIZATION_FAILED", "CONFIGURATION_FAILED",
         ],
         .opsAlert: [nil],
         .opsRecovered: [nil],

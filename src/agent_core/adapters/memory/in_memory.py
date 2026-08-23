@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -31,6 +32,9 @@ from agent_core.domain.memory import (
     Sensitivity,
     TracedBelief,
     TracedPassage,
+    lexical_query_terms,
+    lexical_term_lexemes,
+    lexical_text_matches,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
@@ -53,6 +57,18 @@ class InMemoryMemoryStore:
             self._position += 1
             return self._position
 
+    async def head_position(self, principal: Principal) -> int:
+        async with self._lock:
+            return max(
+                (
+                    record.store_position
+                    for record in self._records.values()
+                    if record.tenant_id == principal.tenant_id
+                    and record.principal_id == principal.principal_id
+                ),
+                default=0,
+            )
+
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord:
         async with self._lock:
             record = self._records.get(belief_id)
@@ -65,10 +81,14 @@ class InMemoryMemoryStore:
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
+        term_lexemes = lexical_term_lexemes(lexical_query_terms(query.text))
+        subjects = {subject.casefold() for subject in query.subjects}
         async with self._lock:
             result = []
             for record in self._records.values():
                 if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
+                    continue
+                if record.store_position <= query.min_store_position:
                     continue
                 if (
                     not query.include_superseded
@@ -92,12 +112,16 @@ class InMemoryMemoryStore:
                 if (
                     record.portability.value == "local"
                     and record.scope != query.current_scope
-                    and record.subject.casefold()
-                    not in {subject.casefold() for subject in query.subjects}
+                    and record.subject.casefold() not in subjects
                 ):
                     continue
+                if term_lexemes and record.subject.casefold() not in subjects:
+                    text = f"{record.subject} {record.statement}"
+                    if not lexical_text_matches(term_lexemes, text):
+                        continue
                 result.append(record.model_copy(deep=True))
-            return result
+            result.sort(key=lambda record: (-record.store_position, str(record.id)))
+            return result[: max(query.max_items * 8, 64)]
 
     async def related(
         self,
@@ -166,6 +190,31 @@ class InMemoryMemoryStore:
                 and (session_id is None or record.source_session_id == session_id)
             ]
             records.sort(key=lambda item: (-item.store_position, str(item.id)))
+            return [item.model_copy(deep=True) for item in records[:limit]]
+
+    async def list_idle(
+        self,
+        principal: Principal,
+        *,
+        reinforced_before: datetime,
+        decay_confidence_ceiling: float | None = None,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        async with self._lock:
+            records = [
+                record
+                for record in self._records.values()
+                if record.tenant_id == principal.tenant_id
+                and record.principal_id == principal.principal_id
+                and record.status in _LIVE_MEMORY
+                and record.last_reinforced_at <= reinforced_before
+                and (
+                    decay_confidence_ceiling is None
+                    or record.status is MemoryStatus.PROVISIONAL
+                    or record.confidence < decay_confidence_ceiling
+                )
+            ]
+            records.sort(key=lambda item: (item.last_reinforced_at, str(item.id)))
             return [item.model_copy(deep=True) for item in records[:limit]]
 
     async def edit(
@@ -308,6 +357,52 @@ class InMemoryTraceStore:
                 raise NotFoundError("recall trace not found")
             return trace.model_copy(deep=True)
 
+    async def mark_cited(
+        self, trace_id: UUID, principal: Principal, cited: Sequence[UUID]
+    ) -> RecallTrace:
+        async with self._lock:
+            trace = self._traces.get(trace_id)
+            if trace is None or (
+                trace.tenant_id != principal.tenant_id
+                or trace.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("recall trace not found")
+            marked = list(trace.cited)
+            known = set(marked)
+            for belief_id in cited:
+                if belief_id not in known:
+                    known.add(belief_id)
+                    marked.append(belief_id)
+            if marked != trace.cited:
+                trace = trace.model_copy(update={"cited": marked})
+                self._traces[trace_id] = trace
+            return trace.model_copy(deep=True)
+
+    async def expire_operator_fields(self, now: datetime, limit: int) -> int:
+        if limit < 0:
+            raise ValueError("recall-trace expiry limit must be nonnegative")
+        async with self._lock:
+            expired = sorted(
+                (
+                    trace
+                    for trace in self._traces.values()
+                    if trace.operator_fields_expire_at <= now and trace.has_operator_fields
+                ),
+                key=lambda trace: (trace.operator_fields_expire_at, str(trace.id)),
+            )[:limit]
+            for trace in expired:
+                self._traces[trace.id] = trace.model_copy(
+                    update={
+                        "arm_latencies_ms": {},
+                        "candidates": 0,
+                        "dropped_for_budget": [],
+                        "dropped_for_budget_count": (
+                            trace.dropped_for_budget_count + len(trace.dropped_for_budget)
+                        ),
+                    }
+                )
+            return len(expired)
+
     async def user_view(
         self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str
     ) -> RecallTraceView:
@@ -326,7 +421,7 @@ class InMemoryTraceStore:
             effective = min(
                 SENSITIVITY_ORDER[trace.sensitivity_ceiling], SENSITIVITY_ORDER[ceiling]
             )
-            considered += len(trace.dropped_for_budget)
+            considered += trace.considered_not_shown
             withheld += len(trace.blocked)
             for item in trace.beliefs:
                 if SENSITIVITY_ORDER[item.sensitivity] > effective or item.blocked:

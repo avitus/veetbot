@@ -6,7 +6,7 @@ title: Current Milestone
 
 - **Active milestone:** Milestone 12 — notifications and device identity — is
   complete. Milestone 13 — general-purpose subagents and delegation — is the
-  next authorized milestone, is specified by
+  next sequential authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates, and has not started. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
@@ -18,7 +18,9 @@ title: Current Milestone
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
-  (ADR-0061).
+  (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an
+  independently advancing parallel workstream whose gate ceiling cannot move
+  ahead of Milestone 15 (ADR-0069); it completed on 2026-08-23.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -28,18 +30,32 @@ title: Current Milestone
   delivered directly to `dev`; code review is reserved for the final merge into
   `main`. Milestones 13 through 15 remain
   authorized and specified with twenty-one, twenty-one, and sixteen registered
-  gates; none has started.
+  gates; none has started. Milestone 16, the parallel memory-evaluation
+  workstream, has implemented all twenty of its gates, republished the
+  provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
+  the CodeRabbit review loop finished clean on the `dev` to `main` pull
+  request (merge `571f6d9`); the verified gate ceiling stays at Milestone 12. Its live benchmark arm ran three times — the first two failed
+  only the absolute incomplete-runs condition, at two of 132 probe arms each,
+  after which the harness gained a content-free failure class and one retry per
+  probe arm, and the third published
+  `evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json`
+  with four retried runs and a lift of forty-five — which is milestone evidence
+  rather than one of the two completion conditions below.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
 tenant activation remains blocked until the evaluation threshold in the
 [skills design](skills.md#rollout-evidence) passes, and that activation is
 roadmap item B1 rather than a Milestone 10 completion condition (ADR-0061).
-The provider-assisted memory extractor's historical `formation@4` evidence
-passed on the intended production model and ADR-0057 is accepted. ADR-0068's
-semantic deterministic repair and retry lifecycle advance the active policies to
-deterministic `formation@5` and provider-assisted `formation@6`; `auto` now falls
-back safely until the current tuple is reevaluated. Tenant activation remains
+The provider-assisted memory extractor's evidence is accepted under ADR-0057.
+ADR-0068's semantic deterministic repair and retry lifecycle advanced the active
+policies to deterministic `formation@5` and provider-assisted `formation@6`, and
+Milestone 16's admission of working-state established facts advances them again
+to `formation@7` and `formation@8` (ADR-0069). Milestone 16 republished the
+provider evidence at `formation@8` on the intended production model and deleted
+the superseded `formation@4` artifact, so `auto` again activates provider
+assistance for the balanced OpenAI `gpt-5.6-sol` and default-profile tuple and
+falls back safely for every other one. Tenant activation remains
 separate from Milestone completion under ADR-0061. The machine-readable [project
 state](../status/project-state.yaml) records progress and evidence.
 
@@ -65,7 +81,7 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row. Milestone
 16's [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
-and ADR-0069 landed the same way, with nineteen further `gate.memory.*`
+and ADR-0069 landed the same way, with twenty further `gate.memory.*`
 entries in the existing area, and it never showed a zero row because its
 authorization and its specification arrived together.
 
@@ -133,7 +149,7 @@ twenty-one `gate.surface.*` entries plus the plan's acceptance criteria and
 the [inbound-surfaces design](inbound-surfaces.md); Milestone 15's is its
 sixteen `gate.ops.*` entries plus the plan's acceptance criteria and the
 [operational-hardening design](operational-hardening.md); and Milestone 16's
-is its nineteen `gate.memory.*` entries plus the plan's acceptance criteria
+is its twenty `gate.memory.*` entries plus the plan's acceptance criteria
 and the
 [memory-evaluation-and-lifecycle design](memory-evaluation-and-lifecycle.md),
 whose benchmark baseline is re-recorded deliberately by every change that
@@ -164,3 +180,7 @@ the checked-in benchmark baseline equals a fresh deterministic run exactly and
 the provider-assisted extraction evidence has been republished at its new
 policy version. Being a parallel workstream changes nothing about the ceiling,
 which still advances only after every earlier milestone has completed.
+
+Milestone 16 completed on those terms on 2026-08-23: every declared gate and
+the cumulative registry passed, the PostgreSQL lanes passed, and hosted CI and
+the final CodeRabbit review finished clean on the `dev` to `main` pull request.

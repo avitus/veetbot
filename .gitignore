@@ -25,6 +25,17 @@ xcuserdata/
 # uv
 # (uv.lock is intentionally allowed to be committed once generated.)
 
+# External evaluation data — never commit.
+# LongMemEval (MIT), LoCoMo (CC BY-NC 4.0), and HaluMem (CC BY-NC-ND 4.0) are
+# downloaded by the operator, read from a local path, and neither the files nor
+# any derivative of them belongs in this repository. The synthetic fixtures the
+# adapters are tested against are invented and are named so they do not match.
+longmemeval_*.json
+longmemeval_*.jsonl
+locomo*.json
+HaluMem*
+halumem_*
+
 # OS / editor
 .DS_Store
 Thumbs.db

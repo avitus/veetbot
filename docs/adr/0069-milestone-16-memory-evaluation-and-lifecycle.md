@@ -1,6 +1,6 @@
 # ADR-0069: Milestone 16 memory evaluation and lifecycle
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-22
 - Related: Sections 20, 21, and 24 of the engineering plan; ADR-0014,
   ADR-0018, ADR-0019, ADR-0022, ADR-0045, ADR-0051, ADR-0057, ADR-0061
@@ -39,7 +39,7 @@ alongside Milestones 12 through 15, rather than as a roadmap item, because the
 missing yardstick blocks every remaining memory decision and the missing
 lifecycle is already specified work.
 
-## Proposed decisions
+## Decisions
 
 1. **Milestone 16 is authorized as a parallel workstream.** It may be developed
    alongside Milestones 12 through 15 exactly as Milestone 11 was developed
@@ -114,10 +114,12 @@ lifecycle is already specified work.
     policy, and replays outstanding rejections so nothing a user rejected
     returns. Re-derivation remains opt-in per principal, as the formation
     design requires.
-12. **One gate area, `memory`, nineteen gates.** The existing area takes them:
+12. **One gate area, `memory`, twenty gates.** The existing area takes them:
     the benchmark measures the same subject the area already covers, and its
     gates cross-reference formation and retrieval gates rather than standing
-    apart from them. The `memory` area now spans three declaring
+    apart from them. The twentieth gate versions the expanded provider corpus's
+    seventeen-of-twenty-one coverage independently of Milestone 10's completed
+    sixteen-of-twenty gate. The `memory` area now spans three declaring
     specifications.
 
 ## Consequences
@@ -132,12 +134,14 @@ lifecycle is already specified work.
 - The provider-assisted extraction evidence is invalidated by the
   `formation@8` bump until it is republished; under the automatic mode the
   composition falls back to deterministic extraction with a content-free audit,
-  and under the required mode startup refuses.
+  and under the required mode startup refuses. Its expanded-corpus coverage is
+  registered as `gate.memory.provider_positive_coverage_v2` rather than
+  rewriting Milestone 10's historical evidence.
 - Ten lifecycle gates land behavior the corpus has described since Milestone 9:
   decay, usage feedback, the recall delta, correction lines, established facts,
   conflicts, re-derivation, trace expiry, lexical parity, and the profile
   document.
-- The shipped operator-reviewable knob inventory grows from 121 to 132 as the
+- The shipped operator-reviewable knob inventory grows from 126 to 137 as the
   memory profile document becomes real, and three interactive snapshot knobs
   move to the context plan.
 - One migration is added, for the trace operator-expiry index.

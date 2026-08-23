@@ -24,6 +24,8 @@ from agent_core.domain.devices import (
     push_token_fingerprint,
 )
 from agent_core.domain.notifications import (
+    _ALLOWED_SUBJECT_STATUSES,
+    _REQUIRED_IDENTIFIERS,
     NOTIFICATION_TITLES,
     DeliveryOutcome,
     Notification,
@@ -115,7 +117,7 @@ def test_notification_and_device_vocabularies_are_closed() -> None:
     assert {item.value for item in PushProvider} == {"apns", "telegram"}
 
 
-def test_apple_and_server_notification_titles_cannot_drift() -> None:
+def test_apple_and_server_notification_contract_cannot_drift() -> None:
     swift = (ROOT / "clients/apple/Veetbot/Models/NotificationModels.swift").read_text(
         encoding="utf-8"
     )
@@ -137,6 +139,31 @@ def test_apple_and_server_notification_titles_cannot_drift() -> None:
     assert {swift_cases[name]: title for name, title in swift_titles.items()} == dict(
         NOTIFICATION_TITLES
     )
+
+    identifier_block = swift.split("private static let requiredIdentifiers", 1)[1].split(
+        "private static let allowedStatuses", 1
+    )[0]
+    swift_identifiers = {
+        swift_cases[name]: set(re.findall(r'"([^"]+)"', values))
+        for name, values in re.findall(r"\.(\w+): \[(.*?)\],", identifier_block, re.DOTALL)
+    }
+    assert swift_identifiers == _REQUIRED_IDENTIFIERS
+
+    status_block = swift.split("private static let allowedStatuses", 1)[1].split(
+        "enum CodingKeys", 1
+    )[0]
+    swift_statuses = {
+        swift_cases[name]: {
+            *(re.findall(r'"([^"]+)"', values)),
+            *({None} if "nil" in values else set()),
+        }
+        for name, values in re.findall(r"\.(\w+): \[(.*?)\],", status_block, re.DOTALL)
+    }
+    server_statuses = {
+        kind: {None if status is None else status.value for status in statuses}
+        for kind, statuses in _ALLOWED_SUBJECT_STATUSES.items()
+    }
+    assert swift_statuses == server_statuses
 
 
 @pytest.mark.parametrize(

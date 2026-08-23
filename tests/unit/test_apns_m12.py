@@ -205,6 +205,7 @@ def test_apns_owned_clients_have_explicit_timeouts(
         (429, "TooManyRequests", DeliveryOutcome.RETRY),
         (500, "InternalServerError", DeliveryOutcome.RETRY),
         (403, "ExpiredProviderToken", DeliveryOutcome.RETRY),
+        (403, "InvalidProviderToken", DeliveryOutcome.RETRY),
         (400, "PayloadEmpty", DeliveryOutcome.REJECTED),
     ],
 )
@@ -239,6 +240,42 @@ async def test_apns_maps_provider_outcomes(
     assert outcome.outcome is expected
     assert outcome.provider_reason == reason
     assert outcome.provider_id == "provider-id"
+    await transport.aclose()
+
+
+@pytest.mark.parametrize("reason", ["ExpiredProviderToken", "InvalidProviderToken"])
+async def test_apns_provider_token_rejection_retries_with_a_fresh_token(
+    tmp_path: Path,
+    reason: str,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(403, json={"reason": reason})
+        return httpx.Response(200)
+
+    key_path, _key = _private_key_file(tmp_path)
+    client = httpx.AsyncClient(
+        base_url="https://api.sandbox.push.apple.com:443",
+        transport=httpx.MockTransport(handler),
+    )
+    transport = APNsPushTransport(
+        key_file=key_path,
+        key_id="KEY123",
+        team_id="TEAM123",
+        topic="com.veetbot.app",
+        clock=FixedClock(NOW),
+        clients={PushEnvironment.SANDBOX: client},
+    )
+
+    first = await transport.deliver(push_target(), push_message())
+    second = await transport.deliver(push_target(), push_message())
+
+    assert first.outcome is DeliveryOutcome.RETRY
+    assert second.outcome is DeliveryOutcome.DELIVERED
+    assert requests[0].headers["authorization"] != requests[1].headers["authorization"]
     await transport.aclose()
 
 

@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import logging
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from uuid import UUID
 
 from agent_core.context.estimator import canonical_json_bytes
@@ -20,7 +22,7 @@ from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextAssembly, ContextPlan, ContextPressure, WorkingState
 from agent_core.domain.errors import ContextOverflow
-from agent_core.domain.memory import RecallResult
+from agent_core.domain.memory import MemoryCorrection, RecallProfile
 from agent_core.domain.messages import (
     CacheBreakpoint,
     CacheHints,
@@ -37,6 +39,10 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.domain.tools import ToolSpec
+
+# The delta block is the same rendering the retriever produced for the base
+# one, taken over the items the base recall did not already carry.
+from agent_core.memory.retrieval import render_memory
 from agent_core.ports.context import ContextPlanner, TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryRetriever, QueryFormer
@@ -46,6 +52,21 @@ MAX_LOADED_SKILL_BODIES = 2
 RECALL_CACHE_CAPACITY = 1_024
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _RecallBundle:
+    """What one turn's memory read produced, in assembly order.
+
+    `base` and `delta` are already-rendered memory blocks and are droppable
+    under budget pressure; `corrections` override the frozen snapshot and are
+    not. An empty bundle is what a turn without a user message, without a
+    retriever, or with a failed recall assembles.
+    """
+
+    base: str | None = None
+    delta: str | None = None
+    corrections: tuple[MemoryCorrection, ...] = ()
 
 
 def _current_user_text(items: list[ConversationItem]) -> str | None:
@@ -208,6 +229,7 @@ class BudgetedContextBuilder:
         working_state: WorkingStateManager,
         memory_retriever: MemoryRetriever | None = None,
         query_former: QueryFormer | None = None,
+        session_scope: Callable[[UUID], Awaitable[str]] | None = None,
     ) -> None:
         self._planner = planner
         self._estimator = estimator
@@ -215,9 +237,10 @@ class BudgetedContextBuilder:
         self._working_state = working_state
         self._memory_retriever = memory_retriever
         self._query_former = query_former
-        self._recall_tasks: OrderedDict[
-            tuple[UUID, int, str], asyncio.Task[RecallResult | None]
-        ] = OrderedDict()
+        self._session_scope = session_scope
+        self._recall_tasks: OrderedDict[tuple[UUID, int, str], asyncio.Task[_RecallBundle]] = (
+            OrderedDict()
+        )
 
     async def measure(
         self,
@@ -331,16 +354,32 @@ class BudgetedContextBuilder:
             principal_id=None,
         )
         recall_items: list[ConversationItem] = []
-        recalled = await self._recall_once(run, checkpoint, state, active)
-        if recalled is not None and recalled.items:
-            recall_items = [
+        correction_items: list[ConversationItem] = []
+        recalled = await self._recall_once(run, checkpoint, state, active, plan)
+        for block in (recalled.base, recalled.delta):
+            if block is not None:
+                recall_items.append(
+                    UserMessage(
+                        content=[TextPart(text=block)],
+                        trust=TrustLevel.MEMORY,
+                        principal_id=None,
+                    )
+                )
+        if recalled.corrections:
+            correction_items.append(
                 UserMessage(
-                    content=[TextPart(text=recalled.rendered)],
+                    content=[
+                        TextPart(
+                            text="\n".join(
+                                correction.render() for correction in recalled.corrections
+                            )
+                        )
+                    ],
                     trust=TrustLevel.MEMORY,
                     principal_id=None,
                 )
-            ]
-        active_with_recall = _insert_before_current_user(active, recall_items)
+            )
+        active_with_recall = _insert_before_current_user(active, [*recall_items, *correction_items])
         fixed_body = [
             *summary_items,
             *skill_items,
@@ -352,9 +391,13 @@ class BudgetedContextBuilder:
         fixed_total = plan.prefix_tokens + fixed_tokens + plan.budget.reserve_output_tokens
         recall_dropped = False
         if recall_items and fixed_total > plan.budget.total_tokens:
+            # Recall yields; the corrections do not. They override the frozen
+            # snapshot the prefix goes on rendering, so a long conversation
+            # must never be able to squeeze one out — the never-yield set in
+            # the context engine's "Yield order under pressure".
             recall_dropped = True
             recall_items = []
-            active_with_recall = [item.model_copy(deep=True) for item in active]
+            active_with_recall = _insert_before_current_user(active, correction_items)
             fixed_body = [
                 *summary_items,
                 *skill_items,
@@ -479,7 +522,7 @@ class BudgetedContextBuilder:
                 "context_reserve_tokens": str(plan.budget.reserve_output_tokens),
                 "context_origin_trust": (
                     TrustLevel.MEMORY.value
-                    if plan.memory_snapshot or recall_items
+                    if plan.memory_snapshot or recall_items or correction_items
                     else TrustLevel.USER.value
                 ),
             },
@@ -495,12 +538,13 @@ class BudgetedContextBuilder:
         checkpoint: RunCheckpoint,
         state: WorkingState,
         active: list[ConversationItem],
-    ) -> RecallResult | None:
+        plan: ContextPlan,
+    ) -> _RecallBundle:
         if self._memory_retriever is None or self._query_former is None:
-            return None
+            return _RecallBundle()
         message = _current_user_text(active)
         if message is None:
-            return None
+            return _RecallBundle()
         checkpoint_identity = hashlib.sha256(
             _canonical_json(
                 {
@@ -508,6 +552,13 @@ class BudgetedContextBuilder:
                     "last_event_sequence": checkpoint.last_event_sequence,
                     "conversation": [item.model_dump(mode="json") for item in active],
                     "working_state": state.model_dump(mode="json"),
+                    # The plan's snapshot identity is part of what a cached
+                    # recall answers: a rotated plan freezes a new snapshot at
+                    # a new watermark, and the delta it bounds is a different
+                    # question with the same conversation.
+                    "epoch": plan.epoch,
+                    "snapshot_id": None if plan.snapshot_id is None else str(plan.snapshot_id),
+                    "snapshot_watermark": plan.snapshot_watermark,
                 }
             )
         ).hexdigest()
@@ -519,6 +570,8 @@ class BudgetedContextBuilder:
                     run.model_copy(deep=True),
                     state.model_copy(deep=True),
                     message,
+                    snapshot_id=plan.snapshot_id,
+                    snapshot_watermark=plan.snapshot_watermark,
                 )
             )
             self._recall_tasks[key] = task
@@ -536,14 +589,36 @@ class BudgetedContextBuilder:
         run: Run,
         state: WorkingState,
         message: str,
-    ) -> RecallResult | None:
+        *,
+        snapshot_id: UUID | None,
+        snapshot_watermark: int,
+    ) -> _RecallBundle:
+        """Take the turn's base recall, and over a frozen snapshot its delta.
+
+        The base recall is the turn's own question. The delta is that query
+        taken again with no text over the store positions the session has not
+        seen, which is what reaches a belief formed or corrected since the
+        snapshot froze; the corrections are what override the snapshot members
+        that stopped holding. Both further reads are skipped when the store
+        head the base recall read is still the session's watermark, since
+        nothing has been written since and neither could say anything. The
+        delta also shares the base block's budget class rather than doubling
+        it. A failure in either read costs the turn only what that read would
+        have added: the base recall it already has is still the turn's memory.
+        """
+
         assert self._memory_retriever is not None
         assert self._query_former is not None
         try:
-            queries = self._query_former.form(run, state, message)
+            # Recall is scoped to the session's project: a belief learned in
+            # another one is carried in and demoted, never silently local.
+            scope = (
+                None if self._session_scope is None else await self._session_scope(run.session_id)
+            )
+            queries = self._query_former.form(run, state, message, current_scope=scope)
             if not queries:
-                return None
-            return await self._memory_retriever.recall(
+                return _RecallBundle()
+            base = await self._memory_retriever.recall(
                 queries[0],
                 session_id=run.session_id,
                 run_id=run.id,
@@ -555,7 +630,66 @@ class BudgetedContextBuilder:
                 "context_memory_recall_failed",
                 extra={"run_id": str(run.id), "error_class": type(exc).__name__},
             )
-            return None
+            return _RecallBundle()
+        rendered_base = base.rendered if base.items else None
+        # One instant governs the turn's memory, the way it governs one recall:
+        # a historical query stamps both blocks with the moment it asks about.
+        instant = queries[0].as_of or self._clock.now()
+        if snapshot_id is None or base.watermark <= snapshot_watermark:
+            # No row can sit above the store head, and every status change a
+            # correction selects on takes a fresh position, so a head still at
+            # the session's watermark makes both further reads provably empty.
+            # Skipping them spares a quiet turn a query, a trace, an event, and
+            # a page of rows that could only have said nothing.
+            return _RecallBundle(base=rendered_base)
+        # The two blocks share one budget class. In-turn recall is capped once
+        # in the context engine's Region B table, not once per block, so the
+        # delta is issued for what the base block left of it and is not issued
+        # at all when the base block spent the class. Corrections are outside
+        # this: they are unbudgeted, never yield, and are the trust-critical
+        # half of the pair.
+        remaining = queries[0].budget_tokens - base.tokens
+        try:
+            delta = (
+                None
+                if remaining <= 0
+                else await self._memory_retriever.recall(
+                    queries[0].model_copy(
+                        update={
+                            "profile": RecallProfile.CORE,
+                            "text": None,
+                            "subjects": [],
+                            "min_store_position": snapshot_watermark,
+                            "budget_tokens": remaining,
+                        }
+                    ),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    turn_id=run.id,
+                    moment="in_turn",
+                )
+            )
+            corrections = await self._memory_retriever.corrections(
+                snapshot_id=snapshot_id,
+                watermark=snapshot_watermark,
+            )
+        except Exception as exc:
+            logger.warning(
+                "context_memory_delta_failed",
+                extra={"run_id": str(run.id), "error_class": type(exc).__name__},
+            )
+            return _RecallBundle(base=rendered_base)
+        # A belief the base recall already carries is not news, however new its
+        # position is: stating it twice in one turn is two voices on one fact.
+        carried = {item.belief_id for item in base.items}
+        fresh = (
+            [] if delta is None else [item for item in delta.items if item.belief_id not in carried]
+        )
+        return _RecallBundle(
+            base=rendered_base,
+            delta=render_memory(fresh, as_of=instant) if fresh else None,
+            corrections=tuple(corrections),
+        )
 
     def _truncate_tool_results(
         self,

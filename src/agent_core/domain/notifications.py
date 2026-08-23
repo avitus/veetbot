@@ -25,6 +25,25 @@ class NotificationKind(StrEnum):
     TEST = "test"
 
 
+TEST_NOTIFICATION_DEDUPE_PREFIX = "device.test:"
+
+
+def test_notification_target_device_id(dedupe_key: str) -> UUID | None:
+    """Return the device selected by a TEST dedupe key, failing closed."""
+
+    if not dedupe_key.startswith(TEST_NOTIFICATION_DEDUPE_PREFIX):
+        return None
+    raw_device_id, separator, _idempotency_key = dedupe_key.removeprefix(
+        TEST_NOTIFICATION_DEDUPE_PREFIX
+    ).partition(":")
+    if not separator:
+        return None
+    try:
+        return UUID(raw_device_id)
+    except ValueError:
+        return None
+
+
 class NotificationStatus(StrEnum):
     PENDING = "pending"
     DISPATCHED = "dispatched"
@@ -333,7 +352,7 @@ def schedule_occurrence_skipped_key(occurrence_id: UUID) -> str:
 def device_test_key(device_id: UUID, idempotency_key: str) -> str:
     if not idempotency_key or not idempotency_key.strip() or len(idempotency_key) > 255:
         raise ValueError("device test idempotency key must contain 1 to 255 characters")
-    return f"device.test:{device_id}:{idempotency_key}"
+    return f"{TEST_NOTIFICATION_DEDUPE_PREFIX}{device_id}:{idempotency_key}"
 
 
 def ops_alert_key(tenant_id: str, signal: str, episode: int) -> str:

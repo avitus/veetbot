@@ -13,8 +13,9 @@ may import the evaluation package.
 from __future__ import annotations
 
 import importlib
-import os
 import tempfile
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -27,7 +28,7 @@ from agent_core.config import Settings, load_settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import MemoryRecord, RecallMoment, RecallTrace
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import AssistantMessage, FakeModelScript, ScriptedTurn, TextPart
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunLimits
 from agent_core.evals.memory_benchmark import (
     BENCHMARK_VERSION,
@@ -35,15 +36,19 @@ from agent_core.evals.memory_benchmark import (
     BenchmarkProbe,
     BenchmarkScenario,
     BenchmarkSession,
+    BenchmarkTurn,
     ConsolidationCounts,
     DeterministicBenchmarkResult,
     DeterministicScenarioResult,
     MemoryBenchmarkBaseline,
     MemoryBenchmarkCorpus,
     ProbeRetrievalResult,
+    SessionEvents,
     aggregate_deterministic,
     baseline_probe_rows,
     compare_to_baseline,
+    evidence_event_refs,
+    evidence_provenance_recalled,
     load_baseline,
     load_corpus,
     probe_run_facts,
@@ -83,10 +88,11 @@ class MemoryBenchmarkResult(BaseModel):
     """One benchmark command's outcome, printed as the command's document.
 
     `baseline` carries the comparison against the recorded baseline, or None
-    when none is recorded yet.  `live` and `evidence` stay None here: the live
-    arm and the activation evidence it publishes land in a later task, and the
-    validator states the rule they answer to — a live arm publishes evidence
-    exactly when it passed, and evidence without a live arm is meaningless.
+    when none is recorded yet.  `live` and `evidence` are set by the live arm
+    in the sibling live module, and the validator states the rule they answer
+    to — a live arm publishes evidence exactly when it passed, and evidence
+    without a live arm is meaningless.  Both are typed as `BaseModel` here so
+    that the pure driver never imports the live arm that defines them.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -212,42 +218,65 @@ async def run_benchmark(
 ) -> MemoryBenchmarkResult | None:
     """Run the benchmark the command asked for and judge it.
 
-    The deterministic arm always runs and is compared against the recorded
-    baseline when there is one; drift and regression both fail the run.  The
-    live arm is opt-in and is not implemented yet, so asking for it without the
-    opt-in skips cleanly and asking for it with the opt-in says so plainly
-    rather than quietly reporting a deterministic-only result as a live one.
-    `model_policy` and `output` belong to that arm and are unused until it
-    lands.  `clock` stamps a recorded baseline and defaults to the composition
-    root's wall clock, because evaluation code never reads the ambient one.
+    This is the single entry point for both arms.  The live arm owns
+    `model_policy` and `output`, publishes its own evidence, and gates itself
+    on `RUN_LIVE_MODEL_TESTS`, returning None on a clean skip; it lives in a
+    sibling module imported lazily here so that the pure driver never depends
+    on it.  The deterministic arm writes no evidence, so an `--output` path
+    handed to it is a mistake rather than something to ignore, and it is
+    compared against the recorded baseline when there is one; any difference
+    (drift, regression, improvement, or shift) fails the run.  `clock` stamps a
+    recorded baseline and
+    defaults to the composition root's wall clock, because evaluation code
+    never reads the ambient one.
     """
 
-    del model_policy, output
     if not deterministic_only:
-        if os.environ.get("RUN_LIVE_MODEL_TESTS") != "1":
-            return None
-        raise NotImplementedError(
-            "the live memory benchmark arm lands in Task 2; "
-            "run with --deterministic-only until then"
+        if output is None:
+            raise ValueError("the live memory benchmark arm requires an evidence output path")
+        live = importlib.import_module("agent_core.evals.memory_benchmark_live")
+        result: MemoryBenchmarkResult | None = await live.run_live_benchmark(
+            repository_root,
+            model_policy=model_policy,
+            policy_profile=policy_profile,
+            build_ref=build_ref,
+            output=output,
         )
-    result = await run_deterministic_benchmark(repository_root, policy_profile=policy_profile)
+        return result
+    if output is not None:
+        raise ValueError(
+            "an evidence output path belongs to the live arm; "
+            "the deterministic arm records a baseline instead"
+        )
+    deterministic = await run_deterministic_benchmark(
+        repository_root, policy_profile=policy_profile
+    )
     recorded = load_baseline(repository_root)
-    comparison = None if recorded is None else compare_to_baseline(result, recorded)
+    comparison = None if recorded is None else compare_to_baseline(deterministic, recorded)
     if baseline_output is not None:
         # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
         bootstrap = importlib.import_module("agent_core.bootstrap")
         recording_clock: Clock = clock or bootstrap.system_clock()
         write_baseline(
-            result,
+            deterministic,
             build_ref=build_ref,
             recorded_at=recording_clock.now(),
             path=baseline_output,
         )
-    failures = [] if comparison is None else [*comparison.drift, *comparison.regressions]
+    failures = (
+        []
+        if comparison is None
+        else [
+            *comparison.drift,
+            *comparison.regressions,
+            *comparison.improvements,
+            *comparison.shifts,
+        ]
+    )
     return MemoryBenchmarkResult(
         passed=not failures,
         failure_summary="; ".join(failures) if failures else None,
-        deterministic=result,
+        deterministic=deterministic,
         baseline=comparison,
     )
 
@@ -266,30 +295,33 @@ def probe_prompt(probe: BenchmarkProbe, corpus: MemoryBenchmarkCorpus, *, live: 
     return f"{probe.question}\n{corpus.probe_instruction}"
 
 
-async def run_deterministic_scenario(
+@asynccontextmanager
+async def scenario_composition(
     settings: Settings,
     scenario: BenchmarkScenario,
     *,
-    corpus: MemoryBenchmarkCorpus,
-    policy_profile: str = "default",
-) -> DeterministicScenarioResult:
-    """Run one scenario's sessions and probes against a real composition.
+    policy_profile: str,
+    script: FakeModelScript | None = None,
+    model_policy: str | None = None,
+    replay_sessions: bool = True,
+    session_events: dict[str, SessionEvents] | None = None,
+) -> AsyncIterator[tuple[Any, list[ConsolidationCounts]]]:
+    """Compose one scenario's application graph and leave it open for probes.
 
-    One composition serves the whole scenario, so every probe reads the store
-    the scenario's own conversations built.  Sessions are consolidated by
-    calling the memory service directly rather than by closing them, because
-    the close hook and the idle sweep both consolidate at the `general` scope
-    and a project-scoped scenario closed through them would form nothing; this
-    is the documented harness path.  Maintenance runs exactly once, after the
-    last session and before the first probe, so that no probe can change the
-    store the next probe reads.
+    Sessions are consolidated by calling the memory service directly rather
+    than by closing them, because the close hook and the idle sweep both
+    consolidate at the `general` scope and a project-scoped scenario closed
+    through them would form nothing; this is the documented harness path.
+    Maintenance runs exactly once, after the last session and before the first
+    probe, so that no probe can change the store the next probe reads.  The
+    live arm reuses this with a real `model_policy` and no script, and its
+    without-memory arm reuses it with `replay_sessions=False`, which composes
+    the same graph over a store the scenario never spoke to.
     """
 
     # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
     bootstrap = importlib.import_module("agent_core.bootstrap")
-    script = FakeModelScript(turns=[ScriptedTurn(text=PROBE_ACK_TEXT)], on_exhausted="repeat_last")
     consolidations: list[ConsolidationCounts] = []
-    probes: list[ProbeRetrievalResult] = []
     async with bootstrap.build(
         settings=settings,
         storage="memory",
@@ -300,13 +332,47 @@ async def run_deterministic_scenario(
         sequential_ids=True,
         enabled_tools=list(PROBE_TOOLS),
         limits=PROBE_RUN_LIMITS,
+        model_policy=model_policy,
     ) as composition:
+        if replay_sessions:
+            for session in scenario.sessions:
+                consolidations.append(
+                    await _converse(composition, composition.clock, session, session_events)
+                )
+            await composition.maintenance_factory().run_once()
+        yield composition, consolidations
+
+
+async def run_deterministic_scenario(
+    settings: Settings,
+    scenario: BenchmarkScenario,
+    *,
+    corpus: MemoryBenchmarkCorpus,
+    policy_profile: str = "default",
+    session_events: dict[str, SessionEvents] | None = None,
+) -> DeterministicScenarioResult:
+    """Run one scenario's sessions and probes against a real composition.
+
+    One composition serves the whole scenario, so every probe reads the store
+    the scenario's own conversations built, and the scripted model keeps the
+    arm off the network.  A caller that passes `session_events` is handed the
+    events each replayed turn appended and gets the evidence-provenance counts
+    on every probe; the authored corpus names labels rather than evidence and
+    passes nothing.
+    """
+
+    script = FakeModelScript(turns=[ScriptedTurn(text=PROBE_ACK_TEXT)], on_exhausted="repeat_last")
+    probes: list[ProbeRetrievalResult] = []
+    async with scenario_composition(
+        settings,
+        scenario,
+        policy_profile=policy_profile,
+        script=script,
+        session_events=session_events,
+    ) as (composition, consolidations):
         clock = composition.clock
-        for session in scenario.sessions:
-            consolidations.append(await _converse(composition, clock, session))
-        await composition.maintenance_factory().run_once()
         for probe in scenario.probes:
-            probes.append(await _probe(composition, clock, scenario, probe, corpus))
+            probes.append(await _probe(composition, clock, scenario, probe, corpus, session_events))
         extractor_name: str = composition.memory.extractor_name
         live: list[MemoryRecord] = await composition.memory.list_memories()
         every: list[MemoryRecord] = await composition.memory.list_memories(include_inactive=True)
@@ -327,24 +393,32 @@ async def run_deterministic_scenario(
     )
 
 
-async def _converse(composition: Any, clock: Any, session: BenchmarkSession) -> ConsolidationCounts:
-    """Replay one session's turns and consolidate what they stated."""
+async def _converse(
+    composition: Any,
+    clock: Any,
+    session: BenchmarkSession,
+    session_events: dict[str, SessionEvents] | None = None,
+) -> ConsolidationCounts:
+    """Replay one session's turns and consolidate what they stated.
+
+    A turn the scenario marks as the assistant's is appended as an assistant
+    message rather than as a principal one, so the conversation the dataset
+    recorded is replayed whole while the extractor, which reads principal user
+    messages only, can never form from it.  When `session_events` is given the
+    replay records the event each turn appended, which is what the
+    evidence-provenance metric joins a returned belief against.
+    """
 
     _advance(clock, session.advance_seconds)
     view = await _open_session(composition, session.project_scope)
+    sequences: list[int] = []
     for turn in session.turns:
         _advance(clock, turn.advance_seconds)
         async with composition.uow_factory() as uow:
-            await uow.events.append(
-                NewEvent(
-                    session_id=view.id,
-                    run_id=None,
-                    event_type="user.message.created",
-                    actor_type="principal",
-                    actor_id=EVALUATION_PRINCIPAL.principal_id,
-                    payload={"content": turn.text},
-                )
-            )
+            appended: EventEnvelope = await uow.events.append(_turn_event(view.id, turn))
+        sequences.append(appended.sequence)
+    if session_events is not None:
+        session_events[session.id] = SessionEvents(session_id=view.id, turn_sequences=sequences)
     scope = session.project_scope or DEFAULT_SCOPE
     result = await composition.memory.run(trigger="session_close", scope=scope, session_id=view.id)
     return ConsolidationCounts(
@@ -358,12 +432,35 @@ async def _converse(composition: Any, clock: Any, session: BenchmarkSession) -> 
     )
 
 
+def _turn_event(session_id: UUID, turn: BenchmarkTurn) -> NewEvent:
+    """Shape one replayed turn as the event its role would have appended."""
+
+    if turn.role == "user":
+        return NewEvent(
+            session_id=session_id,
+            run_id=None,
+            event_type="user.message.created",
+            actor_type="principal",
+            actor_id=EVALUATION_PRINCIPAL.principal_id,
+            payload={"content": turn.text},
+        )
+    message = AssistantMessage(content=[TextPart(text=turn.text)])
+    return NewEvent(
+        session_id=session_id,
+        run_id=None,
+        event_type="assistant.message.completed",
+        actor_type="runtime",
+        payload={"message": message.model_dump(mode="json")},
+    )
+
+
 async def _probe(
     composition: Any,
     clock: Any,
     scenario: BenchmarkScenario,
     probe: BenchmarkProbe,
     corpus: MemoryBenchmarkCorpus,
+    session_events: Mapping[str, SessionEvents] | None = None,
 ) -> ProbeRetrievalResult:
     """Ask one probe in a fresh session and score what it recalled."""
 
@@ -378,6 +475,13 @@ async def _probe(
         events: list[EventEnvelope] = await uow.events.list_after(view.id, 0, EVALUATION_PRINCIPAL)
     snapshot, in_turn = await _recall_traces(composition, events)
     distinct_prefixes, policy_failures, run_completed = probe_run_facts(events, run.status)
+    named = set() if session_events is None else evidence_event_refs(probe, session_events)
+    recalled = bool(named) and evidence_provenance_recalled(
+        probe,
+        [*([] if snapshot is None else [snapshot]), *in_turn],
+        session_events or {},
+        store=store_live,
+    )
     return score_probe(
         probe,
         scenario,
@@ -387,6 +491,8 @@ async def _probe(
         distinct_prefixes=distinct_prefixes,
         policy_failures=policy_failures,
         run_completed=run_completed,
+        evidence_total=int(bool(named)),
+        evidence_recalled=int(recalled),
         snapshot_trace_id=None if snapshot is None else snapshot.id,
         in_turn_trace_ids=[trace.id for trace in in_turn],
     )
@@ -397,9 +503,12 @@ async def _recall_traces(
 ) -> tuple[RecallTrace | None, list[RecallTrace]]:
     """Read the probe run's recall traces back, split by moment.
 
-    A probe run plans once and takes one turn, so it records one snapshot trace
-    and one in-turn trace; the first snapshot in event order is the one the
-    frozen prefix carried, and every in-turn trace counts.
+    A probe run plans once and takes one turn, so it records one snapshot
+    trace; the first snapshot in event order is the one the frozen prefix
+    carried. The turn itself records the base recall and, over a frozen
+    snapshot, the delta bounded by its watermark, and every in-turn trace
+    counts: a probe is scored on what the turn was told, from whichever read
+    told it.
     """
 
     snapshot: RecallTrace | None = None

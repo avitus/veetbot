@@ -20,19 +20,19 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:743), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:647).
+scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:687).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
-(memory-formation-and-consolidation.md:254), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:785),
+(memory-formation-and-consolidation.md:284), usage that resets decay and raises
+utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:780), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:674) are
+resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:714) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -92,6 +92,7 @@ evals/capability/memory-benchmark.v1.json     scenarios, sessions,
             |
             +--> compare_to_baseline --> memory-benchmark.baseline.json
             |                            drift | regressions | improvements
+            |                            shifts (attribution partition)
             v
   run_live_benchmark   RUN_LIVE_MODEL_TESTS=1, ceiling USD 4.00
             |          with-memory arm and without-memory arm, same probes
@@ -427,13 +428,16 @@ drift          the corpus digest, the benchmark version, a policy version, the
                expected beliefs, needed total) differs. The baseline is not
                comparable; it is invalid, not merely worse.
 regressions    a higher-is-better count fell — supported beliefs, needed
-               formed, needed recalled, the attribution counts, completed
-               probe runs — or a lower-is-better count rose — fabricated,
-               stale live, noise, dropped for budget, blocked, currency
-               violations, abstention leaks, false transfers, run policy
-               failures, distinct prefixes — or any per-probe row's
-               needed_recalled fell.
+               formed, needed recalled, completed probe runs — or a
+               lower-is-better count rose — fabricated, stale live, noise,
+               dropped for budget, blocked, currency violations, abstention
+               leaks, false transfers, run policy failures, distinct
+               prefixes — or any per-probe row's needed_recalled fell.
 improvements   the mirror image, reported and never required.
+shifts         an attribution count moved. The three partition needed
+               recalled by the moment that found the belief, so a move says
+               where recall happened rather than how much of it did; it is
+               reported and is neither a regression nor an improvement.
 ```
 
 Two gates read that comparison and they are deliberately different. "No
@@ -502,6 +506,35 @@ if the first completed live run reports zero cost the harness aborts with
 "model pricing unavailable; ceiling unenforceable" rather than running sixty
 more probes for free and calling the ceiling enforced.
 
+A run that terminated without an answer is asked once more before it counts.
+Every probe arm whose run terminated before an answer for a reason other than
+budget exhaustion, step exhaustion, context overflow, or a permanent model
+error is retried exactly once, against a composition built the same way but
+freshly, and the retry is admitted through the same pre-admission ceiling check
+as any other run: a retry the ceiling refuses stops the arm instead of running
+outside it. Those four are terminations the runtime decided on rather than
+suffered — re-asking a probe the per-run budget already stopped would let one
+probe spend twice its per-run ceiling — so they are kept on the first attempt,
+with their class, and counted incomplete. An arm that completed is never asked
+again, a second failure is kept, and a first attempt that failed after a billed
+call still counts its cost. `retried_runs` counts the retries, `incomplete_runs`
+keeps its meaning — what was still incomplete after the retry — and the
+publication condition `incomplete_runs == 0` is unchanged. Each incomplete run
+records its terminal status, its terminal error class (the class name the run
+record already carries, or the exception type when the arm failed outside the
+run, never a message), whether any model call was billed, and what it cost; the
+command prints one such line per incomplete run beside its one-line summary,
+and the artifact carries only the aggregate `failure_classes` histogram. The
+evidence validator re-checks that `retried_runs` does not exceed the runs the
+two arms could have asked and that a histogram, when present, accounts for
+every incomplete run.
+
+The per-probe rows themselves do carry each arm's answer text verbatim, and
+that is safe only because every probe in this corpus is synthetic: a published
+artifact quotes invented people and invented facts, so it discloses nothing
+about a real principal. A corpus drawn from real conversations would have to
+hash those answers rather than publish them.
+
 ## Public datasets, opt-in and never vendored
 
 Three public long-horizon benchmarks are the outside check on the corpus, and
@@ -543,16 +576,23 @@ single-session-assistant is excluded by design.
 
 ```text
 agent eval memory-benchmark --deterministic-only
-agent eval memory-benchmark --output PATH --build-ref SHA [--model-policy P]
+agent eval memory-benchmark --no-deterministic-only --output PATH
+                            --build-ref SHA [--model-policy P]
                             [--policy-profile P]
 agent eval memory-benchmark --deterministic-only --write-baseline PATH
-agent eval memory-benchmark --external longmemeval --path DIR
-                            [--sample N --seed S]
+agent eval memory-benchmark --external longmemeval --path FILE
+                            --output PATH [--sample N --seed S]
+                            [--principal-speaker a|b]
 ```
 
-`--output` is required for a live run and the harness refuses an existing path
-before it spends anything. `--build-ref` is required for a live run and may be
-resolved from the working tree for a deterministic one. The exit status is 0 on
+The live arm is selected by `--no-deterministic-only`. `--output` is required
+for a live run and the harness refuses an existing path before it spends
+anything; the deterministic arm publishes no evidence, so an `--output` handed
+to it is refused as a usage error rather than ignored. An external dataset is
+the exception: it publishes metrics rather than evidence, so it requires an
+`--output` in either arm and records no baseline. `--build-ref` is
+required for a live run and may be resolved from the working tree for a
+deterministic one. The exit status is 0 on
 a pass and on a clean opt-in skip, and 1 on drift, a regression, or a live
 failure; the result document is printed as JSON either way. The command lives
 beside `agent eval memory-formation` and, like it, reaches the composition root
@@ -586,8 +626,8 @@ interactive snapshot knobs leave this document, because `context/plan.yaml` is
 already the authority the planner reads for an interactive session and two
 sources for one number is a bug waiting for an overlay. That removes three
 knobs and adds fourteen, taking the memory profile document from seventeen
-knobs to twenty-eight and the shipped operator-reviewable inventory from 121 to
-132; the derivation paragraph and the table in
+knobs to twenty-eight and the shipped operator-reviewable inventory from 126 to
+137; the derivation paragraph and the table in
 [bootstrap-and-composition.md](bootstrap-and-composition.md) move with it.
 
 `SESSION_IDLE_SECONDS` stays a constant and does not become a knob. The idle
@@ -600,7 +640,11 @@ consolidation and the idle sweep; `scheduled_enabled` and
 `scheduled_interval_seconds` drive the decay sweep's cadence;
 `durable_item_share` reserves `ceil(share * max_items)` snapshot slots for
 preference, user-model, and `user`-scope beliefs, which is the reservation the
-retrieval specification already describes.
+retrieval specification already describes. The reservation is a floor and not
+also a ceiling: it holds slots against a burst of project beliefs, and a
+durable belief above the share is still seated while the snapshot has room, so
+"unused priming slots are not backfilled" bounds the priming set rather than
+the durable one.
 
 ## Trace retention, lexical parity, episode paging, and session scope
 
@@ -616,7 +660,9 @@ untouched, is idempotent, and returns zero on a second call. The count of
 dropped items survives as a new optional scalar on the record so the user-safe
 projection can still say how many beliefs were considered and not shown. A
 migration adds the index the sweep's bounded id-subquery uses, and the
-maintenance worker gains a trace sweep beside the memory sweep.
+maintenance worker gains a trace sweep beside the memory sweep. Knowledge
+retrieval writes the same trace record, so it stamps its expiry from the same
+profile the memory retriever reads rather than from a literal of its own.
 
 **Lexical parity between the adapters.** PostgreSQL full-text search currently
 requires every query term; the in-memory adapter applies no lexical predicate
@@ -627,6 +673,21 @@ a record matches if it overlaps any query term or its subject was named, and
 both order newest-first and cap candidates at `max(max_items * 8, 64)` before
 ranking. Strict conjunction was rejected because it turns the ranking arm into
 a filter and drops beliefs the ranker should merely have demoted.
+
+Overlap means a **whole lexeme**, not a substring. PostgreSQL matches
+`to_tsvector('simple', subject || ' ' || statement)` against one
+`plainto_tsquery` per term, which lowercases without stemming, so `themes` is
+not `theme` and `Apple` is not `app`; the in-memory adapter tokenizes the same
+way rather than testing containment, because it is the tier the benchmark
+measures and the more permissive of two stores would record a baseline the
+production store cannot reproduce. The shared tokenizer keeps a run joined by
+dots, slashes, colons, or an at sign whole, splits an apostrophe into its
+parts, emits a hyphenated word both whole and in parts, and treats a term that
+reduces to no lexeme as matching nothing, exactly as an empty query does. It
+approximates rather than reimplements the PostgreSQL parser: a URL carrying a
+query string and a date divide differently there. Those edges change what the
+ranker is offered, never what a principal may see, which is the reason lexical
+recall is allowed to be an approximation and the isolation predicates are not.
 
 **Episode paging.** Episode search reads one page of events and stops, so a
 match beyond the first page is invisible. It becomes a bounded page loop with
@@ -652,9 +713,24 @@ interval, which is the guard against decaying the same belief twice in a
 window. Each selected belief loses `decay.step` of confidence; a belief that
 falls below `decay.floor_confidence` is retired with `valid_to` set to the
 sweep instant. Both outcomes are events, `memory.decayed` and `memory.retired`,
-written through the existing reinforcement path so provenance and position
-ordering are unchanged. Explicit user statements are `ACTIVE` at high
-confidence and are never eligible.
+written through the existing reinforcement path so provenance is unchanged.
+Only the retiring outcome takes a fresh store position. A session reads a
+position past its snapshot watermark as a belief formed or corrected since, so
+a quiet loss of confidence keeps the position it had — republishing it to the
+next turn would report a change nobody made — while a retirement is exactly the
+change the correction lines below select on. Explicit user statements are
+`ACTIVE` at high confidence and are never eligible.
+
+`MemoryStore` gains `list_idle(principal, reinforced_before, limit)` — live
+beliefs last reinforced at or before an instant, least recently reinforced
+first — and the sweep reads its window through it, cut at the shortest time
+constant any belief type carries and bounded by `decay.max_per_sweep`. The
+ordering is the point: a window ordered newest-first would refill with the rows
+a retiring sweep had just written while beliefs idle for years sank below the
+bound and were never swept, and idleness is the property the sweep selects on
+in any case. PostgreSQL serves it from `ix_memories_principal_idle`, since the
+existing `ix_memories_principal_live_position` orders by store position and can
+only filter the principal.
 
 Ranking gains the time term the decay design implies. The reinforcement
 contribution becomes
@@ -691,12 +767,17 @@ idempotent. `GovernedMemoryService.record_usage` extracts the short belief
 identifiers from the run's final message with the same eight-hex form the
 renderer emits, resolves the run's in-turn traces and the session's snapshot
 trace, and for each trace marks the returned beliefs whose short identifier
-appears and were not already cited. A cited belief's `utility` rises by
+appears and were not already cited. A short identifier that fits more than one
+returned belief identifies none of them: it credits nothing, charges nothing,
+and is counted as ambiguous, because the deterministic identifiers the
+evaluation harness issues render every belief the same way and a citing live
+arm would otherwise credit whatever it recalled. A cited belief's `utility`
+rises by
 `usage.cited_utility_delta` to a ceiling of 1 and its `last_reinforced_at`
 moves to now; a returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:785): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:797): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -712,11 +793,13 @@ is invisible to it and a belief inside it that has since been superseded goes
 on being rendered until the next session. The retrieval specification already
 describes the fix (memory-retrieval-and-ranking.md:93) and names its two parts.
 
-`MemoryStore` gains `head_position(principal)`, the maximum live store position
-for that principal, and recall sets the session's `snapshot_watermark` from it
-rather than from the maximum position it happened to return. `RecallQuery`
-gains `min_store_position`, and both adapters filter on it, which makes the
-delta a query rather than a post-filter.
+`MemoryStore` gains `head_position(principal)`, the newest store position that
+principal has written whatever its status — a retirement moves the head, or the
+correction it produces would sit below the watermark that has to notice it —
+and zero when the principal has written nothing. Recall sets the session's
+`snapshot_watermark` from it rather than from the maximum position it happened
+to return. `RecallQuery` gains `min_store_position`, and both adapters filter
+on it, which makes the delta a query rather than a post-filter.
 
 `MemoryRetriever` gains `corrections(snapshot_id, watermark, as_of)`. It reads
 the snapshot trace, finds the beliefs it returned that are now superseded,
@@ -732,12 +815,23 @@ The superseding clause is omitted when there is no successor. The builder then
 assembles three things instead of one: the base recall, a delta recall run with
 the core profile and no query text over positions past the watermark, and the
 correction lines as a separate memory-trust user message inserted before the
-current user turn. Only the base and delta blocks are droppable under budget
-pressure; correction lines stay in the fixed body and are never offered for
-yielding, so a correction cannot be squeezed out by a long conversation, and if
+current user turn. The two recall blocks share the one in-turn recall class the
+context engine caps (context-engine.md:221): the delta is issued for what the
+base block left of that budget and is not issued at all when the base block
+spent it, so a session with a frozen snapshot cannot carry twice the recall a
+session without one may. Only the base and delta blocks are droppable under
+budget pressure; correction lines stay in the fixed body and are never offered
+for yielding, so a correction cannot be squeezed out by a long conversation, and if
 they alone overflow the window that is the fixed-body overflow failure the
 context engine already defines. The cached prefix is never rewritten, which the
 prefix-stability gate continues to prove.
+
+Two smaller rules follow from that shape. A belief the base recall already
+returned is dropped from the delta rather than stated twice in one turn, since
+two blocks saying the same thing is two voices on one fact. And a snapshot
+trace that has expired or was never recorded yields neither delta nor
+corrections: the turn takes its base recall and no more, because a session that
+cannot read its own snapshot has nothing to report a change against.
 
 ## Established facts enter formation
 
@@ -745,9 +839,14 @@ The context engine maintains a structured working state whose `Fact` entries
 are the agent's own established conclusions, and formation never reads it, so
 a fact the agent established in a session is forgotten at session close.
 Formation gains a pass over the last working-state update in the window: each
-`Fact` whose source events are all trusted user sources becomes a candidate at
+`Fact` must carry a non-empty `source_event_ids` list, every referenced event
+must belong to the owning tenant and principal, and every reference must resolve
+to a trusted user event in the source session. Only a fact passing all three
+checks becomes a candidate at
 the maximum inferred confidence with a stable subject derived from its
-statement, proposed at the run's scope and at the portability ceiling for its
+statement — the first capitalized entity span, ignoring a word that only opens
+the sentence, and the first three words when the statement names no entity —
+proposed at the run's scope and at the portability ceiling for its
 type, and prepended before the candidate ceiling is applied — so an established
 fact may displace an extractor proposal, which is the intended ordering, and
 displaced proposals are counted as rejected rather than silently dropped.
@@ -770,6 +869,16 @@ evidence conflicts when its authority ranks below the existing belief's, under
 `USER` above `AFFIRMED` above `INFERRED`, or when the two rank equally and
 nothing orders them in time: the same session with no later source event, or a
 different session with the existing belief not older than the incoming instant.
+The incoming instant is the time of the newest source event backing the
+candidate — when the statement was made, never when it is being consolidated —
+and the existing belief's instant is its `valid_from`, when its own evidence
+arrived. `updated_at` cannot stand in for either, because usage feedback,
+decay, and conflict linkage all write it long after the evidence landed.
+Re-derivation is what makes the distinction load-bearing: a replay reads an old
+session at today's clock, so anchoring on the consolidation instant would let
+stale evidence supersede the belief that already replaced it. Replayed evidence
+no newer than the belief standing in its place conflicts with it instead, which
+leaves both statements live and flagged rather than reverting the current one.
 Two user statements with later sources or a later instant still supersede, and
 polarity alone never conflicts, so a later retraction at the same authority
 still supersedes the assertion it retracts.
@@ -777,15 +886,18 @@ still supersedes the assertion it retracts.
 A conflict commits the incoming belief flagged for review and linked to the
 existing one, links the existing one back, emits both the formation event and a
 `memory.needs_confirmation` event, counts as committed in the audit, and
-increments a conflicted counter on the consolidation result. Retrieval then
-lets conflict partners bypass the per-subject cap and renders the link, so the
-user sees both statements and which one the other contradicts. Nothing is
-resolved by guessing; that is the point.
+increments a conflicted counter on the consolidation result. The existing belief
+takes a fresh store position when it is linked, because being disputed is a
+state change and the next turn's recall delta is how the user learns of it.
+Retrieval then lets conflict partners bypass the per-subject cap and renders the
+link as short identifiers, `conflicts=[m:xxxxxxxx]`, so the user sees both
+statements and which one the other contradicts in the same form they cite.
+Nothing is resolved by guessing; that is the point.
 
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:674), so it is a command and it demands
+(memory-formation-and-consolidation.md:714), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the
@@ -961,9 +1073,10 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     blocks, it is never offered for yielding, and the prefix digest is
     unchanged. Registered as `gate.memory.correction_lines`, case. **M16.**
 16. **Established facts enter formation as affirmed candidates.** A fact
-    established in working state from trusted user sources becomes a committed
-    belief at affirmed authority carrying the fact's provenance, while a fact
-    whose sources are untrusted or foreign forms nothing. Registered as
+    established in working state with non-empty provenance whose every source
+    belongs to the owning principal and is a trusted user event becomes a
+    committed belief at affirmed authority carrying that provenance. Empty
+    provenance, an untrusted source, or a foreign source forms nothing. Registered as
     `gate.memory.established_facts_form`, case. **M16.**
 17. **A lower-authority contradiction is conflicted, not resolved.** An
     inference contradicting a user-stated belief commits flagged and linked in
@@ -975,10 +1088,15 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     authority with a later source or instant supersedes, equal authority with no
     ordering conflicts, and polarity alone never conflicts. Registered as
     `gate.memory.authority_recency`, property. **M16.**
-19. **Re-derivation is opt-in and replays rejections.** The command refuses
-    without an explicit confirmation, and with it re-consolidates from watermark
-    zero without resurrecting a rejected belief. Registered as
-    `gate.memory.rederive_opt_in`, case. **M16.**
+19. **Re-derivation is opt-in and replays rejections.** `agent memory replay
+    --session --confirm` refuses without an explicit confirmation, and with it
+    re-consolidates from watermark zero without resurrecting a rejected belief.
+    Registered as `gate.memory.rederive_opt_in`, case. **M16.**
+20. **Expanded positive formation coverage is current.** Provider assistance
+    fully supports at least seventeen of the twenty-one labeled positive cases
+    in the expanded corpus before Milestone 16 evidence can be published,
+    independently of Milestone 10's historical sixteen-of-twenty gate.
+    Registered as `gate.memory.provider_positive_coverage_v2`, case. **M16.**
 
 ## Open questions
 

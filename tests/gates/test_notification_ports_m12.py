@@ -7,14 +7,22 @@ from collections.abc import Callable
 
 from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.persistence.notifications import (
+    InMemoryDeviceRegistrationIdempotencyRepository,
     InMemoryDeviceRegistry,
     InMemoryNotificationOutbox,
+    PostgresDeviceRegistrationIdempotencyRepository,
     PostgresDeviceRegistry,
     PostgresNotificationOutbox,
 )
 from agent_core.adapters.push import FakePushTransport
-from agent_core.ports.devices import DeviceRegistry
+from agent_core.ports.devices import (
+    DeviceRegistrationIdempotencyRepository,
+    DeviceRegistry,
+)
 from agent_core.ports.notifications import NotificationOutbox, PushTransport
+from tests.contract import (
+    test_device_registration_idempotency_repository_contract as device_idempotency_contract,
+)
 from tests.contract import test_device_registry_contract as device_contract
 from tests.contract import test_notification_outbox_contract as outbox_contract
 from tests.contract import test_push_transport_contract as push_contract
@@ -46,11 +54,23 @@ def test_notification_ports_have_executable_contracts_for_every_adapter() -> Non
             ),
         ),
         (
+            DeviceRegistrationIdempotencyRepository,
+            (
+                InMemoryDeviceRegistrationIdempotencyRepository,
+                PostgresDeviceRegistrationIdempotencyRepository,
+            ),
+            (
+                device_idempotency_contract.test_in_memory_device_registration_idempotency_repository_satisfies_contract,
+                postgres_contract.test_postgres_device_registration_idempotency_satisfies_shared_contract,
+            ),
+        ),
+        (
             NotificationOutbox,
             (InMemoryNotificationOutbox, PostgresNotificationOutbox),
             (
                 outbox_contract.test_notification_enqueue_deduplicates_and_lists_by_principal,
                 outbox_contract.test_notification_claim_settle_and_pagination,
+                outbox_contract.test_notification_claim_is_partitioned_by_provider,
                 outbox_contract.test_notification_delivery_attempt_is_unique,
                 postgres_contract.test_postgres_notification_outbox_satisfies_shared_contracts,
             ),

@@ -14,8 +14,9 @@ The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
 were written. The present answer is different: Milestones 0 through 12 are
-complete, and Milestone 13 subagents and delegation is the next authorized,
-fully specified milestone.
+complete, and Milestone 13 subagents and delegation is the next sequential,
+fully specified milestone. Milestone 16 memory evaluation and lifecycle
+completed on 2026-08-23 as a separately authorized parallel workstream.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -84,11 +85,11 @@ rather than smoothed.
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
 | 10 | Memory maturation, self-authored skills, web access, browser automation | Complete | 38 | Tenant activation remains roadmap item B1 (ADR-0061) |
 | 11 | Scheduled runs | Complete | 23 | Nothing |
-| 12 | Notifications and device identity | In progress | 20 | The Apple push key and capability are owner actions outside the corpus |
+| 12 | Notifications and device identity | Complete | 20 | The Apple push key and capability are owner actions outside the corpus |
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
-| 16 | Memory evaluation and lifecycle | Authorized | 19 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
+| 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -360,7 +361,7 @@ only at `engineering-plan.md:479`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:577` named `ApprovalService` as one of
+`bootstrap-and-composition.md:596` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -1088,8 +1089,8 @@ repository, and why the push key lives in one role.
 
 The readiness verdict is therefore **Complete**: all twenty notification and
 device gates and all 247 cumulative gates pass, with the full PostgreSQL, Apple,
-hosted CI, and final review lanes green on the final pull-request head. There is
-no unnamed design choice between the corpus and the implementation. The owner's
+and hosted CI lanes green on the recorded `4f0c7c4` candidate. There is no
+unnamed design choice between the corpus and the implementation. The owner's
 Apple Developer work — enabling the bundle identifier's push capability,
 regenerating provisioning profiles, and mounting a production APNs key — remains
 an external, default-off activation action rather than a repository completion
@@ -1160,7 +1161,7 @@ choice between the corpus and the first red tests. What remains outside the
 corpus is the owner's bucket and scoped key, the `age` identity, the first
 escrow, and the first off-host rehearsal.
 
-## Milestone 16: memory evaluation and lifecycle, authorized and specified
+## Milestone 16: memory evaluation and lifecycle complete
 
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
 memory the one thing its twenty-nine safety gates never provided, which is a
@@ -1191,11 +1192,12 @@ committed flagged and surfaced instead of silently resolved, and re-derivation
 as an explicit operator action. Nineteen hard gates in the `memory` area;
 ADR-0069 records the decisions.
 
-The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's own copies of the three public datasets, a funded
-provider key for the live arm, and the republished provider-extraction evidence
-at the new formation policy version.
+The readiness verdict is therefore **Complete**: the milestone finished on
+2026-08-23 with all twenty gates passing and hosted review clean, and no
+unnamed design choice stood between the corpus and the first red
+tests. The owner's own copies of
+the three public datasets and provider credentials for opt-in future live-arm
+reruns remain external activation inputs, not repository design gaps.
 
 ## The three plan sections no specification expanded
 
@@ -1422,7 +1424,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2521` against
-    `model-gateway.md:1795` and `milestone-map.md:1299`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1303`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

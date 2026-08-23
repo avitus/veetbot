@@ -86,5 +86,21 @@ import Testing
 
         #expect(source.contains("horizontalSizeClass == .regular"))
         #expect(source.contains("usesDirectActivation: usesDirectSidebarActivation"))
+        #expect(source.contains(".navigationDestination(isPresented:"))
+        #expect(!modernList.contains("isActive:"))
+        #expect(source.contains("private var pushingList: some View {\n        navigationList"))
+
+        let directListStart = try #require(
+            source.range(of: "private var directlyActivatingList: some View")
+        )
+        let pushingListStart = try #require(
+            source.range(of: "private var pushingList: some View")
+        )
+        let modernProperty = source[modernListStart.lowerBound ..< directListStart.lowerBound]
+        let directList = source[directListStart.lowerBound ..< pushingListStart.lowerBound]
+        let pushingList = source[pushingListStart.lowerBound ..< legacyListStart.lowerBound]
+        #expect(!modernProperty.contains(".navigationDestination(isPresented:"))
+        #expect(!directList.contains(".navigationDestination(isPresented:"))
+        #expect(pushingList.contains(".navigationDestination(isPresented:"))
     }
 }

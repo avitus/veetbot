@@ -96,7 +96,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 324
+    assert len(entries) == 325
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -121,6 +121,25 @@ def test_new_memory_guarantees_are_formal_registry_entries() -> None:
     assert {gate_id: by_id[gate_id].kind for gate_id in expected_kinds} == expected_kinds
 
 
+def test_provider_positive_coverage_is_versioned_across_milestones() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    by_id = {entry.id: entry for entry in entries}
+
+    original = by_id["gate.memory.provider_positive_coverage"]
+    assert original.milestone == 10
+    assert "sixteen of the twenty labeled positive cases" in original.statement
+
+    expanded = by_id["gate.memory.provider_positive_coverage_v2"]
+    assert expanded.milestone == 16
+    assert expanded.spec == "docs/plan/memory-evaluation-and-lifecycle.md#hard-gates"
+    assert "seventeen of the twenty-one labeled positive cases" in expanded.statement
+    assert expanded.check.endswith(
+        "TestProviderEvidencePublicationGate::"
+        "test_lift_without_minimum_positive_coverage_does_not_publish"
+    )
+
+
 def test_census_is_derived() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
@@ -141,7 +160,7 @@ def test_census_is_derived() -> None:
         13: 21,
         14: 21,
         15: 16,
-        16: 19,
+        16: 20,
     }
 
 
@@ -173,11 +192,11 @@ def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
 
 _GATE_TABLE_DERIVED = {
     "subject_specs": 22,
-    "subject_gates": 318,
+    "subject_gates": 319,
     "plan_gates": 2,
     "map_gates": 7,
-    "declarations": 327,
-    "entries": 324,
+    "declarations": 328,
+    "entries": 325,
     "aliases": 3,
 }
 
@@ -192,18 +211,18 @@ def test_gate_table_arithmetic_reports_stale_digits() -> None:
     )
     assert gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED) == [
         "gate table intro says 15 subject specs; registry derives 22",
-        "gate table intro says 178 subject gates; registry derives 318",
-        "gate table intro says 187 declarations; registry derives 327",
-        "gate table intro says 184 entries; registry derives 324",
+        "gate table intro says 178 subject gates; registry derives 319",
+        "gate table intro says 187 declarations; registry derives 328",
+        "gate table intro says 184 entries; registry derives 325",
     ]
 
 
 def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
     shifted = (
         "## The gate table\n\n"
-        "The 22 subject specifications declare 318 gates, the engineering plan\n"
-        "declares 3 more, and this document declares 6 over the corpus: 327\n"
-        "declarations, 324 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 22 subject specifications declare 319 gates, the engineering plan\n"
+        "declares 3 more, and this document declares 6 over the corpus: 328\n"
+        "declarations, 325 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED) == [
@@ -215,9 +234,9 @@ def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
 def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
     reconciled = (
         "## The gate table\n\n"
-        "The 22 subject specifications declare 318 gates, the engineering plan\n"
-        "declares 2 more, and this document declares 7 over the corpus: 327\n"
-        "declarations, 324 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 22 subject specifications declare 319 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 328\n"
+        "declarations, 325 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(reconciled, _GATE_TABLE_DERIVED) == []
@@ -357,7 +376,7 @@ def test_memory_evaluation_and_lifecycle_has_complete_milestone_16_gate_area() -
     assert errors == []
     memory_entries = [entry for entry in entries if entry.milestone == 16]
 
-    assert len(memory_entries) == 19
+    assert len(memory_entries) == 20
     assert all(entry.id.startswith("gate.memory.") for entry in memory_entries)
     assert all(
         entry.spec == "docs/plan/memory-evaluation-and-lifecycle.md#hard-gates"

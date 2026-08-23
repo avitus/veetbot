@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ from agent_core.evals.memory_formation import (
     load_corpus,
     score_case,
 )
+from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
 
 
 def test_score_case_counts_grounded_support_and_fabrication_once() -> None:
@@ -85,7 +87,7 @@ def test_checked_in_memory_formation_corpus_is_versioned_and_large_enough() -> N
     corpus, digest = load_corpus(repository_root)
 
     assert corpus.schema_version == 1
-    assert len(corpus.cases) >= 20
+    assert len(corpus.cases) == 25
     assert len(digest) == 64
     assert {case.id for case in corpus.cases} >= {
         "attribute-saxophone-experience-and-pain-001",
@@ -112,6 +114,31 @@ def test_checked_in_memory_formation_corpus_is_versioned_and_large_enough() -> N
     assert len(wife.expected) == 2
     assert score.supported_candidates == 2
     assert score.fabricated_candidates == 0
+
+
+def test_provider_evaluation_guidance_tracks_current_corpus_cost() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    corpus, _digest = load_corpus(repository_root)
+    expected_calls = len(corpus.cases)
+    expected_ceiling = expected_calls * 0.05
+
+    for relative_path in ("README.md", "evals/capability/README.md"):
+        guidance = (repository_root / relative_path).read_text(encoding="utf-8")
+        assert re.search(
+            rf"{expected_calls}(?: bounded)? provider calls[^\n]*"
+            rf"USD\s+{re.escape(f'{expected_ceiling:.2f}')}",
+            guidance,
+        )
+
+    design = (repository_root / "docs/plan/memory-formation-and-consolidation.md").read_text(
+        encoding="utf-8"
+    )
+    assert f"current {expected_calls}-case corpus" in design
+    assert re.search(
+        rf"reviewed\s+passing\s+`{re.escape(PROVIDER_FORMATION_POLICY_VERSION)}`\s+evidence\s+"
+        rf"from\s+the\s+checked-in\s+{expected_calls}-case\s+corpus",
+        design,
+    )
 
 
 def test_case_schema_requires_an_expectation_or_an_explicit_protection_label() -> None:
@@ -229,7 +256,7 @@ class TestProviderEvidencePublicationGate:
         persisted = type(evidence).model_validate_json(rendered)
         assert persisted == evidence
         assert persisted.extractor_version == "provider-assisted-v2"
-        assert persisted.formation_policy_version == "formation@6"
+        assert persisted.formation_policy_version == PROVIDER_FORMATION_POLICY_VERSION
         assert (
             persisted.model_policy,
             persisted.provider,

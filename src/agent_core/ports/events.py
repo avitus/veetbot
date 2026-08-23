@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, Protocol
@@ -63,6 +64,16 @@ class ProcessEventRepository(Protocol):
     async def get_by_derivation(self, derivation_key: str) -> ProcessEvent | None: ...
 
     async def list(self, event_type: str | None = None) -> list[ProcessEvent]: ...
+
+    async def list_filtered(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        session_id: UUID | None,
+        event_types: frozenset[str],
+        limit: int,
+    ) -> builtins.list[ProcessEvent]: ...
 
 
 class Upcaster(Protocol):

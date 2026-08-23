@@ -38,6 +38,40 @@ public enum KeychainTokenStoreError: Error, LocalizedError {
     }
 }
 
+/// Keeps the already-unlocked bearer token in process memory for this app session.
+/// The durable store remains the only persistence mechanism.
+public actor SessionTokenStore: TokenStore {
+    private let durable: any TokenStore
+    private var cachedToken: String?
+    private var hasLoaded = false
+
+    public init(durable: any TokenStore) {
+        self.durable = durable
+    }
+
+    public func readToken() async throws -> String? {
+        if hasLoaded { return cachedToken }
+        let token = try await durable.readToken()
+        let trimmed = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        cachedToken = trimmed?.isEmpty == false ? trimmed : nil
+        hasLoaded = true
+        return cachedToken
+    }
+
+    public func saveToken(_ token: String) async throws {
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        try await durable.saveToken(trimmed)
+        cachedToken = trimmed.isEmpty ? nil : trimmed
+        hasLoaded = true
+    }
+
+    public func deleteToken() async throws {
+        try await durable.deleteToken()
+        cachedToken = nil
+        hasLoaded = true
+    }
+}
+
 public actor KeychainTokenStore: TokenStore {
     private let service: String
     private let account: String

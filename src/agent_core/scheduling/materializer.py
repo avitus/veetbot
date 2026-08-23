@@ -361,12 +361,13 @@ class ScheduleMaterializer:
         await self._append_occurrence_event(uow, occurrence, schedule, advanced.state, now)
         self._write_probe("process_event")
         if self._notification_producer is not None:
-            await self._notification_producer.for_schedule_occurrence(
+            produced = await self._notification_producer.for_schedule_occurrence(
                 uow,
                 schedule=schedule,
                 occurrence=occurrence,
             )
-            self._write_probe("notification")
+            if produced:
+                self._write_probe("notification")
         auto_paused = (
             schedule.state is ScheduleState.ACTIVE
             and advanced.state is ScheduleState.PAUSED

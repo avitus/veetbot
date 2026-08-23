@@ -19,9 +19,10 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
@@ -150,9 +151,75 @@ async def test_postgres_supersession_serves_current_and_historical_beliefs(
         assert "memory.superseded" in {event.event_type for event in events}
 
 
-async def test_postgres_fts_matches_terms_in_any_order_and_requires_all(
+async def test_postgres_conflict_links_both_beliefs_and_leaves_the_user_statement_live(
     tmp_path: Path,
 ) -> None:
+    """A conflict is two live rows and a JSONB link, so PostgreSQL must keep both.
+
+    `conflicts_with` is the one belief column stored as JSONB, and nothing else
+    writes it. This is the only place the real adapter's round-trip of the link
+    and the review flag through `upsert_belief` and `reinforce` is observed.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memcfl{uuid4().hex[:10]}"
+        subject = f"style-{marker}"
+        stated = await _remember(
+            composition,
+            session_id,
+            f"{marker} answers should be concise",
+            subject=subject,
+        )
+        source = await _user_event(composition, session_id, f"{marker} answers should be detailed")
+        inferred = await composition.memory.remember(
+            session_id=session_id,
+            run_id=None,
+            statement=f"{marker} answers should be detailed",
+            subject=subject,
+            scope="integration",
+            belief_type=BeliefType.PREFERENCE,
+            sensitivity=Sensitivity.INTERNAL,
+            source_event_ids=[source],
+            explicit=False,
+            authority=MemoryAuthority.INFERRED,
+        )
+
+        async with composition.uow_factory() as uow:
+            stored_statement = await uow.memories.get(stated.id, composition.principal)
+            stored_inference = await uow.memories.get(inferred.id, composition.principal)
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+        recall = await composition.memory_retriever.recall(
+            _query(composition, text=f"{marker} answers"), session_id=session_id
+        )
+
+    assert stored_statement.status is MemoryStatus.ACTIVE
+    assert stored_statement.superseded_by is None
+    assert stored_statement.conflicts_with == [inferred.id]
+    assert stored_statement.flagged_for_review is True
+    assert stored_inference.status is MemoryStatus.PROVISIONAL
+    assert stored_inference.conflicts_with == [stated.id]
+    assert stored_inference.flagged_for_review is True
+    assert stored_statement.store_position > stored_inference.store_position
+
+    assert {item.belief_id for item in recall.items} == {stated.id, inferred.id}
+    assert f"conflicts=[m:{str(inferred.id)[:8]}]" in recall.rendered
+    assert f"conflicts=[m:{str(stated.id)[:8]}]" in recall.rendered
+    event_types = {event.event_type for event in events}
+    assert "memory.needs_confirmation" in event_types
+    assert "memory.superseded" not in event_types
+
+
+async def test_postgres_fts_matches_any_term_in_any_order_and_ranks_full_matches_first(
+    tmp_path: Path,
+) -> None:
+    """PostgreSQL answers a text query with the same any-term set as memory.
+
+    Lexical recall is a ranking arm rather than a hard filter, so a belief
+    sharing one term is a candidate the ranker demotes, a belief sharing none
+    is absent, and naming a subject reaches a belief no term reaches.
+    """
+
     async with build(settings=_settings(tmp_path), storage="postgres") as composition:
         session_id = await composition.sessions.create()
         marker = f"memfts{uuid4().hex[:10]}"
@@ -163,22 +230,92 @@ async def test_postgres_fts_matches_terms_in_any_order_and_requires_all(
             subject=f"dash-{marker}",
             belief_type=BeliefType.FACT,
         )
+        partial = await _remember(
+            composition,
+            session_id,
+            f"Runbooks call the {marker} palette burgundy",
+            subject=f"runbook-{marker}",
+            belief_type=BeliefType.FACT,
+        )
 
         reordered = await composition.memory_retriever.recall(
             _query(composition, text=f"{marker} theme emerald"), session_id=session_id
         )
-        assert [item.belief_id for item in reordered.items] == [belief.id]
+        assert [item.belief_id for item in reordered.items] == [belief.id, partial.id]
 
-        missing_term = await composition.memory_retriever.recall(
-            _query(composition, text=f"{marker} nonexistentterm"), session_id=session_id
+        zero_overlap = await composition.memory_retriever.recall(
+            _query(composition, text=f"absent{marker} missing{marker}"), session_id=session_id
         )
-        assert missing_term.items == []
+        assert zero_overlap.items == []
 
         structured = await composition.memory_retriever.recall(
-            _query(composition, text="no lexical overlap", subjects=[f"DASH-{marker}"]),
+            _query(composition, text=f"absent{marker}", subjects=[f"DASH-{marker}"]),
             session_id=session_id,
         )
         assert [item.belief_id for item in structured.items] == [belief.id]
+
+
+_PARITY_BELIEFS = (
+    ("Dashboards use the emerald themes", "dashboard palette"),
+    ("Apple Watch charges overnight", "wearables"),
+    ("The theme is emerald", "editor colours"),
+    ("The e-mail digest is weekly", "digest cadence"),
+    ("Staging endpoint is svc.internal:8443", "endpoint"),
+    ("The user's runbook lives in the wiki", "runbook"),
+    ("Reviews land in tabs/spaces order", "review order"),
+    ("Release 3.14 ships on Tuesday", "release train"),
+)
+_PARITY_TEXTS = (
+    "theme",
+    "themes",
+    "app",
+    "apple",
+    "mail",
+    "e-mail",
+    "svc.internal:8443",
+    "internal",
+    "user's",
+    "users",
+    "wiki runbook",
+    "3.14",
+    "tabs/spaces",
+    "spaces",
+    "...",
+    "emerald digest",
+)
+
+
+async def test_postgres_and_memory_stores_agree_on_lexical_matching(tmp_path: Path) -> None:
+    """The two belief stores answer the same text query with the same set.
+
+    The benchmark measures the in-memory tier, so a predicate more permissive
+    than PostgreSQL's would record a baseline the production store cannot
+    reproduce. Both are asked the same fixtures over the same beliefs.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memlex{uuid4().hex[:10]}"
+        for statement, subject in _PARITY_BELIEFS:
+            await _remember(
+                composition,
+                session_id,
+                statement,
+                subject=f"{subject} {marker}",
+                belief_type=BeliefType.FACT,
+            )
+
+        mirror = InMemoryMemoryStore(composition.clock)
+        for record in await composition.memory.list_memories():
+            await mirror.upsert_belief(record)
+
+        for text in _PARITY_TEXTS:
+            query = _query(composition, text=text)
+            async with composition.uow_factory() as uow:
+                stored = await uow.memories.query(query)
+            assert {record.id for record in stored} == {
+                record.id for record in await mirror.query(query)
+            }, f"stores disagree on {text!r}"
 
 
 async def test_postgres_sensitivity_ceiling_and_local_portability_predicates(
@@ -219,8 +356,10 @@ async def test_postgres_sensitivity_ceiling_and_local_portability_predicates(
         )
         assert [item.belief_id for item in at_ceiling.items] == [restricted.id]
 
+        # Terms the local belief alone carries: any-term recall would return
+        # it on this text if project-local portability did not hold it back.
         cross_project_text = await composition.memory_retriever.recall(
-            _query(composition, text=f"{marker} staging endpoint"), session_id=session_id
+            _query(composition, text="staging endpoint"), session_id=session_id
         )
         assert cross_project_text.items == []
 
@@ -435,6 +574,140 @@ async def test_postgres_changed_rejection_links_belief_and_replacement(
         assert [item.belief_id for item in recalled.items] == [replacement.id]
 
 
+async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
+    tmp_path: Path,
+) -> None:
+    """The JSONB rewrite nulls the operator tier and preserves the user tier."""
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memexp{uuid4().hex[:10]}"
+        first = await _remember(
+            composition,
+            session_id,
+            f"The {marker} standup is at nine",
+            subject=f"standup-{marker}",
+        )
+        await _remember(
+            composition,
+            session_id,
+            f"The {marker} retro is on Friday",
+            subject=f"retro-{marker}",
+        )
+        turn_id = uuid4()
+        # Both beliefs carry the marker and only the first carries "standup",
+        # so the ranking is a fact of the query rather than of identifier order.
+        result = await composition.memory_retriever.recall(
+            _query(composition, text=f"{marker} standup").model_copy(update={"max_items": 1}),
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        assert [item.belief_id for item in result.items] == [first.id]
+
+        async with composition.uow_factory() as uow:
+            recorded = await uow.traces.get(result.trace_id, composition.principal)
+        assert len(recorded.dropped_for_budget) == 1
+
+        expiry = recorded.operator_fields_expire_at + timedelta(seconds=1)
+        async with composition.uow_factory() as uow:
+            assert await uow.traces.expire_operator_fields(expiry, 10) == 1
+        async with composition.uow_factory() as uow:
+            swept = await uow.traces.get(result.trace_id, composition.principal)
+            view = await uow.traces.user_view(
+                turn_id, viewing_surface_id="private", viewing_ceiling="restricted"
+            )
+            assert await uow.traces.expire_operator_fields(expiry, 10) == 0
+        assert swept.arm_latencies_ms == {}
+        assert swept.candidates == 0
+        assert swept.dropped_for_budget == []
+        assert swept.dropped_for_budget_count == 1
+        assert swept.returned == recorded.returned
+        assert swept.beliefs == recorded.beliefs
+        assert swept.rendered == recorded.rendered
+        assert [belief.belief_id for belief in view.beliefs] == [first.id]
+        assert view.considered_not_shown == 1
+
+
+async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
+    tmp_path: Path,
+) -> None:
+    """The locked JSONB rewrite unions citations and moves utility, not confidence.
+
+    Two beliefs are recalled into one turn and the answer cites one of them, so
+    the row-locked rewrite is observed marking exactly that belief used in the
+    user view, raising its utility while its confidence stands, and lowering
+    the other's. A later mark widens the set instead of replacing it, repeating
+    it changes nothing, and a foreign principal cannot reach the trace at all.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memcite{uuid4().hex[:10]}"
+        cited = await _remember(
+            composition,
+            session_id,
+            f"The {marker} standup is at nine",
+            subject=f"standup-{marker}",
+        )
+        uncited = await _remember(
+            composition,
+            session_id,
+            f"The {marker} retro is on Friday",
+            subject=f"retro-{marker}",
+        )
+        # The trace and the citation event both reference a real run, which is
+        # what the events foreign key requires of anything the hook writes.
+        turn_id = await composition.runs.submit(f"What about {marker}?", session_id)
+        result = await composition.memory_retriever.recall(
+            _query(composition, text=marker),
+            session_id=session_id,
+            run_id=turn_id,
+            turn_id=turn_id,
+        )
+        assert {item.belief_id for item in result.items} == {cited.id, uncited.id}
+
+        feedback = await composition.memory.record_usage(
+            session_id=session_id,
+            run_id=turn_id,
+            final_text=f"[m:{str(cited.id)[:8]}] answers it.",
+        )
+
+        assert (feedback.cited, feedback.uncited, feedback.traces) == (1, 1, 1)
+        async with composition.uow_factory() as uow:
+            stored = await uow.traces.get(result.trace_id, composition.principal)
+            view = await uow.traces.user_view(turn_id, "private", "restricted")
+            foreign = composition.principal.model_copy(update={"principal_id": f"other-{marker}"})
+            with pytest.raises(NotFoundError):
+                await uow.traces.mark_cited(result.trace_id, foreign, [cited.id])
+        assert stored.cited == [cited.id]
+        assert {belief.belief_id: belief.used for belief in view.beliefs} == {
+            cited.id: True,
+            uncited.id: False,
+        }
+        beliefs = {belief.id: belief for belief in await composition.memory.list_memories()}
+        assert beliefs[cited.id].utility > 0
+        assert beliefs[cited.id].confidence == cited.confidence
+        assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
+        assert beliefs[uncited.id].utility < 0
+        assert beliefs[uncited.id].confidence == uncited.confidence
+        # The unique store position survives the in-place update, and neither
+        # belief is republished to the recall delta for having been read.
+        assert beliefs[cited.id].store_position == cited.store_position
+        assert beliefs[uncited.id].store_position == uncited.store_position
+
+        async with composition.uow_factory() as uow:
+            widened = await uow.traces.mark_cited(
+                result.trace_id, composition.principal, [uncited.id]
+            )
+        assert widened.cited == [cited.id, uncited.id]
+        async with composition.uow_factory() as uow:
+            repeated = await uow.traces.mark_cited(
+                result.trace_id, composition.principal, [cited.id, uncited.id]
+            )
+            assert repeated == widened
+            assert await uow.traces.get(result.trace_id, composition.principal) == widened
+
+
 async def test_postgres_trace_round_trip_user_view_and_conflict_detection(
     tmp_path: Path,
 ) -> None:
@@ -487,3 +760,157 @@ async def test_postgres_trace_round_trip_user_view_and_conflict_detection(
         with pytest.raises(ConflictError):
             async with composition.uow_factory() as uow:
                 await uow.traces.record(drifted)
+
+
+async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
+    tmp_path: Path,
+) -> None:
+    """The decay window is the least recently reinforced live beliefs.
+
+    The shared database carries rows from other cases, so the ordering is
+    asserted over whatever the window returns and membership over this case's
+    own beliefs: written newest-first, only the three past the cutoff come back,
+    oldest first, and neither the freshly reinforced nor the retired one does.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memidle{uuid4().hex[:10]}"
+        now = composition.clock.now()
+
+        async def _seed(
+            subject: str,
+            idle_days: int,
+            status: MemoryStatus,
+            *,
+            confidence: float = 0.5,
+        ) -> MemoryRecord:
+            reinforced_at = now - timedelta(days=idle_days)
+            async with composition.uow_factory() as uow:
+                record = MemoryRecord.model_validate(
+                    {
+                        "id": uuid4(),
+                        "tenant_id": composition.principal.tenant_id,
+                        "principal_id": composition.principal.principal_id,
+                        "scope": "integration",
+                        "subject": f"{subject}-{marker}",
+                        "statement": f"{subject} statement {marker}",
+                        "source_session_id": session_id,
+                        "source_event_ids": [1],
+                        "confidence": confidence,
+                        "sensitivity": Sensitivity.INTERNAL,
+                        "valid_from": now - timedelta(days=idle_days + 1),
+                        "status": status,
+                        "valid_to": None if status is MemoryStatus.PROVISIONAL else now,
+                        "belief_type": BeliefType.FACT,
+                        "polarity": Polarity.ASSERT,
+                        "portability": Portability.CONTEXTUAL,
+                        "origin_scopes": ["integration"],
+                        "last_reinforced_at": reinforced_at,
+                        "formation_run_id": uuid4(),
+                        "consolidation_policy_version": "formation@1",
+                        "authority": MemoryAuthority.INFERRED,
+                        "store_position": await uow.memories.next_position(),
+                        "created_at": reinforced_at,
+                        "updated_at": reinforced_at,
+                    }
+                )
+                return await uow.memories.upsert_belief(record)
+
+        fresh = await _seed("fresh", 1, MemoryStatus.PROVISIONAL)
+        newer_idle = await _seed("newer-idle", 100, MemoryStatus.PROVISIONAL)
+        high_confidence_idle = await _seed(
+            "high-confidence-idle",
+            200,
+            MemoryStatus.PROVISIONAL,
+            confidence=0.8,
+        )
+        oldest_idle = await _seed("oldest-idle", 400, MemoryStatus.PROVISIONAL)
+        retired = await _seed("retired", 500, MemoryStatus.RETIRED)
+
+        async with composition.uow_factory() as uow:
+            window = await uow.memories.list_idle(
+                composition.principal,
+                reinforced_before=now - timedelta(days=50),
+                limit=500,
+            )
+            bounded = await uow.memories.list_idle(
+                composition.principal,
+                reinforced_before=now - timedelta(days=50),
+                limit=1,
+            )
+            decay_window = await uow.memories.list_idle(
+                composition.principal,
+                reinforced_before=now - timedelta(days=50),
+                decay_confidence_ceiling=0.55,
+                limit=500,
+            )
+
+        stamps = [(record.last_reinforced_at, str(record.id)) for record in window]
+        mine = [record.id for record in window if marker in record.subject]
+        assert stamps == sorted(stamps)
+        assert mine == [oldest_idle.id, high_confidence_idle.id, newer_idle.id]
+        assert fresh.id not in {record.id for record in window}
+        assert retired.id not in {record.id for record in window}
+        assert len(bounded) == 1
+        assert bounded[0].id == window[0].id
+        assert [record.id for record in decay_window if marker in record.subject] == [
+            oldest_idle.id,
+            high_confidence_idle.id,
+            newer_idle.id,
+        ]
+
+
+async def test_postgres_head_position_and_minimum_position_bound_the_recall_delta(
+    tmp_path: Path,
+) -> None:
+    """The store head is per-principal, and the delta bound is a SQL predicate.
+
+    The shared database carries rows from other cases, so the head is asserted
+    against this case's own writes rather than against a literal: it moves to
+    each new position, ignores a principal that has written nothing, and the
+    minimum-position query returns exactly the rows written past it.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memhead{uuid4().hex[:10]}"
+        foreign = composition.principal.model_copy(
+            update={"principal_id": f"absent-{uuid4().hex[:8]}"}
+        )
+
+        async with composition.uow_factory() as uow:
+            before = await uow.memories.head_position(composition.principal)
+            assert await uow.memories.head_position(foreign) == 0
+
+        older = await _remember(
+            composition,
+            session_id,
+            f"User prefers concise {marker} answers",
+            subject=f"answer style {marker}",
+        )
+        async with composition.uow_factory() as uow:
+            midpoint = await uow.memories.head_position(composition.principal)
+        newer = await _remember(
+            composition,
+            session_id,
+            f"User prefers dark {marker} themes",
+            subject=f"theme {marker}",
+        )
+        async with composition.uow_factory() as uow:
+            head = await uow.memories.head_position(composition.principal)
+            everything = await uow.memories.query(_query(composition, text=marker))
+            delta = await uow.memories.query(
+                _query(composition, text=marker).model_copy(update={"min_store_position": midpoint})
+            )
+            exhausted = await uow.memories.query(
+                _query(composition, text=marker).model_copy(update={"min_store_position": head})
+            )
+            assert await uow.memories.head_position(foreign) == 0
+
+        assert older.store_position > before
+        assert midpoint == older.store_position
+        assert head == newer.store_position > midpoint
+        assert {record.id for record in everything} == {older.id, newer.id}
+        assert [record.id for record in delta] == [newer.id]
+        assert exhausted == []

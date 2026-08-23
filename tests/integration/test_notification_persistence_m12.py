@@ -9,6 +9,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import text
 
+from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
@@ -179,20 +180,32 @@ async def test_postgres_device_listing_uses_stable_cursor() -> None:
 
 
 async def test_postgres_notification_outbox_satisfies_shared_contracts() -> None:
-    async with build(settings=database_settings(), storage="postgres") as composition:
-        for contract in (
-            assert_notification_enqueue_deduplicates_and_lists_by_principal,
-            assert_notification_claim_settle_and_pagination,
-        ):
-            with pytest.raises(_RollbackContractError):
-                async with composition.uow_factory() as uow:
-                    assert isinstance(uow, PostgresUnitOfWork)
-                    await uow.session.execute(
-                        text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
-                        {"tenant": TENANT},
-                    )
-                    await contract(uow.notification_outbox)
-                    raise _RollbackContractError
+    clock = FixedClock(NOW)
+    async with build(settings=database_settings(), storage="postgres", clock=clock) as composition:
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await uow.session.execute(
+                    text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                    {"tenant": TENANT},
+                )
+                await assert_notification_enqueue_deduplicates_and_lists_by_principal(
+                    uow.notification_outbox
+                )
+                raise _RollbackContractError
+
+        with pytest.raises(_RollbackContractError):
+            async with composition.uow_factory() as uow:
+                assert isinstance(uow, PostgresUnitOfWork)
+                await uow.session.execute(
+                    text("SELECT set_config('agent_core.tenant_id', :tenant, true)"),
+                    {"tenant": TENANT},
+                )
+                await assert_notification_claim_settle_and_pagination(
+                    uow.notification_outbox,
+                    clock,
+                )
+                raise _RollbackContractError
 
         with pytest.raises(_RollbackContractError):
             async with composition.uow_factory() as uow:
@@ -364,12 +377,12 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
             text("SELECT set_config('agent_core.tenant_id', 'another-tenant', true)")
         )
         counts = [
-            await uow.session.scalar(text(f"SELECT count(*) FROM {table}"))
-            for table in (
-                "devices",
-                "device_registration_idempotency_keys",
-                "notification_outbox",
-                "notification_deliveries",
+            await uow.session.scalar(statement)
+            for statement in (
+                text("SELECT count(*) FROM devices"),
+                text("SELECT count(*) FROM device_registration_idempotency_keys"),
+                text("SELECT count(*) FROM notification_outbox"),
+                text("SELECT count(*) FROM notification_deliveries"),
             )
         ]
         assert counts == [0, 0, 0, 0]

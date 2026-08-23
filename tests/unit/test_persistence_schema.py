@@ -14,6 +14,23 @@ def test_capability_attempt_costs_index_the_scenario_run_foreign_key() -> None:
     assert ("scenario_run_id",) in indexed_columns
 
 
+def test_process_events_index_diagnostic_scope_and_reverse_chronology() -> None:
+    table = Base.metadata.tables["process_events"]
+    index = next(
+        candidate
+        for candidate in table.indexes
+        if candidate.name == "ix_process_events_diagnostics_scope"
+    )
+    expressions = " ".join(str(expression) for expression in index.expressions)
+
+    assert "event_type" in expressions
+    assert "tenant_id" in expressions
+    assert "principal_id" in expressions
+    assert "session_id" in expressions
+    assert "created_at DESC" in expressions
+    assert "id DESC" in expressions
+
+
 def test_browser_profiles_schema_contains_metadata_only() -> None:
     table = Base.metadata.tables["browser_profiles"]
 

@@ -309,9 +309,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 22 subject specifications declare 318 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 327
-declarations, 324 registry entries once the 3 aliases are subtracted.
+The 22 subject specifications declare 319 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 328
+declarations, 325 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1121,16 +1121,18 @@ schema, unit and sudoers files, and firewall and proxy declarations. The
 remaining eleven are boundary cases over the scripts, a throwaway database,
 the outbox, and the release tree.
 
-### Memory evaluation and lifecycle, nineteen gates
+### Memory evaluation and lifecycle, twenty gates
 
-Nineteen gates, all new, in the existing `memory` area and all at Milestone
+Twenty gates, all new, in the existing `memory` area and all at Milestone
 16. Nine cover the benchmark — the corpus shape, reproducibility, the two
 baseline comparisons, protected content, supersession currency, live evidence
 publication, the cost ceiling, and the external dataset adapters — and ten
 cover the lifecycle the two older memory specifications describe and the code
 lacks: the profile document, trace retention, decay, usage feedback, the
 recall delta, correction lines, established facts, conflict surfacing, the
-resolver's ordering, and re-derivation.
+resolver's ordering, and re-derivation. The twentieth versions the expanded
+provider-formation corpus coverage independently of Milestone 10's completed
+historical gate.
 
 ```text
 #   id                                              kind         M
@@ -1154,15 +1156,16 @@ resolver's ordering, and re-derivation.
 17  gate.memory.conflict_surfaced                   case         16
 18  gate.memory.authority_recency                   property     16
 19  gate.memory.rederive_opt_in                     case         16
+20  gate.memory.provider_positive_coverage_v2       case         16
 ```
 
 Gates 2 and 18 are properties because reproducibility and the resolver's
 ordering are claims over generated inputs rather than over one scenario; gates
 1, 9, and 10 are structural because they inspect a checked-in document, a set
 of adapters and what the repository does not contain, and a configuration
-document against its models. The remaining fourteen are boundary cases over
+document against its models. The remaining fifteen are boundary cases over
 the benchmark run, the belief store, the recall trace, the context builder,
-and the command line.
+the command line, and the versioned provider-evidence corpus.
 
 ### This document, seven gates
 
@@ -1239,9 +1242,10 @@ milestone  new gates  cumulative  the earliest of them
 15                16         305  the declared backup set, the
                                   rehearsal, alerts, rollback, the
                                   public boundary, the watchdog
-16                19         324  the benchmark corpus, the baseline,
+16                20         325  the benchmark corpus, the baseline,
                                   live evidence, decay, usage feedback,
-                                  the recall delta, conflicts
+                                  the recall delta, conflicts, expanded
+                                  provider-formation coverage
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1262,21 +1266,21 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and twenty-four gates are green before
+2.  **Forty-one of three hundred and twenty-five gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and twenty-four, which is every
+The cumulative column reaches three hundred and twenty-five, which is every
 registry entry, at Milestone 16. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
 Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
 `gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, and Milestone
-16's nineteen are `gate.memory.*` again, in the area those two specs already
+16's twenty are `gate.memory.*` again, in the area those two specs already
 shared. Every authorized milestone now has a specification that declares its
 gates; the roadmap's items add none until the owner authorizes one and a
 specification lands for it. Routing remains deferred and adds none.
@@ -1544,7 +1548,7 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     each closed it the way the decision implies, with a specification
     that had gates to declare. Milestone 16 never showed one: its
     authorization and its specification landed in the same change, so
-    the row it added was already nineteen.
+    the row it added was already twenty.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —

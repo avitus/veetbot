@@ -1,6 +1,7 @@
 """Deployment configuration validation tests."""
 
 import os
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -73,7 +74,10 @@ def test_playwright_browser_provider_requires_explicit_origins() -> None:
         "https://static.example.org",
     )
 
-    with pytest.raises(ConfigurationError, match="BROWSER_ALLOWED_ORIGINS"):
+    with pytest.raises(
+        ConfigurationError,
+        match="BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER=playwright",
+    ):
         load_settings({**base_environment(), "BROWSER_PROVIDER": "playwright"})
 
 
@@ -153,6 +157,22 @@ def test_browser_grant_pin_requires_hosted_provider_and_valid_uuid() -> None:
                 "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
                 "BROWSER_PROFILE_ID": PROFILE_ID,
                 "BROWSER_GRANT_ID": "not-a-uuid",
+                "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            }
+        )
+
+
+def test_browser_grant_pin_requires_a_hosted_profile_id() -> None:
+    with pytest.raises(
+        ConfigurationError,
+        match="BROWSER_GRANT_ID requires BROWSER_PROFILE_ID",
+    ):
+        load_settings(
+            {
+                **base_environment(),
+                "BROWSER_PROVIDER": "hosted",
+                "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+                "BROWSER_GRANT_ID": GRANT_ID,
                 "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
             }
         )
@@ -698,6 +718,20 @@ def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
         load_settings(values)
 
 
+def test_policy_semantic_interpolation_is_refused_even_when_declared(tmp_path: Path) -> None:
+    overlay = tmp_path / "policy" / "default.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("name: ${OPENAI_MODEL}\n", encoding="utf-8")
+    values = {
+        **base_environment(),
+        "AGENT_CONFIG_DIR": str(tmp_path),
+        "OPENAI_MODEL": "deployment-specific-policy-name",
+    }
+
+    with pytest.raises(ConfigurationError, match="policy-semantic interpolation"):
+        load_settings(values)
+
+
 def test_undeclared_interpolation_in_new_provider_profile_is_refused(tmp_path: Path) -> None:
     overlay = tmp_path / "models" / "providers" / "custom.yaml"
     overlay.parent.mkdir(parents=True)
@@ -808,11 +842,11 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_126_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_137_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 126
+    assert len(qualified_paths) == 137
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
@@ -823,3 +857,27 @@ def test_all_126_versioned_knobs_are_present_and_non_null() -> None:
                 assert isinstance(value, dict), f"{relative}:{path} is not a mapping path"
                 value = cast(dict[str, object], value)[component]
             assert value is not None, f"{relative}:{path} is null"
+
+
+def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
+    leaves: set[str] = set()
+    for key, value in document.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, Mapping):
+            leaves |= _leaf_paths(cast(Mapping[str, object], value), path)
+        else:
+            leaves.add(path)
+    return leaves
+
+
+def test_memory_profiles_knob_paths_match_document() -> None:
+    loaded: object = yaml.safe_load(
+        (PACKAGE_ROOT / "memory/profiles.yaml").read_text(encoding="utf-8")
+    )
+    assert isinstance(loaded, dict)
+    document = cast(Mapping[str, object], loaded)
+
+    declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
+
+    assert declared == _leaf_paths(document) - {"schema_version"}
+    assert len(declared) == 28

@@ -26,8 +26,8 @@ mechanism behind it, lands the `Device` table the audit placed
 pairing of untrusted senders, no device-scoped tool, no presence-based routing.
 Those are Milestone 14 and the roadmap.
 
-Milestones 10 and 11 are complete and the verified gate ceiling is 11.
-Milestone 12 is the active implementation milestone.
+Milestones 10 through 12 are complete and the verified gate ceiling is 12.
+Milestone 13 is the next sequential authorized milestone and has not started.
 
 ## Scope
 
@@ -164,7 +164,9 @@ Milestone 14 defines: its identity is minted by the surface role, its
 `platform` names the channel, and its `push_provider` is `telegram`, with the
 paired chat reference as the routing token — declared here so that a Surface
 row is representable by this contract and the dispatcher can partition by
-provider. `push_token` and `push_provider` are present together or absent together;
+provider. `push_token` and `push_provider` are present together or absent
+together; an unpaired or revoked Surface may therefore have neither, while a
+routed Surface uses Telegram and no other provider;
 `push_environment` is required when `push_provider` is `apns` and must be null
 for any other provider — a Telegram Surface has no sandbox or production host.
 The token is a secret value: it is returned to no client, appears in no event or log, and
@@ -381,8 +383,8 @@ For each claimed row it:
    `pending` with the next backoff instant for that provider.
 
 The transport's outcome vocabulary is closed and mapped deliberately. A
-transport 5xx, 429, network failure, or expired provider token is `RETRY` — the
-provider token is re-minted and the device is not charged. A 410 `Unregistered`
+transport 5xx, 429, network failure, or expired or invalid provider token is
+`RETRY` — the provider token is re-minted and the device is not charged. A 410 `Unregistered`
 or 400 `BadDeviceToken` / `DeviceTokenNotForTopic` is `UNREGISTERED`: the
 device's token is nulled, `push_token_invalidated_at` is set, a
 `device.push_token_invalidated` process event is appended, the delivery is
@@ -401,10 +403,24 @@ it writes the delivery row, the next claimant cannot distinguish that accepted
 send from no send and re-sends. The transport's collapse identifier (the
 `dedupe_key`) makes that replay invisible on the device as a best-effort
 reduction, not a guarantee, and the ledger shows the extra attempt.
+Settlement is fenced to the claimed attempt and lease: every terminal or retry
+update compares the row's current attempt and requires an active claim whose
+`claimed_until` is later than the settlement instant. It returns `False` after
+the lease expires or a newer worker reclaims or settles the row, leaving the
+stored state untouched.
 
 Wake-up is `LISTEN`/`NOTIFY` on a fixed channel after the enqueuing
 transaction commits, over a bounded poll, exactly as the schedule worker does.
 Correctness is the table scan.
+
+Every dispatcher scan also reads a bounded oldest-first view of notifications
+that have remained `pending` for more than five minutes and emits a
+content-free warning carrying the notification identifier, kind, creation
+instant, and claimant. A long-lived dispatcher emits that warning at most once
+per notification in each five-minute cooldown, using bounded in-process state;
+a process restart may emit it again. This makes a row whose only remaining
+targets belong to an as-yet undeployed provider visible even though that
+dispatcher correctly cannot claim or settle it.
 
 Revocation is immediate in the only sense that matters here: the dispatcher
 resolves targets at claim time, so a device revoked before the next claim
@@ -474,7 +490,7 @@ class NotificationOutbox(Protocol):
     async def claim_due(self, now: datetime, limit: int, claimant: str, lease_seconds: float, providers: frozenset[PushProvider]) -> list[Notification]: ...
     async def record_delivery(self, delivery: NotificationDelivery) -> None: ...
     async def list_deliveries_for(self, notification_ids: tuple[UUID, ...]) -> dict[UUID, list[NotificationDelivery]]: ...
-    async def settle(self, notification_id: UUID, status: NotificationStatus, next_attempt_at: datetime | None) -> None: ...
+    async def settle(self, notification_id: UUID, attempt: int, status: NotificationStatus, next_attempt_at: datetime | None) -> bool: ...
     async def list(self, principal: Principal, page: Page) -> Page[Notification]: ...
 
 

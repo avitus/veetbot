@@ -132,7 +132,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 126 operator-reviewable knobs. Metadata such as
+# The design corpus declares 137 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -260,20 +260,31 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "formation.session_boundary_enabled",
             "formation.scheduled_enabled",
             "formation.scheduled_interval_seconds",
+            "formation.established_facts_enabled",
+            "formation.decay.floor_confidence",
+            "formation.decay.step",
+            "formation.decay.max_per_sweep",
             "retrieval.semantic_enabled",
             "retrieval.reciprocal_rank_fusion_k",
             "retrieval.durable_item_share",
             "retrieval.lifecycle_weights.active",
             "retrieval.lifecycle_weights.provisional",
-            "snapshots.interactive.max_items",
-            "snapshots.interactive.max_tokens",
-            "snapshots.interactive.max_window_ratio",
+            "retrieval.decay_tau_days.fact",
+            "retrieval.decay_tau_days.preference",
+            "retrieval.decay_tau_days.relationship",
+            "retrieval.decay_tau_days.user_model_attr",
+            "retrieval.decay_tau_days.procedure_pointer",
+            "retrieval.stale_penalty",
+            "retrieval.near_duplicate_penalty",
+            "retrieval.usage.cited_utility_delta",
+            "retrieval.usage.uncited_utility_delta",
             "snapshots.async.max_items",
             "snapshots.async.max_tokens",
             "snapshots.async.max_window_ratio",
             "snapshots.child.max_items",
             "snapshots.child.max_tokens",
             "snapshots.child.max_window_ratio",
+            "traces.operator_retention_days",
         ),
     }
 )
@@ -308,6 +319,19 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:notifications.lease_seconds": 1,
         "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
         "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
+        "memory/profiles.yaml:formation.scheduled_interval_seconds": 1,
+        "memory/profiles.yaml:formation.decay.max_per_sweep": 1,
+        "memory/profiles.yaml:retrieval.reciprocal_rank_fusion_k": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.fact": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.preference": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.relationship": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.user_model_attr": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.procedure_pointer": 1,
+        "memory/profiles.yaml:snapshots.async.max_items": 1,
+        "memory/profiles.yaml:snapshots.async.max_tokens": 1,
+        "memory/profiles.yaml:snapshots.child.max_items": 1,
+        "memory/profiles.yaml:snapshots.child.max_tokens": 1,
+        "memory/profiles.yaml:traces.operator_retention_days": 1,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
         "tools/limits.yaml:circuit_breaker.identical_denied_threshold": 1,
         "tools/limits.yaml:circuit_breaker.uncertain_threshold": 1,
@@ -530,7 +554,13 @@ def _validate_interpolation(
     interpolation: Mapping[str, str],
 ) -> None:
     serialized = yaml.safe_dump(dict(document), sort_keys=True)
-    missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
+    referenced = set(INTERPOLATION.findall(serialized))
+    if relative.startswith("policy/") and referenced:
+        raise ConfigurationError(
+            f"{relative} cannot use policy-semantic interpolation; policy hashes must cover "
+            "the effective rules"
+        )
+    missing = sorted(referenced - interpolation.keys())
     if missing:
         names = ", ".join(missing)
         raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")
@@ -719,7 +749,7 @@ def validate_settings(
         and not settings.browser_allowed_origins
     ):
         raise ConfigurationError(
-            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER is enabled"
+            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER=playwright"
         )
     if settings.browser_provider is BrowserProviderKind.HOSTED:
         if settings.browser_profile_service_url is None:

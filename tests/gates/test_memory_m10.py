@@ -15,7 +15,7 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -36,6 +36,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
 from agent_core.memory.provider_extraction import (
+    PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
     provider_extraction_evidence_matches,
 )
@@ -88,7 +89,7 @@ class _AdvancingCandidateExtractor:
 def _provider_evidence(build_ref: str) -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@6",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         model_policy="fake",
         provider="fake",
         model="scripted",
@@ -109,6 +110,19 @@ def _provider_evidence(build_ref: str) -> ProviderExtractionEvaluationEvidence:
         provider_policy_failures=0,
         evaluated_at=NOW,
     )
+
+
+def test_provider_evidence_preserves_m10_positive_coverage_floor() -> None:
+    evidence = _provider_evidence("m10-evidence")
+
+    assert evidence.positive_case_count == 20
+    assert evidence.minimum_supported_case_count == 16
+    assert evidence.provider_supported_case_count == 16
+
+    below_floor = evidence.model_dump()
+    below_floor["provider_supported_case_count"] = 15
+    with pytest.raises(ValueError, match="positive coverage floor"):
+        ProviderExtractionEvaluationEvidence.model_validate(below_floor)
 
 
 async def test_ordinary_conversation_forms_one_memory_per_durable_entity() -> None:
@@ -234,6 +248,71 @@ async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
     assert await service.list_memories(include_inactive=True) == []
 
 
+async def test_memory_diagnosis_queries_only_required_process_event_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    async with factory() as uow:
+        process_events = uow.process_events
+    original_list = process_events.list
+    queried_filters: list[tuple[str, str, UUID | None, frozenset[str], int]] = []
+
+    async def refuse_unbounded_list(event_type: str | None = None) -> list[ProcessEvent]:
+        del event_type
+        raise AssertionError("diagnosis must not use the unbounded process-event query")
+
+    async def recording_list_filtered(
+        *,
+        tenant_id: str,
+        principal_id: str,
+        session_id: UUID | None,
+        event_types: frozenset[str],
+        limit: int,
+    ) -> list[ProcessEvent]:
+        queried_filters.append((tenant_id, principal_id, session_id, event_types, limit))
+        rows = [
+            event
+            for event_type in event_types
+            for event in await original_list(event_type)
+            if event.payload.get("tenant_id") == tenant_id
+            and event.payload.get("principal_id") == principal_id
+            and (session_id is None or event.payload.get("session_id") == str(session_id))
+        ]
+        return sorted(rows, key=lambda event: (event.created_at, event.id.int))[-limit:]
+
+    monkeypatch.setattr(process_events, "list", refuse_unbounded_list)
+    monkeypatch.setattr(
+        process_events,
+        "list_filtered",
+        recording_list_filtered,
+        raising=False,
+    )
+
+    await service.diagnose(SESSION_ID)
+
+    assert queried_filters == [
+        (
+            principal().tenant_id,
+            principal().principal_id,
+            SESSION_ID,
+            frozenset(
+                {
+                    "memory.provider_extraction.completed",
+                    "memory.provider_extraction.failed",
+                }
+            ),
+            100,
+        ),
+        (
+            principal().tenant_id,
+            principal().principal_id,
+            None,
+            frozenset({"memory.provider_extraction.selection"}),
+            100,
+        ),
+    ]
+
+
 def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:
     resolved = ResolvedModel(
         provider="fake",
@@ -243,7 +322,7 @@ def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:
     )
     evidence = ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@6",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         model_policy=resolved.policy_name,
         provider=resolved.provider,
         model=resolved.model,
@@ -422,7 +501,7 @@ async def test_transient_provider_failure_retries_the_same_prefix_after_backoff(
         SequenceIdFactory(UUID(int=value) for value in range(9_700, 9_900)),
         principal(),
         extractor=extractor,
-        policy_version="formation@6",
+        policy_version=PROVIDER_FORMATION_POLICY_VERSION,
     )
 
     first = await service.run(
@@ -432,7 +511,7 @@ async def test_transient_provider_failure_retries_the_same_prefix_after_backoff(
     )
     diagnosis = await service.diagnose(SESSION_ID)
 
-    assert len(first.beliefs) == 3
+    assert first.beliefs == []
     assert first.run.watermark_after == 0
     assert diagnosis.watermark == 0
     assert diagnosis.pending_retry is True
@@ -512,7 +591,7 @@ async def test_retryable_provider_failure_is_bounded_and_audits_exhaustion() -> 
         SequenceIdFactory(UUID(int=value) for value in range(10_100, 10_300)),
         principal(),
         extractor=extractor,
-        policy_version="formation@6",
+        policy_version=PROVIDER_FORMATION_POLICY_VERSION,
     )
 
     results = []
@@ -530,6 +609,20 @@ async def test_retryable_provider_failure_is_bounded_and_audits_exhaustion() -> 
             retry_at = datetime.fromisoformat(
                 cast(str, diagnosis.formation_requests[-1].payload["not_before"])
             )
+            async with factory() as uow:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=SESSION_ID,
+                        run_id=None,
+                        event_type="memory.formation.requested",
+                        actor_type="runtime",
+                        payload={
+                            "trigger": "run_terminal",
+                            "not_before": retry_at.isoformat(),
+                        },
+                        derivation_key=f"later-run-terminal:{attempt}",
+                    )
+                )
             clock.advance(retry_at - clock.now())
 
     diagnosis = await service.diagnose(SESSION_ID)

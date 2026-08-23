@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent_core.domain.memory import BeliefType, Portability, Sensitivity
+from agent_core.domain.memory import BeliefType, MemoryAuthority, Portability, Sensitivity
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass, TrustLevel
 from agent_core.domain.tools import (
@@ -91,6 +91,14 @@ class MemoryRememberTool:
             portability=portability,
             sensitivity=Sensitivity(str(arguments.get("sensitivity", Sensitivity.INTERNAL.value))),
             origin_trust=statement_trust,
+            # A statement handed to the tool at memory trust is the agent
+            # affirming what it already holds, which ranks below the user
+            # saying it and above an extractor inferring it.
+            authority=(
+                MemoryAuthority.AFFIRMED
+                if statement_trust is TrustLevel.MEMORY
+                else MemoryAuthority.USER
+            ),
         )
         structured = {"belief_id": str(belief.id), "status": belief.status.value}
         return ToolResult(

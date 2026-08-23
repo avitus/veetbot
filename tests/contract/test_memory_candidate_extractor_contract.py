@@ -21,7 +21,10 @@ from agent_core.domain.messages import (
 from agent_core.memory import SHIPPED_MEMORY_CANDIDATE_EXTRACTORS
 from agent_core.memory.formation import MAX_EXTRACTOR_PROPOSALS, DeterministicCandidateExtractor
 from agent_core.memory.model_extraction import ModelAssistedCandidateExtractor
-from agent_core.memory.provider_extraction import ProviderAssistedCandidateExtractor
+from agent_core.memory.provider_extraction import (
+    PROVIDER_FORMATION_POLICY_VERSION,
+    ProviderAssistedCandidateExtractor,
+)
 from agent_core.ports.memory import MemoryCandidateExtractor
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import AGENT_ID, NOW, principal
@@ -60,7 +63,7 @@ class _StructuredRouter:
 def _evidence() -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@6",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         model_policy="fake",
         provider="fake",
         model="scripted",

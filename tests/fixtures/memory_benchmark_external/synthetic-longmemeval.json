@@ -1,0 +1,143 @@
+[
+  {
+    "question_id": "syn_user_01",
+    "question_type": "single-session-user",
+    "question": "What did I name the sourdough starter?",
+    "answer": "Bubbles",
+    "question_date": "2024/03/18 (Mon) 09:15",
+    "haystack_session_ids": ["syn_a_1", "syn_a_2"],
+    "haystack_dates": ["2024/03/01 (Fri) 10:00", "2024/03/05 (Tue) 18:30"],
+    "haystack_sessions": [
+      [
+        {
+          "role": "user",
+          "content": "I finally named the sourdough starter Bubbles.",
+          "has_answer": true
+        },
+        {"role": "assistant", "content": "Bubbles is a sturdy name for a starter."}
+      ],
+      [
+        {"role": "user", "content": "The greenhouse thermometer arrived this morning."},
+        {"role": "assistant", "content": "That should help the seedlings settle."}
+      ]
+    ],
+    "answer_session_ids": ["syn_a_1"]
+  },
+  {
+    "question_id": "syn_multi_02",
+    "question_type": "multi-session",
+    "question": "Which two rooms did I repaint?",
+    "answer": "the hallway and the pantry",
+    "question_date": "2024/04/02 (Tue) 20:05",
+    "haystack_session_ids": ["syn_b_1", "syn_b_2", "syn_b_3"],
+    "haystack_dates": [
+      "2024/03/02 (Sat) 11:00",
+      "2024/03/12 (Tue) 09:45",
+      "2024/03/22 (Fri) 16:20"
+    ],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "I repainted the hallway a dull olive.", "has_answer": true},
+        {"role": "assistant", "content": "Olive wears well in a corridor."}
+      ],
+      [{"role": "user", "content": "The rain held off all weekend."}],
+      [
+        {"role": "user", "content": "I repainted the pantry the same olive.", "has_answer": true},
+        {"role": "assistant", "content": "The two rooms will read as one."}
+      ]
+    ],
+    "answer_session_ids": ["syn_b_1", "syn_b_3"]
+  },
+  {
+    "question_id": "syn_temporal_03",
+    "question_type": "temporal-reasoning",
+    "question": "How long after the move did I join the choir?",
+    "answer": "about six weeks",
+    "question_date": "2024/05/01 (Wed) 08:00",
+    "haystack_session_ids": ["syn_c_1", "syn_c_2"],
+    "haystack_dates": ["2024/01/06 (Sat) 12:00", "2024/02/17 (Sat) 12:00"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "We moved into the flat on the sixth.", "has_answer": true}],
+      [
+        {"role": "user", "content": "I joined the choir today.", "has_answer": true},
+        {"role": "assistant", "content": "Six weeks in and already singing."}
+      ]
+    ],
+    "answer_session_ids": ["syn_c_1", "syn_c_2"]
+  },
+  {
+    "question_id": "syn_update_04",
+    "question_type": "knowledge-update",
+    "question": "Which bank holds my current account?",
+    "answer": "Harborline",
+    "question_date": "2024/06/09 (Sun) 07:40",
+    "haystack_session_ids": ["syn_d_1", "syn_d_2"],
+    "haystack_dates": ["2024/04/04 (Thu) 15:00", "2024/05/20 (Mon) 15:00"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "My current account is with Ridgeway."}],
+      [
+        {
+          "role": "user",
+          "content": "I moved the current account to Harborline.",
+          "has_answer": true
+        }
+      ]
+    ],
+    "answer_session_ids": ["syn_d_2"]
+  },
+  {
+    "question_id": "syn_pref_05",
+    "question_type": "single-session-preference",
+    "question": "How do I like the itinerary written?",
+    "answer": "as a short bulleted list",
+    "question_date": "2024/06/25 (Tue) 19:00",
+    "haystack_session_ids": ["syn_e_1", "syn_e_2"],
+    "haystack_dates": ["2024/05/02 (Thu) 09:00", "2024/05/30 (Thu) 09:00"],
+    "haystack_sessions": [
+      [
+        {
+          "role": "user",
+          "content": "I like an itinerary as a short bulleted list.",
+          "has_answer": true
+        },
+        {"role": "assistant", "content": "Bulleted it is."}
+      ],
+      [{"role": "user", "content": "The ferry timetable changed again."}]
+    ],
+    "answer_session_ids": ["syn_e_1"]
+  },
+  {
+    "question_id": "syn_assistant_06",
+    "question_type": "single-session-assistant",
+    "question": "Which trailhead did you recommend for the ridge walk?",
+    "answer": "the Larkspur trailhead",
+    "question_date": "2024/07/03 (Wed) 06:30",
+    "haystack_session_ids": ["syn_f_1", "syn_f_2"],
+    "haystack_dates": ["2024/06/01 (Sat) 07:00", "2024/06/15 (Sat) 07:00"],
+    "haystack_sessions": [
+      [
+        {"role": "user", "content": "Where should I start the ridge walk?"},
+        {"role": "assistant", "content": "Start at the Larkspur trailhead.", "has_answer": true}
+      ],
+      [{"role": "user", "content": "The boots finally broke in."}]
+    ],
+    "answer_session_ids": ["syn_f_1"]
+  },
+  {
+    "question_id": "syn_abstain_07",
+    "question_type": "multi-session_abs",
+    "question": "Which airline did I book for the reunion?",
+    "answer": "abstain",
+    "question_date": "2024/07/20 (Sat) 13:10",
+    "haystack_session_ids": ["syn_g_1", "syn_g_2"],
+    "haystack_dates": ["2024/06/03 (Mon) 10:00", "2024/06/24 (Mon) 10:00"],
+    "haystack_sessions": [
+      [{"role": "user", "content": "The reunion is set for the autumn."}],
+      [
+        {"role": "user", "content": "I still have not booked anything for it."},
+        {"role": "assistant", "content": "Plenty of time yet."}
+      ]
+    ],
+    "answer_session_ids": []
+  }
+]

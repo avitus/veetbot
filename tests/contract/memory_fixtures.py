@@ -36,7 +36,7 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.chunking import DeterministicChunker
 from agent_core.memory.formation import GovernedMemoryService
-from agent_core.memory.retrieval import HybridMemoryRetriever
+from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION, HybridMemoryRetriever
 from tests.contract.support import (
     NOW,
     PRINCIPAL_ID,
@@ -142,6 +142,7 @@ def recall_query(
     budget_tokens: int = 500,
     max_items: int = 10,
     min_score: float = 0.1,
+    min_store_position: int = 0,
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED,
 ) -> RecallQuery:
     return RecallQuery(
@@ -154,6 +155,7 @@ def recall_query(
         as_of=as_of,
         include_superseded=include_superseded,
         profile=profile,
+        min_store_position=min_store_position,
         budget_tokens=budget_tokens,
         max_items=max_items,
         min_score=min_score,
@@ -176,7 +178,7 @@ def trace() -> RecallTrace:
         rendered="<memory></memory>",
         rendered_sha256=hashlib.sha256(b"<memory></memory>").hexdigest(),
         candidates=0,
-        retrieval_policy_version="retrieval@1",
+        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
         created_at=NOW,
         operator_fields_expire_at=NOW + timedelta(days=30),
     )

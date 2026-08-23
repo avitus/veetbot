@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "extractor_version": "provider-assisted-v2",
-  "formation_policy_version": "formation@6",
+  "formation_policy_version": "formation@8",
   "model_policy": "replace-with-evaluated-model-policy",
   "provider": "replace-with-resolved-provider",
   "model": "replace-with-resolved-model",

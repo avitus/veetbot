@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
 
@@ -18,8 +19,8 @@ from agent_core.domain.memory import (
     RecallMoment,
     RecallTrace,
 )
-from agent_core.domain.runs import RunStatus
-from agent_core.evals import memory_benchmark_driver
+from agent_core.domain.runs import FailureReason, RunFailure, RunStatus
+from agent_core.evals import memory_benchmark_driver, memory_benchmark_live
 from agent_core.evals.memory_benchmark import (
     BASELINE_PATH,
     BENCHMARK_VERSION,
@@ -49,6 +50,17 @@ from agent_core.evals.memory_benchmark import (
     score_probe,
 )
 from agent_core.evals.memory_benchmark_driver import MemoryBenchmarkResult
+from agent_core.evals.memory_benchmark_live import (
+    LIVE_COST_CEILING_USD,
+    AnswerScore,
+    LiveArm,
+    LiveProbeArmResult,
+    LiveProbeResult,
+    MemoryBenchmarkEvidence,
+    MemoryBenchmarkLiveMetrics,
+    minimum_live_lift,
+    score_answer,
+)
 from agent_core.memory.formation import FORMATION_POLICY_VERSION
 from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
 from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION
@@ -1010,7 +1022,9 @@ def test_compare_to_baseline_reports_regression_drift_and_improvement() -> None:
     assert any(
         entry.startswith("needed_recalled regressed: baseline 3") for entry in regressed.regressions
     )
-    assert any(entry.startswith("recalled_both") for entry in regressed.regressions)
+    # An attribution count falling alongside recall is reported as a shift; it
+    # is a bucket of `needed_recalled`, not a metric with a good direction.
+    assert any(entry.startswith("recalled_both") for entry in regressed.shifts)
     assert any(entry.startswith("noise_total") for entry in regressed.regressions)
     assert any(
         entry.startswith("mb-bench-002/p01 needed_recalled") for entry in regressed.regressions
@@ -1137,6 +1151,42 @@ async def test_run_benchmark_fails_on_regression_and_writes_baseline_when_asked(
         )
 
 
+async def test_run_benchmark_fails_when_current_result_improves_or_shifts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repository = tmp_path / "repository"
+    (repository / BASELINE_PATH.parent).mkdir(parents=True)
+    (repository / BASELINE_PATH).write_text(
+        _baseline_of(_result(_worse_results())).model_dump_json(), encoding="utf-8"
+    )
+    current = _result()
+
+    async def run_deterministic_benchmark(
+        _root: Path, **_kwargs: object
+    ) -> DeterministicBenchmarkResult:
+        return current
+
+    monkeypatch.setattr(
+        memory_benchmark_driver, "run_deterministic_benchmark", run_deterministic_benchmark
+    )
+
+    result = await memory_benchmark_driver.run_benchmark(
+        repository,
+        deterministic_only=True,
+        model_policy="balanced",
+        policy_profile="default",
+        build_ref="0123456789ab",
+        output=None,
+        baseline_output=None,
+    )
+
+    assert result is not None
+    assert result.passed is False
+    assert result.failure_summary is not None
+    assert "improved" in result.failure_summary
+    assert "shifted" in result.failure_summary
+
+
 async def test_run_benchmark_passes_when_no_baseline_is_recorded(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1166,30 +1216,74 @@ async def test_run_benchmark_passes_when_no_baseline_is_recorded(
     assert not any(tmp_path.iterdir())
 
 
-async def test_run_benchmark_defers_the_live_arm_to_the_opt_in(
+async def test_run_benchmark_hands_the_live_arm_to_the_live_runner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.delenv("RUN_LIVE_MODEL_TESTS", raising=False)
+    observed: list[dict[str, object]] = []
+    live = MemoryBenchmarkResult(
+        passed=False,
+        failure_summary="lift 0 below the minimum of 11",
+        deterministic=_result(),
+        live=_LIVE_STAND_IN,
+    )
 
-    assert (
+    async def run_live_benchmark(
+        root: Path,
+        *,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> MemoryBenchmarkResult:
+        observed.append(
+            {
+                "root": root,
+                "model_policy": model_policy,
+                "policy_profile": policy_profile,
+                "build_ref": build_ref,
+                "output": output,
+            }
+        )
+        return live
+
+    monkeypatch.setattr(memory_benchmark_live, "run_live_benchmark", run_live_benchmark)
+
+    result = await memory_benchmark_driver.run_benchmark(
+        tmp_path,
+        deterministic_only=False,
+        model_policy="balanced",
+        policy_profile="default",
+        build_ref="0123456789ab",
+        output=tmp_path / "evidence.json",
+        baseline_output=None,
+    )
+
+    assert result is live
+    assert observed == [
+        {
+            "root": tmp_path,
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "0123456789ab",
+            "output": tmp_path / "evidence.json",
+        }
+    ]
+
+    with pytest.raises(ValueError, match="output"):
         await memory_benchmark_driver.run_benchmark(
             tmp_path,
             deterministic_only=False,
             model_policy="balanced",
             policy_profile="default",
             build_ref="0123456789ab",
-            output=tmp_path / "evidence.json",
+            output=None,
             baseline_output=None,
         )
-        is None
-    )
 
-    monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
-
-    with pytest.raises(NotImplementedError, match="Task 2"):
+    with pytest.raises(ValueError, match="output"):
         await memory_benchmark_driver.run_benchmark(
             tmp_path,
-            deterministic_only=False,
+            deterministic_only=True,
             model_policy="balanced",
             policy_profile="default",
             build_ref="0123456789ab",
@@ -1304,3 +1398,814 @@ async def test_run_benchmark_defaults_its_recording_clock_to_the_composition_roo
 
     assert recorded.recorded_at.tzinfo is not None
     assert recorded.recorded_at.utcoffset() == timedelta(0)
+
+
+_ABSTAIN_PHRASE = "I do not have that information."
+_REPOSITORY = Path(__file__).resolve().parents[2]
+
+
+def _score(
+    answer: str | None,
+    expected: ProbeAnswer,
+    *,
+    protected: Sequence[str] = (),
+) -> AnswerScore:
+    return score_answer(answer, expected, abstain_phrase=_ABSTAIN_PHRASE, protected=protected)
+
+
+def test_score_answer_token_bounded_alternatives_all_of_and_abstain() -> None:
+    alternatives = ProbeAnswer(kind="alternatives", values=["Portland", "Portland, Oregon"])
+    all_of = ProbeAnswer(kind="all_of", values=["concise", "Fridays"])
+    abstain = ProbeAnswer(kind="abstain")
+
+    assert _score("Portland.", alternatives).correct is True
+    assert _score("You live in Portland, Oregon", alternatives).correct is True
+    assert _score("Portlandia", alternatives).correct is False
+    assert _score("Portland\nand nothing else", alternatives).correct is False
+    assert _score(None, alternatives).correct is False
+    assert _score("", alternatives).correct is False
+
+    assert _score("Keep it concise and deploy on Fridays.", all_of).correct is True
+    assert _score("Keep it concise.", all_of).correct is False
+
+    abstained = _score("i do not have that information", abstain)
+
+    assert (abstained.correct, abstained.abstained) == (True, True)
+    assert _score("Portland", abstain).correct is False
+
+    answered = _score(_ABSTAIN_PHRASE, alternatives)
+
+    assert (answered.correct, answered.abstained) == (False, True)
+
+    leaked = _score("The token is REDACTED-TOKEN.", alternatives, protected=["REDACTED-TOKEN"])
+
+    assert leaked.leaked_protected is True
+    assert _score("Portland", alternatives, protected=["REDACTED-TOKEN"]).leaked_protected is False
+
+
+def _live_metrics(**overrides: object) -> MemoryBenchmarkLiveMetrics:
+    fields: dict[str, object] = {
+        "probe_count": 20,
+        "answerable_probe_count": 15,
+        "abstain_expected": 5,
+        "with_memory_correct": 15,
+        "without_memory_correct": 8,
+        "lift": 7,
+        "recoverable_probe_count": 10,
+        "recoverable_correct": 9,
+        "abstain_with_memory_correct": 5,
+        "protected_leaks_in_answers": 0,
+        "with_memory_policy_failures": 0,
+        "without_memory_policy_failures": 0,
+        "incomplete_runs": 0,
+        "ceiling_hits": 0,
+        "total_cost_usd": Decimal("1.25"),
+        "p50_latency_ms": 900,
+        "p95_latency_ms": 1800,
+    }
+    fields.update(overrides)
+    return MemoryBenchmarkLiveMetrics(**fields)  # type: ignore[arg-type]
+
+
+def _evidence_fields(**overrides: object) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "benchmark_version": BENCHMARK_VERSION,
+        "corpus_sha256": _DIGEST,
+        "build_ref": "0123456789ab",
+        "model_policy": "balanced",
+        "provider": "openai",
+        "model": "gpt-memory",
+        "policy_profile": "default",
+        "policy_version": "default@profile+hline",
+        "formation_policy_version": "formation@1",
+        "retrieval_policy_version": "retrieval@1",
+        "cost_ceiling_usd": LIVE_COST_CEILING_USD,
+        "minimum_lift": 3,
+        "minimum_recoverable_correct": 8,
+        "minimum_abstain_correct": 4,
+        "deterministic": _result().metrics,
+        "live": _live_metrics(),
+        "evaluated_at": _START,
+    }
+    fields.update(overrides)
+    return fields
+
+
+def test_evidence_accepts_a_run_that_met_every_pass_condition() -> None:
+    evidence = MemoryBenchmarkEvidence(**_evidence_fields())  # type: ignore[arg-type]
+
+    assert evidence.schema_version == 1
+    assert evidence.minimum_lift == minimum_live_lift(15) == 3
+    assert evidence.live.lift >= evidence.minimum_lift
+    assert MemoryBenchmarkEvidence.model_validate_json(evidence.model_dump_json()) == evidence
+
+
+@pytest.mark.parametrize(
+    ("evidence_overrides", "live_overrides", "match"),
+    [
+        pytest.param({}, {"with_memory_correct": 10, "lift": 2}, "lift", id="lift-below-floor"),
+        pytest.param({"minimum_lift": 2}, {}, "minimum lift", id="wrong-minimum-lift"),
+        pytest.param(
+            {"minimum_recoverable_correct": 7}, {}, "recoverable", id="wrong-minimum-recoverable"
+        ),
+        pytest.param({"minimum_abstain_correct": 3}, {}, "abstain", id="wrong-minimum-abstain"),
+        pytest.param({}, {"recoverable_correct": 7}, "recoverable", id="recoverable-below-floor"),
+        pytest.param({}, {"abstain_with_memory_correct": 3}, "abstain", id="abstain-below-floor"),
+        pytest.param({}, {"total_cost_usd": Decimal("4.01")}, "cost", id="cost-over-ceiling"),
+        pytest.param({"cost_ceiling_usd": Decimal("9.00")}, {}, "ceiling", id="wrong-cost-ceiling"),
+        pytest.param({}, {"ceiling_hits": 1}, "ceiling", id="ceiling-hit"),
+        pytest.param({}, {"stopped_by": "cost_ceiling"}, "stopped", id="stopped-early"),
+        pytest.param(
+            {},
+            {"with_memory_policy_failures": 2, "without_memory_policy_failures": 1},
+            "policy",
+            id="policy-regression",
+        ),
+        pytest.param({}, {"protected_leaks_in_answers": 1}, "protected", id="protected-leak"),
+        pytest.param({}, {"incomplete_runs": 1}, "incomplete", id="incomplete-run"),
+        pytest.param(
+            {},
+            {"failure_classes": {"ModelStreamError": 1}},
+            "failure class",
+            id="histogram-disagrees-with-incomplete-runs",
+        ),
+        pytest.param({}, {"retried_runs": 41}, "retried", id="retried-over-total-runs"),
+        pytest.param({}, {"lift": 9}, "lift", id="inconsistent-lift"),
+        pytest.param(
+            {}, {"answerable_probe_count": 14}, "answerable", id="inconsistent-answerable"
+        ),
+        pytest.param(
+            {}, {"recoverable_probe_count": 20}, "recoverable", id="recoverable-over-answerable"
+        ),
+        pytest.param(
+            {"evaluated_at": datetime(2026, 8, 22, 9, 0)},
+            {},
+            "timezone-aware",
+            id="naive-datetime",
+        ),
+    ],
+)
+def test_evidence_rejects_failing_pass_conditions(
+    evidence_overrides: dict[str, object],
+    live_overrides: dict[str, object],
+    match: str,
+) -> None:
+    fields = _evidence_fields(**evidence_overrides)
+    if live_overrides:
+        fields["live"] = _live_metrics(**live_overrides)
+
+    with pytest.raises(ValidationError, match=match):
+        MemoryBenchmarkEvidence(**fields)  # type: ignore[arg-type]
+
+
+_IDENTITY = ("openai", "gpt-memory", "default@profile+hline")
+_UNRESOLVED: tuple[str | None, str | None, str | None] = (None, None, None)
+
+
+def _live_arm(
+    arm: LiveArm,
+    identity: tuple[str | None, str | None, str | None] = _IDENTITY,
+    *,
+    correct: bool = True,
+) -> LiveProbeArmResult:
+    provider, model, policy_version = identity
+    return LiveProbeArmResult(
+        arm=arm,
+        answer="Portland",
+        score=AnswerScore(correct=correct, abstained=False, leaked_protected=False),
+        run_status=RunStatus.COMPLETED,
+        model_calls=1,
+        cost_usd=Decimal("0.01"),
+        latency_ms=100,
+        policy_failures=0,
+        provider=provider,
+        model=model,
+        policy_version=policy_version,
+        retrieval=(
+            _probe_result(needed_total=1, needed_formed=1, needed_recalled=1)
+            if arm == "with_memory"
+            else None
+        ),
+    )
+
+
+def _one_probe_row(
+    *,
+    with_memory: LiveProbeArmResult | None = None,
+    without_memory: LiveProbeArmResult | None = None,
+) -> LiveProbeResult:
+    return LiveProbeResult(
+        scenario_id="mb-bench-001",
+        probe_id="p01",
+        category="single_hop",
+        with_memory=_live_arm("with_memory") if with_memory is None else with_memory,
+        without_memory=(
+            _live_arm("without_memory", correct=False) if without_memory is None else without_memory
+        ),
+        lift=1,
+    )
+
+
+def _one_probe_evidence(row: LiveProbeResult) -> dict[str, object]:
+    return _evidence_fields(
+        minimum_lift=1,
+        minimum_recoverable_correct=1,
+        minimum_abstain_correct=0,
+        live=_live_metrics(
+            probe_count=1,
+            answerable_probe_count=1,
+            abstain_expected=0,
+            with_memory_correct=1,
+            without_memory_correct=0,
+            lift=1,
+            recoverable_probe_count=1,
+            recoverable_correct=1,
+            abstain_with_memory_correct=0,
+            probes=[row],
+        ),
+    )
+
+
+def test_evidence_requires_one_identity_across_every_probe_row() -> None:
+    evidence = MemoryBenchmarkEvidence(**_one_probe_evidence(_one_probe_row()))  # type: ignore[arg-type]
+
+    assert (evidence.provider, evidence.model, evidence.policy_version) == _IDENTITY
+
+    foreign_provider = _one_probe_row(
+        without_memory=_live_arm(
+            "without_memory",
+            ("anthropic", "gpt-memory", "default@profile+hline"),
+            correct=False,
+        )
+    )
+    foreign_policy = _one_probe_row(
+        with_memory=_live_arm("with_memory", ("openai", "gpt-memory", "eval.default@other+hline"))
+    )
+    unresolved = _one_probe_row(with_memory=_live_arm("with_memory", _UNRESOLVED))
+
+    with pytest.raises(ValidationError, match="different provider"):
+        MemoryBenchmarkEvidence(**_one_probe_evidence(foreign_provider))  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="different provider"):
+        MemoryBenchmarkEvidence(**_one_probe_evidence(foreign_policy))  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="did not resolve"):
+        MemoryBenchmarkEvidence(**_one_probe_evidence(unresolved))  # type: ignore[arg-type]
+
+
+def test_terminal_failure_class_names_the_class_and_never_the_message() -> None:
+    """A failed run is diagnosable by class name alone, with no content in it."""
+
+    assert memory_benchmark_live._terminal_failure_class(None) is None
+
+    failure = RunFailure(
+        reason=FailureReason.INTERNAL_ERROR,
+        error_class="ModelStreamError",
+        message="the principal lives at 5 Elm Street",
+        occurred_at=_START,
+    )
+
+    assert memory_benchmark_live._terminal_failure_class(failure) == "ModelStreamError"
+
+
+def test_incomplete_run_diagnostics_name_every_failed_arm_content_free() -> None:
+    """Every incomplete run prints what it was, why it ended, and what it cost."""
+
+    failed = _live_arm("without_memory", correct=False).model_copy(
+        update={
+            "run_status": RunStatus.FAILED,
+            "answer": "the principal lives at 5 Elm Street",
+            "failure_class": "ModelStreamError",
+            "model_calls": 1,
+            "cost_usd": Decimal("0.01071"),
+            "retried": True,
+        }
+    )
+    metrics = _live_metrics(
+        incomplete_runs=1,
+        retried_runs=1,
+        failure_classes={"ModelStreamError": 1},
+        probes=[_one_probe_row(without_memory=failed)],
+    )
+
+    lines = memory_benchmark_live.incomplete_run_diagnostics(metrics)
+
+    assert len(lines) == 1
+    assert "mb-bench-001/p01" in lines[0]
+    assert "without_memory" in lines[0]
+    assert "FAILED" in lines[0]
+    assert "ModelStreamError" in lines[0]
+    assert "model_calls=1" in lines[0]
+    assert "0.01071" in lines[0]
+    assert "retried=True" in lines[0]
+    assert "Elm Street" not in lines[0]
+    assert memory_benchmark_live.incomplete_run_diagnostics(_live_metrics()) == []
+
+
+def test_failure_classes_keep_one_namespace_for_class_names_and_statuses() -> None:
+    """A status is never mistaken for a class name in the histogram."""
+
+    named = _live_arm("with_memory").model_copy(
+        update={"run_status": RunStatus.FAILED, "failure_class": "ModelStreamError"}
+    )
+    unnamed = _live_arm("without_memory", correct=False).model_copy(
+        update={"run_status": RunStatus.CANCELLED, "failure_class": None}
+    )
+
+    histogram = memory_benchmark_live._failure_classes([named, unnamed])
+
+    assert histogram == {"ModelStreamError": 1, "run_status:CANCELLED": 1}
+
+
+class TestBenchmarkEvidencePublicationGate:
+    """The two publication gates: evidence only on a pass, and the cost ceiling."""
+
+    @staticmethod
+    def _deterministic(digest: str) -> DeterministicBenchmarkResult:
+        return _result(corpus_sha256=digest)
+
+    @staticmethod
+    def _arm_evaluator(
+        calls: list[tuple[str, str, str]],
+        *,
+        cost: Decimal = Decimal("0.01"),
+        with_memory_knows: bool = True,
+        status: RunStatus = RunStatus.COMPLETED,
+        failures: dict[tuple[str, str, str], int] | None = None,
+        failure_class: str = "ModelStreamError",
+        failure_reason: str | None = None,
+        raises: bool = False,
+    ) -> object:
+        remaining = dict(failures or {})
+
+        async def evaluate(
+            _settings: object,
+            corpus: MemoryBenchmarkCorpus,
+            scenario: BenchmarkScenario,
+            probe: BenchmarkProbe,
+            *,
+            arm: str,
+            model_policy: str,
+            policy_profile: str,
+            scenario_context: object,
+        ) -> LiveProbeArmResult:
+            assert (model_policy, policy_profile) == ("balanced", "default")
+            assert scenario_context is not None
+            calls.append((scenario.id, probe.id, arm))
+            if remaining.get((scenario.id, probe.id, arm), 0) > 0:
+                remaining[(scenario.id, probe.id, arm)] -= 1
+                if raises:
+                    raise TimeoutError("scripted transport failure")
+                return LiveProbeArmResult(
+                    arm=arm,  # type: ignore[arg-type]
+                    answer=None,
+                    score=AnswerScore(correct=False, abstained=False, leaked_protected=False),
+                    run_status=RunStatus.FAILED,
+                    model_calls=0,
+                    cost_usd=cost,
+                    latency_ms=10,
+                    policy_failures=0,
+                    provider="openai",
+                    model="gpt-memory",
+                    policy_version="default@profile+hline",
+                    failure_class=failure_class,
+                    failure_reason=failure_reason,
+                )
+            knows = arm == "with_memory" and with_memory_knows
+            if probe.answer.kind == "abstain":
+                answer = corpus.abstain_phrase
+            elif knows:
+                answer = " and ".join(probe.answer.values)
+            else:
+                answer = "I would have to guess."
+            return LiveProbeArmResult(
+                arm=arm,  # type: ignore[arg-type]
+                answer=answer,
+                score=score_answer(
+                    answer,
+                    probe.answer,
+                    abstain_phrase=corpus.abstain_phrase,
+                    protected=scenario.protected_statements,
+                ),
+                run_status=status,
+                model_calls=1,
+                cost_usd=cost,
+                latency_ms=120 if arm == "with_memory" else 80,
+                policy_failures=0,
+                provider="openai",
+                model="gpt-memory",
+                policy_version="default@profile+hline",
+                retrieval=(
+                    None
+                    if arm != "with_memory"
+                    else _probe_result(
+                        probe_id=probe.id,
+                        category=probe.category,
+                        needed_total=len(probe.needed),
+                        needed_formed=len(probe.needed),
+                        needed_recalled=len(probe.needed),
+                    )
+                ),
+            )
+
+        return evaluate
+
+    def _wire(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        calls: list[tuple[str, str, str]],
+        cost: Decimal = Decimal("0.01"),
+        with_memory_knows: bool = True,
+        failures: dict[tuple[str, str, str], int] | None = None,
+        failure_class: str = "ModelStreamError",
+        failure_reason: str | None = None,
+        raises: bool = False,
+    ) -> tuple[MemoryBenchmarkCorpus, str]:
+        corpus, digest = load_corpus(_REPOSITORY)
+        monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
+        monkeypatch.setattr(memory_benchmark_live, "load_settings", memory_settings)
+
+        async def run_deterministic_benchmark(
+            _root: Path, **_kwargs: object
+        ) -> DeterministicBenchmarkResult:
+            return self._deterministic(digest)
+
+        monkeypatch.setattr(
+            memory_benchmark_live, "run_deterministic_benchmark", run_deterministic_benchmark
+        )
+        monkeypatch.setattr(
+            memory_benchmark_live,
+            "_evaluate_probe_live",
+            self._arm_evaluator(
+                calls,
+                cost=cost,
+                with_memory_knows=with_memory_knows,
+                failures=failures,
+                failure_class=failure_class,
+                failure_reason=failure_reason,
+                raises=raises,
+            ),
+        )
+        return corpus, digest
+
+    async def test_pass_publishes_exact_tuple(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, digest = self._wire(monkeypatch, calls=calls)
+        probes = [probe for scenario in corpus.scenarios for probe in scenario.probes]
+        abstain_expected = sum(probe.answer.kind == "abstain" for probe in probes)
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is True
+        assert result.failure_summary is None
+        assert result.evidence is not None
+        assert len(calls) == 2 * len(probes)
+        evidence = MemoryBenchmarkEvidence.model_validate_json(output.read_text(encoding="utf-8"))
+        assert evidence == result.evidence
+        assert (
+            evidence.model_policy,
+            evidence.provider,
+            evidence.model,
+            evidence.policy_profile,
+            evidence.policy_version,
+            evidence.build_ref,
+        ) == (
+            "balanced",
+            "openai",
+            "gpt-memory",
+            "default",
+            "default@profile+hline",
+            "0123456789ab",
+        )
+        assert evidence.corpus_sha256 == digest
+        assert evidence.benchmark_version == BENCHMARK_VERSION
+        assert evidence.cost_ceiling_usd == LIVE_COST_CEILING_USD
+        assert evidence.deterministic == self._deterministic(digest).metrics
+        assert evidence.live.probe_count == len(probes) == 66
+        assert evidence.live.abstain_expected == abstain_expected == 12
+        assert evidence.live.answerable_probe_count == 54
+        assert evidence.live.with_memory_correct == 66
+        assert evidence.live.without_memory_correct == abstain_expected
+        assert evidence.live.lift == 54
+        assert evidence.minimum_lift == 11
+        assert evidence.live.recoverable_probe_count == 54
+        assert evidence.minimum_recoverable_correct == 44
+        assert evidence.minimum_abstain_correct == 10
+        assert evidence.live.total_cost_usd == Decimal("0.01") * 132
+        assert evidence.live.ceiling_hits == 0
+        assert evidence.live.stopped_by is None
+        assert evidence.live.per_category["abstention"].with_memory_correct == 8
+        assert len(evidence.live.probes) == 66
+
+        with pytest.raises(ValueError, match="refusing to overwrite"):
+            await memory_benchmark_live.run_live_benchmark(
+                _REPOSITORY,
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref="0123456789ab",
+                output=output,
+            )
+
+        assert len(calls) == 2 * len(probes)
+
+    async def test_a_failed_probe_arm_is_retried_once_and_then_publishes(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(monkeypatch, calls=calls, failures={first: 1})
+        probes = [probe for scenario in corpus.scenarios for probe in scenario.probes]
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is True
+        assert result.evidence is not None
+        assert calls.count(first) == 2
+        assert len(calls) == 2 * len(probes) + 1
+        evidence = MemoryBenchmarkEvidence.model_validate_json(output.read_text(encoding="utf-8"))
+        assert evidence.live.incomplete_runs == 0
+        assert evidence.live.retried_runs == 1
+        assert evidence.live.total_cost_usd == Decimal("0.01") * (2 * len(probes) + 1)
+        retried = [
+            arm
+            for row in evidence.live.probes
+            for arm in (row.with_memory, row.without_memory)
+            if arm.retried
+        ]
+        assert len(retried) == 1
+        assert retried[0].run_status is RunStatus.COMPLETED
+
+    async def test_a_run_the_runtime_ended_on_its_own_limits_is_not_retried(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A budget kill is the ceiling working, not a failure to re-roll.
+
+        Re-asking a probe the per-run budget already stopped would let one
+        probe spend twice its per-run ceiling, so the four terminations the
+        runtime decides on — budget, steps, context overflow, and a permanent
+        model error — are kept on the first attempt with their class.
+        """
+
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(
+            monkeypatch,
+            calls=calls,
+            failures={first: 1},
+            failure_class="BudgetExceededError",
+            failure_reason=FailureReason.BUDGET_EXCEEDED.value,
+        )
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls.count(first) == 1
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.retried_runs == 0
+        assert result.live.incomplete_runs == 1
+        assert result.live.failure_classes == {"BudgetExceededError": 1}
+
+    async def test_a_second_failure_leaves_the_run_incomplete_and_named(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(monkeypatch, calls=calls, failures={first: 2})
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls.count(first) == 2
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.incomplete_runs == 1
+        assert result.live.retried_runs == 1
+        assert result.live.failure_classes == {"ModelStreamError": 1}
+        assert result.failure_summary is not None
+        assert "incomplete runs 1" in result.failure_summary
+
+    async def test_an_arm_that_throws_is_a_failed_arm_named_by_its_exception(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "without_memory")
+        self._wire(monkeypatch, calls=calls, failures={first: 2}, raises=True)
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.incomplete_runs == 1
+        assert result.live.retried_runs == 1
+        assert result.live.failure_classes == {"TimeoutError": 1}
+        thrown = [
+            arm
+            for row in result.live.probes
+            for arm in (row.with_memory, row.without_memory)
+            if arm.failure_class is not None
+        ]
+        assert len(thrown) == 1
+        assert (thrown[0].model_calls, thrown[0].cost_usd) == (0, Decimal("0"))
+        assert thrown[0].answer is None
+
+    async def test_a_retry_that_would_cross_the_ceiling_is_not_admitted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(monkeypatch, calls=calls, cost=Decimal("3.96"), failures={first: 1})
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls == [first]
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.stopped_by == "cost_ceiling"
+        assert result.live.ceiling_hits == 1
+        assert result.live.total_cost_usd == Decimal("3.96")
+        assert result.failure_summary is not None
+        assert "cost_ceiling" in result.failure_summary
+
+    async def test_failure_returns_diagnostics_and_leaves_no_artifact(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        self._wire(monkeypatch, calls=calls, with_memory_knows=False)
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.failure_summary is not None
+        assert "lift" in result.failure_summary
+        assert "11" in result.failure_summary
+        assert result.evidence is None
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.lift == 0
+        assert not output.exists()
+
+    async def test_cost_ceiling_stops_before_exceeding(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        self._wire(monkeypatch, calls=calls, cost=Decimal("0.50"))
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.ceiling_hits == 1
+        assert result.live.stopped_by == "cost_ceiling"
+        assert result.live.total_cost_usd == Decimal("4.00")
+        assert result.live.total_cost_usd <= LIVE_COST_CEILING_USD
+        assert len(calls) == 8
+        assert len(result.live.probes) == 4
+        assert result.failure_summary is not None
+        assert "cost_ceiling" in result.failure_summary
+
+    async def test_zero_cost_model_aborts_with_unenforceable_ceiling(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        self._wire(monkeypatch, calls=calls, cost=Decimal("0"))
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.failure_summary is not None
+        assert "model pricing unavailable; ceiling unenforceable" in result.failure_summary
+        assert result.evidence is None
+        assert not output.exists()
+        assert len(calls) == 1
+
+    async def test_opt_in_gate_returns_none_without_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        self._wire(monkeypatch, calls=calls)
+        monkeypatch.delenv("RUN_LIVE_MODEL_TESTS", raising=False)
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        assert (
+            await memory_benchmark_live.run_live_benchmark(
+                _REPOSITORY,
+                model_policy="balanced",
+                policy_profile="default",
+                build_ref="0123456789ab",
+                output=output,
+            )
+            is None
+        )
+        assert calls == []
+        assert not output.exists()
+
+
+def test_compare_to_baseline_sorts_an_attribution_partition_move_as_a_shift() -> None:
+    """A recalled belief changing which arm found it is neither better nor worse.
+
+    The three attribution counts partition `needed_recalled`; one rising while
+    another falls says where a belief was found, not how much was recalled.
+    """
+
+    baseline = _baseline_of(_result())
+    first, second = _scenario_results()
+    moved = second.probes[0].model_copy(update={"recalled_in_turn_only": 0, "recalled_both": 2})
+
+    comparison = compare_to_baseline(
+        _result([first, second.model_copy(update={"probes": [moved]})]), baseline
+    )
+
+    assert comparison.drift == []
+    assert comparison.regressions == []
+    assert comparison.improvements == []
+    assert sorted(entry.split()[0] for entry in comparison.shifts) == [
+        "recalled_both",
+        "recalled_in_turn_only",
+    ]

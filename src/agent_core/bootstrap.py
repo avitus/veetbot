@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import signal
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -290,9 +291,13 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, Run, RunLimits, RunStatus
 from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
-from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
+from agent_core.domain.sessions import (
+    DEFAULT_PROJECT_SCOPE,
+    SESSION_BROWSER_PROFILE_METADATA_KEY,
+    project_scope,
+)
 from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.domain.tools import ToolExecutionContext
 from agent_core.execution.egress import validate_destination
@@ -307,6 +312,7 @@ from agent_core.memory.formation import (
     DeterministicCandidateExtractor,
     GovernedMemoryService,
 )
+from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
@@ -428,6 +434,7 @@ class Composition:
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
     memory_retriever: HybridMemoryRetriever
+    memory_profiles: MemoryProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
 
@@ -1145,7 +1152,7 @@ async def build_notification_worker(
             providers=frozenset({PushProvider.APNS}),
             clock=effective_clock,
             ids=effective_ids,
-            claimant=f"notify:{os.getpid()}",
+            claimant=f"notify:{socket.gethostname()}:{os.getpid()}",
             batch_size=int(notification_limits["claim_batch"]),
             lease_seconds=float(notification_limits["lease_seconds"]),
             retry_delays=tuple(
@@ -1202,6 +1209,7 @@ async def _compose(
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
+    memory_profiles: MemoryProfiles,
     mcp_config: Mapping[str, object],
     max_compactions_per_step: int,
     skill_store: SkillPackageStore,
@@ -1321,7 +1329,14 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
-    memory_retriever = HybridMemoryRetriever(uow_factory, clock, ids, principal)
+    memory_retriever = HybridMemoryRetriever(
+        uow_factory,
+        clock,
+        ids,
+        principal,
+        profile=memory_profiles.retrieval,
+        trace_retention=memory_profiles.traces,
+    )
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
     registry = StaticToolRegistry()
@@ -1568,6 +1583,9 @@ async def _compose(
         principal,
         extractor=memory_extractor,
         policy_version=memory_policy_version,
+        formation_profile=memory_profiles.formation,
+        decay_tau_days=memory_profiles.retrieval.decay_tau_days,
+        usage=memory_profiles.retrieval.usage,
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
@@ -1631,6 +1649,17 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
         )
+
+        async def session_project_scope(session_id: UUID) -> str:
+            """Name the project a session belongs to, for formation and recall."""
+
+            try:
+                async with uow_factory() as uow:
+                    session = await uow.sessions.get(session_id, principal)
+            except NotFoundError:
+                return DEFAULT_PROJECT_SCOPE
+            return project_scope(session.metadata)
+
         context_builder = BudgetedContextBuilder(
             context_planner,
             estimator,
@@ -1638,6 +1667,7 @@ async def _compose(
             working_state,
             memory_retriever,
             query_former,
+            session_project_scope,
         )
         compactor = StructuredCompactor(
             estimator,
@@ -1653,6 +1683,7 @@ async def _compose(
             clock,
             ids,
             principal,
+            trace_retention=memory_profiles.traces,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
         registry.register(KnowledgeSearchTool(knowledge_service))
@@ -1675,7 +1706,18 @@ async def _compose(
         async def sweep_memory() -> int:
             return len(await memory_service.expire())
 
+        async def sweep_traces() -> int:
+            return await memory_service.expire_traces()
+
+        async def sweep_memory_decay() -> int:
+            if not memory_profiles.formation.scheduled_enabled:
+                return 0
+            result = await memory_service.decay()
+            return result.decayed + result.retired
+
         async def sweep_memory_consolidation() -> int:
+            if not memory_profiles.formation.session_boundary_enabled:
+                return 0
             ready_at = clock.now()
             async with uow_factory() as uow:
                 sessions = await uow.maintenance.pending_memory_sessions(
@@ -1689,7 +1731,7 @@ async def _compose(
                 try:
                     await memory_service.run(
                         trigger="session_idle",
-                        scope="general",
+                        scope=await session_project_scope(session_id),
                         session_id=session_id,
                     )
                 except Exception:
@@ -1757,11 +1799,13 @@ async def _compose(
                 await schedule_accountant.account(run_id)
             except Exception:
                 logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
+            completed: Run | None = None
             try:
                 async with uow_factory() as uow:
                     run = await uow.runs.get(run_id, principal)
                     if run.status not in TERMINAL_RUN_STATUSES:
                         return
+                    completed = run
                     await uow.events.append(
                         NewEvent(
                             session_id=run.session_id,
@@ -1780,6 +1824,24 @@ async def _compose(
                     )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
+            # What the answer cited is only knowable once the answer exists, so
+            # usage feedback is the completion's own step: its own error
+            # boundary, its own units of work, and no external call inside one.
+            if (
+                completed is not None
+                and completed.status is RunStatus.COMPLETED
+                and completed.final_message
+            ):
+                try:
+                    plan = await context_planner.current(completed.session_id)
+                    await memory_service.record_usage(
+                        session_id=completed.session_id,
+                        run_id=completed.id,
+                        final_text=completed.final_message,
+                        snapshot_trace_id=None if plan is None else plan.snapshot_id,
+                    )
+                except Exception:
+                    logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 
@@ -1871,9 +1933,11 @@ async def _compose(
         )
 
         async def consolidate_closed_session(session_id: UUID) -> None:
+            if not memory_profiles.formation.session_boundary_enabled:
+                return
             await memory_service.run(
                 trigger="session_close",
-                scope="general",
+                scope=await session_project_scope(session_id),
                 session_id=session_id,
             )
 
@@ -2048,8 +2112,13 @@ async def _compose(
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
+                    sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
+                    sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    memory_decay_interval_seconds=(
+                        memory_profiles.formation.scheduled_interval_seconds
+                    ),
                 ),
                 schedule_worker_factory=schedule_worker_factory,
                 sandbox=sandbox_manager,
@@ -2059,6 +2128,7 @@ async def _compose(
                 tool_pipeline=pipeline,
                 memory=memory_service,
                 memory_retriever=memory_retriever,
+                memory_profiles=memory_profiles,
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
             ),
@@ -2315,6 +2385,9 @@ async def build(
                 f"{ruleset.profile_name!r}"
             )
     context_config = load_config_document(effective_settings, "context/plan.yaml")
+    memory_profiles = MemoryProfiles.from_document(
+        load_config_document(effective_settings, "memory/profiles.yaml")
+    )
     run_defaults = runtime_config["run_defaults"]
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
@@ -2624,6 +2697,7 @@ async def build(
             ruleset=ruleset,
             live_events=live_events,
             context_config=context_config,
+            memory_profiles=memory_profiles,
             mcp_config=tool_config["mcp"],
             max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
             skill_store=skill_store,

@@ -115,8 +115,8 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least seventeen of the twenty-one labeled positive cases before evidence can be published."
-  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_lift_without_minimum_positive_coverage_does_not_publish
+  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least sixteen of the twenty labeled positive cases before evidence can be published."
+  check: tests/gates/test_memory_m10.py::test_provider_evidence_preserves_m10_positive_coverage_floor
 - id: gate.memory.provider_source_safety
   milestone: 10
   kind: case
@@ -179,6 +179,12 @@
   spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
   statement: "**No triple regression** — retrieval improves target eval cases **without** increasing policy failures, without regressing cache utilization, and without raising noise ratio."
   check: tests/gates/test_memory_m9.py::test_no_triple_regress
+- id: gate.memory.provider_positive_coverage_v2
+  milestone: 16
+  kind: case
+  spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
+  statement: "**Expanded positive formation coverage is current.** Provider assistance must fully support at least seventeen of the twenty-one labeled positive cases in the expanded corpus before Milestone 16 evidence can be published."
+  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_lift_without_minimum_positive_coverage_does_not_publish
 - id: gate.memory.bench_corpus_shape
   milestone: 16
   kind: structural
@@ -220,76 +226,76 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Live evidence exists only when every pass condition held.** A passing live run publishes one artifact carrying the corpus digest, build reference, provider, model, policy profile, compiled policy version, and both memory policy versions, and its validator re-derives every threshold from the counts inside it; a failing run returns diagnostics and writes no artifact, and an existing artifact is never overwritten."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_benchmark_eval.py::TestBenchmarkEvidencePublicationGate::test_pass_publishes_exact_tuple
 - id: gate.memory.bench_cost_ceiling
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The live arm stops before it exceeds its ceiling.** The pre-admission check refuses the run that would cross USD 4.00, records that it stopped for the ceiling, and publishes nothing; a model priced at zero aborts the arm instead of defeating the check."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_benchmark_eval.py::TestBenchmarkEvidencePublicationGate::test_cost_ceiling_stops_before_exceeding
 - id: gate.memory.bench_external_adapters
   milestone: 16
   kind: structural
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The external adapters map their datasets without vendoring them.** Each of the three loaders round-trips a synthetic fixture shaped like its dataset into scenarios, labeled beliefs, and probes with evidence references, and the repository contains no dataset file."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_benchmark_external.py::test_adapters_round_trip_synthetic_fixtures
 - id: gate.memory.profiles_wired
   milestone: 16
   kind: structural
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Memory profiles are loaded and mirror the shipped defaults.** The shipped profile document validates to exactly the default models, an operator overlay changes the value the retriever uses, unknown keys are rejected, and the session idle boundary is not in the document."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_memory_profiles_are_loaded_and_mirror_shipped_defaults
 - id: gate.memory.trace_retention
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Operator trace fields expire on schedule.** A trace past its operator expiry loses its arm latencies, candidate counts, and dropped-for-budget identifiers while its user-safe fields survive intact, an unexpired trace is untouched, and a second sweep changes nothing."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_trace_operator_fields_expire_on_schedule
 - id: gate.memory.decay_lifecycle
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Unused provisional beliefs decay and retire.** Under the sweep an idle provisional belief loses confidence and one below the floor is retired with its validity closed, while an active user-stated belief and a recently reinforced belief are untouched."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_decay_sweep_lowers_unused_provisional_and_retires_below_floor
 - id: gate.memory.usage_feedback
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Citing a belief resists decay and never raises confidence.** A belief whose short identifier appears in a completed run's final message is marked cited on its trace, gains utility and a fresh reinforcement instant, and keeps its confidence exactly; a returned-but-uncited belief loses utility; repeating the completion changes nothing."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_usage_feedback_marks_cited_and_never_raises_confidence
 - id: gate.memory.recall_delta
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The recall delta surfaces beliefs formed after the snapshot.** A belief written after a session's snapshot is injected in the next turn through the delta query bounded by the snapshot watermark, without rewriting the cached prefix."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_recall_delta_surfaces_post_snapshot_beliefs
 - id: gate.memory.correction_lines
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Correction lines are never yielded and never move the prefix.** When a snapshot member is superseded mid-session the next turn carries its correction line, that line survives budget pressure that drops recall blocks, it is never offered for yielding, and the prefix digest is unchanged."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_snapshot_correction_lines_never_yield_and_prefix_is_stable
 - id: gate.memory.established_facts_form
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
-  statement: "**Established facts enter formation as affirmed candidates.** A fact established in working state from trusted user sources becomes a committed belief at affirmed authority carrying the fact's provenance, while a fact whose sources are untrusted or foreign forms nothing."
-  check: tests/gates/pending.py::pending_gate
+  statement: "**Established facts enter formation as affirmed candidates.** A fact established in working state with non-empty provenance whose every source is a trusted user event of the owning principal becomes a committed belief at affirmed authority carrying that provenance, while empty provenance, an untrusted source, or a foreign source forms nothing."
+  check: tests/gates/test_memory_m16.py::test_established_facts_enter_formation_as_affirmed_candidates
 - id: gate.memory.conflict_surfaced
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**A lower-authority contradiction is conflicted, not resolved.** An inference contradicting a user-stated belief commits flagged and linked in both directions, requests confirmation, leaves the original live, and both statements surface together in recall with the link rendered."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_lower_authority_contradiction_is_conflicted_and_both_surface
 - id: gate.memory.authority_recency
   milestone: 16
   kind: property
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The resolver orders authority then recency.** Over generated authority pairs and source orderings, higher authority never loses to lower, equal authority with a later source or instant supersedes, equal authority with no ordering conflicts, and polarity alone never conflicts."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_resolver_orders_authority_then_recency
 - id: gate.memory.rederive_opt_in
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Re-derivation is opt-in and replays rejections.** The command refuses without an explicit confirmation, and with it re-consolidates from watermark zero without resurrecting a rejected belief."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_replay_is_opt_in_and_replays_rejections

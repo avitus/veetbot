@@ -31,7 +31,7 @@ def device(
     device_id: UUID = DEVICE_ID,
     client_device_id: str = "client-device-a",
     principal_id: str = PRINCIPAL_ID,
-    token: str | None = "push-token-a",
+    token: str | None = "push-token-a",  # noqa: S107
     muted_kinds: frozenset[NotificationKind] = frozenset(),
     created_at: datetime = NOW,
 ) -> Device:
@@ -83,7 +83,7 @@ async def assert_device_registration_is_idempotent_and_principal_scoped(
     stranger_device = device(
         device_id=UUID(int=DEVICE_ID.int + 2),
         principal_id=stranger.principal_id,
-        token="push-token-b",
+        token="push-token-b",  # noqa: S106
     )
     assert await registry.upsert(stranger_device, stranger) == stranger_device
     with pytest.raises(NotFoundError):
@@ -142,7 +142,7 @@ async def assert_device_tokens_move_and_lifecycle_removes_targets(
     third = device(
         device_id=UUID(int=DEVICE_ID.int + 2),
         client_device_id="client-device-c",
-        token="push-token-c",
+        token="push-token-c",  # noqa: S106
         muted_kinds=frozenset({NotificationKind.RUN_FAILED}),
     )
     await registry.upsert(third, principal())

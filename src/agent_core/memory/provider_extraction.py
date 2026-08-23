@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
 from decimal import ROUND_FLOOR, Decimal
 from enum import StrEnum
@@ -32,13 +33,18 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import (
     ModelAttempt,
+    ModelEvent,
+    ModelFailedEvent,
     ModelRequest,
     ModelTurn,
     ModelUsage,
+    ReasoningDeltaEvent,
     ResolvedModel,
     StopReason,
     SystemMessage,
+    TextDeltaEvent,
     TextPart,
+    ToolCallDeltaEvent,
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
@@ -51,9 +57,13 @@ from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 PROVIDER_EXTRACTOR_VERSION = "provider-assisted-v2"
-PROVIDER_FORMATION_POLICY_VERSION = "formation@6"
+PROVIDER_FORMATION_POLICY_VERSION = "formation@8"
 
 logger = logging.getLogger(__name__)
+
+
+class ProviderExtractionBudgetError(ValueError):
+    """The provider reported usage beyond the extractor's local ceiling."""
 
 
 def _safe_provider_failure(exc: Exception, *, stream_had_output: bool) -> ProviderExtractionFailure:
@@ -67,6 +77,13 @@ def _safe_provider_failure(exc: Exception, *, stream_had_output: bool) -> Provid
             provider_parameter=failure.provider_parameter,
             stream_had_output=(getattr(failure, "stream_had_output", False) or stream_had_output),
             retryable=failure.kind in {"transient", "protocol"},
+        )
+    if isinstance(exc, ProviderExtractionBudgetError):
+        return ProviderExtractionFailure(
+            error_class=type(exc).__name__,
+            failure_kind="permanent",
+            stream_had_output=stream_had_output,
+            retryable=False,
         )
     if isinstance(exc, TimeoutError):
         return ProviderExtractionFailure(
@@ -109,7 +126,7 @@ def provider_extraction_evidence_matches(
 
 
 class ProviderExtractionBudget(BaseModel):
-    """The fixed formation@6 ceiling for one provider-assisted consolidation."""
+    """The fixed formation@8 ceiling for one provider-assisted consolidation."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -699,6 +716,7 @@ class ProviderAssistedCandidateExtractor:
         evidence: ProviderExtractionEvaluationEvidence | None,
         fallback: MemoryCandidateExtractor,
         evaluation_mode: bool = False,
+        budget: ProviderExtractionBudget | None = None,
     ) -> None:
         if not evaluation_mode and (
             evidence is None
@@ -731,7 +749,7 @@ class ProviderAssistedCandidateExtractor:
         self._evidence = evidence
         self._evaluation_mode = evaluation_mode
         self._fallback = fallback
-        self._budget = ProviderExtractionBudget()
+        self._budget = budget or ProviderExtractionBudget()
 
     @classmethod
     def for_evaluation(
@@ -773,7 +791,7 @@ class ProviderAssistedCandidateExtractor:
         *,
         principal: Principal,
         scope: str,
-    ) -> list[MemoryCandidate]:
+    ) -> list[MemoryCandidate] | MemoryExtractionResult:
         if principal != self._principal:
             raise ValueError("provider memory extractor principal does not match its job")
         deterministic = await self._fallback.extract(
@@ -894,11 +912,28 @@ class ProviderAssistedCandidateExtractor:
         )
         usage = None
         response_sha256: str | None = None
+        stream_had_output = False
+
+        async def tracked_stream() -> AsyncIterator[ModelEvent]:
+            nonlocal stream_had_output
+            async for event in self._provider.stream(request, self._resolved_model, attempt):
+                if isinstance(event, ModelFailedEvent):
+                    if event.partial_turn is not None:
+                        stream_had_output = stream_had_output or bool(
+                            event.partial_turn.assistant_messages
+                            or event.partial_turn.tool_calls
+                            or event.partial_turn.provider_reasoning_items
+                        )
+                elif isinstance(
+                    event,
+                    (TextDeltaEvent, ReasoningDeltaEvent, ToolCallDeltaEvent),
+                ):
+                    stream_had_output = True
+                yield event
+
         try:
             async with asyncio.timeout(self._budget.timeout_seconds):
-                turn = await collect_turn(
-                    self._provider.stream(request, self._resolved_model, attempt)
-                )
+                turn = await collect_turn(tracked_stream())
             catalog_usage = price_usage(turn.usage, self._resolved_model.pricing)
             usage = turn.usage if turn.usage.cost > catalog_usage.cost else catalog_usage
             raw_response = _assistant_text(turn)
@@ -909,7 +944,9 @@ class ProviderAssistedCandidateExtractor:
                 or usage.output_tokens > self._budget.maximum_output_tokens
                 or usage.cost > self._budget.maximum_cost_usd
             ):
-                raise ValueError("memory extraction model exceeded its recorded budget")
+                raise ProviderExtractionBudgetError(
+                    "memory extraction model exceeded its recorded budget"
+                )
             source_text_by_sequence = _source_text_by_sequence(events, principal)
             grounded: list[MemoryCandidate] = []
             # One malformed claim must not discard the rest of the batch, and a
@@ -972,7 +1009,7 @@ class ProviderAssistedCandidateExtractor:
         except Exception as exc:
             failure = _safe_provider_failure(
                 exc,
-                stream_had_output=response_sha256 is not None,
+                stream_had_output=stream_had_output,
             )
             logger.warning(
                 "memory_provider_extraction_failed",

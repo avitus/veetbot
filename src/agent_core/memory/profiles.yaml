@@ -3,6 +3,11 @@ formation:
   session_boundary_enabled: true
   scheduled_enabled: true
   scheduled_interval_seconds: 86400
+  established_facts_enabled: true
+  decay:
+    floor_confidence: 0.2
+    step: 0.05
+    max_per_sweep: 200
 retrieval:
   semantic_enabled: false
   reciprocal_rank_fusion_k: 60
@@ -10,11 +15,19 @@ retrieval:
   lifecycle_weights:
     active: 1.0
     provisional: 0.4
+  decay_tau_days:
+    fact: 30
+    preference: 180
+    relationship: 365
+    user_model_attr: 180
+    procedure_pointer: 90
+  stale_penalty: 0.1
+  near_duplicate_penalty: 0.1
+  usage:
+    cited_utility_delta: 0.1
+    uncited_utility_delta: -0.05
+# The interactive snapshot ceiling is context/plan.yaml's classes.memory_snapshot.
 snapshots:
-  interactive:
-    max_items: 40
-    max_tokens: 1500
-    max_window_ratio: 0.02
   async:
     max_items: 80
     max_tokens: 3000
@@ -23,3 +36,5 @@ snapshots:
     max_items: 15
     max_tokens: 500
     max_window_ratio: 0.02
+traces:
+  operator_retention_days: 30

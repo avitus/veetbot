@@ -6738,8 +6738,8 @@ baseline.
 
 ### Re-derivation stays opt-in and demands a confirmation
 
-**Decided:** `agent memory rederive --confirm`, per session or across all
-sessions, replaying outstanding rejections.
+**Decided:** `agent memory replay --session <id> --confirm` reprocesses one
+named session and replays outstanding rejections.
 
 **Why:** the formation design makes re-derivation opt-in per principal, and
 silently re-mining old episodes is exactly the surprise that rule prevents.
@@ -6747,3 +6747,125 @@ silently re-mining old episodes is exactly the surprise that rule prevents.
 **Question for you:** none.
 
 **Reversal cost:** none; it is the standing rule.
+
+ADR-0068 built this surface, and Milestone 16 verified it against the standing
+rule as `gate.memory.rederive_opt_in`; there is no all-session mode or second
+command.
+
+## Milestone 16 implementation review
+
+The milestone completed on 2026-08-23. These are the decisions its final
+whole-branch review escalated, in the standing format, plus the deferred
+follow-up list. None blocks anything; every item is open for a different
+answer.
+
+### Replayed older evidence conflicts instead of superseding
+
+**Decided:** the conflict resolver's cross-session recency test anchors on the
+incoming candidate's newest source-event time compared against the existing
+belief's `valid_from`, so `agent memory replay --confirm` of an older session
+produces a flagged conflict pair rather than superseding a newer belief with
+older evidence. Before this fix the anchor was the consolidation instant, and a
+replay demonstrably reverted currency.
+
+**Why:** the re-derivation surface must never make the store less current, and
+`updated_at` stopped being an evidence signal once usage feedback and decay
+began touching it.
+
+**Question for you:** should older replayed evidence instead be ignored as
+stale — no new record at all — rather than surfacing as a conflict?
+
+**Reversal cost:** cheap; one resolver branch and the property gate's oracle.
+
+### The whole-row reinforce write keeps its narrow lost-update window
+
+**Decided:** utility moves and decay reuse the existing whole-row `reinforce`
+write, so a sweep that read a belief before a concurrent supersession commits
+can write the old status back. This is the adapter's pre-existing pattern
+(`edit` and `reject` share it), not something Milestone 16 introduced, and the
+sweeps are lease-guarded.
+
+**Why:** column-scoped updates or compare-and-set on `updated_at` are a
+persistence-layer hardening outside the milestone's scope.
+
+**Question for you:** schedule the column-scoped or compare-and-set hardening?
+
+**Reversal cost:** none; the change is additive.
+
+### A deleted snapshot member gets no correction line
+
+**Decided:** correction lines cover superseded, expired, and retired snapshot
+members — the three statuses the design names. Deletion removes the row, so a
+frozen prefix keeps rendering a deleted belief with no correction.
+
+**Why:** deletion is a rare, operator-driven act the correction design never
+mentions, and inventing a tombstone mid-milestone would have been new design.
+
+**Question for you:** should deletion write a tombstone the correction pass can
+render, or is the next snapshot rebuild soon enough?
+
+**Reversal cost:** moderate; it needs a tombstone or soft delete and a
+migration.
+
+### Live benchmark evidence carries the model's answer text
+
+**Decided:** the published live artifact records each probe's one-line model
+answer verbatim. Over the synthetic corpus that text restates invented facts
+about invented people, and both READMEs disclose it.
+
+**Why:** the answers are the evidence that scoring was honest, and nothing in
+the corpus is real.
+
+**Question for you:** before any non-synthetic corpus exists, should a schema
+bump hash or redact the answer rows?
+
+**Reversal cost:** cheap prospectively; published artifacts are immutable.
+
+### The live-arm retry hardening shipped without its own ADR
+
+**Decided:** after two runs failed only the absolute incomplete-runs condition,
+the arm gained a content-free terminal failure class and one retry per probe
+arm — excluding terminations the runtime decided on — and the third run
+published. The design document and the capability README record the mechanism;
+no ADR was written.
+
+**Why:** the published pass conditions did not change, so this read as harness
+repair rather than an architectural decision.
+
+**Question for you:** does the retry semantics deserve an ADR-0069 amendment?
+
+**Reversal cost:** none; it is documentation either way.
+
+### The deferred follow-up list
+
+**Decided:** the per-task reviews and the final whole-branch review left these
+as accepted, recorded limitations rather than blockers.
+
+- Benchmark: corpus v2 should add a lower-authority conflict scenario, since
+  conflict surfacing is proven by a gate but not yet measured by the
+  benchmark; citation-based usage feedback is structurally inert under the
+  harness's sequential identifiers.
+- Live arm: the four first-attempt failures were the without-memory arm of the
+  four multi-hop probes at their second position — content-correlated and
+  undiagnosed; a retried arm's first failure class is discarded, so an
+  additive `first_attempt_failure_class` is the next instrument; an arm that
+  fails outside the run records zero cost.
+- Retrieval: an uncited belief's negative utility does not lower its rank; a
+  superseded row is not stale-penalized in historical queries; the recall
+  delta yields entirely to the base block when the base fills the shared
+  token class; a conflict pair ranked below a full subject cap drops whole;
+  a rendered conflict marker may name a partner the budget dropped.
+- Formation: the fact-subject fallback can produce verb-bearing subjects that
+  never pair with their contradictions; one malformed fact discards the whole
+  working-state snapshot; fact statements are not grounding-checked against
+  the cited source text; replaying a later reinforcing session re-reinforces.
+- Events and configuration: the `memory.cited` event is absent from the
+  runtime-loop event catalog and stamps an actor the recall event does not;
+  seven profile knobs (`semantic_enabled` and the async and child snapshot
+  blocks) are carried by the specification with no consumer yet.
+- Persistence lanes: no PostgreSQL test exercises decay and retirement
+  end-to-end; a nightly deterministic lane remains an open question.
+
+**Question for you:** pick any to schedule; none blocks the next milestone.
+
+**Reversal cost:** not applicable; this is a list, not a decision.

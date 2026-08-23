@@ -22,6 +22,7 @@ from agent_core.domain.notifications import (
     NotificationStatus,
     PushMessage,
     PushOutcome,
+    test_notification_target_device_id,
 )
 from agent_core.domain.runs import RunStatus
 from agent_core.ports.determinism import Clock, IdFactory
@@ -37,6 +38,8 @@ from agent_core.ports.repositories import (
 
 DispatchProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
+_PENDING_BACKLOG_ALERT_AFTER = timedelta(minutes=5)
+_PENDING_BACKLOG_WARNING_COOLDOWN = timedelta(minutes=5)
 
 
 class DispatchProbeError(RuntimeError):
@@ -93,10 +96,15 @@ class NotificationDispatcher:
         self._lease_seconds = lease_seconds
         self._retry_delays = retry_delays
         self._dispatch_probe = dispatch_probe or (lambda _boundary: None)
+        self._backlog_warning_at: dict[UUID, datetime] = {}
 
     async def run_once(self) -> int:
         now = self._clock.now()
         async with self._uow_factory() as uow:
+            backlog = await uow.notification_outbox.list_pending_older_than(
+                now - _PENDING_BACKLOG_ALERT_AFTER,
+                self._batch_size,
+            )
             claimed = await uow.notification_outbox.claim_due(
                 now,
                 self._batch_size,
@@ -104,6 +112,25 @@ class NotificationDispatcher:
                 self._lease_seconds,
                 self._providers,
             )
+        warning_cutoff = now - _PENDING_BACKLOG_WARNING_COOLDOWN
+        self._backlog_warning_at = {
+            notification_id: warned_at
+            for notification_id, warned_at in self._backlog_warning_at.items()
+            if warned_at > warning_cutoff
+        }
+        for notification in backlog:
+            if notification.id in self._backlog_warning_at:
+                continue
+            logger.warning(
+                "notification pending backlog exceeded threshold",
+                extra={
+                    "notification_id": str(notification.id),
+                    "notification_kind": notification.kind.value,
+                    "notification_created_at": notification.created_at.isoformat(),
+                    "claimant": self._claimant,
+                },
+            )
+            self._backlog_warning_at[notification.id] = now
         for notification in claimed:
             try:
                 await self._dispatch(notification)
@@ -120,15 +147,17 @@ class NotificationDispatcher:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             if await self._is_stale(uow, notification, now):
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.SUPERSEDED,
                     None,
                 )
                 return
             if notification.expires_at is not None and notification.expires_at <= now:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.EXPIRED,
                     None,
                 )
@@ -139,9 +168,8 @@ class NotificationDispatcher:
                 notification.kind,
             )
             if notification.kind is NotificationKind.TEST:
-                target_device_id = _test_target_device_id(notification.dedupe_key)
-                if target_device_id is not None:
-                    targets = [target for target in targets if target.device_id == target_device_id]
+                target_device_id = test_notification_target_device_id(notification.dedupe_key)
+                targets = [target for target in targets if target.device_id == target_device_id]
             deliveries = await uow.notification_outbox.list_deliveries(notification.id)
 
         terminal_devices = {
@@ -161,8 +189,9 @@ class NotificationDispatcher:
         ]
         if not pending_targets:
             async with self._uow_factory() as uow:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.PENDING if other_targets else NotificationStatus.DISPATCHED,
                     now if other_targets else None,
                 )
@@ -220,35 +249,64 @@ class NotificationDispatcher:
             if saw_retry:
                 retry_index = notification.attempts - 1
                 if retry_index < len(self._retry_delays):
-                    await uow.notification_outbox.settle(
-                        notification.id,
+                    await self._settle_claim(
+                        uow,
+                        notification,
                         NotificationStatus.PENDING,
                         now + timedelta(seconds=self._retry_delays[retry_index]),
                     )
                 else:
-                    await uow.notification_outbox.settle(
-                        notification.id,
+                    await self._settle_claim(
+                        uow,
+                        notification,
                         NotificationStatus.FAILED,
                         None,
                     )
             elif saw_rejection:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.FAILED,
                     None,
                 )
             elif other_targets:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.PENDING,
                     now,
                 )
             else:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.DISPATCHED,
                     None,
                 )
+
+    async def _settle_claim(
+        self,
+        uow: NotificationDispatchUnitOfWork,
+        notification: Notification,
+        status: NotificationStatus,
+        next_attempt_at: datetime | None,
+    ) -> bool:
+        settled = await uow.notification_outbox.settle(
+            notification.id,
+            notification.attempts,
+            status,
+            next_attempt_at,
+        )
+        if not settled:
+            logger.info(
+                "notification settlement skipped after claim loss",
+                extra={
+                    "notification_id": str(notification.id),
+                    "notification_attempt": notification.attempts,
+                    "claimant": self._claimant,
+                },
+            )
+        return settled
 
     async def _is_stale(
         self,
@@ -325,16 +383,3 @@ class NotificationDispatcher:
                 created_at=now,
             )
         )
-
-
-def _test_target_device_id(dedupe_key: str) -> UUID | None:
-    prefix = "device.test:"
-    if not dedupe_key.startswith(prefix):
-        return None
-    raw_device_id, separator, _idempotency_key = dedupe_key.removeprefix(prefix).partition(":")
-    if not separator:
-        return None
-    try:
-        return UUID(raw_device_id)
-    except ValueError:
-        return None

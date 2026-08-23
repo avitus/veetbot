@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
@@ -131,6 +132,85 @@ def minimum_supported_case_count(positive_case_count: int) -> int:
     """Return the exact eighty-percent positive-coverage floor."""
 
     return (positive_case_count * 4 + 4) // 5
+
+
+MINIMUM_LEXICAL_TERM_LENGTH = 3
+_TERM_PUNCTUATION = ".,:;!?()[]{}\"'"
+# One run of alphanumerics, or several joined by the characters PostgreSQL's
+# default parser keeps inside a single token: a host, a path, an address, a
+# decimal, a hyphenated word. Underscore separates, as it does there.
+_LEXEME_ATOM = re.compile(r"[^\W_]+(?:[-'\u2019./:@][^\W_]+)*")
+_LEXEME_APOSTROPHE = re.compile(r"['\u2019]")
+
+
+def lexical_terms(text: str) -> set[str]:
+    """Split text into the terms lexical recall matches on."""
+
+    return {
+        stripped
+        for part in text.casefold().split()
+        if len(stripped := part.strip(_TERM_PUNCTUATION)) >= MINIMUM_LEXICAL_TERM_LENGTH
+    }
+
+
+def lexical_tokens(text: str) -> set[str]:
+    """Split text into the lexemes a `simple` full-text vector would hold.
+
+    Both belief stores must answer a text query the same way, and PostgreSQL
+    answers it by matching whole lexemes of `to_tsvector('simple', ...)`: it
+    lowercases and never stems, so `themes` is not `theme`, it keeps a run
+    joined by dots, slashes, colons, or an at sign whole the way a host, path,
+    or address stays whole, it splits an apostrophe into its parts, and it
+    emits a hyphenated word both whole and in parts.
+
+    The approximation ends at the parser's edges: a URL carrying a query
+    string, and a date, are divided differently there. Lexical recall is a
+    ranking arm rather than an isolation predicate, so an edge that differs
+    changes what the ranker is offered and never what a principal may see.
+    """
+
+    tokens: set[str] = set()
+    for atom in _LEXEME_ATOM.findall(text.casefold()):
+        for part in _LEXEME_APOSTROPHE.split(atom):
+            if not part:
+                continue
+            tokens.add(part)
+            if "-" in part:
+                tokens.update(piece for piece in part.split("-") if piece)
+    return tokens
+
+
+def lexical_term_lexemes(terms: Iterable[str]) -> list[frozenset[str]]:
+    """The lexemes each query term needs, the way `plainto_tsquery` ands them."""
+
+    return [frozenset(lexical_tokens(term)) for term in terms]
+
+
+def lexical_text_matches(term_lexemes: Iterable[frozenset[str]], text: str) -> bool:
+    """Whether any term's lexemes all appear in this text.
+
+    A term that reduces to no lexeme matches nothing, as an empty tsquery does.
+    """
+
+    tokens = lexical_tokens(text)
+    return any(lexemes and lexemes <= tokens for lexemes in term_lexemes)
+
+
+def lexical_query_terms(text: str | None) -> list[str]:
+    """Order the query's lexical terms so both belief stores match the same set.
+
+    Every store answers a text query with any-term semantics: a record matches
+    when it overlaps one term or more. Text too short to yield a term is still
+    a query, so it is matched whole rather than matching everything.
+    """
+
+    if text is None:
+        return []
+    terms = sorted(lexical_terms(text))
+    if terms:
+        return terms
+    collapsed = " ".join(text.casefold().split())
+    return [collapsed] if collapsed else []
 
 
 class ProviderExtractionEvaluationEvidence(BaseModel):
@@ -274,10 +354,54 @@ class ConsolidationRun(BaseModel):
 
 
 class ConsolidationResult(BaseModel):
+    """What one consolidation produced, beyond the audit row it wrote.
+
+    `conflicted` counts the beliefs committed beside a belief they contradict
+    rather than over it. They are already inside the audit's `committed` total;
+    the separate count exists because a conflict is the outcome an operator
+    most wants to see, and the audit row is column-per-field in the store.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     run: ConsolidationRun
     beliefs: list[MemoryRecord] = Field(default_factory=list)
+    conflicted: int = Field(default=0, ge=0)
+
+
+class DecayResult(BaseModel):
+    """What one decay sweep changed, counted in disjoint outcomes.
+
+    `decayed` counts beliefs that lost a step of confidence and stayed live;
+    `retired` counts the ones the step carried below the floor, which are
+    closed rather than lowered. A belief is never in both.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decayed: int = Field(default=0, ge=0)
+    retired: int = Field(default=0, ge=0)
+
+
+class UsageFeedback(BaseModel):
+    """What one completed run's citations fed back into the store.
+
+    `cited` and `uncited` count the beliefs actually written, not mentions: a
+    belief returned by several of the run's traces moves once, a belief the
+    answer cited is never also counted as unused, and one already at the
+    ceiling or the floor is left alone and not counted. `ambiguous` counts
+    citations that named more than one returned belief and were therefore
+    evidence about none of them. `traces` counts the recall traces the feedback
+    read, which is zero when the run holds no recall trace at all and when the
+    run's feedback had already been recorded.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cited: int = Field(default=0, ge=0)
+    uncited: int = Field(default=0, ge=0)
+    traces: int = Field(default=0, ge=0)
+    ambiguous: int = Field(default=0, ge=0)
 
 
 class MemoryDiagnosis(BaseModel):
@@ -295,6 +419,32 @@ class MemoryDiagnosis(BaseModel):
     pending_retry: bool = False
 
 
+class MemoryCorrection(BaseModel):
+    """One snapshot belief that stopped holding after the session froze it.
+
+    The frozen prefix goes on rendering the belief it captured, so the
+    correction is the only thing that can tell the turn the belief is closed.
+    It carries identifiers and an instant rather than statements: the
+    successor is already rendered by the delta, and repeating its text here
+    would state it twice in two voices.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    belief_id: UUID
+    replacement_id: UUID | None = None
+    ended_at: datetime
+
+    def render(self) -> str:
+        """Render the override line the context builder places in Region B."""
+
+        stamp = self.ended_at.isoformat().replace("+00:00", "Z")
+        line = f"correction: [m:{str(self.belief_id)[:8]}] no longer holds as of {stamp}"
+        if self.replacement_id is None:
+            return f"{line}."
+        return f"{line}; superseded by [m:{str(self.replacement_id)[:8]}]."
+
+
 class RecallQuery(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -310,6 +460,10 @@ class RecallQuery(BaseModel):
     budget_tokens: PositiveInt
     max_items: PositiveInt
     min_score: float = Field(ge=0, le=1)
+    # The recall delta bounds a query by the store position a session froze its
+    # snapshot at, so a belief written since is a query result rather than
+    # something the caller has to filter for afterwards.
+    min_store_position: int = Field(default=0, ge=0)
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
 
 
@@ -369,6 +523,9 @@ class RecallTrace(BaseModel):
     returned: list[UUID] = Field(default_factory=list)
     cited: list[UUID] = Field(default_factory=list)
     dropped_for_budget: list[UUID] = Field(default_factory=list)
+    # The operator sweep nulls the identifiers above and leaves this count, so
+    # the user-safe projection can still say how many beliefs were considered.
+    dropped_for_budget_count: int = Field(default=0, ge=0)
     blocked: list[UUID] = Field(default_factory=list)
     carried_in: list[UUID] = Field(default_factory=list)
     beliefs: list[RecalledBelief] = Field(default_factory=list)
@@ -376,6 +533,18 @@ class RecallTrace(BaseModel):
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime
+
+    @property
+    def has_operator_fields(self) -> bool:
+        """Whether the operator tier still holds anything an expiry would null."""
+
+        return bool(self.arm_latencies_ms or self.candidates or self.dropped_for_budget)
+
+    @property
+    def considered_not_shown(self) -> int:
+        """Beliefs dropped for budget: by identifier, or by count once expired."""
+
+        return len(self.dropped_for_budget) or self.dropped_for_budget_count
 
 
 class TracedBelief(BaseModel):

@@ -328,11 +328,12 @@ artifact is committed.
 Provider-assisted memory formation uses safe automatic selection by default.
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` activates matching operator or
 release-bundled evidence and otherwise records the reason and stays on
-deterministic `formation@5`. The bundled `formation@4` artifact is historical
-and does not match current provider-assisted `formation@6`. `off` does not even resolve a formation model;
-`required` refuses startup without an exact extractor, model, profile, and
-compiled-policy-version match. An operator artifact can be supplied with
-`AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
+deterministic `formation@7`. The bundled artifact is reviewed provider-assisted
+`formation@8` evidence for the balanced OpenAI `gpt-5.6-sol` and default-profile
+tuple, so that tuple activates and every other one falls back. `off` does not
+even resolve a formation model; `required` refuses startup without an exact
+extractor, model, profile, and compiled-policy-version match. An operator
+artifact can be supplied with `AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
 
 Release engineers can generate that artifact instead of authoring JSON:
 
@@ -343,8 +344,8 @@ RUN_LIVE_MODEL_TESTS=1 uv run agent eval memory-formation \
   --output .agent/evals/provider-memory-evidence.json
 ```
 
-The checked-in corpus currently makes 24 bounded provider calls (at most USD
-1.20 under the extractor's per-call ceiling). The command compares isolated
+The checked-in corpus currently makes 25 bounded provider calls (at most USD
+1.25 under the extractor's per-call ceiling). The command compares isolated
 provider and deterministic arms, derives the corpus hash and resolved model,
 and writes a new file only after the no-fabrication, no-policy-regression, and
 positive-lift gate passes. Provider extraction itself runs only during memory

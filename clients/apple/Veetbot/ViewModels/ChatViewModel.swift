@@ -98,7 +98,7 @@ public final class ChatViewModel: ObservableObject {
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil
     ) {
-        self.tokenStore = tokenStore
+        self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
         self.artifactCache = artifactCache
@@ -113,6 +113,8 @@ public final class ChatViewModel: ObservableObject {
         do {
             let configuration = try ConnectionConfiguration(baseURLString: baseURLString)
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            let previousToken = try await tokenStore.readToken()
+            let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
             if !trimmedToken.isEmpty {
                 try await tokenStore.saveToken(trimmedToken)
             }
@@ -126,6 +128,19 @@ public final class ChatViewModel: ObservableObject {
                 browserProfiles = []
                 browserAuthentication = nil
                 await configurationStore.saveBrowserProfileID(nil)
+            } else if credentialsChanged {
+                browserProfiles = []
+                browserAuthentication = nil
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
             await configurationStore.save(configuration)
             requiresReauthentication = false
@@ -138,18 +153,23 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        var revokeError: Error?
         if let api {
             do {
                 _ = try await deviceRegistrationCoordinator.revoke(using: api)
             } catch {
-                present(error)
-                return
+                revokeError = error
             }
         }
         selectionRequestID = nil
         historyReconciliationID = nil
         watchTasks.cancel()
-        do { try await tokenStore.deleteToken() } catch { present(error) }
+        var tokenDeletionError: Error?
+        do {
+            try await tokenStore.deleteToken()
+        } catch {
+            tokenDeletionError = error
+        }
         api = nil
         eventStream = nil
         browserProfiles = []
@@ -159,6 +179,11 @@ public final class ChatViewModel: ObservableObject {
         await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
+        if let revokeError {
+            present(revokeError)
+        } else if let tokenDeletionError {
+            present(tokenDeletionError)
+        }
     }
 
     public func registerRemoteNotifications(
@@ -682,10 +707,12 @@ public final class ChatViewModel: ObservableObject {
         }
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
+        var createdProfileID: UUID?
         do {
             let profile = try await api.createBrowserProfile(
                 allowedOrigins: [normalizedOrigin]
             )
+            createdProfileID = profile.id
             let ceremony = try await api.beginBrowserAuthentication(
                 profileID: profile.id,
                 loginURL: normalizedLoginURL
@@ -701,9 +728,39 @@ public final class ChatViewModel: ObservableObject {
             }
             return ceremony.launchURL
         } catch {
-            present(error)
+            let creationError = error
+            if let createdProfileID {
+                let cleanupError = await discardUnusedBrowserProfile(
+                    using: api,
+                    profileID: createdProfileID,
+                    authenticationID: nil
+                )
+                browserProfiles.removeAll { $0.id == createdProfileID }
+                if browserAuthentication?.profileID == createdProfileID {
+                    browserAuthentication = nil
+                }
+                if let cleanupError {
+                    errorMessage =
+                        "\(displayMessage(for: creationError)) The unused browser profile could not be fully removed: \(displayMessage(for: cleanupError))"
+                } else {
+                    present(creationError)
+                }
+            } else {
+                present(creationError)
+            }
             return nil
         }
+    }
+
+    public func websiteAuthenticationLaunchFailed() async {
+        await discardCurrentWebsiteAccess(
+            successMessage:
+                "Veetbot couldn’t open the secure login page. The unused login was removed; try again."
+        )
+    }
+
+    public func cancelWebsiteAccessSetup() async {
+        await discardCurrentWebsiteAccess(successMessage: nil)
     }
 
     public func refreshBrowserAuthentication() async {
@@ -714,7 +771,11 @@ public final class ChatViewModel: ObservableObject {
             let updated = try await api.getBrowserAuthentication(browserAuthentication.id)
             self.browserAuthentication = updated
             try await reloadBrowserProfiles(using: api)
-            if updated.status == .ready {
+            if updated.status == .ready,
+                browserProfiles.contains(where: {
+                    $0.id == updated.profileID && $0.status == .ready
+                })
+            {
                 selectedBrowserProfileID = updated.profileID
                 await configurationStore.saveBrowserProfileID(updated.profileID)
             }
@@ -759,6 +820,68 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    private func discardCurrentWebsiteAccess(successMessage: String?) async {
+        guard let api, let authentication = browserAuthentication else {
+            if let successMessage { errorMessage = successMessage }
+            return
+        }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        let profileID = authentication.profileID
+        let cleanupError = await discardUnusedBrowserProfile(
+            using: api,
+            profileID: profileID,
+            authenticationID: authentication.status.isTerminal ? nil : authentication.id
+        )
+        browserAuthentication = nil
+        browserProfiles.removeAll { $0.id == profileID }
+        if selectedBrowserProfileID == profileID {
+            selectedBrowserProfileID = nil
+            await configurationStore.saveBrowserProfileID(nil)
+        }
+        do {
+            try await reloadBrowserProfiles(using: api)
+        } catch {
+            if cleanupError == nil {
+                present(error)
+                return
+            }
+        }
+        if let cleanupError {
+            errorMessage =
+                "The login setup could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
+        } else {
+            errorMessage = successMessage
+        }
+    }
+
+    private func discardUnusedBrowserProfile(
+        using api: VeetbotAPIClient,
+        profileID: UUID,
+        authenticationID: UUID?
+    ) async -> Error? {
+        var firstError: Error?
+        if let authenticationID {
+            do {
+                _ = try await api.cancelBrowserAuthentication(authenticationID)
+            } catch {
+                firstError = error
+            }
+        }
+        do {
+            _ = try await api.revokeBrowserProfile(profileID)
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+        do {
+            try await api.deleteBrowserProfile(profileID)
+            return nil
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+        return firstError
+    }
+
     private func reloadBrowserProfiles(using api: VeetbotAPIClient) async throws {
         var profiles: [BrowserProfileView] = []
         var cursor: String?
@@ -791,6 +914,18 @@ public final class ChatViewModel: ObservableObject {
             {
                 selectedBrowserProfileID = await configurationStore.loadBrowserProfileID()
                 try await install(configuration)
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        browserProfiles = []
+                        browserAuthentication = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
         } catch {
             present(error)
@@ -951,6 +1086,10 @@ public final class ChatViewModel: ObservableObject {
             requiresReauthentication = true
         }
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    private func displayMessage(for error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }
 

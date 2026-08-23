@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import math
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -1987,6 +1988,38 @@ class PostgresProcessEventRepository:
             )
         ).all()
         return [self._to_domain(row) for row in rows]
+
+    async def list_filtered(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        session_id: UUID | None,
+        event_types: frozenset[str],
+        limit: int,
+    ) -> builtins.list[ProcessEvent]:
+        if not event_types:
+            raise ValueError("process event types cannot be empty")
+        if limit <= 0:
+            raise ValueError("process event limit must be positive")
+        statement = select(ProcessEventRow).where(
+            ProcessEventRow.event_type.in_(event_types),
+            ProcessEventRow.payload["tenant_id"].as_string() == tenant_id,
+            ProcessEventRow.payload["principal_id"].as_string() == principal_id,
+        )
+        if session_id is not None:
+            statement = statement.where(
+                ProcessEventRow.payload["session_id"].as_string() == str(session_id)
+            )
+        rows = (
+            await self._session.scalars(
+                statement.order_by(
+                    ProcessEventRow.created_at.desc(),
+                    ProcessEventRow.id.desc(),
+                ).limit(limit)
+            )
+        ).all()
+        return [self._to_domain(row) for row in reversed(rows)]
 
 
 class PostgresIdempotencyRepository:

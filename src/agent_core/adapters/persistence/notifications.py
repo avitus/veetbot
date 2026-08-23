@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from pydantic import SecretStr
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import String, and_, cast, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,7 @@ from agent_core.domain.devices import (
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.notifications import (
+    TEST_NOTIFICATION_DEDUPE_PREFIX,
     DeliveryOutcome,
     NewNotification,
     Notification,
@@ -51,6 +52,7 @@ from agent_core.domain.notifications import (
     NotificationDelivery,
     NotificationKind,
     NotificationStatus,
+    test_notification_target_device_id,
 )
 from agent_core.ports.determinism import Clock
 
@@ -299,6 +301,9 @@ class InMemoryNotificationOutbox:
                     value.principal_id,
                     value.kind,
                 )
+                if value.kind is NotificationKind.TEST:
+                    target_device_id = test_notification_target_device_id(value.dedupe_key)
+                    targets = [target for target in targets if target.device_id == target_device_id]
                 terminal_devices = {
                     delivery.device_id
                     for delivery in self._deliveries.values()
@@ -326,6 +331,22 @@ class InMemoryNotificationOutbox:
                 self._notifications[value.id] = updated
                 claimed.append(updated.model_copy(deep=True))
             return claimed
+
+    async def list_pending_older_than(
+        self,
+        before: datetime,
+        limit: int,
+    ) -> list[Notification]:
+        cutoff = _aware_utc(before)
+        _positive_limit(limit, "notification backlog")
+        async with self._lock:
+            values = [
+                value
+                for value in self._notifications.values()
+                if value.status is NotificationStatus.PENDING and value.created_at < cutoff
+            ]
+            values.sort(key=lambda value: (value.created_at, value.id))
+            return [value.model_copy(deep=True) for value in values[:limit]]
 
     async def record_delivery(self, delivery: NotificationDelivery) -> None:
         async with self._lock:
@@ -377,13 +398,25 @@ class InMemoryNotificationOutbox:
     async def settle(
         self,
         notification_id: UUID,
+        attempt: int,
         status: NotificationStatus,
         next_attempt_at: datetime | None,
-    ) -> None:
+    ) -> bool:
+        if attempt <= 0:
+            raise ValueError("notification settlement attempt must be positive")
+        instant = _aware_utc(self._clock.now())
         async with self._lock:
             notification = self._notifications.get(notification_id)
             if notification is None:
                 raise NotFoundError("notification not found")
+            if (
+                notification.status is not NotificationStatus.PENDING
+                or notification.attempts != attempt
+                or notification.claimed_by is None
+                or notification.claimed_until is None
+                or notification.claimed_until <= instant
+            ):
+                return False
             if status is NotificationStatus.PENDING:
                 if next_attempt_at is None:
                     raise ValueError("pending notification requires next attempt")
@@ -406,6 +439,7 @@ class InMemoryNotificationOutbox:
                     }
                 )
             self._notifications[notification_id] = updated
+            return True
 
     async def list(
         self,
@@ -767,6 +801,24 @@ class PostgresNotificationOutbox:
         values.sort(key=lambda value: (value.next_attempt_at, value.created_at, value.id))
         return values
 
+    async def list_pending_older_than(
+        self,
+        before: datetime,
+        limit: int,
+    ) -> list[Notification]:
+        rows = (
+            await self._session.scalars(
+                select(NotificationOutboxRow)
+                .where(
+                    NotificationOutboxRow.status == NotificationStatus.PENDING.value,
+                    NotificationOutboxRow.created_at < _aware_utc(before),
+                )
+                .order_by(NotificationOutboxRow.created_at, NotificationOutboxRow.id)
+                .limit(_positive_limit(limit, "notification backlog"))
+            )
+        ).all()
+        return [notification_to_domain(row) for row in rows]
+
     async def record_delivery(self, delivery: NotificationDelivery) -> None:
         owner = await self._session.scalar(
             select(NotificationOutboxRow.id)
@@ -846,9 +898,13 @@ class PostgresNotificationOutbox:
     async def settle(
         self,
         notification_id: UUID,
+        attempt: int,
         status: NotificationStatus,
         next_attempt_at: datetime | None,
-    ) -> None:
+    ) -> bool:
+        if attempt <= 0:
+            raise ValueError("notification settlement attempt must be positive")
+        instant = _aware_utc(self._clock.now())
         values: dict[str, object]
         if status is NotificationStatus.PENDING:
             if next_attempt_at is None:
@@ -869,12 +925,24 @@ class PostgresNotificationOutbox:
             }
         identity = await self._session.scalar(
             update(NotificationOutboxRow)
-            .where(NotificationOutboxRow.id == notification_id)
+            .where(
+                NotificationOutboxRow.id == notification_id,
+                NotificationOutboxRow.status == NotificationStatus.PENDING.value,
+                NotificationOutboxRow.attempts == attempt,
+                NotificationOutboxRow.claimed_by.is_not(None),
+                NotificationOutboxRow.claimed_until > instant,
+            )
             .values(**values)
             .returning(NotificationOutboxRow.id)
         )
         if identity is None:
-            raise NotFoundError("notification not found")
+            exists = await self._session.scalar(
+                select(NotificationOutboxRow.id).where(NotificationOutboxRow.id == notification_id)
+            )
+            if exists is None:
+                raise NotFoundError("notification not found")
+            return False
+        return True
 
     async def list(
         self,
@@ -926,6 +994,16 @@ def _pending_target_exists(provider_values: set[str] | None = None) -> ColumnEle
         device.push_token.is_not(None),
         ~device.muted_kinds.op("@>")(func.jsonb_build_array(NotificationOutboxRow.kind)),
         ~terminal_delivery,
+        or_(
+            NotificationOutboxRow.kind != NotificationKind.TEST.value,
+            NotificationOutboxRow.dedupe_key.like(
+                func.concat(
+                    TEST_NOTIFICATION_DEDUPE_PREFIX,
+                    cast(device.id, String),
+                    ":%",
+                )
+            ),
+        ),
     ]
     if provider_values is not None:
         conditions.append(device.push_provider.in_(provider_values))

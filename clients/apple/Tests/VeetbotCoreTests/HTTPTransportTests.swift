@@ -58,6 +58,16 @@ import Testing
     }
 
     @Test
+    func testSessionTokenStoreDoesNotReopenKeychainForEveryRequest() async throws {
+        let durable = OneSuccessfulReadTokenStore(token: "device-token")
+        let store = SessionTokenStore(durable: durable)
+
+        #expect(try await store.readToken() == "device-token")
+        #expect(try await store.readToken() == "device-token")
+        #expect(await durable.readCount == 1)
+    }
+
+    @Test
     func testWebsiteAccessUsesProfileIdentifiersAndDirectAuthenticationCeremonies() async throws {
         defer { StubURLProtocol.handler = nil }
         let profileID = try #require(
@@ -710,11 +720,19 @@ import Testing
         let deviceJSON = """
             {"id":"\(deviceID.uuidString)","client_device_id":"installation","name":"Owner's iPhone","kind":"mobile","platform":"ios","app_bundle_id":"com.veetbot.apple","push_provider":"apns","push_environment":"sandbox","push_token_fingerprint":"abcdef","push_token_updated_at":"2026-08-22T00:00:00Z","push_token_invalidated_at":null,"muted_kinds":[],"status":"active","revoked_at":null,"last_seen_at":"2026-08-22T00:00:00Z","created_at":"2026-08-22T00:00:00Z","updated_at":"2026-08-22T00:00:00Z"}
             """
+        let revokedDeviceJSON = """
+            {"id":"\(deviceID.uuidString)","client_device_id":"installation","name":"Owner's iPhone","kind":"mobile","platform":"ios","app_bundle_id":"com.veetbot.apple","push_provider":null,"push_environment":null,"push_token_fingerprint":null,"push_token_updated_at":"2026-08-22T00:00:00Z","push_token_invalidated_at":"2026-08-22T00:05:00Z","muted_kinds":[],"status":"revoked","revoked_at":"2026-08-22T00:05:00Z","last_seen_at":"2026-08-22T00:00:00Z","created_at":"2026-08-22T00:00:00Z","updated_at":"2026-08-22T00:05:00Z"}
+            """
         StubURLProtocol.handler = { request in
             lock.withLock { requests.append(request) }
-            let body = request.url?.path == "/v1/devices" && request.httpMethod == "GET"
-                ? "{\"items\":[\(deviceJSON)],\"next_cursor\":null}"
-                : deviceJSON
+            let body: String
+            if request.url?.path == "/v1/devices" && request.httpMethod == "GET" {
+                body = "{\"items\":[\(deviceJSON)],\"next_cursor\":null}"
+            } else if request.url?.path.hasSuffix("/revoke") == true {
+                body = revokedDeviceJSON
+            } else {
+                body = deviceJSON
+            }
             let response = try #require(
                 HTTPURLResponse(
                     url: request.url!,
@@ -743,7 +761,9 @@ import Testing
             ).id == deviceID
         )
         #expect(try await client.listDevices(limit: 500, cursor: "next").items.count == 1)
-        #expect(try await client.revokeDevice(deviceID).status == .active)
+        let revoked = try await client.revokeDevice(deviceID)
+        #expect(revoked.status == .revoked)
+        #expect(revoked.revokedAt != nil)
 
         let captured = lock.withLock { requests }
         #expect(captured.map(\.httpMethod) == ["POST", "GET", "POST"])
@@ -792,6 +812,29 @@ import Testing
         )
         return VeetbotAPIClient(transport: transport)
     }
+}
+
+private actor OneSuccessfulReadTokenStore: TokenStore {
+    private let token: String
+    private(set) var readCount = 0
+
+    init(token: String) {
+        self.token = token
+    }
+
+    func readToken() throws -> String? {
+        readCount += 1
+        guard readCount == 1 else {
+            throw KeychainTokenStoreError.operationFailed(13)
+        }
+        return token
+    }
+
+    func saveToken(_ token: String) throws {
+        _ = token
+    }
+
+    func deleteToken() throws {}
 }
 
 private final class StubURLProtocol: URLProtocol {

@@ -51,7 +51,7 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "subagents-and-delegation.md": (21, 0),
     "inbound-surfaces.md": (21, 0),
     "operational-hardening.md": (16, 0),
-    "memory-evaluation-and-lifecycle.md": (19, 0),
+    "memory-evaluation-and-lifecycle.md": (20, 0),
     "milestone-map.md": (7, 0),
 }
 

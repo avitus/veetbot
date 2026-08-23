@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 from collections import defaultdict, deque
 from collections.abc import Sequence
 from datetime import datetime
@@ -235,6 +236,12 @@ class InMemoryRunRepository:
         async with self._lock:
             if run.id in self._runs:
                 raise ConflictError("run already exists")
+            if run.status not in TERMINAL_RUN_STATUSES and any(
+                candidate.session_id == run.session_id
+                and candidate.status not in TERMINAL_RUN_STATUSES
+                for candidate in self._runs.values()
+            ):
+                raise ConflictError("session already has an active run")
             if (
                 run.parent_run_id is not None
                 and run.kind is RunKind.SKILL_REVIEW
@@ -591,6 +598,31 @@ class InMemoryProcessEventRepository:
                 if event_type is None or event.event_type == event_type
             ]
         return sorted(rows, key=lambda event: (event.created_at, event.id.int))
+
+    async def list_filtered(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        session_id: UUID | None,
+        event_types: frozenset[str],
+        limit: int,
+    ) -> builtins.list[ProcessEvent]:
+        if not event_types:
+            raise ValueError("process event types cannot be empty")
+        if limit <= 0:
+            raise ValueError("process event limit must be positive")
+        async with self._lock:
+            rows = [
+                event.model_copy(deep=True)
+                for event in self._events.values()
+                if event.event_type in event_types
+                and event.payload.get("tenant_id") == tenant_id
+                and event.payload.get("principal_id") == principal_id
+                and (session_id is None or event.payload.get("session_id") == str(session_id))
+            ]
+        rows.sort(key=lambda event: (event.created_at, event.id.int), reverse=True)
+        return list(reversed(rows[:limit]))
 
 
 class InMemoryToolInvocationRepository:
