@@ -299,3 +299,63 @@
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Re-derivation is opt-in and replays rejections.** The command refuses without an explicit confirmation, and with it re-consolidates from watermark zero without resurrecting a rejected belief."
   check: tests/gates/test_memory_m16.py::test_replay_is_opt_in_and_replays_rejections
+- id: gate.memory.read_api_ceiling_required
+  milestone: 17
+  kind: case
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**A request without a ceiling is refused.** A list or detail request that omits `ceiling` is a validation error naming the parameter; the server returns no belief and applies no default. A ceiling outside the enumeration is the same error."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_ceiling_filter
+  milestone: 17
+  kind: property
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**Nothing above the ceiling is returned or distinguishable.** Over generated belief sensitivities and request ceilings, no item of any list page has a sensitivity above the requested ceiling, and a detail read of a belief above it is byte-identical to a detail read of an identifier that does not exist."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_principal_isolation
+  milestone: 17
+  kind: case
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**A principal sees only its own beliefs.** A list request returns nothing belonging to another principal or another tenant, and a detail request for such a belief is `not_found` with status 404 rather than `forbidden`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_pagination
+  milestone: 17
+  kind: case
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**Keyset paging neither skips nor repeats.** Walking every page while beliefs are written and retired between requests yields each live belief at most once and every belief that existed throughout exactly once; a malformed cursor is a validation error; `next_cursor` is null on the last page and only there; and re-reading a cursor against an unchanged store returns an identical page."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_filters
+  milestone: 17
+  kind: case
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**Every filter selects the documented set.** Status, belief type, subject, source session, and text each select exactly the set the design declares and compose with one another; the default status set is the live one; and the text filter's results equal those of the shared lexical helpers applied directly."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_read_only
+  milestone: 17
+  kind: structural
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**The router is read-only.** Every route mounted under `/v1/memories` declares the GET method and exactly the scope `memory.read`; a route with any other method or any other scope fails the build."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_flag_absent
+  milestone: 17
+  kind: case
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**The flag is a real switch.** With `AGENT_MEMORY_API_ENABLED` unset, no `/v1/memories` route is registered and none appears in the OpenAPI document, while `memory.read` remains a recognized scope for configuration validation."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.browse_contract_parity
+  milestone: 17
+  kind: structural
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**Both stores browse identically.** The shared browse contract suite passes against the in-memory adapter and the PostgreSQL adapter, covering order, the keyset boundary, every filter, and the text query."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_view_projection
+  milestone: 17
+  kind: structural
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**The projection is exactly the exposure list.** A serialized `MemoryView` carries every field the exposure list names and no other key, and no construction path — list, detail, or error envelope — can emit a withheld field."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.memory.read_api_error_vocabulary
+  milestone: 17
+  kind: case
+  spec: docs/plan/memory-read-api-and-browser.md#hard-gates
+  statement: "**Every error is a member of the closed vocabulary.** Across missing and malformed parameters, absent and insufficient credentials, unknown identifiers, and above-ceiling reads, every response either succeeds or carries one of `validation_error`, `unauthenticated`, `forbidden`, or `not_found` with its documented status."
+  check: tests/gates/pending.py::pending_gate

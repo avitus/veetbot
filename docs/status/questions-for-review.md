@@ -6869,3 +6869,148 @@ as accepted, recorded limitations rather than blockers.
 **Question for you:** pick any to schedule; none blocks the next milestone.
 
 **Reversal cost:** not applicable; this is a list, not a decision.
+
+## Milestone 17 memory read API and browser (ADR-0070)
+
+### A second parallel workstream, and it moves no ceiling
+
+**Decided:** Milestone 17 develops alongside Milestones 13 through 15 and
+alongside Milestone 16, on the clause ADR-0069 decision 1 already established:
+its gates may go green independently, and the verified ceiling still advances
+only in numerical order, so nothing here moves it past 15. You authorized this
+when you authorized the milestone.
+
+**Why:** the work shares no file with the delegation, surface, or operations
+tranches, and it reads a belief store Milestone 16 has finished maturing.
+
+**Question for you:** none about the mechanism. The only judgment worth
+revisiting is how many parallel memory workstreams you want in flight at once,
+now that this is the second.
+
+**Reversal cost:** cheap; it is sequencing.
+
+### Round one reads and never writes
+
+**Decided:** browse, search, filter, and detail. No edit, no retraction, no
+deletion, no confirmation of a flagged conflict over HTTP; corrections stay on
+the `agent memory` command line, which routes them through the governed
+formation service rather than around it. You fixed this boundary when
+authorizing the milestone, and a structural gate walks the router so a write
+route cannot arrive by accident.
+
+**Why:** reading is the half people asked for and the half that pays for itself
+immediately; writing raises provenance, tombstone, and formation-watermark
+questions that reading does not, and none of them blocks the surface.
+
+**Question for you:** whether the first write to arrive later should be
+single-belief retraction — the correction people reach for most — or whether
+corrections should stay on the command line indefinitely.
+
+**Reversal cost:** cheap as scoping; a write route is additive. Expensive as
+design, because it needs the three answers above before it can be specified.
+
+### The native client browses at the `restricted` ceiling
+
+**Decided:** full-parity viewing. You considered the conservative alternative,
+a lower ceiling for the graphical surface, and rejected it, accepting the
+consequence explicitly: a stolen, unlocked device holding a live token can read
+restricted beliefs. ADR-0070 decision 5 records that acceptance rather than
+burying it.
+
+**Why:** a browser that silently omits rows teaches its reader that the
+platform forgot something it did not forget, and an invisible omission is worse
+than no browser at all. The device is yours, the token is device-local and
+keychain-held, and the surface is private in the same sense the Milestone 9
+runtime surface already is.
+
+**Question for you:** whether opening the browser should additionally demand a
+biometric or passcode re-authentication. That would mitigate the accepted
+consequence, but it is a new layer in ADR-0017's stack and needs its own
+decision rather than arriving as a client detail.
+
+**Reversal cost:** cheap; the client supplies the ceiling as a parameter like
+any other caller, so lowering it is a one-line client change and no server
+change at all.
+
+### The ceiling is required, and the server never supplies one
+
+**Decided:** every request carries an explicit `ceiling`; a request that omits
+it is a validation error, not a request served at the permissive end. This is
+ADR-0045 decision 11's rule restated for a route, and gate 1 exists so that a
+default cannot be reintroduced quietly the first time a client forgets the
+parameter.
+
+**Why:** a default ceiling is the failure mode where a caller added next year
+is trusted by omission, and the mapping from scopes or roles to a sensitivity
+ceiling is wrong the first time a surface exists that its author did not
+imagine.
+
+**Question for you:** none.
+
+**Reversal cost:** cheap as code and expensive as a decision — softening it
+would weaken a stated security requirement, which needs your explicit approval
+rather than a reviewer's.
+
+### Three provenance fields are withheld, and this one is genuinely open
+
+**Decided:** `MemoryView` exposes twenty-three fields from an explicit
+allow-list. `tenant_id`, `principal_id`, `utility`, and `store_position` are
+withheld outright and that is settled. `formation_run_id`,
+`consolidation_policy_version`, and `origin_scopes` are withheld as a
+**recommendation flagged for your sign-off**, not as a decision the
+specification makes on its own.
+
+**Why:** the trio is genuine provenance and you could reasonably want it in a
+belief's detail view. It is also the operator-tier vocabulary that the
+`formations` audit surface owns, and putting three of its fields in a belief
+response answers a question this milestone deliberately deferred — a reader
+who sees a policy version and a formation run identifier will next want the
+run, and there is no route to it.
+
+**Question for you:** expose the trio now, or withhold it and revisit when a
+consolidations view exists, so provenance arrives as one coherent surface? This
+is the one item in this section that the implementing change should not land
+without an answer to.
+
+**Reversal cost:** cheap before the code ships. Moderate after: adding a field
+to a response is additive, but removing one a client has started reading is a
+breaking change on a surface the native client consumes.
+
+### The default page is the live set, not the whole history
+
+**Decided:** with no `status` parameter the list returns `active` and
+`provisional` beliefs. Superseded, expired, and retired rows are one parameter
+away.
+
+**Why:** a browser that opens onto history rather than belief answers a
+different question from the one its user asked, and the retired rows outnumber
+the live ones as soon as the decay sweep has run for a while.
+
+**Question for you:** whether "what did you used to believe about me" is common
+enough that the first page should show everything and let the reader narrow,
+which is the opposite default.
+
+**Reversal cost:** cheap; it is a default, and both behaviors are reachable
+today.
+
+### Trace viewing is deferred on a defect, not on preference
+
+**Decided:** no recall-trace route in this milestone.
+`PostgresTraceStore.for_turn` selects traces by turn identifier alone, with no
+tenant or principal predicate, so it is not safe behind a route at any ceiling.
+That predicate must be added and observed by the trace store's contract suite
+before a trace route can be designed. The specification names the defect rather
+than describing the deferral as a scoping preference.
+
+**Why:** naming it is what stops a trace route being added casually later by
+someone who assumes the store method is already principal-scoped. A trace view
+would also owe the minimum-of-two-ceilings rule the retrieval design requires,
+which is a second ceiling mechanism inside a milestone whose whole ceiling
+story is one parameter.
+
+**Question for you:** fix the `for_turn` predicate inside Milestone 17's
+implementation change, where it is a few lines and a contract-suite case, or
+leave it to the milestone that eventually designs the trace route?
+
+**Reversal cost:** none for the deferral. The fix itself is small, and leaving
+it unfixed costs nothing until something tries to reach a trace.

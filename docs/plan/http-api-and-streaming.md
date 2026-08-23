@@ -490,6 +490,25 @@ POST   /v1/surfaces/pairings/{pairing_id}/revoke     surface.write
 DELETE /v1/surfaces/pairings/{pairing_id}            surface.write
 ```
 
+### The Milestone 17 memory read extension
+
+[memory-read-api-and-browser.md](memory-read-api-and-browser.md) adds two
+read-only routes and one exact scope, `memory.read`, mounted only when
+`AGENT_MEMORY_API_ENABLED` is set. Both are GETs; nothing under `/v1/memories`
+mutates, and a gate walks the router to keep it that way.
+
+```text
+GET    /v1/memories                                  memory.read
+GET    /v1/memories/{memory_id}                      memory.read
+```
+
+The memory design owns their query parameters, the `MemoryView` projection and
+its exposure list, the required sensitivity `ceiling` parameter, the keyset
+cursor over `(store_position DESC, id ASC)`, and ten gates. The routes use this
+document's error envelope and its closed code vocabulary unchanged, and the
+cross-principal not-found rule extends to the ceiling: a belief above it is
+indistinguishable from one that does not exist.
+
 ### Tenancy is a repository argument, never a filter applied afterwards
 
 Every repository method that reads a tenant-scoped resource takes the

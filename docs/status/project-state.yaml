@@ -10,7 +10,8 @@ project:
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
   # Milestone 16 was authorized as a parallel workstream on 2026-08-22
-  # (ADR-0069); its gates do not advance the verified ceiling past 15.
+  # (ADR-0069) and Milestone 17 on 2026-08-23 (ADR-0070); the gates of
+  # neither advance the verified ceiling past 15.
   authorized_milestones:
     - 0
     - 1
@@ -29,6 +30,7 @@ project:
     - 14
     - 15
     - 16
+    - 17
 
 milestones:
   "0":
@@ -172,6 +174,24 @@ milestones:
       - semantic arm and pgvector, external memory provider, persona surface
       - temporal entity graph, session history and artifacts as sources
       - belief merge and global consolidation, HTTP memory surface
+  "17":
+    title: Memory read API and browser
+    status: authorized
+    authorized_on: 2026-08-23
+    design: docs/plan/memory-read-api-and-browser.md
+    adr: docs/adr/0070-milestone-17-memory-read-api-and-browser.md
+    gates_registered: 10
+    authorized_scope:
+      - read-only GET /v1/memories list and detail routes
+      - the exact scope memory.read and the AGENT_MEMORY_API_ENABLED flag
+      - an explicit required ceiling on every request, never inferred
+      - status, belief type, subject, session, and shared-lexical text filters
+      - the MemoryView exposure list and a shared browse contract suite
+      - the native Apple memory browser at the restricted ceiling
+    deferred_scope:
+      - every write, edit, retraction, and deletion over HTTP
+      - recall-trace viewing, blocked on tenant and principal trace predicates
+      - consolidation and formation audit routes, knowledge documents
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -212,14 +232,17 @@ readiness:
     evaluation and lifecycle completed on 2026-08-23 as a parallel
     workstream: all twenty registered gates pass and hosted review on the
     dev to main pull request finished clean; the verified gate ceiling
-    stays at Milestone 12. Model routing remains
+    stays at Milestone 12. On 2026-08-23 the owner authorized Milestone 17,
+    the memory read API and the native memory browser, as a second parallel
+    workstream (ADR-0070), specified by memory-read-api-and-browser.md with
+    ten registered gates. Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T21:03:53Z
+last_updated: 2026-08-23T23:30:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round
