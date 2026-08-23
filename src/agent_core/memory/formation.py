@@ -937,7 +937,7 @@ class GovernedMemoryService:
                 committed = 0
                 reinforced = 0
                 superseded = 0
-                for candidate in candidates:
+                for candidate in [] if should_retry else candidates:
                     if (
                         candidate.proposed_scope != scope
                         or not set(candidate.source_event_ids) <= trusted_user_sources

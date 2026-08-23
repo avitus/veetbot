@@ -725,6 +725,88 @@ import Testing
     }
 
     @Test
+    func testReadyAuthenticationDoesNotRestoreAnAbsentWebsiteProfile() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b6")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b7")
+        )
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configurationStore = ConnectionConfigurationStore(defaults: defaults)
+        let session = urlSession { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-profiles"):
+                return try response(
+                    for: request,
+                    statusCode: 201,
+                    body: #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:01:00Z","last_used_at":null}"#
+                )
+            case (
+                "POST",
+                "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
+            ):
+                return try response(
+                    for: request,
+                    statusCode: 201,
+                    body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"needs_user","expires_at":"2026-08-22T13:00:00Z","launch_url":"https://browser.example.org/login"}"#
+                )
+            case ("GET", "/v1/browser-profiles"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case (
+                "GET",
+                "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)"
+            ):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"ready","expires_at":"2026-08-22T13:00:00Z","launch_url":null}"#
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: nil),
+            configurationStore: configurationStore,
+            historyStore: VolatileSessionHistoryStore(),
+            urlSession: session
+        )
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "principal-one"
+            )
+        )
+        #expect(
+            await model.createWebsiteAccess(
+                origin: "https://example.org",
+                loginURL: "https://example.org/login"
+            ) != nil
+        )
+
+        await model.refreshBrowserAuthentication()
+
+        #expect(model.browserAuthentication?.status == .ready)
+        #expect(model.browserProfiles.isEmpty)
+        #expect(model.selectedBrowserProfileID == nil)
+        #expect(await configurationStore.loadBrowserProfileID() == nil)
+    }
+
+    @Test
     func testBootstrapClearsARevokedPersistedWebsiteProfile() async throws {
         let profileID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-0000000000b5")

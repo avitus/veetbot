@@ -11,6 +11,7 @@ from uuid import UUID
 import httpx
 
 from agent_core.api import create_app
+from agent_core.application.errors import SessionMetadataValidationError
 from agent_core.config import AuthMode, DeploymentMode, SandboxMechanism, Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.browser import (
@@ -197,7 +198,19 @@ class MetadataRejectingSessions(Sessions):
         browser_profile_id: UUID | None = None,
     ) -> SessionView:
         del owner, agent_id, metadata, browser_profile_id
-        raise ValueError("session metadata is invalid")
+        raise SessionMetadataValidationError("session metadata is invalid")
+
+
+class UnexpectedValueErrorSessions(Sessions):
+    async def create(
+        self,
+        owner: Principal,
+        agent_id: str,
+        metadata: dict[str, object],
+        browser_profile_id: UUID | None = None,
+    ) -> SessionView:
+        del owner, agent_id, metadata, browser_profile_id
+        raise ValueError("unexpected downstream value error")
 
 
 def settings() -> Settings:
@@ -330,6 +343,30 @@ async def test_session_metadata_service_validation_is_a_malformed_request() -> N
 
     assert response.status_code == 400
     assert response.json()["error"]["code"] == "malformed_request"
+
+
+async def test_unexpected_session_value_error_remains_an_internal_error() -> None:
+    services = SimpleNamespace(
+        sessions=UnexpectedValueErrorSessions(),
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=Profiles(),
+        browser_grants=Grants(),
+    )
+    owner = principal().model_copy(update={"scopes": {"session.write"}})
+    app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://127.0.0.1",
+    ) as client:
+        response = await client.post(
+            "/v1/sessions",
+            json={"agent_id": "general", "metadata": {}},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"
 
 
 async def test_browser_write_requests_reject_malformed_origins_and_grant_windows() -> None:

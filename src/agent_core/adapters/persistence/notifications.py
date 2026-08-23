@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from pydantic import SecretStr
-from sqlalchemy import and_, delete, exists, func, or_, select, update
+from sqlalchemy import String, and_, cast, delete, exists, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +44,7 @@ from agent_core.domain.devices import (
 )
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.notifications import (
+    TEST_NOTIFICATION_DEDUPE_PREFIX,
     DeliveryOutcome,
     NewNotification,
     Notification,
@@ -51,6 +52,7 @@ from agent_core.domain.notifications import (
     NotificationDelivery,
     NotificationKind,
     NotificationStatus,
+    test_notification_target_device_id,
 )
 from agent_core.ports.determinism import Clock
 
@@ -299,6 +301,9 @@ class InMemoryNotificationOutbox:
                     value.principal_id,
                     value.kind,
                 )
+                if value.kind is NotificationKind.TEST:
+                    target_device_id = test_notification_target_device_id(value.dedupe_key)
+                    targets = [target for target in targets if target.device_id == target_device_id]
                 terminal_devices = {
                     delivery.device_id
                     for delivery in self._deliveries.values()
@@ -960,6 +965,16 @@ def _pending_target_exists(provider_values: set[str] | None = None) -> ColumnEle
         device.push_token.is_not(None),
         ~device.muted_kinds.op("@>")(func.jsonb_build_array(NotificationOutboxRow.kind)),
         ~terminal_delivery,
+        or_(
+            NotificationOutboxRow.kind != NotificationKind.TEST.value,
+            NotificationOutboxRow.dedupe_key.like(
+                func.concat(
+                    TEST_NOTIFICATION_DEDUPE_PREFIX,
+                    cast(device.id, String),
+                    ":%",
+                )
+            ),
+        ),
     ]
     if provider_values is not None:
         conditions.append(device.push_provider.in_(provider_values))

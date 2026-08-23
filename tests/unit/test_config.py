@@ -699,6 +699,20 @@ def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
         load_settings(values)
 
 
+def test_policy_semantic_interpolation_is_refused_even_when_declared(tmp_path: Path) -> None:
+    overlay = tmp_path / "policy" / "default.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("name: ${OPENAI_MODEL}\n", encoding="utf-8")
+    values = {
+        **base_environment(),
+        "AGENT_CONFIG_DIR": str(tmp_path),
+        "OPENAI_MODEL": "deployment-specific-policy-name",
+    }
+
+    with pytest.raises(ConfigurationError, match="policy-semantic interpolation"):
+        load_settings(values)
+
+
 def test_undeclared_interpolation_in_new_provider_profile_is_refused(tmp_path: Path) -> None:
     overlay = tmp_path / "models" / "providers" / "custom.yaml"
     overlay.parent.mkdir(parents=True)
