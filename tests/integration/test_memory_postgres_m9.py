@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
 from agent_core.domain.errors import ConflictError
@@ -193,6 +194,69 @@ async def test_postgres_fts_matches_any_term_in_any_order_and_ranks_full_matches
             session_id=session_id,
         )
         assert [item.belief_id for item in structured.items] == [belief.id]
+
+
+_PARITY_BELIEFS = (
+    ("Dashboards use the emerald themes", "dashboard palette"),
+    ("Apple Watch charges overnight", "wearables"),
+    ("The theme is emerald", "editor colours"),
+    ("The e-mail digest is weekly", "digest cadence"),
+    ("Staging endpoint is svc.internal:8443", "endpoint"),
+    ("The user's runbook lives in the wiki", "runbook"),
+    ("Reviews land in tabs/spaces order", "review order"),
+    ("Release 3.14 ships on Tuesday", "release train"),
+)
+_PARITY_TEXTS = (
+    "theme",
+    "themes",
+    "app",
+    "apple",
+    "mail",
+    "e-mail",
+    "svc.internal:8443",
+    "internal",
+    "user's",
+    "users",
+    "wiki runbook",
+    "3.14",
+    "tabs/spaces",
+    "spaces",
+    "...",
+    "emerald digest",
+)
+
+
+async def test_postgres_and_memory_stores_agree_on_lexical_matching(tmp_path: Path) -> None:
+    """The two belief stores answer the same text query with the same set.
+
+    The benchmark measures the in-memory tier, so a predicate more permissive
+    than PostgreSQL's would record a baseline the production store cannot
+    reproduce. Both are asked the same fixtures over the same beliefs.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memlex{uuid4().hex[:10]}"
+        for statement, subject in _PARITY_BELIEFS:
+            await _remember(
+                composition,
+                session_id,
+                statement,
+                subject=f"{subject} {marker}",
+                belief_type=BeliefType.FACT,
+            )
+
+        mirror = InMemoryMemoryStore(composition.clock)
+        for record in await composition.memory.list_memories():
+            await mirror.upsert_belief(record)
+
+        for text in _PARITY_TEXTS:
+            query = _query(composition, text=text)
+            async with composition.uow_factory() as uow:
+                stored = await uow.memories.query(query)
+            assert {record.id for record in stored} == {
+                record.id for record in await mirror.query(query)
+            }, f"stores disagree on {text!r}"
 
 
 async def test_postgres_sensitivity_ceiling_and_local_portability_predicates(

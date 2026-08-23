@@ -27,6 +27,7 @@ from agent_core.domain.memory import (
     RecallResult,
     RecallTrace,
     Sensitivity,
+    lexical_terms,
 )
 from agent_core.domain.runs import Run
 from agent_core.memory.profiles import (
@@ -380,7 +381,7 @@ def _score(
     *,
     profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
 ) -> RecalledBelief | None:
-    text_terms = _terms(query.text or "")
+    text_terms = lexical_terms(query.text or "")
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_text = f"{record.subject} {record.statement}".casefold()
     lexical = (
@@ -505,14 +506,6 @@ def _line(item: RecalledBelief) -> str:
         f"[m:{str(item.belief_id)[:8]}]{origin} {html.escape(item.statement)} "
         f"({item.authority.value}, {item.confidence_band}){conflict}"
     )
-
-
-def _terms(text: str) -> set[str]:
-    return {
-        part.strip(".,:;!?()[]{}\"'")
-        for part in text.casefold().split()
-        if len(part.strip(".,:;!?()[]{}\"'")) >= 3
-    }
 
 
 def _entities(text: str) -> set[str]:

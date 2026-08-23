@@ -314,3 +314,46 @@ async def test_query_excludes_zero_overlap_text_and_caps_candidates_newest_first
     )
     assert named[0].id == unrelated.id
     assert len(named) == 64
+
+
+async def test_query_matches_whole_words_the_way_full_text_search_does() -> None:
+    """The in-memory predicate matches lexemes, not substrings.
+
+    PostgreSQL matches `to_tsvector('simple', ...)` against a per-term
+    `plainto_tsquery`, which compares whole lexemes and never stems under the
+    `simple` configuration. A substring predicate would make the in-memory tier
+    the more permissive of the two stores, and it is the tier the benchmark
+    measures, so it compares tokens the same way.
+    """
+
+    store = _store()
+    plural = memory(belief_id=1_100, statement="Dashboards use the emerald themes").model_copy(
+        update={"subject": "dashboard palette", "store_position": 1}
+    )
+    prefixed = memory(belief_id=1_101, statement="Apple Watch charges overnight").model_copy(
+        update={"subject": "wearables", "store_position": 2}
+    )
+    exact = memory(belief_id=1_102, statement="The theme is emerald").model_copy(
+        update={"subject": "editor colours", "store_position": 3}
+    )
+    hyphenated = memory(belief_id=1_103, statement="The e-mail digest is weekly").model_copy(
+        update={"subject": "digest cadence", "store_position": 4}
+    )
+    for record in (plural, prefixed, exact, hyphenated):
+        await store.upsert_belief(record)
+
+    # "theme" is not "themes" and "app" is not "Apple": neither is a lexeme of
+    # the record it reads as a substring of.
+    assert [record.id for record in await store.query(recall_query(text="theme"))] == [exact.id]
+    assert await store.query(recall_query(text="app")) == []
+    assert [record.id for record in await store.query(recall_query(text="themes"))] == [plural.id]
+    assert [record.id for record in await store.query(recall_query(text="apple"))] == [prefixed.id]
+    # A hyphenated word is its own lexeme and each of its parts, as the
+    # PostgreSQL parser splits it.
+    assert [record.id for record in await store.query(recall_query(text="mail"))] == [hyphenated.id]
+    assert [record.id for record in await store.query(recall_query(text="e-mail"))] == [
+        hyphenated.id
+    ]
+    # Query text that reduces to no lexeme matches nothing, as an empty
+    # `plainto_tsquery` does, rather than matching everything.
+    assert await store.query(recall_query(text="...")) == []

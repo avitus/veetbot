@@ -20,8 +20,8 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:743), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:649).
+scenarios (memory-retrieval-and-ranking.md:748), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:658).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
@@ -31,8 +31,8 @@ Decay over unused provisional and low-confidence beliefs
 utility without ever raising confidence (memory-retrieval-and-ranking.md:790),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:780), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:676) are
+resolved at read time (memory-retrieval-and-ranking.md:785), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:685) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -637,6 +637,21 @@ both order newest-first and cap candidates at `max(max_items * 8, 64)` before
 ranking. Strict conjunction was rejected because it turns the ranking arm into
 a filter and drops beliefs the ranker should merely have demoted.
 
+Overlap means a **whole lexeme**, not a substring. PostgreSQL matches
+`to_tsvector('simple', subject || ' ' || statement)` against one
+`plainto_tsquery` per term, which lowercases without stemming, so `themes` is
+not `theme` and `Apple` is not `app`; the in-memory adapter tokenizes the same
+way rather than testing containment, because it is the tier the benchmark
+measures and the more permissive of two stores would record a baseline the
+production store cannot reproduce. The shared tokenizer keeps a run joined by
+dots, slashes, colons, or an at sign whole, splits an apostrophe into its
+parts, emits a hyphenated word both whole and in parts, and treats a term that
+reduces to no lexeme as matching nothing, exactly as an empty query does. It
+approximates rather than reimplements the PostgreSQL parser: a URL carrying a
+query string and a date divide differently there. Those edges change what the
+ranker is offered, never what a principal may see, which is the reason lexical
+recall is allowed to be an approximation and the isolation predicates are not.
+
 **Episode paging.** Episode search reads one page of events and stops, so a
 match beyond the first page is invisible. It becomes a bounded page loop with
 a cursor on the event sequence, stopping at a short page, at the caller's
@@ -797,7 +812,7 @@ resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:676), so it is a command and it demands
+(memory-formation-and-consolidation.md:685), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

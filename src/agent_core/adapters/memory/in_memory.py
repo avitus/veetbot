@@ -32,6 +32,8 @@ from agent_core.domain.memory import (
     TracedBelief,
     TracedPassage,
     lexical_query_terms,
+    lexical_term_lexemes,
+    lexical_text_matches,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
@@ -66,7 +68,7 @@ class InMemoryMemoryStore:
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
-        terms = lexical_query_terms(query.text)
+        term_lexemes = lexical_term_lexemes(lexical_query_terms(query.text))
         subjects = {subject.casefold() for subject in query.subjects}
         async with self._lock:
             result = []
@@ -98,9 +100,9 @@ class InMemoryMemoryStore:
                     and record.subject.casefold() not in subjects
                 ):
                     continue
-                if terms and record.subject.casefold() not in subjects:
-                    text = f"{record.subject} {record.statement}".casefold()
-                    if not any(term in text for term in terms):
+                if term_lexemes and record.subject.casefold() not in subjects:
+                    text = f"{record.subject} {record.statement}"
+                    if not lexical_text_matches(term_lexemes, text):
                         continue
                 result.append(record.model_copy(deep=True))
             result.sort(key=lambda record: (-record.store_position, str(record.id)))
