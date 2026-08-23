@@ -422,9 +422,9 @@ class DeterministicCandidateExtractor:
                 context = recurring_symptom.group("context")
                 activity_phrase = "" if activity is None else activity.strip(" ,.:;!?")
                 if recent_activity_subject is not None and context is not None:
-                    normalized_context = context.strip(" ,.:;!?").casefold()
-                    normalized_recent = recent_activity_subject.casefold()
-                    if normalized_context in normalized_recent.split():
+                    context_terms = set(re.findall(r"[a-z0-9]+", context.casefold())) - {"the"}
+                    recent_terms = set(re.findall(r"[a-z0-9]+", recent_activity_subject.casefold()))
+                    if context_terms and context_terms <= recent_terms:
                         if not activity_phrase:
                             activity_phrase = f"using {recent_activity_subject}"
                         elif activity_phrase.casefold() == "playing":

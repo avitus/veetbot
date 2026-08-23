@@ -181,6 +181,73 @@ async def test_two_dispatchers_deliver_one_target_once_and_record_the_attempt() 
         assert delivery.attempt == 1
 
 
+async def test_expired_claim_cannot_overwrite_newer_successful_settlement() -> None:
+    clock, factory = await memory_uow_factory()
+    assert isinstance(clock, FixedClock)
+    ids = SequenceIdFactory()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    second_started = asyncio.Event()
+    release_second = asyncio.Event()
+
+    class SlowRetryTransport:
+        async def deliver(self, target, message):  # type: ignore[no-untyped-def]
+            del target, message
+            first_started.set()
+            await release_first.wait()
+            return PushOutcome(
+                outcome=DeliveryOutcome.RETRY,
+                provider_reason="ServiceUnavailable",
+            )
+
+    class SlowSuccessTransport:
+        async def deliver(self, target, message):  # type: ignore[no-untyped-def]
+            del target, message
+            second_started.set()
+            await release_second.wait()
+            return PushOutcome(outcome=DeliveryOutcome.DELIVERED)
+
+    async with factory() as uow:
+        await uow.devices.upsert(device(), principal())
+        assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
+
+    stale_dispatch = asyncio.create_task(
+        _dispatcher(factory, clock, ids, SlowRetryTransport()).run_once()
+    )
+    await first_started.wait()
+    clock.advance(timedelta(seconds=31))
+    current_dispatch = asyncio.create_task(
+        _dispatcher(
+            factory,
+            clock,
+            ids,
+            SlowSuccessTransport(),
+            claimant="notify-b",
+        ).run_once()
+    )
+    await second_started.wait()
+    release_first.set()
+    assert await stale_dispatch == 1
+
+    async with factory() as uow:
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+    assert notification.status is NotificationStatus.PENDING
+    assert notification.attempts == 2
+    assert notification.claimed_by == "notify-b"
+
+    release_second.set()
+    assert await current_dispatch == 1
+    async with factory() as uow:
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+        deliveries = await uow.notification_outbox.list_deliveries(notification.id)
+    assert notification.status is NotificationStatus.DISPATCHED
+    assert notification.attempts == 2
+    assert {(delivery.attempt, delivery.outcome) for delivery in deliveries} == {
+        (1, DeliveryOutcome.RETRY),
+        (2, DeliveryOutcome.DELIVERED),
+    }
+
+
 async def test_unexpected_failure_isolated_to_one_claimed_notification() -> None:
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()

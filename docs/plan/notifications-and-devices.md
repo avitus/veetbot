@@ -403,6 +403,10 @@ it writes the delivery row, the next claimant cannot distinguish that accepted
 send from no send and re-sends. The transport's collapse identifier (the
 `dedupe_key`) makes that replay invisible on the device as a best-effort
 reduction, not a guarantee, and the ledger shows the extra attempt.
+Settlement is fenced to the claimed attempt: every terminal or retry update
+compares the row's current attempt and active claim, returns `False` after a
+newer worker has reclaimed or settled the row, and leaves that newer state
+untouched.
 
 Wake-up is `LISTEN`/`NOTIFY` on a fixed channel after the enqueuing
 transaction commits, over a bounded poll, exactly as the schedule worker does.
@@ -483,7 +487,7 @@ class NotificationOutbox(Protocol):
     async def claim_due(self, now: datetime, limit: int, claimant: str, lease_seconds: float, providers: frozenset[PushProvider]) -> list[Notification]: ...
     async def record_delivery(self, delivery: NotificationDelivery) -> None: ...
     async def list_deliveries_for(self, notification_ids: tuple[UUID, ...]) -> dict[UUID, list[NotificationDelivery]]: ...
-    async def settle(self, notification_id: UUID, status: NotificationStatus, next_attempt_at: datetime | None) -> None: ...
+    async def settle(self, notification_id: UUID, attempt: int, status: NotificationStatus, next_attempt_at: datetime | None) -> bool: ...
     async def list(self, principal: Principal, page: Page) -> Page[Notification]: ...
 
 

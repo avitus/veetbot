@@ -373,10 +373,10 @@ src/agent_core/
   policy/default.yaml      the v0.1 policy profile
   models/policies.yaml     model_policies and provider profiles
   models/catalog.yaml      aliases, limits, context windows, prices
-  context/plan.yaml        region caps, reserves, the 15,000 ceiling
+  context/plan.yaml        region caps, reserves, snapshot caps, the 15,000 ceiling
   tools/limits.yaml        registry ceilings, breaker thresholds
   runtime/limits.yaml      leases, sweep cadences, priority classes
-  memory/profiles.yaml     RRF k, decay and usage knobs, snapshot caps
+  memory/profiles.yaml     RRF k, decay and usage knobs
 ```
 
 The two under `policy/` are already named by

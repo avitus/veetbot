@@ -114,7 +114,12 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
     assert len(claimed) == 1
     assert claimed[0].attempts == 1
     assert claimed[0].claimed_by == "dispatcher-a"
-    await outbox.settle(claimed[0].id, NotificationStatus.DISPATCHED, None)
+    assert await outbox.settle(
+        claimed[0].id,
+        claimed[0].attempts,
+        NotificationStatus.DISPATCHED,
+        None,
+    )
 
     page = await outbox.list(principal(), limit=2)
     assert [item.id for item in page] == [values[2].id, values[1].id]
@@ -128,6 +133,62 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
     assert len(settled) == 1
     assert settled[0].status is NotificationStatus.DISPATCHED
     assert settled[0].settled_at is not None
+
+    remaining = await outbox.claim_due(
+        NOW + timedelta(seconds=3),
+        2,
+        "dispatcher-a",
+        30,
+        frozenset({PushProvider.APNS}),
+    )
+    assert len(remaining) == 2
+    for pending in remaining:
+        assert await outbox.settle(
+            pending.id,
+            pending.attempts,
+            NotificationStatus.DISPATCHED,
+            None,
+        )
+
+    fenced = new_notification(
+        notification_id=UUID(int=NOTIFICATION_ID.int + 20),
+        dedupe_key="test:fenced-settlement",
+        created_at=NOW + timedelta(seconds=20),
+    )
+    assert await outbox.enqueue(fenced) is not None
+    [first_claim] = await outbox.claim_due(
+        NOW + timedelta(seconds=20),
+        1,
+        "dispatcher-a",
+        30,
+        frozenset({PushProvider.APNS}),
+    )
+    [second_claim] = await outbox.claim_due(
+        NOW + timedelta(seconds=51),
+        1,
+        "dispatcher-b",
+        30,
+        frozenset({PushProvider.APNS}),
+    )
+    assert first_claim.attempts == 1
+    assert second_claim.attempts == 2
+    assert not await outbox.settle(
+        fenced.id,
+        first_claim.attempts,
+        NotificationStatus.FAILED,
+        None,
+    )
+    [still_claimed] = [
+        item for item in await outbox.list(principal(), limit=10) if item.id == fenced.id
+    ]
+    assert still_claimed.status is NotificationStatus.PENDING
+    assert still_claimed.claimed_by == "dispatcher-b"
+    assert await outbox.settle(
+        fenced.id,
+        second_claim.attempts,
+        NotificationStatus.DISPATCHED,
+        None,
+    )
 
 
 async def assert_notification_claim_is_partitioned_by_provider(

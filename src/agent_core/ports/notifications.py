@@ -52,9 +52,10 @@ class NotificationOutbox(Protocol):
     async def settle(
         self,
         notification_id: UUID,
+        attempt: int,
         status: NotificationStatus,
         next_attempt_at: datetime | None,
-    ) -> None: ...
+    ) -> bool: ...
 
     async def list(
         self,

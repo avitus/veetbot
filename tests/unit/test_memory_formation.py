@@ -125,6 +125,27 @@ async def test_candidate_extracts_explicit_remember_requests() -> None:
     assert candidates[0].belief_type is BeliefType.FACT
 
 
+async def test_multiword_activity_context_preserves_the_recent_subject() -> None:
+    part = TextPart(
+        text=(
+            "I've started playing the soprano saxophone. On soprano saxophone "
+            "my right thumb is often hurting after half an hour of playing."
+        )
+    ).model_dump(mode="json")
+    candidates = await DeterministicCandidateExtractor().extract(
+        [_envelope("user.message.created", {"content": [part]})],
+        principal=principal(),
+        scope="general",
+    )
+
+    pain = next(candidate for candidate in candidates if "thumb pain" in candidate.subject)
+    assert pain.subject == "right thumb pain while playing soprano saxophone"
+    assert (
+        pain.statement
+        == "User's right thumb often hurts after half an hour of playing soprano saxophone."
+    )
+
+
 async def test_candidate_extracts_stated_preferences_from_text_parts() -> None:
     part = TextPart(text="We really prefer tabs over spaces").model_dump(mode="json")
     candidates = await DeterministicCandidateExtractor().extract(

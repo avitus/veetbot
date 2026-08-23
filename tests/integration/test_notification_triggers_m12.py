@@ -13,6 +13,7 @@ from agent_core.adapters.persistence import notifications as notification_adapte
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.application.notification_producer import NotificationProducer
 from agent_core.bootstrap import build
+from agent_core.domain.devices import PushProvider
 from agent_core.domain.notifications import NotificationStatus
 from agent_core.domain.runs import (
     FailureReason,
@@ -251,10 +252,17 @@ async def test_session_erasure_deletes_pending_notifications_and_keeps_settled_a
                 principal_id=composition.principal.principal_id,
                 status=RunStatus.FAILED,
             )
-            rows = await uow.notification_outbox.list(composition.principal, limit=10)
-            settled = next(row for row in rows if row.run_id == context.run.id)
-            await uow.notification_outbox.settle(
+            claimed = await uow.notification_outbox.claim_due(
+                NOW,
+                10,
+                "notify-test",
+                30,
+                frozenset({PushProvider.APNS}),
+            )
+            settled = next(row for row in claimed if row.run_id == context.run.id)
+            assert await uow.notification_outbox.settle(
                 settled.id,
+                settled.attempts,
                 NotificationStatus.DISPATCHED,
                 None,
             )

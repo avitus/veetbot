@@ -135,15 +135,17 @@ class NotificationDispatcher:
         now = self._clock.now()
         async with self._uow_factory() as uow:
             if await self._is_stale(uow, notification, now):
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.SUPERSEDED,
                     None,
                 )
                 return
             if notification.expires_at is not None and notification.expires_at <= now:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.EXPIRED,
                     None,
                 )
@@ -175,8 +177,9 @@ class NotificationDispatcher:
         ]
         if not pending_targets:
             async with self._uow_factory() as uow:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.PENDING if other_targets else NotificationStatus.DISPATCHED,
                     now if other_targets else None,
                 )
@@ -234,35 +237,64 @@ class NotificationDispatcher:
             if saw_retry:
                 retry_index = notification.attempts - 1
                 if retry_index < len(self._retry_delays):
-                    await uow.notification_outbox.settle(
-                        notification.id,
+                    await self._settle_claim(
+                        uow,
+                        notification,
                         NotificationStatus.PENDING,
                         now + timedelta(seconds=self._retry_delays[retry_index]),
                     )
                 else:
-                    await uow.notification_outbox.settle(
-                        notification.id,
+                    await self._settle_claim(
+                        uow,
+                        notification,
                         NotificationStatus.FAILED,
                         None,
                     )
             elif saw_rejection:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.FAILED,
                     None,
                 )
             elif other_targets:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.PENDING,
                     now,
                 )
             else:
-                await uow.notification_outbox.settle(
-                    notification.id,
+                await self._settle_claim(
+                    uow,
+                    notification,
                     NotificationStatus.DISPATCHED,
                     None,
                 )
+
+    async def _settle_claim(
+        self,
+        uow: NotificationDispatchUnitOfWork,
+        notification: Notification,
+        status: NotificationStatus,
+        next_attempt_at: datetime | None,
+    ) -> bool:
+        settled = await uow.notification_outbox.settle(
+            notification.id,
+            notification.attempts,
+            status,
+            next_attempt_at,
+        )
+        if not settled:
+            logger.info(
+                "notification settlement skipped after claim loss",
+                extra={
+                    "notification_id": str(notification.id),
+                    "notification_attempt": notification.attempts,
+                    "claimant": self._claimant,
+                },
+            )
+        return settled
 
     async def _is_stale(
         self,

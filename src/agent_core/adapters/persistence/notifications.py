@@ -398,13 +398,22 @@ class InMemoryNotificationOutbox:
     async def settle(
         self,
         notification_id: UUID,
+        attempt: int,
         status: NotificationStatus,
         next_attempt_at: datetime | None,
-    ) -> None:
+    ) -> bool:
+        if attempt <= 0:
+            raise ValueError("notification settlement attempt must be positive")
         async with self._lock:
             notification = self._notifications.get(notification_id)
             if notification is None:
                 raise NotFoundError("notification not found")
+            if (
+                notification.status is not NotificationStatus.PENDING
+                or notification.attempts != attempt
+                or notification.claimed_by is None
+            ):
+                return False
             if status is NotificationStatus.PENDING:
                 if next_attempt_at is None:
                     raise ValueError("pending notification requires next attempt")
@@ -427,6 +436,7 @@ class InMemoryNotificationOutbox:
                     }
                 )
             self._notifications[notification_id] = updated
+            return True
 
     async def list(
         self,
@@ -885,9 +895,12 @@ class PostgresNotificationOutbox:
     async def settle(
         self,
         notification_id: UUID,
+        attempt: int,
         status: NotificationStatus,
         next_attempt_at: datetime | None,
-    ) -> None:
+    ) -> bool:
+        if attempt <= 0:
+            raise ValueError("notification settlement attempt must be positive")
         values: dict[str, object]
         if status is NotificationStatus.PENDING:
             if next_attempt_at is None:
@@ -908,12 +921,23 @@ class PostgresNotificationOutbox:
             }
         identity = await self._session.scalar(
             update(NotificationOutboxRow)
-            .where(NotificationOutboxRow.id == notification_id)
+            .where(
+                NotificationOutboxRow.id == notification_id,
+                NotificationOutboxRow.status == NotificationStatus.PENDING.value,
+                NotificationOutboxRow.attempts == attempt,
+                NotificationOutboxRow.claimed_by.is_not(None),
+            )
             .values(**values)
             .returning(NotificationOutboxRow.id)
         )
         if identity is None:
-            raise NotFoundError("notification not found")
+            exists = await self._session.scalar(
+                select(NotificationOutboxRow.id).where(NotificationOutboxRow.id == notification_id)
+            )
+            if exists is None:
+                raise NotFoundError("notification not found")
+            return False
+        return True
 
     async def list(
         self,
