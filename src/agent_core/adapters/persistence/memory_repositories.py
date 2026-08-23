@@ -364,6 +364,30 @@ class PostgresMemoryStore:
         )
         return [_memory(row) for row in rows]
 
+    async def list_idle(
+        self,
+        principal: Principal,
+        *,
+        reinforced_before: datetime,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(MemoryRow)
+                    .where(
+                        MemoryRow.tenant_id == principal.tenant_id,
+                        MemoryRow.principal_id == principal.principal_id,
+                        MemoryRow.status.in_(_LIVE),
+                        MemoryRow.last_reinforced_at <= reinforced_before,
+                    )
+                    .order_by(MemoryRow.last_reinforced_at, MemoryRow.id)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return [_memory(row) for row in rows]
+
     async def edit(
         self, belief_id: UUID, principal: Principal, edit: MemoryEdit, edited: MemoryRecord
     ) -> MemoryRecord:

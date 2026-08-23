@@ -35,6 +35,7 @@ from agent_core.memory.formation import (
     GovernedMemoryService,
     portability_ceiling,
 )
+from agent_core.memory.profiles import DecayProfile, FormationProfile
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal, session
 
@@ -600,3 +601,45 @@ async def test_decay_sweep_is_idempotent_within_interval() -> None:
 
     assert (later.decayed, later.retired) == (1, 0)
     assert (await service.list_memories())[0].confidence == pytest.approx(0.45)
+
+
+async def test_decay_sweep_reaches_the_oldest_idle_belief_past_its_window() -> None:
+    """A store larger than one sweep's ceiling still decays its oldest belief.
+
+    The window holds `max_per_sweep` beliefs, and a sweep that filled it with
+    the most recently written ones would never reach a long-idle belief: decay
+    hands every belief it touches a fresh store position, so the newest rows
+    are exactly the ones the sweep has already dealt with. One belief older
+    than the ceiling's worth of newer ones proves the window is ordered by
+    idleness instead.
+    """
+
+    clock, factory, _service, _retriever = await formation_stack()
+    ceiling = 3
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(7_000, 8_000)),
+        principal(),
+        formation_profile=FormationProfile(decay=DecayProfile(max_per_sweep=ceiling)),
+    )
+    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+
+    clock.advance(timedelta(days=31))
+    newer = [
+        await _form(
+            factory,
+            service,
+            f"Region {index} is eu-west-{index}.",
+            subject=f"region {index}",
+            explicit=False,
+        )
+        for index in range(ceiling)
+    ]
+
+    result = await service.decay()
+
+    beliefs = {belief.id: belief for belief in await service.list_memories()}
+    assert (result.decayed, result.retired) == (1, 0)
+    assert beliefs[idle.id].confidence == pytest.approx(0.5)
+    assert [beliefs[belief.id] for belief in newer] == newer

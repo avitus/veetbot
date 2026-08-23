@@ -688,6 +688,17 @@ written through the existing reinforcement path so provenance and position
 ordering are unchanged. Explicit user statements are `ACTIVE` at high
 confidence and are never eligible.
 
+`MemoryStore` gains `list_idle(principal, reinforced_before, limit)` — live
+beliefs last reinforced at or before an instant, least recently reinforced
+first — and the sweep reads its window through it, cut at the shortest time
+constant any belief type carries and bounded by `decay.max_per_sweep`. The
+ordering is the point: decay gives every belief it touches a fresh store
+position, so a window ordered newest-first would refill with rows the sweep had
+just written while beliefs idle for years sank below the bound and were never
+swept. PostgreSQL serves it from `ix_memories_principal_idle`, since the
+existing `ix_memories_principal_live_position` orders by store position and can
+only filter the principal.
+
 Ranking gains the time term the decay design implies. The reinforcement
 contribution becomes
 

@@ -1344,6 +1344,13 @@ class GovernedMemoryService:
         An explicit user statement is active at high confidence and is
         therefore never eligible.
 
+        The window is the least recently reinforced beliefs past the shortest
+        time constant any type carries, bounded by the per-sweep ceiling.
+        Ordering it by idleness rather than by write position is what keeps the
+        sweep working in a large store: decay hands every belief it touches a
+        fresh store position, so a newest-first window would refill with rows
+        the sweep had just written while long-idle beliefs sank out of reach.
+
         A belief the step carries below the floor is retired with its validity
         closed at the sweep instant. Both outcomes are written through the
         reinforcement path, so each takes a fresh store position and announces
@@ -1355,9 +1362,12 @@ class GovernedMemoryService:
         decay = self._profile.decay
         decayed = 0
         retired = 0
+        horizon = min(self._decay_tau_days.for_belief_type(kind) for kind in BeliefType)
         async with self._uow_factory() as uow:
-            candidates = await uow.memories.list_memories(
-                self._principal, include_inactive=False, limit=decay.max_per_sweep
+            candidates = await uow.memories.list_idle(
+                self._principal,
+                reinforced_before=instant - timedelta(days=horizon),
+                limit=decay.max_per_sweep,
             )
             for record in candidates:
                 if not self._decays(record, instant, interval):

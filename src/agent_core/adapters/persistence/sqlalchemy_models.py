@@ -847,6 +847,13 @@ class MemoryRow(Base):
             text("store_position DESC"),
         ),
         Index(
+            "ix_memories_principal_idle",
+            "tenant_id",
+            "principal_id",
+            "status",
+            "last_reinforced_at",
+        ),
+        Index(
             "ix_memories_fts",
             text("to_tsvector('simple'::regconfig, (subject || ' '::text) || statement)"),
             postgresql_using="gin",
