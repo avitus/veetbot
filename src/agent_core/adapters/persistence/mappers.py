@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from typing import Any, Literal, cast
 
+from pydantic import SecretStr
+
 from agent_core.adapters.persistence.sqlalchemy_models import (
     AgentRow,
     ApprovalRow,
     ArtifactRow,
+    DeviceRegistrationIdempotencyRow,
+    DeviceRow,
     EventRow,
     IdempotencyKeyRow,
     ModelCallRow,
+    NotificationDeliveryRow,
+    NotificationOutboxRow,
     RunRow,
     ScheduleIdempotencyKeyRow,
     ScheduleOccurrenceRow,
@@ -23,6 +29,14 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
 from agent_core.adapters.persistence.upcasters import EventUpcasterRegistry
 from agent_core.domain.agents import AgentSpec
 from agent_core.domain.approvals import ApprovalRequest
+from agent_core.domain.devices import (
+    Device,
+    DeviceKind,
+    DeviceRegistrationIdempotencyRecord,
+    DeviceStatus,
+    PushEnvironment,
+    PushProvider,
+)
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.messages import (
     CostSource,
@@ -31,6 +45,15 @@ from agent_core.domain.messages import (
     ProviderPin,
     StopReason,
     ToolResultItem,
+)
+from agent_core.domain.notifications import (
+    DeliveryOutcome,
+    NewNotification,
+    Notification,
+    NotificationDelivery,
+    NotificationKind,
+    NotificationPayload,
+    NotificationStatus,
 )
 from agent_core.domain.persistence import IdempotencyRecord, ModelCallRecord
 from agent_core.domain.policies import (
@@ -221,6 +244,117 @@ def schedule_values(schedule: Schedule) -> dict[str, Any]:
     }
 
 
+def device_to_domain(row: DeviceRow) -> Device:
+    return Device(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        client_device_id=row.client_device_id,
+        name=row.name,
+        kind=DeviceKind(row.kind),
+        platform=row.platform,
+        app_bundle_id=row.app_bundle_id,
+        push_provider=None if row.push_provider is None else PushProvider(row.push_provider),
+        push_token=None if row.push_token is None else SecretStr(row.push_token),
+        push_environment=(
+            None if row.push_environment is None else PushEnvironment(row.push_environment)
+        ),
+        push_token_updated_at=row.push_token_updated_at,
+        push_token_invalidated_at=row.push_token_invalidated_at,
+        muted_kinds=frozenset(NotificationKind(value) for value in row.muted_kinds),
+        status=DeviceStatus(row.status),
+        revoked_at=row.revoked_at,
+        last_seen_at=row.last_seen_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def device_values(device: Device) -> dict[str, Any]:
+    return {
+        "id": device.id,
+        "tenant_id": device.tenant_id,
+        "principal_id": device.principal_id,
+        "client_device_id": device.client_device_id,
+        "name": device.name,
+        "kind": device.kind.value,
+        "platform": device.platform,
+        "app_bundle_id": device.app_bundle_id,
+        "push_provider": None if device.push_provider is None else device.push_provider.value,
+        "push_token": (None if device.push_token is None else device.push_token.get_secret_value()),
+        "push_environment": (
+            None if device.push_environment is None else device.push_environment.value
+        ),
+        "push_token_updated_at": device.push_token_updated_at,
+        "push_token_invalidated_at": device.push_token_invalidated_at,
+        "muted_kinds": sorted(kind.value for kind in device.muted_kinds),
+        "status": device.status.value,
+        "revoked_at": device.revoked_at,
+        "last_seen_at": device.last_seen_at,
+        "created_at": device.created_at,
+        "updated_at": device.updated_at,
+    }
+
+
+def notification_to_domain(row: NotificationOutboxRow) -> Notification:
+    return Notification(
+        id=row.id,
+        tenant_id=row.tenant_id,
+        principal_id=row.principal_id,
+        kind=NotificationKind(row.kind),
+        dedupe_key=row.dedupe_key,
+        session_id=row.session_id,
+        run_id=row.run_id,
+        approval_id=row.approval_id,
+        question_id=row.question_id,
+        schedule_id=row.schedule_id,
+        occurrence_id=row.occurrence_id,
+        payload=NotificationPayload.model_validate(row.payload),
+        priority=row.priority,
+        expires_at=row.expires_at,
+        status=NotificationStatus(row.status),
+        attempts=row.attempts,
+        next_attempt_at=row.next_attempt_at,
+        claimed_by=row.claimed_by,
+        claimed_until=row.claimed_until,
+        created_at=row.created_at,
+        settled_at=row.settled_at,
+    )
+
+
+def new_notification_values(notification: NewNotification) -> dict[str, Any]:
+    return {
+        **notification.model_dump(exclude={"payload"}),
+        "kind": notification.kind.value,
+        "payload": notification.payload.model_dump(mode="json"),
+        "status": NotificationStatus.PENDING.value,
+        "attempts": 0,
+        "claimed_by": None,
+        "claimed_until": None,
+        "settled_at": None,
+    }
+
+
+def notification_delivery_values(delivery: NotificationDelivery) -> dict[str, Any]:
+    return {
+        **delivery.model_dump(),
+        "outcome": delivery.outcome.value,
+    }
+
+
+def notification_delivery_to_domain(row: NotificationDeliveryRow) -> NotificationDelivery:
+    return NotificationDelivery(
+        id=row.id,
+        notification_id=row.notification_id,
+        device_id=row.device_id,
+        attempt=row.attempt,
+        outcome=DeliveryOutcome(row.outcome),
+        provider_reason=row.provider_reason,
+        provider_id=row.provider_id,
+        attempted_at=row.attempted_at,
+    )
+
+
 def schedule_revision_to_domain(row: ScheduleRevisionRow) -> ScheduleRevision:
     return ScheduleRevision.model_validate(
         {
@@ -278,6 +412,20 @@ def schedule_idempotency_to_domain(row: ScheduleIdempotencyKeyRow) -> ScheduleId
 
 
 def schedule_idempotency_values(record: ScheduleIdempotencyRecord) -> dict[str, Any]:
+    return record.model_dump(mode="python")
+
+
+def device_registration_idempotency_to_domain(
+    row: DeviceRegistrationIdempotencyRow,
+) -> DeviceRegistrationIdempotencyRecord:
+    return DeviceRegistrationIdempotencyRecord.model_validate(
+        {key: getattr(row, key) for key in DeviceRegistrationIdempotencyRecord.model_fields}
+    )
+
+
+def device_registration_idempotency_values(
+    record: DeviceRegistrationIdempotencyRecord,
+) -> dict[str, Any]:
     return record.model_dump(mode="python")
 
 

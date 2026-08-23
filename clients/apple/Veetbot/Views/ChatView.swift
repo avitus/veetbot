@@ -1,5 +1,21 @@
 import SwiftUI
 
+enum ConversationScrollTarget: Equatable {
+    case bottom
+    case notification(NotificationFocus)
+
+    static func resolve(_ focus: NotificationFocus?) -> ConversationScrollTarget {
+        focus.map(Self.notification) ?? .bottom
+    }
+
+    var scrollID: String {
+        switch self {
+        case .bottom: return "conversation-bottom"
+        case .notification(let focus): return focus.scrollID
+        }
+    }
+}
+
 public struct ChatView: View {
     @ObservedObject var model: ChatViewModel
     @ObservedObject private var state: RunStateReducer
@@ -46,6 +62,11 @@ public struct ChatView: View {
                                         artifactSelection = ArtifactSelection(id: artifactID)
                                     }
                                 )
+                                .id(
+                                    activity.approvalID.map {
+                                        NotificationFocus.approval($0).scrollID
+                                    } ?? activity.id
+                                )
                             case .toolBundle(let bundle):
                                 ToolActivityBundleCard(
                                     bundle: bundle,
@@ -69,6 +90,7 @@ public struct ChatView: View {
                                     )
                                 }
                             }
+                            .id(NotificationFocus.approval(approval.id).scrollID)
                         }
                         if state.runStatus == .running || state.runStatus == .queued {
                             HStack(spacing: 8) {
@@ -82,6 +104,7 @@ public struct ChatView: View {
                             ClarifyingQuestionCard(prompt: prompt) { answer in
                                 await model.answerQuestion(prompt, answer: answer)
                             }
+                            .id(NotificationFocus.question(prompt.questionID).scrollID)
                         }
                         Color.clear.frame(height: 1).id(Self.bottomAnchorID)
                     }
@@ -89,7 +112,13 @@ public struct ChatView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .onChange(of: scrollChangeToken) { _ in
-                    withAnimation { proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom) }
+                    scroll(proxy)
+                }
+                .onChange(of: model.notificationFocus) { _ in
+                    scroll(proxy)
+                }
+                .onAppear {
+                    scroll(proxy)
                 }
             }
             Divider()
@@ -156,12 +185,24 @@ public struct ChatView: View {
             && (!state.isRunActive || state.runStatus == .waitingForUser)
     }
 
-    private static let bottomAnchorID = "conversation-bottom"
+    private static let bottomAnchorID = ConversationScrollTarget.bottom.scrollID
 
     private var scrollChangeToken: String {
         // Follow newly inserted activity, but leave the viewport fixed while an
         // existing assistant message grows so its beginning remains readable.
-        "\(state.timeline.count):\(state.tools.count)"
+        "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none")"
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy) {
+        withAnimation {
+            let target = ConversationScrollTarget.resolve(model.notificationFocus)
+            switch target {
+            case .notification:
+                proxy.scrollTo(target.scrollID, anchor: .center)
+            case .bottom:
+                proxy.scrollTo(target.scrollID, anchor: .bottom)
+            }
+        }
     }
 
     private func submitDraft() {

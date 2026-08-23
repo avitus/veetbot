@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import signal
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.sql.functions import func
 
+from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.artifacts.filesystem import FilesystemArtifactStore
 from agent_core.adapters.artifacts.local import LocalTrajectoryArtifactStore
 from agent_core.adapters.browser.authentications import (
@@ -31,7 +33,10 @@ from agent_core.adapters.browser.authentications import (
 )
 from agent_core.adapters.browser.grants import InMemoryBrowserGrantRepository
 from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
-from agent_core.adapters.browser.hosted_provider import HostedBrowserProvider
+from agent_core.adapters.browser.hosted_provider import (
+    HostedBrowserProvider,
+    SessionBoundHostedBrowserProvider,
+)
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
@@ -78,6 +83,7 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.adapters.models.openai_responses import OpenAIResponsesProvider
 from agent_core.adapters.models.registry import ADAPTER_DEFINITIONS
 from agent_core.adapters.models.unavailable import MissingCredentialProvider
+from agent_core.adapters.notification_wakeup import PostgresNotificationWakeup
 from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
@@ -107,6 +113,14 @@ from agent_core.adapters.persistence.memory_repositories import (
     PostgresKnowledgeStore,
     PostgresMemoryStore,
     PostgresTraceStore,
+)
+from agent_core.adapters.persistence.notifications import (
+    InMemoryDeviceRegistrationIdempotencyRepository,
+    InMemoryDeviceRegistry,
+    InMemoryNotificationOutbox,
+    PostgresDeviceRegistrationIdempotencyRepository,
+    PostgresDeviceRegistry,
+    PostgresNotificationOutbox,
 )
 from agent_core.adapters.persistence.projections import (
     PostgresSessionHistoryRepository,
@@ -177,6 +191,16 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.device_management import (
+    DeviceManagementService,
+    NotificationInboxService,
+)
+from agent_core.application.notification_dispatcher import (
+    NotificationDispatcher,
+    NotificationDispatchUnitOfWorkFactory,
+)
+from agent_core.application.notification_producer import NotificationProducer
+from agent_core.application.notification_worker import NotificationWorker
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
@@ -196,6 +220,12 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     BrowserProfileService as PublicBrowserProfileServiceContract,
+)
+from agent_core.application.services import (
+    DeviceService as PublicDeviceServiceContract,
+)
+from agent_core.application.services import (
+    NotificationService as PublicNotificationServiceContract,
 )
 from agent_core.application.services import (
     RunService as PublicRunServiceContract,
@@ -219,9 +249,11 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     MemoryProviderExtractionMode,
+    PushProviderKind,
     Settings,
     WebProviderKind,
     load_config_document,
+    load_notification_worker_settings,
     load_provider_extraction_evidence,
     load_schedule_worker_settings,
     load_settings,
@@ -236,6 +268,8 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.devices import PushProvider
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
@@ -257,9 +291,15 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, Run, RunLimits, RunStatus
 from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
+from agent_core.domain.sessions import (
+    DEFAULT_PROJECT_SCOPE,
+    SESSION_BROWSER_PROFILE_METADATA_KEY,
+    project_scope,
+)
 from agent_core.domain.skills import SkillPackage, SkillSource
+from agent_core.domain.tools import ToolExecutionContext
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
@@ -272,6 +312,7 @@ from agent_core.memory.formation import (
     DeterministicCandidateExtractor,
     GovernedMemoryService,
 )
+from agent_core.memory.profiles import MemoryProfiles
 from agent_core.memory.provider_extraction import (
     PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
@@ -300,6 +341,7 @@ from agent_core.ports.dispatch import WorkerService
 from agent_core.ports.live_events import LiveEventBroadcaster
 from agent_core.ports.mcp import MCPClientFactory, MCPServerRepository
 from agent_core.ports.models import ModelProvider
+from agent_core.ports.notifications import PushTransport
 from agent_core.ports.persistence import (
     ScheduleUnitOfWork,
     TransactionCallback,
@@ -360,6 +402,8 @@ class ApplicationServices:
     browser_profiles: PublicBrowserProfileServiceContract
     browser_grants: PublicBrowserGrantServiceContract
     schedules: PublicScheduleServiceContract
+    devices: PublicDeviceServiceContract
+    notifications: PublicNotificationServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -390,6 +434,7 @@ class Composition:
     tool_pipeline: ToolPipeline
     memory: GovernedMemoryService
     memory_retriever: HybridMemoryRetriever
+    memory_profiles: MemoryProfiles
     knowledge: KnowledgeService
     mcp_proxy: WorkerEgressProxy | None
 
@@ -459,6 +504,17 @@ async def _publish_model_event(
         logger.warning("live_event_publish_failed", extra={"error_class": type(exc).__name__})
 
 
+def system_clock() -> Clock:
+    """Hand the wall clock to a caller that owns no composition.
+
+    Adapters are constructed here and nowhere else, so a command or an
+    evaluation harness that needs the time asks the composition root for a
+    clock rather than reading the ambient one.
+    """
+
+    return SystemClock()
+
+
 def default_fake_script() -> FakeModelScript:
     return FakeModelScript(
         turns=[
@@ -504,6 +560,8 @@ def _memory_uow_repositories(
     traces = traces or InMemoryTraceStore()
     knowledge = knowledge or InMemoryKnowledgeStore(clock)
     schedules = InMemoryScheduleRepository()
+    devices = InMemoryDeviceRegistry()
+    notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
@@ -525,6 +583,7 @@ def _memory_uow_repositories(
         traces=traces,
         knowledge=knowledge,
         schedules=schedules,
+        notification_outbox=notification_outbox,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -558,6 +617,9 @@ def _memory_uow_repositories(
         schedule_occurrences=schedule_occurrences,
         schedule_idempotency=InMemoryScheduleIdempotencyRepository(schedules),
         schedule_admission=AllowScheduleAdmissionController(),
+        devices=devices,
+        device_registration_idempotency=InMemoryDeviceRegistrationIdempotencyRepository(),
+        notification_outbox=notification_outbox,
         queue=None,
     )
 
@@ -590,6 +652,7 @@ def _postgres_repository_factory(
         traces = PostgresTraceStore(session)
         knowledge = PostgresKnowledgeStore(session, clock)
         schedules = PostgresScheduleRepository(session)
+        devices = PostgresDeviceRegistry(session)
         return UnitOfWorkRepositories(
             agents=agents,
             approvals=PostgresApprovalRepository(session, clock),
@@ -631,6 +694,11 @@ def _postgres_repository_factory(
             schedule_admission=PostgresScheduleAdmissionController(
                 session, schedule_admission_limits, schedule_metrics
             ),
+            devices=devices,
+            device_registration_idempotency=(
+                PostgresDeviceRegistrationIdempotencyRepository(session)
+            ),
+            notification_outbox=PostgresNotificationOutbox(session, clock),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -692,6 +760,7 @@ class _ScheduleUnitOfWork(ScheduleUnitOfWork):
         self.schedule_admission = PostgresScheduleAdmissionController(
             session, self._admission_limits, self._metrics
         )
+        self.notification_outbox = PostgresNotificationOutbox(session, self._clock)
         self.queue = PostgresRunQueue(
             session,
             self._clock,
@@ -761,6 +830,134 @@ class _ScheduleUnitOfWorkFactory:
 
     def is_open(self) -> bool:
         return False
+
+
+class _NotificationUnitOfWork:
+    """Least-privilege repository set for the production notify role."""
+
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+        self._session: AsyncSession | None = None
+
+    async def __aenter__(self) -> Self:
+        session = self._maker()
+        self._session = session
+        await session.execute(
+            select(func.set_config("agent_core.tenant_id", self._tenant_id, True))
+        )
+        upcasters = EventUpcasterRegistry()
+        history = PostgresSessionHistoryRepository(session, self._clock, upcasters)
+        self.approvals = PostgresApprovalRepository(session, self._clock)
+        self.checkpoints = PostgresCheckpointRepository(
+            session,
+            self._clock,
+            history,
+        )
+        self.devices = PostgresDeviceRegistry(session)
+        self.notification_outbox = PostgresNotificationOutbox(session, self._clock)
+        self.process_events = PostgresProcessEventRepository(session)
+        self.runs = PostgresRunRepository(session, self._clock)
+        self.sessions = PostgresSessionRepository(session)
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        del exc, traceback
+        if self._session is None:
+            return
+        try:
+            if exc_type is None:
+                await self._session.commit()
+            else:
+                await self._session.rollback()
+        finally:
+            await self._session.close()
+            self._session = None
+
+
+class _NotificationUnitOfWorkFactory:
+    def __init__(
+        self,
+        maker: async_sessionmaker[AsyncSession],
+        *,
+        tenant_id: str,
+        clock: Clock,
+    ) -> None:
+        self._maker = maker
+        self._tenant_id = tenant_id
+        self._clock = clock
+
+    def __call__(self) -> _NotificationUnitOfWork:
+        return _NotificationUnitOfWork(
+            self._maker,
+            tenant_id=self._tenant_id,
+            clock=self._clock,
+        )
+
+
+def _validate_notification_role(settings: Settings) -> Principal:
+    validate_settings(
+        settings,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
+    if not settings.notification_dispatch_enabled:
+        raise ConfigurationError(
+            "notification dispatch is disabled; set AGENT_NOTIFICATION_DISPATCH_ENABLED=1"
+        )
+    if not settings.notification_api_enabled:
+        raise ConfigurationError(
+            "notification API is disabled; set AGENT_NOTIFICATION_API_ENABLED=1 before dispatch"
+        )
+    if settings.deployment_mode is not DeploymentMode.PRODUCTION:
+        raise ConfigurationError("notification worker requires the production process topology")
+    if settings.auth_mode is not AuthMode.TOKEN:
+        raise ConfigurationError("notification worker requires configured non-development identity")
+    if not settings.database_url.startswith(("postgresql://", "postgresql+asyncpg://")):
+        raise ConfigurationError("notification worker requires PostgreSQL storage")
+    if settings.auth_token is not None:
+        raise ConfigurationError("notification worker environment must not contain an API bearer")
+    if settings.credentials:
+        raise ConfigurationError("notification worker environment must not contain provider keys")
+    if settings.push_provider is not PushProviderKind.APNS:
+        raise ConfigurationError("notification worker requires PUSH_PROVIDER=apns")
+    apns_values = {
+        "APNS_KEY_FILE": settings.apns_key_file,
+        "APNS_KEY_ID": settings.apns_key_id,
+        "APNS_TEAM_ID": settings.apns_team_id,
+        "APNS_TOPIC": settings.apns_topic,
+    }
+    missing = [name for name, value in apns_values.items() if value is None]
+    if missing:
+        raise ConfigurationError(
+            "notification worker requires APNs configuration: " + ", ".join(missing)
+        )
+    assert settings.apns_key_file is not None
+    if not settings.apns_key_file.is_absolute():
+        raise ConfigurationError("APNS_KEY_FILE must be an absolute path")
+    unknown = set(settings.auth_scopes) - set(PLATFORM_SCOPES)
+    if unknown:
+        raise ConfigurationError(
+            "AUTH_SCOPES contains unknown platform scopes: " + ", ".join(sorted(unknown))
+        )
+    return Principal(
+        tenant_id=settings.auth_tenant_id,
+        principal_id=settings.auth_principal_id,
+        roles=set(settings.auth_roles),
+        scopes=set(settings.auth_scopes),
+    )
 
 
 def _validate_schedule_role(settings: Settings) -> Principal:
@@ -865,6 +1062,11 @@ async def build_schedule_worker(
     )
     effective_clock = clock or SystemClock()
     effective_ids = ids or RandomIdFactory()
+    notification_producer = (
+        NotificationProducer(clock=effective_clock, ids=effective_ids)
+        if effective_settings.notification_dispatch_enabled
+        else None
+    )
     wakeup = PostgresScheduleWakeup(effective_settings.database_url)
     metrics = ScheduleMetrics(tenant_hash_key=tenant_hash_key(effective_settings.database_url))
     engine = create_engine(effective_settings.database_url)
@@ -886,6 +1088,7 @@ async def build_schedule_worker(
             ids=effective_ids,
             seed_checkpoint=DurableCheckpointSeeder(effective_clock),
             metrics=metrics,
+            notification_producer=notification_producer,
         )
         yield ScheduleWorker(
             uow_factory=factory,
@@ -899,6 +1102,74 @@ async def build_schedule_worker(
         )
     finally:
         await wakeup.close()
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def build_notification_worker(
+    *,
+    settings: Settings | None = None,
+    clock: Clock | None = None,
+    ids: IdFactory | None = None,
+    transport: PushTransport | None = None,
+) -> AsyncIterator[NotificationWorker]:
+    """Build only the resources needed to dispatch durable notifications."""
+
+    effective_settings = settings or load_notification_worker_settings()
+    principal = _validate_notification_role(effective_settings)
+    runtime = load_config_document(effective_settings, "runtime/limits.yaml")
+    notification_limits = runtime["notifications"]
+    effective_clock = clock or SystemClock()
+    effective_ids = ids or RandomIdFactory()
+    effective_transport = transport
+    if effective_transport is None:
+        assert effective_settings.apns_key_file is not None
+        assert effective_settings.apns_key_id is not None
+        assert effective_settings.apns_team_id is not None
+        assert effective_settings.apns_topic is not None
+        try:
+            effective_transport = APNsPushTransport(
+                key_file=effective_settings.apns_key_file,
+                key_id=effective_settings.apns_key_id,
+                team_id=effective_settings.apns_team_id,
+                topic=effective_settings.apns_topic,
+                clock=effective_clock,
+            )
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
+    wakeup = PostgresNotificationWakeup(effective_settings.database_url)
+    engine = create_engine(effective_settings.database_url)
+    try:
+        await assert_schema_revision(engine)
+        factory = _NotificationUnitOfWorkFactory(
+            create_session_factory(engine),
+            tenant_id=principal.tenant_id,
+            clock=effective_clock,
+        )
+        dispatcher = NotificationDispatcher(
+            uow_factory=cast(NotificationDispatchUnitOfWorkFactory, factory),
+            transport=effective_transport,
+            providers=frozenset({PushProvider.APNS}),
+            clock=effective_clock,
+            ids=effective_ids,
+            claimant=f"notify:{socket.gethostname()}:{os.getpid()}",
+            batch_size=int(notification_limits["claim_batch"]),
+            lease_seconds=float(notification_limits["lease_seconds"]),
+            retry_delays=tuple(
+                float(value) for value in notification_limits["retry_delays_seconds"]
+            ),
+        )
+        yield NotificationWorker(
+            dispatch_once=dispatcher.run_once,
+            clock=effective_clock,
+            fallback_poll_seconds=float(notification_limits["fallback_poll_seconds"]),
+            wait_for_wakeup=wakeup.wait,
+        )
+    finally:
+        await wakeup.close()
+        close_transport = getattr(effective_transport, "aclose", None)
+        if close_transport is not None:
+            await close_transport()
         await engine.dispose()
 
 
@@ -931,12 +1202,14 @@ async def _compose(
     schedule_fallback_poll_seconds: float,
     schedule_admission_backoff_seconds: float,
     schedule_definition_limits: ScheduleDefinitionLimits,
+    notification_expiry_seconds: float,
     schedule_notify: Callable[[], Awaitable[None]],
     schedule_wait: Callable[[float], Awaitable[None]],
     schedule_metrics: ScheduleMetrics,
     ruleset: LoadedRuleset,
     live_events: LiveEventBroadcaster,
     context_config: Mapping[str, object],
+    memory_profiles: MemoryProfiles,
     mcp_config: Mapping[str, object],
     max_compactions_per_step: int,
     skill_store: SkillPackageStore,
@@ -1056,7 +1329,14 @@ async def _compose(
         raise ConfigurationError("microvm sandbox adapter is not configured in this deployment")
     estimator = ConservativeTokenEstimator()
     working_state = WorkingStateManager(clock, working_config, estimator)
-    memory_retriever = HybridMemoryRetriever(uow_factory, clock, ids, principal)
+    memory_retriever = HybridMemoryRetriever(
+        uow_factory,
+        clock,
+        ids,
+        principal,
+        profile=memory_profiles.retrieval,
+        trace_retention=memory_profiles.traces,
+    )
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
     registry = StaticToolRegistry()
@@ -1267,7 +1547,7 @@ async def _compose(
             evidence_corpus_sha256 or "none",
         )
     )
-    selection_key = f"memory.provider_extraction.selection:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v2:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -1276,6 +1556,8 @@ async def _compose(
                 actor_type="composition-root",
                 actor_id=principal.principal_id,
                 payload={
+                    "tenant_id": principal.tenant_id,
+                    "principal_id": principal.principal_id,
                     "mode": memory_mode.value,
                     "outcome": selection_outcome,
                     "reason": selection_reason,
@@ -1301,6 +1583,9 @@ async def _compose(
         principal,
         extractor=memory_extractor,
         policy_version=memory_policy_version,
+        formation_profile=memory_profiles.formation,
+        decay_tau_days=memory_profiles.retrieval.decay_tau_days,
+        usage=memory_profiles.retrieval.usage,
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
@@ -1364,6 +1649,17 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
         )
+
+        async def session_project_scope(session_id: UUID) -> str:
+            """Name the project a session belongs to, for formation and recall."""
+
+            try:
+                async with uow_factory() as uow:
+                    session = await uow.sessions.get(session_id, principal)
+            except NotFoundError:
+                return DEFAULT_PROJECT_SCOPE
+            return project_scope(session.metadata)
+
         context_builder = BudgetedContextBuilder(
             context_planner,
             estimator,
@@ -1371,6 +1667,7 @@ async def _compose(
             working_state,
             memory_retriever,
             query_former,
+            session_project_scope,
         )
         compactor = StructuredCompactor(
             estimator,
@@ -1386,6 +1683,7 @@ async def _compose(
             clock,
             ids,
             principal,
+            trace_retention=memory_profiles.traces,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
         registry.register(KnowledgeSearchTool(knowledge_service))
@@ -1408,7 +1706,18 @@ async def _compose(
         async def sweep_memory() -> int:
             return len(await memory_service.expire())
 
+        async def sweep_traces() -> int:
+            return await memory_service.expire_traces()
+
+        async def sweep_memory_decay() -> int:
+            if not memory_profiles.formation.scheduled_enabled:
+                return 0
+            result = await memory_service.decay()
+            return result.decayed + result.retired
+
         async def sweep_memory_consolidation() -> int:
+            if not memory_profiles.formation.session_boundary_enabled:
+                return 0
             ready_at = clock.now()
             async with uow_factory() as uow:
                 sessions = await uow.maintenance.pending_memory_sessions(
@@ -1422,7 +1731,7 @@ async def _compose(
                 try:
                     await memory_service.run(
                         trigger="session_idle",
-                        scope="general",
+                        scope=await session_project_scope(session_id),
                         session_id=session_id,
                     )
                 except Exception:
@@ -1466,11 +1775,17 @@ async def _compose(
         )
         token_slot = _ActiveToken()
         checkpoint_seeder = DurableCheckpointSeeder(clock)
+        notification_producer = (
+            NotificationProducer(clock=clock, ids=ids)
+            if settings.notification_dispatch_enabled
+            else None
+        )
         schedule_accountant = ScheduleOutcomeAccountant(
             uow_factory=uow_factory,
             clock=clock,
             ids=ids,
             metrics=schedule_metrics,
+            notification_producer=notification_producer,
         )
         principal_resolver = StaticPrincipalResolver(principal)
         skill_reviews: SkillBackgroundReview | None = None
@@ -1484,11 +1799,13 @@ async def _compose(
                 await schedule_accountant.account(run_id)
             except Exception:
                 logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
+            completed: Run | None = None
             try:
                 async with uow_factory() as uow:
                     run = await uow.runs.get(run_id, principal)
                     if run.status not in TERMINAL_RUN_STATUSES:
                         return
+                    completed = run
                     await uow.events.append(
                         NewEvent(
                             session_id=run.session_id,
@@ -1507,6 +1824,24 @@ async def _compose(
                     )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
+            # What the answer cited is only knowable once the answer exists, so
+            # usage feedback is the completion's own step: its own error
+            # boundary, its own units of work, and no external call inside one.
+            if (
+                completed is not None
+                and completed.status is RunStatus.COMPLETED
+                and completed.final_message
+            ):
+                try:
+                    plan = await context_planner.current(completed.session_id)
+                    await memory_service.record_usage(
+                        session_id=completed.session_id,
+                        run_id=completed.id,
+                        final_text=completed.final_message,
+                        snapshot_trace_id=None if plan is None else plan.snapshot_id,
+                    )
+                except Exception:
+                    logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 
@@ -1538,6 +1873,7 @@ async def _compose(
             identical_call_threshold=identical_call_threshold,
             identical_denial_threshold=identical_denial_threshold,
             max_compactions_per_step=max_compactions_per_step,
+            notification_producer=notification_producer,
         )
         dispatcher = (
             InlineRunDispatcher(executor.execute, unit_of_work_open=uow_factory.is_open)
@@ -1597,9 +1933,11 @@ async def _compose(
         )
 
         async def consolidate_closed_session(session_id: UUID) -> None:
+            if not memory_profiles.formation.session_boundary_enabled:
+                return
             await memory_service.run(
                 trigger="session_close",
-                scope="general",
+                scope=await session_project_scope(session_id),
                 session_id=session_id,
             )
 
@@ -1642,6 +1980,13 @@ async def _compose(
             limits=schedule_definition_limits,
             wake_worker=schedule_notify,
         )
+        device_service = DeviceManagementService(
+            uow_factory=uow_factory,
+            clock=clock,
+            ids=ids,
+            notification_expiry_seconds=notification_expiry_seconds,
+        )
+        notification_inbox = NotificationInboxService(uow_factory=uow_factory)
         public_services = ApplicationServices(
             sessions=public_session_service,
             runs=PublicRunService(
@@ -1672,6 +2017,8 @@ async def _compose(
             browser_profiles=browser_profile_service,
             browser_grants=browser_grant_service,
             schedules=schedule_service,
+            devices=device_service,
+            notifications=notification_inbox,
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 
@@ -1691,6 +2038,7 @@ async def _compose(
                 ids=ids,
                 seed_checkpoint=checkpoint_seeder,
                 metrics=schedule_metrics,
+                notification_producer=notification_producer,
             )
             return ScheduleWorker(
                 uow_factory=uow_factory,
@@ -1764,8 +2112,13 @@ async def _compose(
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
+                    sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
+                    sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    memory_decay_interval_seconds=(
+                        memory_profiles.formation.scheduled_interval_seconds
+                    ),
                 ),
                 schedule_worker_factory=schedule_worker_factory,
                 sandbox=sandbox_manager,
@@ -1775,6 +2128,7 @@ async def _compose(
                 tool_pipeline=pipeline,
                 memory=memory_service,
                 memory_retriever=memory_retriever,
+                memory_profiles=memory_profiles,
                 knowledge=knowledge_service,
                 mcp_proxy=mcp_proxy,
             ),
@@ -1852,6 +2206,7 @@ def _browser_provider(
     profile_id: UUID | None,
     profiles: UnitOfWorkFactory,
     sessions: BrowserSessionControlPlane | None,
+    now: Callable[[], datetime],
 ) -> BrowserProvider | None:
     if kind is BrowserProviderKind.DISABLED:
         return None
@@ -1861,7 +2216,7 @@ def _browser_provider(
             allowed_origins=allowed_origins,
         )
     if kind is BrowserProviderKind.HOSTED:
-        if profile_id is None or sessions is None:
+        if sessions is None:
             raise ConfigurationError("hosted browser provider composition is incomplete")
 
         async def load_profile(
@@ -1871,12 +2226,29 @@ def _browser_provider(
             async with profiles() as uow:
                 return await uow.browser_profiles.get(requested_profile_id, owner)
 
-        return HostedBrowserProvider(
+        if profile_id is not None:
+            return HostedBrowserProvider(
+                principal=principal,
+                profile_id=profile_id,
+                allowed_origins=allowed_origins,
+                profiles=load_profile,
+                sessions=sessions,
+            )
+
+        async def select_session_profile(context: ToolExecutionContext) -> UUID:
+            async with profiles() as uow:
+                session = await uow.sessions.get(context.session_id, context.principal)
+            value = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+            if not isinstance(value, str):
+                raise NotFoundError("browser profile binding not found")
+            return UUID(value)
+
+        return SessionBoundHostedBrowserProvider(
             principal=principal,
-            profile_id=profile_id,
-            allowed_origins=allowed_origins,
             profiles=load_profile,
+            profile_selector=select_session_profile,
             sessions=sessions,
+            now=now,
         )
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
@@ -1948,6 +2320,15 @@ async def build(
         and storage != "postgres"
     ):
         raise ConfigurationError("production scheduling requires PostgreSQL storage")
+    if (
+        effective_settings.deployment_mode is DeploymentMode.PRODUCTION
+        and (
+            effective_settings.notification_api_enabled
+            or effective_settings.notification_dispatch_enabled
+        )
+        and storage != "postgres"
+    ):
+        raise ConfigurationError("production notifications require PostgreSQL storage")
     provider_registry = ProviderRegistry.load(
         PACKAGE_ROOT / "models",
         adapters=ADAPTER_DEFINITIONS,
@@ -2004,11 +2385,15 @@ async def build(
                 f"{ruleset.profile_name!r}"
             )
     context_config = load_config_document(effective_settings, "context/plan.yaml")
+    memory_profiles = MemoryProfiles.from_document(
+        load_config_document(effective_settings, "memory/profiles.yaml")
+    )
     run_defaults = runtime_config["run_defaults"]
     model_limits = runtime_config["model"]
     queue_config = runtime_config["queue"]
     worker_config = runtime_config["worker"]
     scheduling_config = runtime_config["scheduling"]
+    notification_config = runtime_config["notifications"]
     schedule_admission_limits = ScheduleAdmissionLimits.model_validate(
         {
             "max_active_runs_per_tenant": scheduling_config["max_active_runs_per_tenant"],
@@ -2258,6 +2643,7 @@ async def build(
                 profile_id=effective_settings.browser_profile_id,
                 profiles=uow_factory,
                 sessions=browser_sessions,
+                now=effective_clock.now,
             )
         )
         for package, source in skill_packages:
@@ -2304,12 +2690,14 @@ async def build(
                 scheduling_config["admission_backoff_seconds"]
             ),
             schedule_definition_limits=schedule_definition_limits,
+            notification_expiry_seconds=float(notification_config["terminal_expiry_seconds"]),
             schedule_notify=schedule_wakeup.notify,
             schedule_wait=schedule_wakeup.wait,
             schedule_metrics=schedule_metrics,
             ruleset=ruleset,
             live_events=live_events,
             context_config=context_config,
+            memory_profiles=memory_profiles,
             mcp_config=tool_config["mcp"],
             max_compactions_per_step=int(runtime_config["context"]["max_compactions_per_step"]),
             skill_store=skill_store,

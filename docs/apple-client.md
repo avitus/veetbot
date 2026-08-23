@@ -24,10 +24,10 @@ make test-apple-ui
 `make test-apple` requires full Xcode and guarantees that Swift Testing suites
 execute; it fails instead of accepting the Command Line Tools behavior that can
 compile the bundle without running it. `make test-apple-ui` also requires full
-Xcode, selects an available iPhone simulator, and launches a debug-only,
-in-process fixture to verify that historical and new-conversation rows open the
-chat surface and that a selected transcript renders. Both targets run in the
-required CircleCI Apple job.
+Xcode, selects available iPhone and iPad simulators, and launches a debug-only,
+in-process fixture to verify that historical rows open and switch conversations,
+new-conversation rows open the chat surface, and selected transcripts render.
+Both targets run in the required CircleCI Apple job.
 
 The connection screen accepts an HTTPS base URL and a static bearer token.
 Plaintext HTTP, embedded URL credentials, queries, and fragments are rejected.
@@ -43,12 +43,29 @@ access, the user must enter the token once in the signed build. The transport
 refuses redirects, uses the operating system trust store, and maps `401` to
 re-authentication while preserving `403` as an authorization failure.
 
+Once a connection is configured, the application-delegate adaptor requests
+notification authorization and registers with APNs. The client mints one
+`client_device_id`, stores it in the nonsynchronizing Data Protection Keychain
+beside the bearer credential, and posts the APNs token and build-derived sandbox
+or production environment to `POST /v1/devices`. System registration runs again
+on launch and Apple invokes the same upload path whenever it rotates the token.
+Forgetting a connection attempts to revoke that server device first, but still
+deletes the local bearer and clears the local connection if revocation fails.
+A `404` from the feature-gated device surface marks notifications unavailable
+without preventing the rest of the client from using an older server.
+
+The tracked entitlement declares `aps-environment`; enabling the push capability
+for the application identifier and regenerating provisioning profiles remain
+owner actions in the Apple Developer portal. Debug and release simulator builds
+remain unsigned-build compatible, and the debug UI-test fixture suppresses the
+permission request.
+
 Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 
 Settings use a compact header, a scrolling body, and a persistent action bar, so
-connection actions remain visible as sections grow. Connection, Appearance, and
-Data & Privacy cards group controls by user intent. Configured macOS clients open
+connection actions remain visible as sections grow. Connection, Website Access,
+Appearance, and Data & Privacy cards group controls by user intent. Configured macOS clients open
 settings in a separate window that resizes horizontally and vertically and
 restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
@@ -59,6 +76,18 @@ immediately. System sizing preserves the platform's accessibility setting, while
 the three explicit sizes use deterministic scales on both platforms. The
 interface palette uses the app icon's turquoise, orange, and navy while retaining
 semantic colors for errors, approvals, and tool risk.
+
+Website Access lists the authenticated principal's browser profiles and lets the
+user choose one `READY` profile for new conversations. Adding access sends only
+the exact public-HTTPS origin and login-page URL to Veetbot, then opens the
+server's five-minute, single-use browser ceremony. The user enters usernames,
+passwords, passkeys, and MFA directly in that isolated browser surface; the app
+has no website-credential fields and receives no keystrokes, cookies, storage
+state, or provider material. It polls only the secret-free ceremony status.
+The selected opaque profile UUID is a device preference, is cleared when the
+server connection changes or credentials are forgotten, and is included only
+when the client creates a new session. The server revalidates ownership and
+readiness before persisting that binding.
 
 ## Runtime behavior
 
@@ -103,12 +132,21 @@ Conversation activity, not selection, updates the server
 ordering. Each row's activity timer shows seconds only during its first minute,
 then uses minute-or-larger relative units.
 
-On iPhone, sidebar rows push an activating chat destination before selecting a
-historical session or resetting to a new conversation. On macOS, where the
-split-view detail is already visible, those rows activate the detail directly.
-This platform-specific navigation prevents a compact-width tap from mutating an
-unbound sidebar value and prevents a macOS selection from leaving the visible
+In compact iPhone and iPad layouts, sidebar rows push an activating chat
+destination before selecting a historical session or resetting to a new
+conversation. On regular-width iPad layouts and macOS, where the split-view
+detail is already visible, those rows activate the detail directly. This
+adaptive navigation prevents a compact-width tap from mutating an unbound
+sidebar value and prevents a regular-width selection from leaving the visible
 detail stale.
+
+A notification tap accepts only the closed, content-free `veetbot` payload
+dictionary. If it names a session and run, the client restores the complete
+durable transcript before attaching to that exact run. Approval and question
+notifications then focus their corresponding card; a cold-launch tap waits for
+the saved connection to install before following the same path. The client keeps
+only transient navigation focus and never persists notification state; offline
+recovery remains the server's `/v1/notifications` authority.
 
 Deleting a row is an irreversible `Delete Everywhere` operation. The client
 first asks the server to delete the session and its associated conversation

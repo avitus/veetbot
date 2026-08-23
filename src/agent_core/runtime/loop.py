@@ -49,6 +49,7 @@ from agent_core.ports.context import Compactor, PressureAwareContextBuilder, Tok
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.dispatch import CancellationToken
 from agent_core.ports.models import ModelProvider
+from agent_core.ports.notifications import RunNotificationProducer
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.repositories import BudgetLedger
 
@@ -77,6 +78,8 @@ class RunContext:
     token: CancellationToken
     dispatch_tools: ToolDispatch
     add_open_question: AddOpenQuestion
+    notification_producer: RunNotificationProducer | None = None
+    finalization_write_probe: Callable[[str], None] | None = None
     on_model_event: ModelEventCallback | None = None
     max_internal_attempts: int = 3
     identical_call_threshold: int = 5

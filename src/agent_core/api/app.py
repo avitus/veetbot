@@ -6,6 +6,7 @@ import unicodedata
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from datetime import datetime
+from enum import StrEnum
 from typing import Annotated, Literal, Protocol, cast
 from urllib.parse import quote
 from uuid import UUID
@@ -13,19 +14,24 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, FastAPI, Header, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from agent_core.api.auth import Authenticator
 from agent_core.api.errors import API_ERROR_STATUS, details_for, mapping_for
 from agent_core.api.middleware import PayloadTooLargeError, RequestBoundaryMiddleware
 from agent_core.api.sse import encode_sse, heartbeat
-from agent_core.application.errors import SessionMessageCursorError
+from agent_core.application.errors import (
+    SessionMessageCursorError,
+    SessionMetadataValidationError,
+)
 from agent_core.application.services import (
     ApprovalService,
     ArtifactService,
     BrowserGrantService,
     BrowserProfileService,
+    DeviceService,
+    NotificationService,
     RunService,
     ScheduleService,
     SessionService,
@@ -40,7 +46,15 @@ from agent_core.domain.browser import (
     BrowserProfileView,
     normalize_browser_origin,
 )
-from agent_core.domain.errors import AgentCoreError
+from agent_core.domain.devices import (
+    DeviceKind,
+    DeviceRegistration,
+    PushEnvironment,
+    PushProvider,
+    device_routing_issue,
+)
+from agent_core.domain.errors import AgentCoreError, DeviceValidationError
+from agent_core.domain.notifications import NotificationKind
 from agent_core.domain.schedules import (
     ScheduleDefinition,
     ScheduleOccurrence,
@@ -52,12 +66,15 @@ from agent_core.domain.views import (
     ApprovalView,
     ArtifactView,
     ContentBlock,
+    DeviceView,
+    NotificationInboxItem,
     Page,
     RunView,
     SessionMessageView,
     SessionView,
     StreamFrame,
     SubmitResult,
+    TestNotificationResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -119,12 +136,19 @@ class ApplicationServices(Protocol):
     @property
     def schedules(self) -> ScheduleService: ...
 
+    @property
+    def devices(self) -> DeviceService: ...
+
+    @property
+    def notifications(self) -> NotificationService: ...
+
 
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agent_id: str = Field(min_length=1)
     metadata: dict[str, object] = Field(default_factory=dict)
+    browser_profile_id: UUID | None = None
 
 
 class MessageRequest(BaseModel):
@@ -202,6 +226,77 @@ class ExpectedScheduleRevisionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     expected_revision: int = Field(ge=1)
+
+
+class DeviceRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    client_device_id: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
+    kind: str = Field(min_length=1, max_length=32)
+    platform: str = Field(min_length=1, max_length=64)
+    app_bundle_id: str | None = Field(default=None, min_length=1, max_length=255)
+    push_provider: str | None = Field(default=None, min_length=1, max_length=32)
+    push_token: str | None = Field(default=None, min_length=1, max_length=8192)
+    push_environment: str | None = Field(default=None, min_length=1, max_length=32)
+    muted_kinds: tuple[str, ...] = Field(default=(), max_length=len(NotificationKind))
+
+    def registration(self) -> DeviceRegistration:
+        kind = _required_device_enum(DeviceKind, self.kind, "device.kind_unknown")
+        provider = _optional_device_enum(
+            PushProvider,
+            self.push_provider,
+            "device.push_provider_unknown",
+        )
+        environment = _optional_device_enum(
+            PushEnvironment,
+            self.push_environment,
+            "device.push_environment_unknown",
+        )
+        muted = frozenset(
+            _required_device_enum(NotificationKind, value, "device.muted_kind_unknown")
+            for value in self.muted_kinds
+        )
+        if len(muted) != len(self.muted_kinds):
+            raise DeviceValidationError(
+                "device.muted_kind_duplicate",
+                "muted notification kinds must be unique",
+            )
+        issue = device_routing_issue(
+            kind=kind,
+            provider=provider,
+            token_present=self.push_token is not None,
+            environment=environment,
+            app_bundle_id_present=self.app_bundle_id is not None,
+        )
+        if issue is not None:
+            raise DeviceValidationError(issue.reason_code, issue.message)
+        return DeviceRegistration(
+            client_device_id=self.client_device_id,
+            name=self.name,
+            kind=kind,
+            platform=self.platform,
+            app_bundle_id=self.app_bundle_id,
+            push_provider=provider,
+            push_token=None if self.push_token is None else SecretStr(self.push_token),
+            push_environment=environment,
+            muted_kinds=muted,
+        )
+
+
+def _required_device_enum[T: StrEnum](enum_type: type[T], value: str, reason: str) -> T:
+    try:
+        return enum_type(value)
+    except ValueError as exc:
+        raise DeviceValidationError(reason, f"unsupported device value: {value}") from exc
+
+
+def _optional_device_enum[T: StrEnum](
+    enum_type: type[T], value: str | None, reason: str
+) -> T | None:
+    if value is None:
+        return None
+    return _required_device_enum(enum_type, value, reason)
 
 
 class ScheduleListItem(BaseModel):
@@ -364,7 +459,15 @@ def create_app(
         body: CreateSessionRequest,
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> SessionView:
-        return await services.sessions.create(authenticated, body.agent_id, body.metadata)
+        try:
+            return await services.sessions.create(
+                authenticated,
+                body.agent_id,
+                body.metadata,
+                browser_profile_id=body.browser_profile_id,
+            )
+        except SessionMetadataValidationError as exc:
+            raise MalformedRequestError("session metadata is malformed") from exc
 
     @app.get(
         "/v1/sessions",
@@ -941,6 +1044,123 @@ def create_app(
 
     if settings.schedule_api_enabled:
         app.include_router(schedule_router)
+
+    notification_router = APIRouter()
+
+    @notification_router.post(
+        "/v1/devices",
+        openapi_extra={"required_scope": "device.write"},
+    )
+    async def register_device(
+        body: DeviceRegistrationRequest,
+        authenticated: Annotated[Principal, secured("device.write")],
+        idempotency_key: Annotated[
+            str | None,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+            ),
+        ] = None,
+    ) -> Response:
+        result = await services.devices.register(
+            authenticated,
+            body.registration(),
+            idempotency_key,
+        )
+        return JSONResponse(
+            status_code=200 if result.replayed else 201,
+            content=result.device.model_dump(mode="json"),
+        )
+
+    @notification_router.get(
+        "/v1/devices",
+        openapi_extra={"required_scope": "device.read"},
+    )
+    async def list_devices(
+        authenticated: Annotated[Principal, secured("device.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[DeviceView]:
+        try:
+            return await services.devices.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("device cursor is malformed") from exc
+
+    @notification_router.get(
+        "/v1/devices/{device_id}",
+        openapi_extra={"required_scope": "device.read"},
+    )
+    async def get_device(
+        device_id: UUID,
+        authenticated: Annotated[Principal, secured("device.read")],
+    ) -> DeviceView:
+        return await services.devices.get(authenticated, device_id)
+
+    @notification_router.post(
+        "/v1/devices/{device_id}/revoke",
+        openapi_extra={"required_scope": "device.write"},
+    )
+    async def revoke_device(
+        device_id: UUID,
+        authenticated: Annotated[Principal, secured("device.write")],
+    ) -> DeviceView:
+        return await services.devices.revoke(authenticated, device_id)
+
+    @notification_router.delete(
+        "/v1/devices/{device_id}",
+        status_code=204,
+        openapi_extra={"required_scope": "device.write"},
+    )
+    async def delete_device(
+        device_id: UUID,
+        authenticated: Annotated[Principal, secured("device.write")],
+    ) -> Response:
+        await services.devices.delete(authenticated, device_id)
+        return Response(status_code=204)
+
+    @notification_router.post(
+        "/v1/devices/{device_id}/test-notification",
+        openapi_extra={"required_scope": "device.write"},
+    )
+    async def enqueue_test_notification(
+        device_id: UUID,
+        authenticated: Annotated[Principal, secured("device.write")],
+        idempotency_key: Annotated[
+            str,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=IDEMPOTENCY_KEY_MAX_LENGTH,
+            ),
+        ],
+    ) -> Response:
+        result: TestNotificationResult = await services.devices.enqueue_test_notification(
+            authenticated,
+            device_id,
+            idempotency_key,
+        )
+        return JSONResponse(
+            status_code=200 if result.replayed else 202,
+            content=result.model_dump(mode="json", exclude={"replayed"}),
+        )
+
+    @notification_router.get(
+        "/v1/notifications",
+        openapi_extra={"required_scope": "notification.read"},
+    )
+    async def list_notifications(
+        authenticated: Annotated[Principal, secured("notification.read")],
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        cursor: str | None = None,
+    ) -> Page[NotificationInboxItem]:
+        try:
+            return await services.notifications.list(authenticated, limit, cursor)
+        except ValueError as exc:
+            raise MalformedRequestError("notification cursor is malformed") from exc
+
+    if settings.notification_api_enabled:
+        app.include_router(notification_router)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

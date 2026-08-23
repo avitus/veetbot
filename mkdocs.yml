@@ -1,5 +1,5 @@
-site_name: Modular General-Purpose AI Agent
-site_description: Engineering documentation for the modular general-purpose AI agent platform.
+site_name: Veetbot Documentation
+site_description: Engineering documentation for Veetbot, a governed general-purpose AI agent platform.
 site_url: https://docs.veetbot.com/
 docs_dir: docs
 site_dir: site
@@ -8,6 +8,8 @@ use_directory_urls: true
 theme:
   name: material
   font: false
+  logo: assets/images/veetbot-icon.svg
+  favicon: assets/images/veetbot-icon.svg
   features:
     - navigation.tracking
     - navigation.top
@@ -18,14 +20,14 @@ theme:
     - search.suggest
   palette:
     - scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-night
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
@@ -86,6 +88,7 @@ nav:
       - Subagents & Delegation: plan/subagents-and-delegation.md
       - Inbound Surfaces: plan/inbound-surfaces.md
       - Operational Hardening: plan/operational-hardening.md
+      - Memory Evaluation & Lifecycle: plan/memory-evaluation-and-lifecycle.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
@@ -169,4 +172,6 @@ nav:
       - ADR-0065 Milestone 15 operational hardening: adr/0065-milestone-15-operational-hardening.md
       - ADR-0066 Atomic documentation publication: adr/0066-atomic-documentation-publication.md
       - ADR-0067 Credential-free execution service: adr/0067-credential-free-execution-service.md
+      - ADR-0068 Retryable memory formation and governed replay: adr/0068-retryable-memory-formation-and-governed-replay.md
+      - ADR-0069 Milestone 16 memory evaluation and lifecycle: adr/0069-milestone-16-memory-evaluation-and-lifecycle.md
   - Changelog: changelog.md

@@ -42,6 +42,7 @@ from agent_core.knowledge.chunking import (
 )
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.memory.formation import GovernedMemoryService
+from agent_core.memory.profiles import TraceProfile
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
 from tests.contract.support import RUN_ID, SESSION_ID, memory_stack, principal, tool_context
 
@@ -443,6 +444,29 @@ async def test_trace_complete(tmp_path: Path) -> None:
     assert trace.passages
     assert all(item.text is not None for item in trace.passages)
     assert all(html.escape(item.text) in trace.rendered for item in trace.passages if item.text)
+
+
+async def test_knowledge_trace_retention_reads_the_trace_profile(tmp_path: Path) -> None:
+    """One retention number governs both retrieval paths that write traces."""
+
+    stack = await _stack(tmp_path)
+    service = KnowledgeService(
+        stack.factory,
+        stack.store,
+        stack.clock,
+        stack.ids,
+        principal(),
+        trace_retention=TraceProfile(operator_retention_days=7),
+    )
+    await _ingest(stack, "Retention-scoped Lyra maintenance passage.")
+    result = await service.search(
+        _query("Lyra maintenance"),
+        session_id=SESSION_ID,
+        turn_id=UUID(int=91),
+    )
+    async with stack.factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    assert trace.operator_fields_expire_at == stack.clock.now() + timedelta(days=7)
 
 
 async def test_no_belief_write(tmp_path: Path) -> None:

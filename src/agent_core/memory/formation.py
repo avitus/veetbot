@@ -3,26 +3,34 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
-from datetime import datetime
+from contextlib import suppress
+from datetime import datetime, timedelta
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from agent_core.domain.agents import Principal
+from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
     ConflictError,
     NotFoundError,
     ToolTrustRejectedError,
     ToolValidationError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
     BeliefRejection,
     BeliefType,
     ConsolidationResult,
     ConsolidationRun,
+    DecayResult,
     MemoryAuthority,
     MemoryCandidate,
+    MemoryDiagnosis,
     MemoryEdit,
+    MemoryExtractionResult,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -30,18 +38,44 @@ from agent_core.domain.memory import (
     RecallTrace,
     RejectionKind,
     Sensitivity,
+    UsageFeedback,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
+from agent_core.memory.profiles import (
+    DEFAULT_FORMATION_PROFILE,
+    DEFAULT_RETRIEVAL_PROFILE,
+    DecayTauDays,
+    FormationProfile,
+    UsageDeltas,
+)
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@2"
+FORMATION_POLICY_VERSION = "formation@7"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
 SESSION_IDLE_SECONDS = 30
+# How many recall traces one maintenance pass may strip of their operator tier.
+TRACE_EXPIRY_SWEEP_LIMIT = 500
+PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
+PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
+WORKING_STATE_EVENT = "context.working_state.updated"
+# Who is speaking, in the order resolution trusts them: what the user said
+# outranks what the agent concluded, which outranks what an extractor guessed.
+_AUTHORITY_RANK = {
+    MemoryAuthority.INFERRED: 0,
+    MemoryAuthority.AFFIRMED: 1,
+    MemoryAuthority.USER: 2,
+}
+
+logger = logging.getLogger(__name__)
+
+# The citation form the renderer emits, read back exactly as it is written:
+# eight lower-case hex digits of the belief identifier (retrieval.py:576).
+_CITED_BELIEF = re.compile(r"\[m:([0-9a-f]{8})\]")
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
     re.I,
@@ -69,6 +103,85 @@ _POSSESSIVE_ENTITY = re.compile(
     r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
 )
 _GROUNDING_TOKEN = re.compile(r"\d+(?:\.\d+)+|[a-z0-9]+(?:['-][a-z0-9]+)*")
+_STARTED_ACTIVITY = re.compile(
+    r"(?:i['\u2019]ve|i\s+have)\s+started\s+(?P<verb>[a-z]+ing)\s+"
+    r"(?:the\s+)?(?P<object>.+?)(?:\s+after\s+(?P<prior>.+))?",
+    re.I,
+)
+_PRIOR_EXPERIENCE = re.compile(
+    r"(?P<duration>.+?)\s+of\s+(?P<verb>[a-z]+ing)\s+(?:the\s+)?(?P<object>.+)",
+    re.I,
+)
+_RECURRING_SYMPTOM = re.compile(
+    r"(?:on\s+(?:the\s+)?(?P<context>.+?)\s+)?my\s+(?P<body>.+?)\s+is\s+"
+    r"(?P<frequency>often|frequently|repeatedly)\s+"
+    r"(?P<symptom>hurting|aching|tingling)\s+after\s+"
+    r"(?P<duration>.+?)(?:\s+of\s+(?P<activity>.+))?",
+    re.I,
+)
+_SYMPTOM_VERBS = {"hurting": "hurts", "aching": "aches", "tingling": "tingles"}
+# Subject derivation for an established fact. The trim set is the punctuation
+# that can sit around a word; the terminator set is the punctuation that ends
+# an entity span; the openers are the words a sentence capitalizes without
+# naming anything.
+_SUBJECT_TRIM = " \t\"'\u2018\u2019\u201c\u201d()[]{}.,:;!?"
+_SUBJECT_TERMINATORS = ".,:;!?\"'\u2019)]}"
+_SUBJECT_LIMIT = 512
+_SENTENCE_OPENERS = frozenset(
+    {
+        "a",
+        "after",
+        "all",
+        "an",
+        "and",
+        "any",
+        "as",
+        "at",
+        "before",
+        "both",
+        "but",
+        "by",
+        "during",
+        "each",
+        "every",
+        "for",
+        "he",
+        "her",
+        "here",
+        "his",
+        "i",
+        "if",
+        "in",
+        "it",
+        "its",
+        "my",
+        "no",
+        "not",
+        "of",
+        "on",
+        "one",
+        "our",
+        "she",
+        "some",
+        "that",
+        "the",
+        "their",
+        "them",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "us",
+        "user",
+        "we",
+        "when",
+        "while",
+        "with",
+        "you",
+        "your",
+    }
+)
 
 
 def contains_memory_injection(value: str) -> bool:
@@ -151,6 +264,39 @@ def _preference_subject(value: str) -> str:
     return f"{topic} preference"
 
 
+def _fact_subject(statement: str) -> str:
+    """Name the subject of one established fact, from the statement alone.
+
+    The subject is the first capitalized entity span in the statement. A word
+    that only opens the sentence is capitalized by grammar rather than by
+    being a name, so the closed set below is skipped in that position and
+    nowhere else. A statement with no entity span falls back to its first
+    three words, which keeps the derivation total and dependent on nothing but
+    the text, so the same fact always reaches the same belief.
+    """
+
+    tokens = statement.split()
+    for index, token in enumerate(tokens):
+        bare = token.strip(_SUBJECT_TRIM)
+        if not bare[:1].isupper():
+            continue
+        if index == 0 and bare.casefold() in _SENTENCE_OPENERS:
+            continue
+        span = [bare]
+        cursor = index
+        while (
+            cursor + 1 < len(tokens)
+            and tokens[cursor].strip(_SUBJECT_TERMINATORS) == tokens[cursor]
+        ):
+            following = tokens[cursor + 1].strip(_SUBJECT_TRIM)
+            if not following[:1].isupper():
+                break
+            span.append(following)
+            cursor += 1
+        return " ".join(span)[:_SUBJECT_LIMIT]
+    return " ".join(token.strip(_SUBJECT_TRIM) for token in tokens[:3]).strip()[:_SUBJECT_LIMIT]
+
+
 class DeterministicCandidateExtractor:
     """Bounded first-person extractor used before model-assisted extraction is enabled."""
 
@@ -198,6 +344,7 @@ class DeterministicCandidateExtractor:
         proposed: list[MemoryCandidate] = []
         retracted_subjects: set[str] = set()
         proposed_subjects: set[str] = set()
+        recent_activity_subject: str | None = None
 
         def add(
             *,
@@ -236,6 +383,64 @@ class DeterministicCandidateExtractor:
         for raw_clause in _CLAUSE_BOUNDARY.split(stripped):
             clause = re.sub(r"^and\s+", "", raw_clause.strip(), flags=re.I)
             if not clause:
+                continue
+
+            started_activity = _STARTED_ACTIVITY.fullmatch(clause)
+            if started_activity is not None:
+                verb = started_activity.group("verb").casefold()
+                activity_object = started_activity.group("object").strip(" ,.:;!?")
+                recent_activity_subject = activity_object
+                add(
+                    subject=activity_object,
+                    statement=f"User started {verb} {activity_object}.",
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    confidence=0.8,
+                )
+                prior = started_activity.group("prior")
+                prior_experience = None if prior is None else _PRIOR_EXPERIENCE.fullmatch(prior)
+                if prior_experience is not None:
+                    duration = prior_experience.group("duration").strip(" ,.:;!?")
+                    prior_verb = prior_experience.group("verb").casefold()
+                    prior_object = prior_experience.group("object").strip(" ,.:;!?")
+                    add(
+                        subject=f"{prior_object} experience",
+                        statement=(
+                            f"User has {duration} of experience {prior_verb} {prior_object}."
+                        ),
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                        confidence=0.82,
+                    )
+                continue
+
+            recurring_symptom = _RECURRING_SYMPTOM.fullmatch(clause)
+            if recurring_symptom is not None:
+                body = recurring_symptom.group("body").strip(" ,.:;!?")
+                frequency = recurring_symptom.group("frequency").casefold()
+                symptom = recurring_symptom.group("symptom").casefold()
+                duration = recurring_symptom.group("duration").strip(" ,.:;!?")
+                activity = recurring_symptom.group("activity")
+                context = recurring_symptom.group("context")
+                activity_phrase = "" if activity is None else activity.strip(" ,.:;!?")
+                if recent_activity_subject is not None and context is not None:
+                    context_terms = set(re.findall(r"[a-z0-9]+", context.casefold())) - {"the"}
+                    recent_terms = set(re.findall(r"[a-z0-9]+", recent_activity_subject.casefold()))
+                    if context_terms and context_terms <= recent_terms:
+                        if not activity_phrase:
+                            activity_phrase = f"using {recent_activity_subject}"
+                        elif activity_phrase.casefold() == "playing":
+                            activity_phrase = f"playing {recent_activity_subject}"
+                suffix = "" if not activity_phrase else f" of {activity_phrase}"
+                subject_suffix = "" if not activity_phrase else f" while {activity_phrase}"
+                add(
+                    subject=f"{body} pain{subject_suffix}",
+                    statement=(
+                        f"User's {body} {frequency} {_SYMPTOM_VERBS[symptom]} after "
+                        f"{duration}{suffix}."
+                    ),
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.82,
+                )
                 continue
 
             preference = re.fullmatch(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", clause, re.I)
@@ -445,13 +650,69 @@ class DeterministicConflictResolver:
         return " ".join(value.casefold().split())
 
     def relationship(
-        self, existing: MemoryRecord, statement: str, source_event_ids: list[int]
+        self,
+        existing: MemoryRecord,
+        statement: str,
+        source_event_ids: list[int],
+        *,
+        authority: MemoryAuthority = MemoryAuthority.USER,
+        polarity: Polarity = Polarity.ASSERT,
+        session_id: UUID | None = None,
+        at: datetime | None = None,
     ) -> str:
-        if set(source_event_ids).issubset(existing.source_event_ids):
+        """Classify incoming evidence against one existing belief.
+
+        The order is same source, duplicate, conflict, contradiction. Only the
+        last one supersedes, and it is reached only when the incoming evidence
+        outranks the existing belief or something orders the two in time.
+        Polarity is accepted so a resolver may record what kind of statement it
+        judged, and is deliberately never consulted: a retraction is a later
+        statement about the same subject, so it is ordered by the same rules as
+        any other, and treating disagreement itself as a conflict would leave
+        every ordinary correction unresolved.
+        """
+
+        # Event sequences are allocated per session, so the same number means
+        # the same episode only within one session. A caller that cannot name
+        # the consolidating session keeps the legacy sequence-only comparison.
+        same_session = session_id is None or existing.source_session_id == session_id
+        if same_session and set(source_event_ids).issubset(existing.source_event_ids):
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
+        if _AUTHORITY_RANK[authority] < _AUTHORITY_RANK[existing.authority]:
+            return "conflict"
+        if _AUTHORITY_RANK[authority] == _AUTHORITY_RANK[existing.authority] and not self._ordered(
+            existing, source_event_ids, same_session=same_session, at=at
+        ):
+            return "conflict"
         return "contradiction"
+
+    @staticmethod
+    def _ordered(
+        existing: MemoryRecord,
+        source_event_ids: list[int],
+        *,
+        same_session: bool,
+        at: datetime | None,
+    ) -> bool:
+        """Say whether the incoming evidence is later than the existing belief.
+
+        Inside one session the event log orders the two, so a later sequence is
+        later evidence. Across sessions only the clock can, and the two instants
+        it compares are both evidence instants: the incoming one is when the
+        statement was made, not when it is being consolidated, and the existing
+        one is `valid_from`, when the belief's own evidence arrived. `updated_at`
+        cannot stand in for it, because usage feedback, decay, and conflict
+        linkage all write it long after the evidence landed. A caller that
+        cannot name an instant keeps the ordering it had before this rule
+        existed rather than turning every cross-session statement into a
+        conflict.
+        """
+
+        if same_session:
+            return max(source_event_ids) > max(existing.source_event_ids)
+        return at is None or existing.valid_from < at
 
 
 def portability_ceiling(belief_type: BeliefType) -> Portability:
@@ -483,6 +744,9 @@ class GovernedMemoryService:
         resolver: DeterministicConflictResolver | None = None,
         extractor: MemoryCandidateExtractor | None = None,
         policy_version: str = FORMATION_POLICY_VERSION,
+        formation_profile: FormationProfile = DEFAULT_FORMATION_PROFILE,
+        decay_tau_days: DecayTauDays = DEFAULT_RETRIEVAL_PROFILE.decay_tau_days,
+        usage: UsageDeltas = DEFAULT_RETRIEVAL_PROFILE.usage,
     ) -> None:
         if not policy_version:
             raise ValueError("memory formation policy version must not be empty")
@@ -494,6 +758,25 @@ class GovernedMemoryService:
         self._resolver = resolver or DeterministicConflictResolver()
         self._extractor = extractor or DeterministicCandidateExtractor()
         self._policy_version = policy_version
+        self._profile = formation_profile
+        # The time constants are the ranker's table: the age at which a belief
+        # stops counting as reinforced is the age at which decay begins.
+        self._decay_tau_days = decay_tau_days
+        # Usage moves utility only. The deltas are the ranker's too, so what a
+        # citation is worth is stated once, in the retrieval profile.
+        self._usage = usage
+
+    @property
+    def formation_profile(self) -> FormationProfile:
+        """Expose the formation profile the composition wired in."""
+
+        return self._profile
+
+    @property
+    def extractor_name(self) -> str:
+        """Name the configured candidate extractor, as a consolidation records it."""
+
+        return self._extractor.name
 
     async def remember(
         self,
@@ -557,6 +840,7 @@ class GovernedMemoryService:
         expires_at: datetime | None,
         trigger: str,
         record_audit: bool,
+        evidence_at: datetime | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
     ) -> tuple[MemoryRecord, str]:
@@ -605,10 +889,34 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
-            for current in sorted(related, key=lambda item: item.store_position, reverse=True):
-                relation = self._resolver.relationship(current, clean_statement, sources)
-                if relation == "same_source":
-                    return current, "unchanged"
+            classified = [
+                (
+                    current,
+                    self._resolver.relationship(
+                        current,
+                        clean_statement,
+                        sources,
+                        authority=authority,
+                        polarity=polarity,
+                        session_id=session_id,
+                        at=evidence_at or self._clock.now(),
+                    ),
+                )
+                for current in sorted(related, key=lambda item: item.store_position, reverse=True)
+            ]
+            # A replay is a no-op whichever related belief the ordering reaches
+            # first, so it is decided over all of them before any is acted on.
+            # A conflict leaves both halves of the pair live and lifts the
+            # existing belief above the replacement it just wrote, so
+            # re-consolidating the same evidence meets the belief that was
+            # contradicted before it meets the record that evidence produced.
+            replay = next(
+                (current for current, relation in classified if relation == "same_source"),
+                None,
+            )
+            if replay is not None:
+                return replay, "unchanged"
+            for current, relation in classified:
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
@@ -649,6 +957,60 @@ class GovernedMemoryService:
                             )
                         )
                     return stored, "reinforced"
+                if relation == "conflict":
+                    # Nothing here is resolved by guessing. The incoming belief
+                    # is committed beside the one it contradicts, both are
+                    # linked and flagged, and the user is asked which holds.
+                    proposed = await self._new_record(
+                        uow,
+                        formation_run.id,
+                        clean_statement,
+                        clean_subject,
+                        scope,
+                        belief_type,
+                        effective_portability,
+                        sensitivity,
+                        session_id,
+                        sources,
+                        explicit,
+                        authority,
+                        polarity,
+                        confidence,
+                        valid_from,
+                        expires_at,
+                    )
+                    replacement = proposed.model_copy(
+                        update={"flagged_for_review": True, "conflicts_with": [current.id]},
+                        deep=True,
+                    )
+                    stored = await uow.memories.upsert_belief(replacement)
+                    # The belief that was already stored has changed state, so
+                    # it takes a fresh position: the next turn's recall delta
+                    # is how the user learns that it is now disputed.
+                    position = await uow.memories.next_position()
+                    linked = current.model_copy(
+                        update={
+                            "conflicts_with": list(
+                                dict.fromkeys([*current.conflicts_with, stored.id])
+                            ),
+                            "flagged_for_review": True,
+                            "store_position": position,
+                            "updated_at": self._clock.now(),
+                        },
+                        deep=True,
+                    )
+                    await uow.memories.reinforce(linked)
+                    await self._append_event(uow, session_id, run_id, "memory.formed", stored)
+                    await self._append_event(
+                        uow, session_id, run_id, "memory.needs_confirmation", stored
+                    )
+                    if record_audit:
+                        await uow.memories.record_consolidation(
+                            formation_run.model_copy(
+                                update={"committed": 1, "finished_at": self._clock.now()}
+                            )
+                        )
+                    return stored, "conflicted"
                 if relation == "contradiction":
                     replacement = await self._new_record(
                         uow,
@@ -768,7 +1130,9 @@ class GovernedMemoryService:
             principal=self._principal,
             scope=scope,
         )
-        candidates = extracted[:MAX_AUTOMATIC_CANDIDATES]
+        provider_failure = (
+            extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
+        )
         trusted_user_sources = {
             event.sequence
             for event in events
@@ -776,8 +1140,38 @@ class GovernedMemoryService:
             and event.actor_type == "principal"
             and event.actor_id == self._principal.principal_id
         }
+        # Working state is formation's second input. Its facts are the agent's
+        # own conclusions, so they enter ahead of the extractor's guesses and
+        # may displace them; the displaced proposals are counted, not dropped.
+        proposals: list[tuple[MemoryCandidate, MemoryAuthority]] = [
+            (candidate, MemoryAuthority.AFFIRMED)
+            for candidate in self._established_fact_candidates(events, scope, trusted_user_sources)
+        ]
+        proposals.extend((candidate, MemoryAuthority.INFERRED) for candidate in extracted)
+        candidates = proposals[:MAX_AUTOMATIC_CANDIDATES]
         by_sequence = {event.sequence: event for event in events}
         after = max((event.sequence for event in events), default=watermark)
+        formation_requests = [
+            event for event in events if event.event_type == "memory.formation.requested"
+        ]
+        retry_attempts = [
+            attempt
+            for event in formation_requests
+            if event.payload.get("trigger") == "provider_retry"
+            and isinstance((attempt := event.payload.get("attempt_number")), int)
+            and 1 <= attempt <= PROVIDER_MAX_ATTEMPTS
+        ]
+        current_attempt = 1
+        effective_trigger = trigger
+        if retry_attempts:
+            effective_trigger = "provider_retry"
+            current_attempt = max(retry_attempts)
+        should_retry = (
+            since_watermark is None
+            and provider_failure is not None
+            and provider_failure.retryable
+            and current_attempt < PROVIDER_MAX_ATTEMPTS
+        )
 
         def no_work(at_watermark: int) -> ConsolidationResult:
             return ConsolidationResult(
@@ -814,11 +1208,12 @@ class GovernedMemoryService:
                     return no_work(current_watermark)
                 consolidation_id = self._ids.new_id()
                 beliefs: list[MemoryRecord] = []
-                rejected = len(extracted) - len(candidates)
+                rejected = len(proposals) - len(candidates)
                 committed = 0
                 reinforced = 0
                 superseded = 0
-                for candidate in candidates:
+                conflicted = 0
+                for candidate, authority in [] if should_retry else candidates:
                     if (
                         candidate.proposed_scope != scope
                         or not set(candidate.source_event_ids) <= trusted_user_sources
@@ -832,6 +1227,11 @@ class GovernedMemoryService:
                     if contains_automatic_memory_hazard(source_text):
                         rejected += 1
                         continue
+                    source_events = [
+                        event
+                        for sequence in candidate.source_event_ids
+                        if (event := by_sequence.get(sequence)) is not None
+                    ]
                     source_event = by_sequence[candidate.source_event_ids[0]]
                     try:
                         belief, action = await self._remember(
@@ -846,13 +1246,22 @@ class GovernedMemoryService:
                             source_event_ids=candidate.source_event_ids,
                             origin_trust=TrustLevel.USER,
                             explicit=False,
-                            authority=MemoryAuthority.INFERRED,
+                            authority=authority,
                             polarity=candidate.polarity,
                             confidence=candidate.model_confidence,
                             valid_from=candidate.valid_from,
                             expires_at=candidate.expires_hint,
-                            trigger=trigger,
+                            trigger=effective_trigger,
                             record_audit=False,
+                            # A consolidation may run at any distance from the
+                            # evidence it reads - a replay re-reads a session
+                            # from watermark zero long afterwards - so recency
+                            # is judged on when the statement was made, never on
+                            # when it is being read.
+                            evidence_at=max(
+                                (event.created_at for event in source_events),
+                                default=None,
+                            ),
                             existing_uow=uow,
                             audit_id=consolidation_id,
                         )
@@ -869,19 +1278,89 @@ class GovernedMemoryService:
                             committed += 1
                             if action == "superseded":
                                 superseded += 1
-                await uow.memories.set_consolidation_watermark(session_id, self._principal, after)
+                            elif action == "conflicted":
+                                conflicted += 1
+                watermark_after = watermark if should_retry else after
+                if should_retry:
+                    assert provider_failure is not None
+                    next_attempt = current_attempt + 1
+                    retry_at = self._clock.now() + timedelta(
+                        seconds=PROVIDER_RETRY_BACKOFF_SECONDS[current_attempt - 1]
+                    )
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=session_id,
+                            run_id=next(
+                                (
+                                    event.run_id
+                                    for event in reversed(events)
+                                    if event.run_id is not None
+                                ),
+                                None,
+                            ),
+                            event_type="memory.formation.requested",
+                            actor_type="memory_maintenance",
+                            actor_id=self._principal.principal_id,
+                            payload={
+                                "trigger": "provider_retry",
+                                "attempt_number": next_attempt,
+                                "not_before": retry_at.isoformat(),
+                                "source_watermark_before": watermark,
+                                "source_watermark_after": after,
+                                "failure_kind": provider_failure.failure_kind,
+                            },
+                            derivation_key=(
+                                "memory.formation.provider_retry:"
+                                f"{session_id}:{after}:{next_attempt}"
+                            ),
+                        )
+                    )
+                else:
+                    await uow.memories.set_consolidation_watermark(
+                        session_id, self._principal, after
+                    )
+                    if (
+                        since_watermark is None
+                        and provider_failure is not None
+                        and provider_failure.retryable
+                        and current_attempt >= PROVIDER_MAX_ATTEMPTS
+                    ):
+                        await uow.process_events.append(
+                            ProcessEvent(
+                                id=self._ids.new_id(),
+                                event_type="memory.provider_extraction.retry_exhausted",
+                                actor_type="memory_maintenance",
+                                actor_id=self._principal.principal_id,
+                                payload={
+                                    "session_id": str(session_id),
+                                    "tenant_id": self._principal.tenant_id,
+                                    "principal_id": self._principal.principal_id,
+                                    "attempt_number": current_attempt,
+                                    "failure_kind": provider_failure.failure_kind,
+                                    "provider_code": provider_failure.provider_code,
+                                    "http_status": provider_failure.http_status,
+                                    "provider_parameter": (provider_failure.provider_parameter),
+                                    "stream_had_output": (provider_failure.stream_had_output),
+                                },
+                                derivation_key=(
+                                    "memory.provider_extraction.retry_exhausted:"
+                                    f"{session_id}:{after}:{current_attempt}"
+                                ),
+                                created_at=self._clock.now(),
+                            )
+                        )
                 audit = ConsolidationRun(
                     id=consolidation_id,
                     tenant_id=self._principal.tenant_id,
                     principal_id=self._principal.principal_id,
-                    trigger=trigger,
+                    trigger=effective_trigger,
                     scope=scope,
                     session_id=session_id,
                     watermark_before=watermark,
-                    watermark_after=after,
+                    watermark_after=watermark_after,
                     model=self._extractor.name,
                     policy_version=self._policy_version,
-                    candidates_proposed=len(extracted),
+                    candidates_proposed=len(proposals),
                     committed=committed,
                     reinforced=reinforced,
                     superseded=superseded,
@@ -892,7 +1371,143 @@ class GovernedMemoryService:
                 await uow.memories.record_consolidation(audit)
             finally:
                 await uow.maintenance.release_memory_session(self._principal, session_id)
-        return ConsolidationResult(run=audit, beliefs=beliefs)
+        return ConsolidationResult(run=audit, beliefs=beliefs, conflicted=conflicted)
+
+    def _established_fact_candidates(
+        self,
+        events: list[EventEnvelope],
+        scope: str,
+        trusted_user_sources: set[int],
+    ) -> list[MemoryCandidate]:
+        """Propose the working-state facts this window established from user events.
+
+        Only the last working-state update in the window is read: it is the
+        state the session ends holding, and the earlier ones are its drafts.
+        The manager stamps every fact `EXTERNAL_UNTRUSTED` because a run never
+        upgrades its own trust, so trust is derived here instead — a fact
+        qualifies exactly when every event it cites is an owning-principal user
+        message inside this window.
+        """
+
+        if not self._profile.established_facts_enabled:
+            return []
+        state_event = next(
+            (event for event in reversed(events) if event.event_type == WORKING_STATE_EVENT),
+            None,
+        )
+        if state_event is None:
+            return []
+        try:
+            state = WorkingState.model_validate(state_event.payload.get("working_state"))
+        except ValidationError:
+            logger.warning(
+                "memory_working_state_payload_invalid",
+                extra={"event_sequence": state_event.sequence},
+            )
+            return []
+        candidates: list[MemoryCandidate] = []
+        for fact in state.established_facts:
+            if not set(fact.source_event_ids) <= trusted_user_sources:
+                continue
+            subject = _fact_subject(fact.statement)
+            if not subject:
+                continue
+            candidates.append(
+                MemoryCandidate(
+                    belief_type=BeliefType.FACT,
+                    subject=subject,
+                    statement=fact.statement,
+                    polarity=Polarity.ASSERT,
+                    source_event_ids=list(fact.source_event_ids),
+                    model_confidence=MAX_INFERRED_CONFIDENCE,
+                    proposed_scope=scope,
+                    proposed_portability=portability_ceiling(BeliefType.FACT),
+                    sensitivity_guess=Sensitivity.INTERNAL,
+                )
+            )
+        return candidates
+
+    async def diagnose(self, session_id: UUID) -> MemoryDiagnosis:
+        """Return content-free formation evidence and governed beliefs for one session."""
+
+        async with self._uow_factory() as uow:
+            events = await uow.events.list_after(session_id, 0, self._principal)
+            watermark = await uow.memories.consolidation_watermark(session_id, self._principal)
+            consolidations = await uow.memories.list_consolidations(
+                self._principal,
+                session_id=session_id,
+                limit=100,
+            )
+            beliefs = await uow.memories.list_memories(
+                self._principal,
+                include_inactive=True,
+                session_id=session_id,
+                limit=200,
+            )
+            attempt_events = await uow.process_events.list_filtered(
+                tenant_id=self._principal.tenant_id,
+                principal_id=self._principal.principal_id,
+                session_id=session_id,
+                event_types=frozenset(
+                    {
+                        "memory.provider_extraction.completed",
+                        "memory.provider_extraction.failed",
+                    }
+                ),
+                limit=100,
+            )
+            selection_events = await uow.process_events.list_filtered(
+                tenant_id=self._principal.tenant_id,
+                principal_id=self._principal.principal_id,
+                session_id=None,
+                event_types=frozenset({"memory.provider_extraction.selection"}),
+                limit=100,
+            )
+            process_events = sorted(
+                [*attempt_events, *selection_events],
+                key=lambda event: (event.created_at, event.id.int),
+            )
+        formation_requests = [
+            event for event in events if event.event_type == "memory.formation.requested"
+        ]
+        provider_attempts = [
+            event
+            for event in process_events
+            if event.event_type
+            in {"memory.provider_extraction.completed", "memory.provider_extraction.failed"}
+        ]
+        selections = [
+            event
+            for event in process_events
+            if event.event_type == "memory.provider_extraction.selection"
+        ]
+        latest_request = formation_requests[-1] if formation_requests else None
+        return MemoryDiagnosis(
+            session_id=session_id,
+            watermark=watermark,
+            formation_requests=formation_requests,
+            provider_selection=selections[-1] if selections else None,
+            provider_attempts=provider_attempts,
+            consolidations=consolidations,
+            beliefs=beliefs,
+            pending_retry=(
+                latest_request is not None
+                and latest_request.sequence > watermark
+                and latest_request.payload.get("trigger") == "provider_retry"
+            ),
+        )
+
+    async def replay(self, session_id: UUID) -> ConsolidationResult:
+        """Reprocess original session evidence without manufacturing memory provenance."""
+
+        diagnosis = await self.diagnose(session_id)
+        scope = diagnosis.consolidations[-1].scope if diagnosis.consolidations else "general"
+        return await self.run(
+            trigger="operator_replay",
+            scope=scope,
+            session_id=session_id,
+            since_watermark=0,
+        )
 
     async def list_memories(
         self,
@@ -1042,6 +1657,257 @@ class GovernedMemoryService:
         async with self._uow_factory() as uow:
             return await uow.memories.expire(self._principal)
 
+    async def decay(self, *, now: datetime | None = None) -> DecayResult:
+        """Take a step of confidence from live beliefs nothing has used.
+
+        Eligible is provisional or below the maximum inferred confidence, idle
+        for at least its belief type's time constant, and last written more
+        than one sweep interval ago — the last of which is what stops two
+        workers, or two passes inside one window, from decaying a belief twice.
+        An explicit user statement is active at high confidence and is
+        therefore never eligible.
+
+        The window is the least recently reinforced beliefs past the shortest
+        time constant any type carries, bounded by the per-sweep ceiling.
+        Ordering it by idleness rather than by write position is what keeps the
+        sweep working in a large store, and it is also what lets the lowered
+        belief keep its position: the window never has to be re-found.
+
+        A belief the step carries below the floor is retired with its validity
+        closed at the sweep instant. Only that branch takes a fresh store
+        position. A session reads a position above its snapshot watermark as a
+        belief formed or corrected since, so a quiet loss of confidence keeps
+        the position it had — republishing it would report a change the user
+        never made — while being closed is exactly the change the next turn's
+        correction lines exist to state. Both outcomes are written through the
+        reinforcement path and announce themselves as events, and the sweep is
+        bounded by the profile's per-sweep ceiling.
+        """
+
+        instant = now or self._clock.now()
+        interval = timedelta(seconds=self._profile.scheduled_interval_seconds)
+        decay = self._profile.decay
+        decayed = 0
+        retired = 0
+        horizon = min(self._decay_tau_days.for_belief_type(kind) for kind in BeliefType)
+        async with self._uow_factory() as uow:
+            candidates = await uow.memories.list_idle(
+                self._principal,
+                reinforced_before=instant - timedelta(days=horizon),
+                decay_confidence_ceiling=MAX_INFERRED_CONFIDENCE,
+                limit=decay.max_per_sweep,
+            )
+            for record in candidates:
+                if not self._decays(record, instant, interval):
+                    continue
+                confidence = max(0.0, record.confidence - decay.step)
+                retiring = confidence < decay.floor_confidence
+                update: dict[str, object] = {
+                    "confidence": confidence,
+                    "updated_at": instant,
+                }
+                if retiring:
+                    update.update(
+                        {
+                            "status": MemoryStatus.RETIRED,
+                            "valid_to": instant,
+                            "store_position": await uow.memories.next_position(),
+                        }
+                    )
+                stored = await uow.memories.reinforce(record.model_copy(update=update, deep=True))
+                await self._append_event(
+                    uow,
+                    _source_session(record),
+                    None,
+                    "memory.retired" if retiring else "memory.decayed",
+                    stored,
+                    actor_type="memory",
+                )
+                retired += int(retiring)
+                decayed += int(not retiring)
+        return DecayResult(decayed=decayed, retired=retired)
+
+    def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
+        """Whether this belief is idle, uncertain, and unwritten long enough."""
+
+        if record.status is not MemoryStatus.PROVISIONAL and (
+            record.confidence >= MAX_INFERRED_CONFIDENCE
+        ):
+            return False
+        tau = timedelta(days=self._decay_tau_days.for_belief_type(record.belief_type))
+        if instant - record.last_reinforced_at < tau:
+            return False
+        return record.updated_at < instant - interval
+
+    async def record_usage(
+        self,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        final_text: str,
+        snapshot_trace_id: UUID | None = None,
+        now: datetime | None = None,
+    ) -> UsageFeedback:
+        """Feed one completed run's citations back into the beliefs it read.
+
+        The answer names beliefs in the eight-hex form the renderer emits, so
+        the citations are read out of the final message and matched against
+        what the run's traces actually returned: an identifier the recall never
+        offered is an invention and moves nothing, and one that fits two of the
+        returned beliefs is evidence about neither. A cited belief gains utility
+        and a fresh reinforcement instant, which is what makes it resist decay;
+        a belief returned and never used loses utility, so it stops winning the
+        ranking it kept winning for nothing.
+
+        Confidence is never touched in either direction
+        (memory-retrieval-and-ranking.md:793): a wrong belief that happens to
+        rank well would otherwise entrench itself by being retrieved, and
+        evidence has to come from the world rather than from the retriever.
+
+        One `memory.cited` event carries the run's identifier as its derivation
+        key, so the re-entrant completion path finds the run already accounted
+        for and changes nothing the second time.
+        """
+
+        instant = now or self._clock.now()
+        short_ids = set(_CITED_BELIEF.findall(final_text))
+        derivation_key = f"memory.cited:{run_id}"
+        async with self._uow_factory() as uow:
+            if await uow.events.get_by_derivation(derivation_key, self._principal) is not None:
+                return UsageFeedback()
+            traces = [
+                trace
+                for trace in await uow.traces.for_turn(run_id)
+                if trace.tenant_id == self._principal.tenant_id
+                and trace.principal_id == self._principal.principal_id
+            ]
+            if snapshot_trace_id is not None and not any(
+                trace.id == snapshot_trace_id for trace in traces
+            ):
+                # A session whose snapshot is gone is still a run whose in-turn
+                # recalls deserve their feedback.
+                with suppress(NotFoundError):
+                    traces.append(await uow.traces.get(snapshot_trace_id, self._principal))
+            # Eight hex digits name a belief only while the run's returned set
+            # holds one belief starting with them. A citation that fits two is
+            # evidence about neither, so it credits neither and charges
+            # neither: crediting both would manufacture usage the answer never
+            # expressed, and the deterministic identifiers the evaluation
+            # harness issues make every belief render `[m:00000000]`.
+            matched: dict[str, set[UUID]] = {short: set() for short in short_ids}
+            returned: set[UUID] = set()
+            for trace in traces:
+                returned.update(trace.returned)
+                for belief_id in trace.returned:
+                    candidates = matched.get(str(belief_id)[:8])
+                    if candidates is not None:
+                        candidates.add(belief_id)
+            cited = {
+                next(iter(candidates)) for candidates in matched.values() if len(candidates) == 1
+            }
+            unresolved = [candidates for candidates in matched.values() if len(candidates) > 1]
+            ambiguous = {belief_id for candidates in unresolved for belief_id in candidates}
+            if not returned:
+                # Nothing was recalled, so there is no feedback to record and
+                # nothing a repeated completion could double-count.
+                return UsageFeedback(traces=len(traces))
+            for trace in traces:
+                fresh = [
+                    belief_id
+                    for belief_id in trace.returned
+                    if belief_id in cited and belief_id not in set(trace.cited)
+                ]
+                if fresh:
+                    await uow.traces.mark_cited(trace.id, self._principal, fresh)
+            # A belief the answer cited is never also charged for going unused,
+            # however many of the run's traces returned it, and neither is one
+            # an ambiguous citation may have meant.
+            uncited = returned - cited - ambiguous
+            moved_cited = await self._move_utility(
+                uow, sorted(cited, key=str), self._usage.cited_utility_delta, instant, cited=True
+            )
+            moved_uncited = await self._move_utility(
+                uow,
+                sorted(uncited, key=str),
+                self._usage.uncited_utility_delta,
+                instant,
+                cited=False,
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=run_id,
+                    event_type="memory.cited",
+                    actor_type="memory",
+                    actor_id=self._principal.principal_id,
+                    payload={
+                        "trace_ids": [str(trace.id) for trace in traces],
+                        "cited": [str(belief_id) for belief_id in sorted(cited, key=str)],
+                        "uncited": [str(belief_id) for belief_id in sorted(uncited, key=str)],
+                        "ambiguous": len(unresolved),
+                    },
+                    derivation_key=derivation_key,
+                )
+            )
+        return UsageFeedback(
+            cited=moved_cited,
+            uncited=moved_uncited,
+            traces=len(traces),
+            ambiguous=len(unresolved),
+        )
+
+    async def _move_utility(
+        self,
+        uow: RepositoryUnitOfWork,
+        belief_ids: list[UUID],
+        delta: float,
+        instant: datetime,
+        *,
+        cited: bool,
+    ) -> int:
+        """Add one signed usage delta to each belief, bounded by [-1, 1].
+
+        A citation also moves `last_reinforced_at`, which is the whole point of
+        the mark: decay measures idleness from it. The unused side deliberately
+        leaves it alone, so ignoring a belief can never postpone its decay.
+
+        Neither side takes a fresh store position. The recall delta reads a
+        position above the session's snapshot watermark as a belief formed or
+        corrected since the snapshot, so republishing a belief to the next turn
+        for having been read would report a change that never happened. A move
+        the clamp flattens to nothing is not written at all.
+        """
+
+        moved = 0
+        for belief_id in belief_ids:
+            try:
+                record = await uow.memories.get(belief_id, self._principal)
+            except NotFoundError:
+                # The belief was deleted between the recall and the completion.
+                continue
+            update: dict[str, object] = {"utility": min(1.0, max(-1.0, record.utility + delta))}
+            if cited:
+                update.update({"last_reinforced_at": instant, "updated_at": instant})
+            updated = record.model_copy(update=update, deep=True)
+            if updated == record:
+                continue
+            await uow.memories.reinforce(updated)
+            moved += 1
+        return moved
+
+    async def expire_traces(
+        self, now: datetime | None = None, *, limit: int = TRACE_EXPIRY_SWEEP_LIMIT
+    ) -> int:
+        """Null the operator tier of recall traces past their operator expiry.
+
+        The user-safe tier is untouched, so this is retention rather than
+        deletion; the bound keeps one sweep's write set small enough that the
+        maintenance pass stays predictable however many traces are due.
+        """
+
+        async with self._uow_factory() as uow:
+            return await uow.traces.expire_operator_fields(now or self._clock.now(), limit)
+
     async def _new_record(
         self,
         uow: RepositoryUnitOfWork,
@@ -1120,13 +1986,19 @@ class GovernedMemoryService:
         run_id: UUID | None,
         event_type: str,
         belief: MemoryRecord,
+        *,
+        actor_type: str | None = None,
     ) -> None:
+        # A belief's authority names who is speaking when the write follows a
+        # statement; a background sweep is the memory itself acting, whatever
+        # authority the belief it touches carries.
         await uow.events.append(
             NewEvent(
                 session_id=session_id,
                 run_id=run_id,
                 event_type=event_type,
-                actor_type="principal" if belief.authority is MemoryAuthority.USER else "memory",
+                actor_type=actor_type
+                or ("principal" if belief.authority is MemoryAuthority.USER else "memory"),
                 actor_id=self._principal.principal_id,
                 payload={"belief": belief.model_dump(mode="json")},
             )

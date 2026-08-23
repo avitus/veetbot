@@ -147,7 +147,7 @@ Additional targets are explicit about their requirements:
 | `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
 | `make test-live` | Explicitly enable credentialed provider tests |
 | `make test-apple` | Run the Apple client's Swift Testing suite (requires full Xcode) |
-| `make test-apple-ui` | Run the iPhone conversation-navigation UI test on an available simulator |
+| `make test-apple-ui` | Run conversation-navigation UI tests on available iPhone and iPad simulators |
 | `make test-deploy` | Exercise release and Nginx installers against isolated command stubs |
 | `make production-check` | Validate release identity, model credential, gVisor, sandbox image, storage, and migration head |
 | `make docs` | Build the MkDocs site and standalone HTML publication |
@@ -228,6 +228,8 @@ composition:
 uv run agent memory list --session <session-id> --include-inactive
 uv run agent memory get <belief-id>
 uv run agent memory formations --session <session-id>
+uv run agent memory diagnose --session <session-id>
+uv run agent memory replay --session <session-id> --confirm
 uv run agent memory trace <trace-id>
 uv run agent memory edit <belief-id> --statement "Corrected statement"
 uv run agent memory delete <belief-id>
@@ -236,8 +238,11 @@ uv run agent memory delete <belief-id>
 The commands emit JSON to stdout. Belief records carry their source session,
 source event ids, formation-run id, policy version, lifecycle, authority, and
 sensitivity. Formation records show extraction watermarks and candidate outcome
-counts; trace records show the retrieval query, ranking scores and arms, safety
-blocks, and budget drops. Trace ids appear in `memory.recalled` events.
+counts. Diagnosis joins formation flags, watermarks, provider attempts, audits,
+and beliefs for one session; confirmed replay reprocesses the original evidence
+through the governed path. Trace records show the retrieval query, ranking scores
+and arms, safety blocks, and budget drops. Trace ids appear in `memory.recalled`
+events.
 
 Hosted checks use [CircleCI](https://circleci.com/) via
 `.circleci/config.yml`. Connect the repository as a CircleCI project for the
@@ -323,10 +328,12 @@ artifact is committed.
 Provider-assisted memory formation uses safe automatic selection by default.
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` activates matching operator or
 release-bundled evidence and otherwise records the reason and stays on
-deterministic `formation@2`. `off` does not even resolve a formation model;
-`required` refuses startup without an exact extractor, model, profile, and
-compiled-policy-version match. An operator artifact can be supplied with
-`AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
+deterministic `formation@7`. The bundled artifact is reviewed provider-assisted
+`formation@8` evidence for the balanced OpenAI `gpt-5.6-sol` and default-profile
+tuple, so that tuple activates and every other one falls back. `off` does not
+even resolve a formation model; `required` refuses startup without an exact
+extractor, model, profile, and compiled-policy-version match. An operator
+artifact can be supplied with `AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
 
 Release engineers can generate that artifact instead of authoring JSON:
 
@@ -337,8 +344,8 @@ RUN_LIVE_MODEL_TESTS=1 uv run agent eval memory-formation \
   --output .agent/evals/provider-memory-evidence.json
 ```
 
-The checked-in corpus currently makes 24 bounded provider calls (at most USD
-1.20 under the extractor's per-call ceiling). The command compares isolated
+The checked-in corpus currently makes 25 bounded provider calls (at most USD
+1.25 under the extractor's per-call ceiling). The command compares isolated
 provider and deterministic arms, derives the corpus hash and resolved model,
 and writes a new file only after the no-fabrication, no-policy-regression, and
 positive-lift gate passes. Provider extraction itself runs only during memory

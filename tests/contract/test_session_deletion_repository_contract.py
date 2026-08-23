@@ -1,5 +1,6 @@
 """Session deletion is scoped, idempotent, and preserves retry work."""
 
+import inspect
 from datetime import timedelta
 from uuid import UUID
 
@@ -21,6 +22,10 @@ from agent_core.adapters.persistence.memory import (
     InMemoryTrajectoryExportRepository,
     InMemoryUsageRepository,
 )
+from agent_core.adapters.persistence.notifications import (
+    InMemoryDeviceRegistry,
+    InMemoryNotificationOutbox,
+)
 from agent_core.adapters.persistence.schedules import InMemoryScheduleRepository
 from agent_core.adapters.persistence.session_deletions import (
     InMemorySessionDeletionRepository,
@@ -34,6 +39,14 @@ from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
 from tests.contract.test_schedule_repository_contract import revision, schedule
+
+
+def test_in_memory_session_deletion_requires_the_notification_outbox() -> None:
+    parameter = inspect.signature(InMemorySessionDeletionRepository).parameters[
+        "notification_outbox"
+    ]
+
+    assert parameter.default is inspect.Parameter.empty
 
 
 async def _repository() -> tuple[
@@ -50,6 +63,7 @@ async def _repository() -> tuple[
     invocations = InMemoryToolInvocationRepository(runs)
     trajectory_exports = InMemoryTrajectoryExportRepository()
     schedules = InMemoryScheduleRepository()
+    notification_outbox = InMemoryNotificationOutbox(clock, InMemoryDeviceRegistry())
     repository = InMemorySessionDeletionRepository(
         sessions=sessions,
         runs=runs,
@@ -65,6 +79,7 @@ async def _repository() -> tuple[
         traces=InMemoryTraceStore(),
         knowledge=InMemoryKnowledgeStore(clock),
         schedules=schedules,
+        notification_outbox=notification_outbox,
     )
     return repository, artifacts, sessions, runs, invocations, trajectory_exports, schedules
 

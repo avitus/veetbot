@@ -158,7 +158,11 @@ Candidates are **proposals, not writes.**
 Candidate boundaries are semantic boundaries. Separate first-person clauses and
 separate text parts are extracted independently; a conjunction such as “I prefer
 tea and we decided to deploy Fridays” must not turn the decision into part of the
-preference. The deterministic extractor has a separate 256-proposal scan ceiling
+preference. Ordinary experience narratives use the same rule: a newly started
+activity, prior experience with a related activity, and a recurring physical
+symptom are independently correctable beliefs with semantic subjects rather than
+one generic hobby or user bucket. Physical symptoms are sensitive and flagged for
+review. The deterministic extractor has a separate 256-proposal scan ceiling
 for resource safety. The governed service, not the extractor, applies the smaller
 twelve-candidate commit ceiling and records the number the extractor returned plus
 every proposal it rejected, including overflow. The `rejected` audit count also
@@ -203,13 +207,43 @@ For each surviving candidate, match against existing beliefs by subject + semant
 | New | Insert as a new belief. |
 | Duplicate / near-duplicate | **Reinforce**: increment corroboration, bump confidence, append `source_event_ids`, update `last_reinforced_at`. No new record. |
 | Refinement | Update/extend the existing belief (e.g. more specific). |
+| Conflict | **Never overwrite and never order.** Commit the new belief beside the existing one, link both directions of `conflicts_with`, flag both for review, and request confirmation. |
 | Contradiction | **Never overwrite.** Insert the new belief and link `conflicts_with` / `supersedes`; apply the conflict policy below. |
+
+**A replay is only a replay inside its own session.** The same-source shortcut
+that makes re-consolidating an already-consolidated episode a no-op compares
+event sequences, and sequences are allocated per session, so it applies only
+when the existing belief's source session is the session being consolidated. A
+later session numbers its own first event one as well; treating that as the same
+source would classify every later session as a replay and leave the belief it
+contradicts live. A resolver that is not told which session is consolidating
+keeps the sequence-only comparison.
 
 **Conflict-resolution policy (default).** Resolve by **source authority, then
 recency**: a direct user statement supersedes an inferred one; a more recent user
 statement supersedes an older user statement. The superseded belief is retained
 with `valid_to` set (bi-temporal — we keep *what was believed and when*), marked
 `superseded`. Formation is **fully autonomous**: resolution is never blocked. Ambiguous or sensitive resolutions are still committed (by authority then recency) but marked `flagged_for_review` and surfaced to the user, who can correct or delete after the fact - the safety model is after-the-fact review, not a pre-commit gate.
+
+**What neither authority nor recency orders is a conflict.** Milestone 16 adds
+the fourth outcome above between duplicate and contradiction, so the order is
+same source, duplicate, conflict, contradiction. Incoming evidence conflicts
+when its authority ranks below the existing belief's, or when the two rank
+equally and nothing places them in time: the same session with no later source
+event, or a different session in which the existing belief's evidence onset,
+`valid_from`, is no older than the incoming instant — the time of the newest
+source event backing the incoming candidate, not the time it is being
+consolidated. Replaying an older session therefore conflicts with the belief
+that replaced it rather than reverting to it. Polarity is never the deciding
+factor, so an ordinary retraction still supersedes what it retracts, and a
+resolver that is not told the incoming instant keeps the ordering it had before
+the rule existed, exactly as one that is not told the session keeps the
+sequence-only comparison. A conflict leaves both of its beliefs live, so the
+same-source shortcut is decided over every related belief before any of them is
+acted on, and re-consolidating a conflicted session is a no-op like any other
+replay. The rule and what a
+conflict then commits are stated in
+[memory-evaluation-and-lifecycle.md:864-889](memory-evaluation-and-lifecycle.md:864-889).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".
@@ -245,7 +279,10 @@ call (Section 9):
 - Emit a `memory.formed` / `memory.reinforced` / `memory.superseded` /
   `memory.needs_confirmation` event to the log — memory changes are themselves
   auditable episodes (and part of what makes re-derivation possible).
-- Advance the consolidation watermark.
+- Advance the consolidation watermark after successful extraction, a
+  non-retryable provider failure, or bounded retry exhaustion. A retryable
+  provider failure commits deterministic proposals but leaves the source prefix
+  pending until the provider succeeds or exhausts the fixed retry policy.
 - If the belief is a `user_model_attr`, update the **user-model projection** (a
   curated view over user-scoped beliefs — the "deepening model of who you are").
 
@@ -263,6 +300,16 @@ call (Section 9):
   `consolidation_policy_version` that formed it, so we always know which run
   produced which belief. This capability is the main advantage of deriving memory
   from an episodic log rather than writing it as a lossy side effect.
+
+Milestone 16 builds this stage.
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
+decay a bounded sweep with per-belief-type half-lives, a confidence step, and a
+retirement floor; adds the `AFFIRMED` authority and the working-state facts
+that enter at it; makes an unresolved contradiction a fourth resolver outcome
+that commits flagged and surfaced rather than superseding; and makes
+re-derivation an explicit `--confirm` command. It also supplies the benchmark
+that measures whether any of it helped, which is what the tracked metrics below
+have been waiting for.
 
 ## User corrections are evidence
 
@@ -383,9 +430,11 @@ New relationships between beliefs: `conflicts_with`, `supersedes`.
   ConsolidationResult`. The builtin implementation is LLM extraction as above; an
   external memory provider can be delegated to behind this port.
 - **`MemoryCandidateExtractor` port**: `extract(events, principal, scope) ->
-  list[MemoryCandidate]`. Extractors propose only; the service owns the candidate
-  cap and every provenance, scope, portability, salience, rejection, and conflict
-  check. `agent_core.memory.SHIPPED_MEMORY_CANDIDATE_EXTRACTORS` is the
+  list[MemoryCandidate] | MemoryExtractionResult`. The result extension remains
+  list-compatible and adds only content-free provider-failure metadata.
+  Extractors propose only; the service owns the candidate cap and every
+  provenance, scope, portability, salience, rejection, and conflict check.
+  `agent_core.memory.SHIPPED_MEMORY_CANDIDATE_EXTRACTORS` is the
   authoritative implementation census; the shared contract parameterizes itself
   from that production-package registry so a new shipped extractor cannot bypass
   the common proposal and fallback assertions.
@@ -412,8 +461,13 @@ The initial human surface is `agent memory`: `list` (optionally including
 inactive beliefs or filtering by source session), `get`, `edit`, and `delete`
 make the belief store inspectable and reversible. `formations` exposes the
 principal-scoped consolidation audits, including model, policy, watermarks, and
-candidate outcome counts. This is a local/operator CLI surface over the same
-composition as the runtime; no separate write path exists.
+candidate outcome counts. `diagnose --session` joins formation flags, the current
+watermark, provider selection and attempt audits, consolidation runs, and formed
+beliefs without exposing prompt or response bodies. `replay --session --confirm`
+reprocesses the original session events through the same governed service and
+retains their source-event provenance; it never inserts a belief directly. This
+is a local/operator CLI surface over the same composition as the runtime; no
+separate write path exists.
 
 ## Milestone 10 ordinary-conversation maturation
 
@@ -435,7 +489,7 @@ the deterministic fallback while preserving the model-assisted design above:
 2. Full extraction remains off the interactive path. The maintenance role selects
    flagged sessions after 30 seconds without committed activity and invokes
    consolidation; an explicit session close remains an immediate boundary. The
-   fixed delay is part of `formation@2`, not a deployment override that can
+   fixed delay is part of deterministic `formation@7`, not a deployment override that can
    silently change the policy represented by that version. Both the session-idle
    cutoff and the flag's persisted `not_before` must be satisfied; `not_before` is
    authoritative even when the session is otherwise idle, while legacy flags
@@ -479,6 +533,19 @@ the deterministic fallback while preserving the model-assisted design above:
    PostgreSQL supersession uses a nested transaction so a stale-current conflict
    rolls back its just-inserted replacement even when the caller catches the
    conflict and continues the outer consolidation transaction.
+7. Provider failure is a formation outcome, not a successful watermark advance.
+   Failure audits retain only normalized safe fields: failure kind, provider code,
+   HTTP status, provider parameter, whether the stream produced output, and
+   retryability. Transient and protocol failures retain the original prefix and
+   append an idempotent `memory.formation.requested` retry after 60 seconds and
+   then 300 seconds. Maintenance eligibility follows the latest formation request,
+   so an older ready flag cannot bypass the retry delay, while the attempt counter
+   is restored from the greatest valid pending `provider_retry` attempt in the
+   source window so a later terminal-run request cannot reset the retry budget.
+   After three total attempts the watermark advances and a content-free
+   `memory.provider_extraction.retry_exhausted` process event records the terminal
+   disposition. Deterministic candidates committed on an earlier attempt remain
+   idempotent same-source outcomes on every replay.
 
 ADR-0051 introduced a schema-constrained hybrid reference extractor over trusted
 principal-authored events and a compact existing-belief view. Its focused tests
@@ -487,10 +554,14 @@ content-free `memory.extraction.completed` auditing, and deterministic fallback.
 Those tests are not production activation evidence. Accepted ADR-0057 supersedes
 the earlier routed-policy selection rule. Normal composition does not select a
 provider extractor until a version-bound artifact for the exact runtime tuple
-passes startup validation; the balanced OpenAI `gpt-5.6-sol` and default-policy
-tuple now has bundled passing evidence from the checked-in 24-case corpus.
+passes startup validation. The balanced OpenAI `gpt-5.6-sol` and default-policy
+tuple has reviewed passing `formation@8` evidence from the checked-in 25-case
+corpus, so `auto` activates provider assistance for exactly that tuple and stays
+on deterministic `formation@7` for every other one. The superseded `formation@4`
+artifact was deleted when its replacement was published, because two artifacts
+for one tuple would leave the activated policy version ambiguous.
 
-### Evaluation-gated provider assistance (`formation@4`)
+### Evaluation-gated provider assistance (`formation@8`)
 
 The first provider-assisted implementation is a dedicated maintenance extractor,
 not an interactive call or a general-purpose subagent. It implements the same
@@ -532,8 +603,8 @@ flag, is mutually exclusive with `required`, and is refused in production.
 evaluation opt-in, it runs a checked-in labeled corpus through isolated paired
 deterministic and provider-assisted arms, derives the active model tuple and
 corpus hash, and atomically writes evidence only when the schema's lift, coverage,
-fabrication, and policy conditions pass. The corpus has twenty positive examples
-and four protected no-memory examples; scoring uses checked-in normalized labels,
+fabrication, and policy conditions pass. The current 25-case corpus has twenty-one
+positive examples and four protected no-memory examples; scoring uses checked-in normalized labels,
 not a second model judge. Every result reports per-case normalized beliefs,
 consolidation counts, shared fallback beliefs, provider-added beliefs, and
 content-free extraction-audit counts for both arms. A failed run exits non-zero,
@@ -547,15 +618,24 @@ authenticate an otherwise unsigned release.
 Every attempted provider extraction emits one process-scoped audit containing its
 principal and session, agent and policy versions, authorized scope, empty tool
 scopes, exact source-event sequences, provider and model, evidence identifiers,
-budget, deadline, usage, cost, and outcome. Prompt and response bodies are never
-stored there; only their SHA-256 hashes are retained. A failed, timed-out,
-malformed, or over-budget call records failure and returns deterministic proposals.
+budget, deadline, usage, cost, outcome, and safe normalized failure fields.
+Prompt and response bodies and exception messages are never stored there; only
+their SHA-256 hashes are retained. A failed, timed-out, malformed, or over-budget
+call records failure and returns deterministic proposals. Retryable failure keeps
+the prefix pending under the bounded schedule above; permanent failure and
+exhausted retry advance it. A recorded usage violation is a local permanent
+budget failure and never enters the provider retry schedule; replaying the same
+over-budget response would not change that policy outcome.
 A cancelled call records the cancellation and propagates it rather than disguising
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through
 the same service gates. Provider-assisted consolidations and beliefs record
-`formation@4`; the default deterministic path continues to record `formation@2`.
-The reversible seam and activation decision are recorded in ADR-0057.
+`formation@8`; the default deterministic path records `formation@7`. The
+activation decision is recorded in ADR-0057, and the retry, diagnosis, replay,
+and policy-version correction is recorded in ADR-0068. Admitting working-state
+established facts as `AFFIRMED` candidates advanced those versions from
+`formation@5` and `formation@6`, because it changes what formation produces
+from the same events (ADR-0069).
 
 ## Hard gates
 
@@ -593,8 +673,9 @@ first formation layer (Section 20).
     to coexist. **M10.**
 11. **Governed inspection and reversibility** — the public memory surface can
     list and inspect beliefs, source-session formation audits, and recall traces;
-    edit and delete use the same principal-scoped service, and a foreign
-    principal can observe or mutate none of them. **M10.**
+    diagnose one session's formation lifecycle and replay its original evidence;
+    edit, delete, diagnosis, and replay use the same principal-scoped service,
+    and a foreign principal can observe or mutate none of them. **M10.**
 12. **Extractor contract coverage** — every shipped
     `MemoryCandidateExtractor` implementation is registered against the shared
     contract for separate, scope-correct, provenance-bound proposals, including
@@ -609,8 +690,9 @@ first formation layer (Section 20).
     and secret-shaped source content cannot pass its safety checks.
     **M10.**
 15. **Audited deterministic fallback** — a failed provider attempt records a
-    content-free failed audit and returns the independently derived deterministic
-    proposals rather than suppressing memory formation. **M10.**
+    content-free failed audit with normalized failure fields and returns the
+    independently derived deterministic proposals rather than suppressing memory
+    formation. **M10.**
 16. **Evidence publication** — the checked-in paired evaluation derives the
     active provider tuple and corpus hash and atomically publishes activation
     evidence only after formation lift, at least eighty percent positive-case
@@ -626,8 +708,8 @@ first formation layer (Section 20).
     returns those diagnostics and the CLI exits non-zero without publishing an
     activation artifact. **M10.**
 19. **Positive formation coverage** — aggregate lift alone is insufficient:
-    provider assistance must fully support at least sixteen of the twenty labeled
-    positive cases before evidence can be published. **M10.**
+    provider assistance must fully support at least sixteen of the twenty
+    labeled positive cases before evidence can be published. **M10.**
 20. **Authoritative source safety** — secret, injection, or transient markers in
     authoritative cited source text cannot be erased by provider normalization
     before the automatic eligibility check. **M10.**

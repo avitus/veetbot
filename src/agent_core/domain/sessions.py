@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -10,6 +11,23 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 SESSION_TITLE_MAX_LENGTH = 64
+SESSION_BROWSER_PROFILE_METADATA_KEY = "browser_profile_id"
+SESSION_PROJECT_SCOPE_METADATA_KEY = "project_scope"
+DEFAULT_PROJECT_SCOPE = "general"
+
+
+def project_scope(metadata: Mapping[str, Any]) -> str:
+    """Name the project a session belongs to, falling back to the general one.
+
+    Memory is scoped by project: consolidation records the scope a belief was
+    learned in and recall demotes beliefs carried in from another one, so every
+    path that consolidates or recalls reads the scope from the same place.
+    """
+
+    scope = metadata.get(SESSION_PROJECT_SCOPE_METADATA_KEY)
+    if isinstance(scope, str) and scope.strip():
+        return scope.strip()
+    return DEFAULT_PROJECT_SCOPE
 
 
 def conversation_title(text: str) -> str | None:

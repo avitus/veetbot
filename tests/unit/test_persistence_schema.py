@@ -14,6 +14,23 @@ def test_capability_attempt_costs_index_the_scenario_run_foreign_key() -> None:
     assert ("scenario_run_id",) in indexed_columns
 
 
+def test_process_events_index_diagnostic_scope_and_reverse_chronology() -> None:
+    table = Base.metadata.tables["process_events"]
+    index = next(
+        candidate
+        for candidate in table.indexes
+        if candidate.name == "ix_process_events_diagnostics_scope"
+    )
+    expressions = " ".join(str(expression) for expression in index.expressions)
+
+    assert "event_type" in expressions
+    assert "tenant_id" in expressions
+    assert "principal_id" in expressions
+    assert "session_id" in expressions
+    assert "created_at DESC" in expressions
+    assert "id DESC" in expressions
+
+
 def test_browser_profiles_schema_contains_metadata_only() -> None:
     table = Base.metadata.tables["browser_profiles"]
 
@@ -166,3 +183,82 @@ def test_schedule_tables_encode_identity_erasure_and_query_constraints() -> None
         "principal_id",
         "key",
     )
+
+
+def test_notification_tables_encode_routing_identity_and_query_constraints() -> None:
+    tables = Base.metadata.tables
+    assert {
+        "devices",
+        "device_registration_idempotency_keys",
+        "notification_outbox",
+        "notification_deliveries",
+    } <= tables.keys()
+
+    device_idempotency = tables["device_registration_idempotency_keys"]
+    assert tuple(column.name for column in device_idempotency.primary_key.columns) == (
+        "tenant_id",
+        "principal_id",
+        "key",
+    )
+    assert set(device_idempotency.columns.keys()) == {
+        "tenant_id",
+        "principal_id",
+        "key",
+        "request_hash",
+        "response",
+        "created_at",
+    }
+
+    devices = tables["devices"]
+    assert {tuple(column.name for column in index.columns) for index in devices.indexes} >= {
+        ("tenant_id", "principal_id", "created_at", "id"),
+        ("push_provider", "push_token"),
+    }
+    token_indexes = [
+        index
+        for index in devices.indexes
+        if tuple(column.name for column in index.columns) == ("push_provider", "push_token")
+    ]
+    assert len(token_indexes) == 1
+    assert token_indexes[0].unique is True
+    assert str(token_indexes[0].dialect_options["postgresql"]["where"]) == (
+        "push_token IS NOT NULL AND status = 'active'"
+    )
+    device_unique_columns = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in devices.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("tenant_id", "principal_id", "client_device_id") in device_unique_columns
+    device_checks = " ".join(
+        str(constraint.sqltext)
+        for constraint in devices.constraints
+        if isinstance(constraint, CheckConstraint)
+    )
+    for required in ("push_provider", "push_token", "push_environment", "muted_kinds"):
+        assert required in device_checks
+
+    outbox = tables["notification_outbox"]
+    assert {tuple(column.name for column in index.columns) for index in outbox.indexes} >= {
+        ("status", "next_attempt_at"),
+        ("tenant_id", "principal_id", "created_at", "id"),
+    }
+    outbox_foreign_keys = {foreign_key.parent.name for foreign_key in outbox.foreign_keys}
+    assert outbox_foreign_keys.isdisjoint(
+        {"session_id", "run_id", "approval_id", "question_id", "schedule_id", "occurrence_id"}
+    )
+
+    deliveries = tables["notification_deliveries"]
+    assert {
+        foreign_key.parent.name: (foreign_key.target_fullname, foreign_key.ondelete)
+        for foreign_key in deliveries.foreign_keys
+    } == {
+        "notification_id": ("notification_outbox.id", "RESTRICT"),
+        "device_id": ("devices.id", "RESTRICT"),
+    }
+    delivery_unique_columns = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in deliveries.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("notification_id", "device_id", "attempt") in delivery_unique_columns

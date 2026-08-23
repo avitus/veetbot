@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -24,6 +24,7 @@ from agent_core.domain.context import ContextBudget, ContextPlan, TaskStatus, Wo
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
+    MemoryCorrection,
     MemoryStatus,
     Portability,
     RecalledBelief,
@@ -152,13 +153,15 @@ class _StaticQueryFormer:
         active_run: Run,
         working_state: WorkingState,
         message: str | None,
+        *,
+        current_scope: str | None = None,
     ) -> list[RecallQuery]:
         del active_run, working_state, message
         return [
             RecallQuery(
                 tenant_id=principal().tenant_id,
                 principal_id=principal().principal_id,
-                current_scope="project-a",
+                current_scope=current_scope or "project-a",
                 text="concise answers",
                 budget_tokens=500,
                 max_items=5,
@@ -204,6 +207,17 @@ class _StaticMemoryRetriever:
             trace_id=UUID(int=902),
             watermark=1,
         )
+
+    async def corrections(
+        self,
+        *,
+        snapshot_id: UUID,
+        watermark: int,
+        as_of: datetime | None = None,
+    ) -> list[MemoryCorrection]:
+        # These plans freeze no snapshot, so nothing here can be corrected.
+        del snapshot_id, watermark, as_of
+        return []
 
 
 class _CountingMemoryRetriever(_StaticMemoryRetriever):

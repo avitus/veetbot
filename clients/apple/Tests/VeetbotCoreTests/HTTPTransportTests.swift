@@ -58,6 +58,75 @@ import Testing
     }
 
     @Test
+    func testWebsiteAccessUsesProfileIdentifiersAndDirectAuthenticationCeremonies() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000a1")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000a2")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let path = request.url?.path ?? ""
+            let body: String
+            let statusCode: Int
+            switch (request.httpMethod, path) {
+            case ("POST", "/v1/browser-profiles"):
+                statusCode = 201
+                body = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:00:00Z","last_used_at":null}"#
+            case ("POST", "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"):
+                statusCode = 201
+                body = #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-08-22T12:05:00Z","launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque"}"#
+            case ("POST", "/v1/sessions"):
+                statusCode = 201
+                body = #"{"id":"00000000-0000-0000-0000-0000000000a3","status":"ACTIVE","agent_id":"general","agent_version":"1","title":null,"metadata":{"browser_profile_id":"\#(profileID.uuidString)"},"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:00:00Z","active_run_id":null,"last_run_id":null}"#
+            default:
+                Issue.record("unexpected request: \(request.httpMethod ?? "") \(path)")
+                statusCode = 500
+                body = "{}"
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: statusCode,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+
+        let client = try makeClient(token: "valid")
+        let profile = try await client.createBrowserProfile(
+            allowedOrigins: ["https://example.org"],
+            idempotencyKey: "profile-create"
+        )
+        let ceremony = try await client.beginBrowserAuthentication(
+            profileID: profile.id,
+            loginURL: "https://example.org/login"
+        )
+        _ = try await client.createSession(browserProfileID: profile.id)
+
+        #expect(ceremony.launchURL?.fragment == "capability=opaque")
+        let captured = lock.withLock { requests }
+        #expect(captured.count == 3)
+        #expect(
+            captured[0].value(forHTTPHeaderField: "Idempotency-Key") == "profile-create"
+        )
+        let profileJSON = try requestJSONObject(captured[0])
+        #expect(profileJSON["allowed_origins"] as? [String] == ["https://example.org"])
+        let ceremonyJSON = try requestJSONObject(captured[1])
+        #expect(ceremonyJSON["login_url"] as? String == "https://example.org/login")
+        let sessionJSON = try requestJSONObject(captured[2])
+        #expect(sessionJSON["browser_profile_id"] as? String == profileID.uuidString)
+        #expect(sessionJSON["username"] == nil)
+        #expect(sessionJSON["password"] == nil)
+    }
+
+    @Test
     func testKeychainStoreUsesLocalDataProtectionKeychain() {
         let query = KeychainTokenStore.makeBaseQuery(
             service: "com.veetbot.test",
@@ -628,6 +697,74 @@ import Testing
             Issue.record("expected a typed not-modified result")
             return
         }
+    }
+
+    @Test
+    func testDeviceRegistrationListAndRevocationUseExactWireContract() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let deviceID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000777")
+        )
+        let deviceJSON = """
+            {"id":"\(deviceID.uuidString)","client_device_id":"installation","name":"Owner's iPhone","kind":"mobile","platform":"ios","app_bundle_id":"com.veetbot.apple","push_provider":"apns","push_environment":"sandbox","push_token_fingerprint":"abcdef","push_token_updated_at":"2026-08-22T00:00:00Z","push_token_invalidated_at":null,"muted_kinds":[],"status":"active","revoked_at":null,"last_seen_at":"2026-08-22T00:00:00Z","created_at":"2026-08-22T00:00:00Z","updated_at":"2026-08-22T00:00:00Z"}
+            """
+        let revokedDeviceJSON = """
+            {"id":"\(deviceID.uuidString)","client_device_id":"installation","name":"Owner's iPhone","kind":"mobile","platform":"ios","app_bundle_id":"com.veetbot.apple","push_provider":null,"push_environment":null,"push_token_fingerprint":null,"push_token_updated_at":"2026-08-22T00:00:00Z","push_token_invalidated_at":"2026-08-22T00:05:00Z","muted_kinds":[],"status":"revoked","revoked_at":"2026-08-22T00:05:00Z","last_seen_at":"2026-08-22T00:00:00Z","created_at":"2026-08-22T00:00:00Z","updated_at":"2026-08-22T00:05:00Z"}
+            """
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let body: String
+            if request.url?.path == "/v1/devices" && request.httpMethod == "GET" {
+                body = "{\"items\":[\(deviceJSON)],\"next_cursor\":null}"
+            } else if request.url?.path.hasSuffix("/revoke") == true {
+                body = revokedDeviceJSON
+            } else {
+                body = deviceJSON
+            }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(body.utf8))
+        }
+        let client = try makeClient(token: "valid")
+        let registration = AppleDeviceRegistration(
+            clientDeviceID: "installation",
+            name: "Owner's iPhone",
+            kind: .mobile,
+            platform: "ios",
+            appBundleID: "com.veetbot.apple",
+            pushToken: "00abff",
+            pushEnvironment: .sandbox
+        )
+
+        #expect(
+            try await client.registerDevice(
+                registration,
+                idempotencyKey: "installation"
+            ).id == deviceID
+        )
+        #expect(try await client.listDevices(limit: 500, cursor: "next").items.count == 1)
+        let revoked = try await client.revokeDevice(deviceID)
+        #expect(revoked.status == .revoked)
+        #expect(revoked.revokedAt != nil)
+
+        let captured = lock.withLock { requests }
+        #expect(captured.map(\.httpMethod) == ["POST", "GET", "POST"])
+        #expect(captured[0].url?.path == "/v1/devices")
+        #expect(captured[0].value(forHTTPHeaderField: "Idempotency-Key") == "installation")
+        let registrationJSON = try requestJSONObject(captured[0])
+        #expect(registrationJSON["client_device_id"] as? String == "installation")
+        #expect(registrationJSON["push_token"] as? String == "00abff")
+        #expect(captured[1].url?.query?.contains("limit=200") == true)
+        #expect(captured[1].url?.query?.contains("cursor=next") == true)
+        #expect(captured[2].url?.path == "/v1/devices/\(deviceID.uuidString)/revoke")
     }
 
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {

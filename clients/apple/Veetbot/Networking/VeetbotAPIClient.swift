@@ -25,9 +25,14 @@ public struct VeetbotAPIClient: Sendable {
 
     public func createSession(
         agentID: String = "general",
-        metadata: [String: JSONValue] = [:]
+        metadata: [String: JSONValue] = [:],
+        browserProfileID: UUID? = nil
     ) async throws -> SessionView {
-        let body = CreateSessionBody(agentID: agentID, metadata: metadata)
+        let body = CreateSessionBody(
+            agentID: agentID,
+            metadata: metadata,
+            browserProfileID: browserProfileID
+        )
         return try await transport.send(
             TransportRequest(
                 method: .post,
@@ -193,6 +198,44 @@ public struct VeetbotAPIClient: Sendable {
         )
     }
 
+    public func registerDevice(
+        _ body: AppleDeviceRegistration,
+        idempotencyKey: String
+    ) async throws -> DeviceView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices",
+                body: try JSONEncoder.server.encode(body),
+                headers: ["Idempotency-Key": idempotencyKey],
+                retryAttempts: 3
+            )
+        )
+    }
+
+    public func listDevices(
+        limit: Int = 200,
+        cursor: String? = nil
+    ) async throws -> Page<DeviceView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(
+            TransportRequest(method: .get, path: "/v1/devices", queryItems: query)
+        )
+    }
+
+    public func revokeDevice(_ deviceID: UUID) async throws -> DeviceView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/devices/\(deviceID.uuidString)/revoke",
+                retryAttempts: 2
+            )
+        )
+    }
+
     public func getArtifact(_ artifactID: UUID) async throws -> ArtifactView {
         try await transport.send(
             TransportRequest(method: .get, path: "/v1/artifacts/\(artifactID.uuidString)")
@@ -216,6 +259,92 @@ public struct VeetbotAPIClient: Sendable {
         if response.statusCode == 304 { return .notModified }
         return .content(data: data, etag: response.value(forHTTPHeaderField: "ETag"))
     }
+
+    public func createBrowserProfile(
+        allowedOrigins: [String],
+        idempotencyKey: String = UUID().uuidString.lowercased()
+    ) async throws -> BrowserProfileView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/browser-profiles",
+                body: try JSONEncoder.server.encode(
+                    CreateBrowserProfileBody(allowedOrigins: allowedOrigins)
+                ),
+                headers: ["Idempotency-Key": idempotencyKey],
+                retryAttempts: 3
+            )
+        )
+    }
+
+    public func listBrowserProfiles(
+        limit: Int = 200,
+        cursor: String? = nil
+    ) async throws -> Page<BrowserProfileView> {
+        var query = [
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200)))
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        return try await transport.send(
+            TransportRequest(method: .get, path: "/v1/browser-profiles", queryItems: query)
+        )
+    }
+
+    public func beginBrowserAuthentication(
+        profileID: UUID,
+        loginURL: String
+    ) async throws -> BrowserAuthenticationView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies",
+                body: try JSONEncoder.server.encode(
+                    BeginBrowserAuthenticationBody(loginURL: loginURL)
+                )
+            )
+        )
+    }
+
+    public func getBrowserAuthentication(
+        _ authenticationID: UUID
+    ) async throws -> BrowserAuthenticationView {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)"
+            )
+        )
+    }
+
+    public func cancelBrowserAuthentication(
+        _ authenticationID: UUID
+    ) async throws -> BrowserAuthenticationView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+            )
+        )
+    }
+
+    public func revokeBrowserProfile(_ profileID: UUID) async throws -> BrowserProfileView {
+        try await transport.send(
+            TransportRequest(
+                method: .post,
+                path: "/v1/browser-profiles/\(profileID.uuidString)/revoke"
+            )
+        )
+    }
+
+    public func deleteBrowserProfile(_ profileID: UUID) async throws {
+        _ = try await transport.sendData(
+            TransportRequest(
+                method: .delete,
+                path: "/v1/browser-profiles/\(profileID.uuidString)",
+                retryAttempts: 2
+            )
+        )
+    }
 }
 
 private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
@@ -233,10 +362,28 @@ private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientErr
 private struct CreateSessionBody: Encodable {
     let agentID: String
     let metadata: [String: JSONValue]
+    let browserProfileID: UUID?
 
     enum CodingKeys: String, CodingKey {
         case agentID = "agent_id"
         case metadata
+        case browserProfileID = "browser_profile_id"
+    }
+}
+
+private struct CreateBrowserProfileBody: Encodable {
+    let allowedOrigins: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case allowedOrigins = "allowed_origins"
+    }
+}
+
+private struct BeginBrowserAuthenticationBody: Encodable {
+    let loginURL: String
+
+    enum CodingKeys: String, CodingKey {
+        case loginURL = "login_url"
     }
 }
 

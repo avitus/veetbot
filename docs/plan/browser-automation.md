@@ -56,7 +56,10 @@ sees bounded observations and opaque element references only.
 ## Capability model
 
 `BrowserProvider` is bound by trusted composition to exactly one principal,
-one opaque profile reference, and one domain policy. It exposes:
+one opaque profile reference, and one domain policy for an execution. A hosted
+deployment may pin that binding globally or resolve it from the session created
+by an authenticated principal; the resolved per-session adapter still owns
+exactly one profile and origin policy. It exposes:
 
 ```text
 navigate(BrowserNavigateRequest) -> BrowserObservation
@@ -101,7 +104,11 @@ keep observation available without granting mutation.
 
 The model never selects a tenant, principal, profile, device, provider, cookie
 jar, credential, or grant in tool arguments. Those values come from the pinned
-run and trusted composition. A URL cannot authorize its own origin. The bound
+run and trusted composition. Interactive clients may ask the session-creation
+surface to bind one principal-owned `READY` profile by opaque UUID. The server
+stores that UUID under a reserved, non-model-visible metadata key only after a
+tenant/principal-scoped repository read; ordinary client metadata cannot set or
+override it. A URL cannot authorize its own origin. The bound
 domain policy validates the initial URL, every redirect, the final URL, popup,
 iframe, and resource navigation according to provider enforcement rules.
 
@@ -430,6 +437,15 @@ provider diagnostics. Cross-principal access is 404. Creation validates one to
 64 unique public-HTTPS origins. Revoke is generation guarded and takes effect
 before returning. Delete is allowed only after revoke. Every mutation is
 idempotent under the ordinary HTTP idempotency contract.
+
+`POST /v1/sessions` also accepts an optional `browser_profile_id` from a trusted
+authenticated client surface. Supplying it requires `browser.profile.read`; the
+service re-reads the profile under the request principal and accepts only
+`READY`. It persists only the opaque UUID as reserved session metadata. The
+field never appears in a model tool schema or prompt, and a model-authored
+message or metadata object cannot select a profile. Hosted composition without
+a deployment-wide `BROWSER_PROFILE_ID` resolves this binding before checking
+the selected profile's exact origin policy and acquiring its run-attempt lease.
 
 ## Policy, approvals, and standing grants
 

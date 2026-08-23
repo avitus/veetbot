@@ -24,10 +24,10 @@ import agent_core.cli.main as cli_main
 import scripts.check_production_deployment as production_check
 from agent_core.bootstrap import build
 from agent_core.cli.main import app
-from agent_core.config import load_settings
-from agent_core.domain.errors import ExportConsentError
+from agent_core.config import ConfigurationError, load_settings
+from agent_core.domain.errors import ExportConsentError, NotFoundError
 from agent_core.domain.events import EventEnvelope
-from agent_core.domain.memory import ConsolidationRun, MemoryEdit
+from agent_core.domain.memory import ConsolidationResult, ConsolidationRun, MemoryEdit
 from agent_core.domain.messages import AssistantMessage, TextPart
 from agent_core.domain.runs import Run, RunStatus
 from agent_core.domain.views import PersistedStreamFrame
@@ -291,7 +291,10 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     execution = (units / "veetbot-execution.service").read_text(encoding="utf-8")
     maintenance = (units / "veetbot-maintenance.service").read_text(encoding="utf-8")
     scheduler = (units / "veetbot-schedule.service").read_text(encoding="utf-8")
+    notify = (units / "veetbot-notify.service").read_text(encoding="utf-8")
     schedule_environment = (deploy / "veetbot-schedule.env.example").read_text(encoding="utf-8")
+    notify_environment = (deploy / "veetbot-notify.env.example").read_text(encoding="utf-8")
+    shared_environment = (deploy / "veetbot.env.example").read_text(encoding="utf-8")
     assert "agent api" in api
     assert cli_main.API_BIND_HOST == "127.0.0.1"
     assert "SupplementaryGroups=docker" not in api
@@ -307,7 +310,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "SupplementaryGroups=docker" in execution
     assert "/run/docker.sock" in execution
     assert "/var/run/docker.sock" not in execution
-    for unit in (api, worker, async_worker, maintenance, scheduler):
+    for unit in (api, worker, async_worker, maintenance, scheduler, notify):
         assert "/run/docker.sock" not in unit
         assert "/var/run/docker.sock" not in unit
     assert "EnvironmentFile=" not in execution
@@ -324,7 +327,7 @@ def test_systemd_units_preserve_role_boundaries() -> None:
             for line in lines
         )
     assert "Restart=on-failure" in execution.splitlines()
-    for unit in (api, worker, async_worker, execution, maintenance, scheduler):
+    for unit in (api, worker, async_worker, execution, maintenance, scheduler, notify):
         assert not any(line.startswith(("BindsTo=", "PartOf=")) for line in unit.splitlines())
     assert "agent worker --role maintenance" in maintenance
     assert "SupplementaryGroups=docker" not in maintenance
@@ -338,6 +341,8 @@ def test_systemd_units_preserve_role_boundaries() -> None:
     assert "UnsetEnvironment=" not in scheduler
     assert "DATABASE_URL=" in schedule_environment
     assert "AGENT_SCHEDULE_WORKER_ENABLED=1" in schedule_environment
+    assert "AGENT_NOTIFICATION_API_ENABLED=0" in schedule_environment
+    assert "AGENT_NOTIFICATION_DISPATCH_ENABLED=0" in schedule_environment
     assert not {
         "AUTH_TOKEN",
         "VEETBOT_OPENAI_KEY",
@@ -346,6 +351,33 @@ def test_systemd_units_preserve_role_boundaries() -> None:
         "FIRECRAWL_API_KEY",
         "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
     } & {line.partition("=")[0] for line in schedule_environment.splitlines()}
+    assert "agent worker --role notify" in notify
+    assert "EnvironmentFile=/etc/veetbot/veetbot-notify.env" in notify
+    assert "EnvironmentFile=/etc/veetbot/veetbot.env" not in notify
+    assert "SupplementaryGroups=docker" not in notify
+    assert "ReadWritePaths=" not in notify
+    assert "AGENT_NOTIFICATION_API_ENABLED=1" in notify_environment
+    assert "AGENT_NOTIFICATION_DISPATCH_ENABLED=1" in notify_environment
+    assert "PUSH_PROVIDER=apns" in notify_environment
+    assert {
+        "DATABASE_URL",
+        "APNS_KEY_FILE",
+        "APNS_KEY_ID",
+        "APNS_TEAM_ID",
+        "APNS_TOPIC",
+    } <= {line.partition("=")[0] for line in notify_environment.splitlines()}
+    assert not {
+        "AUTH_TOKEN",
+        "VEETBOT_OPENAI_KEY",
+        "ANTHROPIC_API_KEY",
+        "TAVILY_API_KEY",
+        "FIRECRAWL_API_KEY",
+        "BROWSER_PROFILE_CONTROL_PLANE_CREDENTIAL_FILE",
+        "SANDBOX_MECHANISM",
+        "AGENT_EXECUTION_SERVICE_SOCKET",
+    } & {line.partition("=")[0] for line in notify_environment.splitlines()}
+    assert "APNS_KEY_FILE=" not in shared_environment
+    assert "APNS_KEY_FILE=" not in schedule_environment
     assert all(
         "EnvironmentFile=/etc/veetbot/veetbot.env" in unit
         for unit in (api, worker, async_worker, maintenance)
@@ -491,6 +523,8 @@ def test_release_script_preserves_release_boundaries() -> None:
     assert "AGENT_SCHEDULE_WORKER_ENABLED" in release
     assert "veetbot-async-worker" in release
     assert "veetbot-schedule" in release
+    assert "veetbot-notify" in release
+    assert "AGENT_NOTIFICATION_DISPATCH_ENABLED" in release
 
 
 def test_nginx_configuration_preserves_public_process_boundaries() -> None:
@@ -755,6 +789,27 @@ def test_mkdocs_site_has_its_public_origin() -> None:
     assert config["theme"]["font"] is False
 
 
+def test_mkdocs_site_uses_veetbot_visual_identity() -> None:
+    config = yaml.safe_load((ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+    theme = config["theme"]
+    css = (ROOT / "docs" / "assets" / "stylesheets" / "extra.css").read_text(encoding="utf-8")
+    source_icon = (ROOT / "assets" / "brand" / "veetbot-icon.svg").read_text(encoding="utf-8")
+    docs_icon = (ROOT / "docs" / "assets" / "images" / "veetbot-icon.svg").read_text(
+        encoding="utf-8"
+    )
+
+    assert config["site_name"] == "Veetbot Documentation"
+    assert theme["logo"] == "assets/images/veetbot-icon.svg"
+    assert theme["favicon"] == "assets/images/veetbot-icon.svg"
+    assert all(palette["primary"] == "custom" for palette in theme["palette"])
+    assert all(palette["accent"] == "custom" for palette in theme["palette"])
+    assert "--veetbot-turquoise: #00706d" in css
+    assert "--veetbot-orange: #a73e00" in css
+    assert "--veetbot-ink: #0d172a" in css
+    assert "--veetbot-paper: #fafaf7" in css
+    assert source_icon == docs_icon
+
+
 def test_repository_contract_requires_red_green_tdd_evidence() -> None:
     contract = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
 
@@ -974,12 +1029,25 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         seen.append(("trace", trace_id))
         return recall_trace
 
+    async def fake_diagnose(session_id: UUID) -> object:
+        seen.append(("diagnose", session_id))
+        return {"session_id": str(session_id), "pending_retry": False}
+
+    async def fake_replay(session_id: UUID) -> object:
+        seen.append(("replay", session_id))
+        return ConsolidationResult(
+            run=formation.model_copy(update={"trigger": "operator_replay"}),
+            beliefs=[belief],
+        )
+
     monkeypatch.setattr(cli_main, "_memory_list", fake_list)
     monkeypatch.setattr(cli_main, "_memory_get", fake_get)
     monkeypatch.setattr(cli_main, "_memory_edit", fake_edit)
     monkeypatch.setattr(cli_main, "_memory_delete", fake_delete)
     monkeypatch.setattr(cli_main, "_memory_formations", fake_formations)
     monkeypatch.setattr(cli_main, "_memory_trace", fake_trace)
+    monkeypatch.setattr(cli_main, "_memory_diagnose", fake_diagnose)
+    monkeypatch.setattr(cli_main, "_memory_replay", fake_replay)
     runner = CliRunner()
 
     listed = runner.invoke(
@@ -1004,16 +1072,24 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         ["memory", "formations", "--session", str(SESSION_ID), "--limit", "9"],
     )
     traced = runner.invoke(app, ["memory", "trace", str(recall_trace.id)])
+    diagnosed = runner.invoke(app, ["memory", "diagnose", "--session", str(SESSION_ID)])
+    unconfirmed_replay = runner.invoke(app, ["memory", "replay", "--session", str(SESSION_ID)])
+    replayed = runner.invoke(app, ["memory", "replay", "--session", str(SESSION_ID), "--confirm"])
     deleted = runner.invoke(app, ["memory", "delete", str(belief.id)])
 
     assert all(
-        result.exit_code == 0 for result in (listed, fetched, edited, formations, traced, deleted)
+        result.exit_code == 0
+        for result in (listed, fetched, edited, formations, traced, diagnosed, replayed, deleted)
     )
     assert json.loads(listed.stdout)[0]["formation_run_id"] == str(formation.id)
     assert json.loads(fetched.stdout)["source_session_id"] == str(SESSION_ID)
     assert json.loads(edited.stdout)["statement"] == "User prefers direct answers"
     assert json.loads(formations.stdout)[0]["committed"] == 1
     assert json.loads(traced.stdout)["query"]["text"] == "concise answers"
+    assert json.loads(diagnosed.stdout)["pending_retry"] is False
+    assert unconfirmed_replay.exit_code == 2
+    assert "requires --confirm" in unconfirmed_replay.stderr
+    assert json.loads(replayed.stdout)["run"]["trigger"] == "operator_replay"
     assert json.loads(deleted.stdout) == {"id": str(belief.id)}
     assert seen == [
         ("list", (True, SESSION_ID, 7)),
@@ -1021,8 +1097,50 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         ("edit", (belief.id, "User prefers direct answers")),
         ("formations", (SESSION_ID, 9)),
         ("trace", recall_trace.id),
+        ("diagnose", SESSION_ID),
+        ("replay", SESSION_ID),
         ("delete", belief.id),
     ]
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_exit_code"),
+    [
+        (ConfigurationError("invalid memory configuration"), 4),
+        (NotFoundError("memory session not found"), 1),
+    ],
+)
+def test_memory_diagnose_and_replay_distinguish_configuration_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_exit_code: int,
+) -> None:
+    async def fail(_session_id: UUID) -> object:
+        raise error
+
+    monkeypatch.setattr(cli_main, "_memory_diagnose", fail)
+    monkeypatch.setattr(cli_main, "_memory_replay", fail)
+    runner = CliRunner()
+
+    diagnosed = runner.invoke(app, ["memory", "diagnose", "--session", str(SESSION_ID)])
+    replayed = runner.invoke(
+        app,
+        ["memory", "replay", "--session", str(SESSION_ID), "--confirm"],
+    )
+
+    assert diagnosed.exit_code == expected_exit_code
+    assert replayed.exit_code == expected_exit_code
+    assert str(error) in diagnosed.stderr
+    assert str(error) in replayed.stderr
+
+
+def test_docs_stylesheet_uses_portable_linter_compatible_declarations() -> None:
+    stylesheet = (ROOT / "docs/assets/stylesheets/extra.css").read_text(encoding="utf-8")
+
+    assert "Consolas" not in stylesheet
+    assert "currentColor" not in stylesheet
+    assert "word-break: break-word" not in stylesheet
+    assert "overflow-wrap: anywhere" in stylesheet
 
 
 async def test_in_memory_composition_round_trips_a_recall_trace_through_the_public_service(
@@ -1208,13 +1326,13 @@ def test_required_files_include_the_status_split_surfaces(
 def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Milestones 12 through 15 are authorized; project state and plan checks follow."""
+    """Milestones 12 through 16 are authorized; project state and plan checks follow."""
     monkeypatch.syspath_prepend(str(ROOT / "scripts"))
     check_docs = importlib.import_module("check_docs")
 
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True)
-    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(16)}
+    milestones = {str(n): {"title": f"milestone {n}", "status": "planned"} for n in range(17)}
     (status / "project-state.yaml").write_text(
         yaml.safe_dump({"project": {"current_milestone": 11}, "milestones": milestones}),
         encoding="utf-8",
@@ -1237,7 +1355,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 16):
+    for milestone in range(12, 17):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 

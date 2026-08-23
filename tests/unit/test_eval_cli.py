@@ -1,4 +1,5 @@
 import sys
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,7 +7,14 @@ import pytest
 from typer.testing import CliRunner
 
 from agent_core.cli.main import app
+from agent_core.domain.runs import RunStatus
 from agent_core.evals.gates import GateStatus
+from agent_core.evals.memory_benchmark_live import (
+    AnswerScore,
+    LiveProbeArmResult,
+    LiveProbeResult,
+    MemoryBenchmarkLiveMetrics,
+)
 
 
 def test_eval_gates_passes_milestone_and_area_through_cli(
@@ -320,3 +328,386 @@ def test_eval_memory_formation_normalizes_failed_gate(
     assert result.exit_code == 1
     assert "memory-formation evaluation failed" in result.stderr
     assert "fabricated candidates" in result.stderr
+
+
+def _benchmark_module(
+    observed: list[dict[str, object]],
+    *,
+    passed: bool = True,
+    failure_summary: str | None = None,
+    skipped: bool = False,
+    live: object | None = None,
+) -> SimpleNamespace:
+    document = f'{{"passed":{str(passed).lower()}}}'
+
+    async def run_benchmark(
+        _root: object,
+        *,
+        deterministic_only: bool,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path | None,
+        baseline_output: Path | None,
+    ) -> SimpleNamespace | None:
+        observed.append(
+            {
+                "deterministic_only": deterministic_only,
+                "model_policy": model_policy,
+                "policy_profile": policy_profile,
+                "build_ref": build_ref,
+                "output": output,
+                "baseline_output": baseline_output,
+            }
+        )
+        if skipped:
+            return None
+        if live is None:
+            return SimpleNamespace(
+                passed=passed,
+                failure_summary=failure_summary,
+                model_dump_json=lambda **_kwargs: document,
+            )
+        return SimpleNamespace(
+            passed=passed,
+            failure_summary=failure_summary,
+            live=live,
+            model_dump_json=lambda **_kwargs: document,
+        )
+
+    return SimpleNamespace(run_benchmark=run_benchmark)
+
+
+def _build_ref_module() -> SimpleNamespace:
+    return SimpleNamespace(
+        resolve_build_ref=lambda _root, explicit: explicit or "resolved-from-git"
+    )
+
+
+def test_eval_memory_benchmark_deterministic_only_prints_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(observed),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+    baseline = tmp_path / "baseline.json"
+
+    explicit = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--deterministic-only",
+            "--build-ref",
+            "abc123",
+            "--write-baseline",
+            str(baseline),
+        ],
+    )
+    resolved = CliRunner().invoke(app, ["eval", "memory-benchmark"])
+
+    assert explicit.exit_code == 0
+    assert '"passed":true' in explicit.stdout
+    assert resolved.exit_code == 0
+    assert observed == [
+        {
+            "deterministic_only": True,
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "abc123",
+            "output": None,
+            "baseline_output": baseline,
+        },
+        {
+            "deterministic_only": True,
+            "model_policy": "balanced",
+            "policy_profile": "default",
+            "build_ref": "resolved-from-git",
+            "output": None,
+            "baseline_output": None,
+        },
+    ]
+
+
+def test_eval_memory_benchmark_reports_opt_in_skip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(observed, skipped=True),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+    evidence = tmp_path / "evidence.json"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--no-deterministic-only",
+            "--build-ref",
+            "abc123",
+            "--output",
+            str(evidence),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "skipped: set RUN_LIVE_MODEL_TESTS=1" in result.stdout
+    assert observed[0]["deterministic_only"] is False
+    assert observed[0]["output"] == evidence
+
+
+def test_eval_memory_benchmark_live_requires_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(observed),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    missing_output = CliRunner().invoke(
+        app, ["eval", "memory-benchmark", "--no-deterministic-only", "--build-ref", "abc123"]
+    )
+    missing_build_ref = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--no-deterministic-only",
+            "--output",
+            str(tmp_path / "evidence.json"),
+        ],
+    )
+    refused_output = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--deterministic-only",
+            "--output",
+            str(tmp_path / "evidence.json"),
+        ],
+    )
+
+    assert missing_output.exit_code == 2
+    assert "--output is required" in missing_output.stderr
+    assert missing_build_ref.exit_code == 2
+    assert "--build-ref is required" in missing_build_ref.stderr
+    assert refused_output.exit_code == 2
+    assert "--output belongs to the live arm" in refused_output.stderr
+    assert observed == []
+
+
+def _external_module(observed: list[dict[str, object]]) -> SimpleNamespace:
+    async def run_external_benchmark(
+        _root: object,
+        *,
+        dataset: str,
+        path: Path,
+        sample: int | None,
+        seed: int,
+        principal_speaker: str,
+        deterministic_only: bool,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> SimpleNamespace:
+        observed.append(
+            {
+                "dataset": dataset,
+                "path": path,
+                "sample": sample,
+                "seed": seed,
+                "principal_speaker": principal_speaker,
+                "deterministic_only": deterministic_only,
+                "build_ref": build_ref,
+                "output": output,
+            }
+        )
+        return SimpleNamespace(model_dump_json=lambda **_kwargs: '{"dataset":"locomo"}')
+
+    return SimpleNamespace(run_external_benchmark=run_external_benchmark)
+
+
+def test_eval_memory_benchmark_external_requires_path_and_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules, "agent_core.evals.memory_benchmark_external", _external_module(observed)
+    )
+    monkeypatch.setitem(
+        sys.modules, "agent_core.evals.memory_benchmark_driver", _benchmark_module([])
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+    dataset = tmp_path / "locomo10.json"
+    dataset.write_text("[]", encoding="utf-8")
+    metrics = tmp_path / "locomo-metrics.json"
+
+    missing_path = CliRunner().invoke(app, ["eval", "memory-benchmark", "--external", "locomo"])
+    missing_output = CliRunner().invoke(
+        app, ["eval", "memory-benchmark", "--external", "locomo", "--path", str(dataset)]
+    )
+    unknown = CliRunner().invoke(
+        app,
+        ["eval", "memory-benchmark", "--external", "nowhere", "--path", str(dataset)],
+    )
+    stray_path = CliRunner().invoke(app, ["eval", "memory-benchmark", "--path", str(dataset)])
+    accepted = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--external",
+            "locomo",
+            "--path",
+            str(dataset),
+            "--output",
+            str(metrics),
+            "--sample",
+            "3",
+            "--seed",
+            "11",
+            "--principal-speaker",
+            "b",
+        ],
+    )
+
+    assert missing_path.exit_code == 2
+    assert "--path is required" in missing_path.stderr
+    assert missing_output.exit_code == 2
+    assert "--output is required" in missing_output.stderr
+    assert unknown.exit_code == 2
+    assert "unknown dataset" in unknown.stderr
+    assert stray_path.exit_code == 2
+    assert "--path belongs to an external dataset run" in stray_path.stderr
+    assert accepted.exit_code == 0
+    assert '"dataset":"locomo"' in accepted.stdout
+    assert observed == [
+        {
+            "dataset": "locomo",
+            "path": dataset,
+            "sample": 3,
+            "seed": 11,
+            "principal_speaker": "b",
+            "deterministic_only": True,
+            "build_ref": "resolved-from-git",
+            "output": metrics,
+        }
+    ]
+
+
+def test_eval_memory_benchmark_returns_failure_for_a_regression(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module([], passed=False, failure_summary="needed_recalled regressed"),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    result = CliRunner().invoke(app, ["eval", "memory-benchmark", "--build-ref", "abc123"])
+
+    assert result.exit_code == 1
+    assert '"passed":false' in result.stdout
+    assert "needed_recalled regressed" in result.stderr
+
+
+def _one_incomplete_run() -> MemoryBenchmarkLiveMetrics:
+    """A failing live arm carrying one run that ended without an answer."""
+
+    failed = LiveProbeArmResult(
+        arm="without_memory",
+        answer=None,
+        score=AnswerScore(correct=False, abstained=False, leaked_protected=False),
+        run_status=RunStatus.FAILED,
+        model_calls=1,
+        cost_usd=Decimal("0.01071"),
+        latency_ms=4872,
+        policy_failures=0,
+        failure_class="ModelStreamError",
+        retried=True,
+    )
+    answered = LiveProbeArmResult(
+        arm="with_memory",
+        answer="Portland",
+        score=AnswerScore(correct=True, abstained=False, leaked_protected=False),
+        run_status=RunStatus.COMPLETED,
+        model_calls=1,
+        cost_usd=Decimal("0.01"),
+        latency_ms=900,
+        policy_failures=0,
+    )
+    return MemoryBenchmarkLiveMetrics(
+        probe_count=1,
+        answerable_probe_count=1,
+        abstain_expected=0,
+        with_memory_correct=1,
+        without_memory_correct=0,
+        lift=1,
+        recoverable_probe_count=0,
+        recoverable_correct=0,
+        abstain_with_memory_correct=0,
+        protected_leaks_in_answers=0,
+        with_memory_policy_failures=0,
+        without_memory_policy_failures=0,
+        incomplete_runs=1,
+        retried_runs=1,
+        ceiling_hits=0,
+        total_cost_usd=Decimal("0.02071"),
+        p50_latency_ms=900,
+        p95_latency_ms=4872,
+        failure_classes={"ModelStreamError": 1},
+        probes=[
+            LiveProbeResult(
+                scenario_id="mb-cli-001",
+                probe_id="p01",
+                category="single_hop",
+                with_memory=answered,
+                without_memory=failed,
+                lift=1,
+            )
+        ],
+    )
+
+
+def test_eval_memory_benchmark_prints_every_incomplete_run_before_the_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(
+            [],
+            passed=False,
+            failure_summary="incomplete runs 1",
+            live=_one_incomplete_run(),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    result = CliRunner().invoke(app, ["eval", "memory-benchmark", "--build-ref", "abc123"])
+
+    assert result.exit_code == 1
+    lines = result.stderr.splitlines()
+    assert lines[-1] == "memory-benchmark evaluation failed: incomplete runs 1"
+    detail = [line for line in lines if line.startswith("incomplete run ")]
+    assert len(detail) == 1
+    assert "mb-cli-001/p01 without_memory" in detail[0]
+    assert "status=FAILED" in detail[0]
+    assert "failure_class=ModelStreamError" in detail[0]
+    assert "model_calls=1" in detail[0]
+    assert "retried=True" in detail[0]

@@ -3,11 +3,23 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Text, delete, func, or_, select, update
+from sqlalchemy import (
+    DateTime,
+    Integer,
+    Text,
+    bindparam,
+    delete,
+    func,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
@@ -51,6 +63,7 @@ from agent_core.domain.memory import (
     Sensitivity,
     TracedBelief,
     TracedPassage,
+    lexical_query_terms,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
@@ -60,6 +73,40 @@ _LIVE = (MemoryStatus.ACTIVE.value, MemoryStatus.PROVISIONAL.value)
 
 def _rowcount(result: Any) -> int:
     return int(result.rowcount or 0)
+
+
+# The operator tier of a recall trace lives inside the stored JSON document, so
+# its expiry is a JSONB rewrite over a bounded, index-ordered set of identifiers
+# rather than a column update. `dropped_for_budget_count` keeps what the nulled
+# identifier list used to say, which is all the user-safe projection needs.
+_DROPPED_LENGTH = (
+    "CASE WHEN jsonb_typeof({trace} -> 'dropped_for_budget') = 'array' "
+    "THEN jsonb_array_length({trace} -> 'dropped_for_budget') ELSE 0 END"
+)
+_OPERATOR_FIELDS_PRESENT = (
+    "COALESCE(trace ->> 'arm_latencies_ms', '{}') <> '{}' "
+    "OR COALESCE((trace ->> 'candidates')::int, 0) <> 0 "
+    f"OR {_DROPPED_LENGTH.format(trace='trace')} <> 0"
+)
+_EXPIRE_OPERATOR_FIELDS = f"""
+UPDATE recall_traces AS expiring
+SET trace = expiring.trace || jsonb_build_object(
+        'arm_latencies_ms', '{{}}'::jsonb,
+        'candidates', 0,
+        'dropped_for_budget', '[]'::jsonb,
+        'dropped_for_budget_count',
+        COALESCE((expiring.trace ->> 'dropped_for_budget_count')::int, 0)
+        + {_DROPPED_LENGTH.format(trace="expiring.trace")}
+    )
+WHERE expiring.id IN (
+    SELECT id
+    FROM recall_traces
+    WHERE operator_fields_expire_at <= :now AND ({_OPERATOR_FIELDS_PRESENT})
+    ORDER BY operator_fields_expire_at, id
+    LIMIT :limit
+    FOR UPDATE SKIP LOCKED
+)
+"""
 
 
 def _memory_values(value: MemoryRecord) -> dict[str, Any]:
@@ -154,6 +201,18 @@ class PostgresMemoryStore:
             raise RuntimeError("memory position sequence returned no value")
         return int(value)
 
+    async def head_position(self, principal: Principal) -> int:
+        # The principal's own newest write, not the sequence's last value: the
+        # sequence is cluster-wide and its counter is not transactional, so it
+        # would report positions this principal cannot see.
+        value = await self._session.scalar(
+            select(func.max(MemoryRow.store_position)).where(
+                MemoryRow.tenant_id == principal.tenant_id,
+                MemoryRow.principal_id == principal.principal_id,
+            )
+        )
+        return 0 if value is None else int(value)
+
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord:
         row = (
             await self._session.scalars(
@@ -178,16 +237,21 @@ class PostgresMemoryStore:
             or_(MemoryRow.expires_at.is_(None), MemoryRow.expires_at > as_of),
             MemoryRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
         ]
+        if query.min_store_position:
+            predicates.append(MemoryRow.store_position > query.min_store_position)
         if not query.include_superseded and query.as_of is None:
             predicates.append(MemoryRow.status.in_(_LIVE))
         if query.belief_types:
             predicates.append(
                 MemoryRow.belief_type.in_(tuple(item.value for item in query.belief_types))
             )
-        if query.text:
+        terms = lexical_query_terms(query.text)
+        if terms:
+            # Any-term semantics: lexical recall is a ranking arm, so one term
+            # matching is enough to make a record a candidate for the ranker.
             vector = func.to_tsvector("simple", MemoryRow.subject + " " + MemoryRow.statement)
-            text_match: ColumnElement[bool] = vector.op("@@")(
-                func.plainto_tsquery("simple", query.text)
+            text_match: ColumnElement[bool] = or_(
+                *[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms]
             )
             if query.subjects:
                 text_match = or_(
@@ -309,6 +373,39 @@ class PostgresMemoryStore:
                     select(MemoryRow)
                     .where(*predicates)
                     .order_by(MemoryRow.store_position.desc(), MemoryRow.id)
+                    .limit(limit)
+                )
+            ).all()
+        )
+        return [_memory(row) for row in rows]
+
+    async def list_idle(
+        self,
+        principal: Principal,
+        *,
+        reinforced_before: datetime,
+        decay_confidence_ceiling: float | None = None,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        predicates: list[ColumnElement[bool]] = [
+            MemoryRow.tenant_id == principal.tenant_id,
+            MemoryRow.principal_id == principal.principal_id,
+            MemoryRow.status.in_(_LIVE),
+            MemoryRow.last_reinforced_at <= reinforced_before,
+        ]
+        if decay_confidence_ceiling is not None:
+            predicates.append(
+                or_(
+                    MemoryRow.status == MemoryStatus.PROVISIONAL.value,
+                    MemoryRow.confidence < decay_confidence_ceiling,
+                )
+            )
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(MemoryRow)
+                    .where(*predicates)
+                    .order_by(MemoryRow.last_reinforced_at, MemoryRow.id)
                     .limit(limit)
                 )
             ).all()
@@ -518,6 +615,47 @@ class PostgresTraceStore:
             raise NotFoundError("recall trace not found")
         return RecallTrace.model_validate(row.trace)
 
+    async def mark_cited(
+        self, trace_id: UUID, principal: Principal, cited: Sequence[UUID]
+    ) -> RecallTrace:
+        # The row is locked before the document is read, so two completions
+        # racing on the same trace union their citations instead of one
+        # rewriting the JSONB the other had already widened.
+        row = (
+            await self._session.scalars(
+                select(RecallTraceRow)
+                .where(
+                    RecallTraceRow.id == trace_id,
+                    RecallTraceRow.tenant_id == principal.tenant_id,
+                    RecallTraceRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("recall trace not found")
+        trace = RecallTrace.model_validate(row.trace)
+        marked = list(trace.cited)
+        known = set(marked)
+        for belief_id in cited:
+            if belief_id not in known:
+                known.add(belief_id)
+                marked.append(belief_id)
+        if marked == trace.cited:
+            return trace
+        updated = trace.model_copy(update={"cited": marked})
+        row.trace = updated.model_dump(mode="json")
+        return updated
+
+    async def expire_operator_fields(self, now: datetime, limit: int) -> int:
+        if limit < 0:
+            raise ValueError("recall-trace expiry limit must be nonnegative")
+        statement = text(_EXPIRE_OPERATOR_FIELDS).bindparams(
+            bindparam("now", value=now, type_=DateTime(timezone=True)),
+            bindparam("limit", value=limit, type_=Integer()),
+        )
+        return _rowcount(await self._session.execute(statement))
+
     async def user_view(
         self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str
     ) -> RecallTraceView:
@@ -558,7 +696,7 @@ class PostgresTraceStore:
             moments=[trace.moment for trace in traces],
             beliefs=beliefs,
             passages=passages,
-            considered_not_shown=sum(len(trace.dropped_for_budget) for trace in traces),
+            considered_not_shown=sum(trace.considered_not_shown for trace in traces),
             withheld_by_safety=sum(len(trace.blocked) for trace in traces),
             as_of=as_of,
         )

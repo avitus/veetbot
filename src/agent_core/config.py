@@ -64,6 +64,11 @@ class BrowserProviderKind(StrEnum):
     HOSTED = "hosted"
 
 
+class PushProviderKind(StrEnum):
+    DISABLED = "disabled"
+    APNS = "apns"
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Environment-layer settings; tuning values remain in versioned YAML."""
@@ -85,6 +90,13 @@ class Settings:
     memory_provider_extraction_evidence: Path | None = None
     schedule_api_enabled: bool = False
     schedule_worker_enabled: bool = False
+    notification_api_enabled: bool = False
+    notification_dispatch_enabled: bool = False
+    push_provider: PushProviderKind = PushProviderKind.DISABLED
+    apns_key_file: Path | None = None
+    apns_key_id: str | None = None
+    apns_team_id: str | None = None
+    apns_topic: str | None = None
     artifact_root: Path = Path(".agent/artifacts")
     auth_tenant_id: str = ""
     auth_principal_id: str = ""
@@ -120,7 +132,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 121 operator-reviewable knobs. Metadata such as
+# The design corpus declares 137 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -238,25 +250,41 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "scheduling.max_materializations_per_minute",
             "scheduling.daily_cost",
             "scheduling.monthly_cost",
+            "notifications.claim_batch",
+            "notifications.lease_seconds",
+            "notifications.fallback_poll_seconds",
+            "notifications.retry_delays_seconds",
+            "notifications.terminal_expiry_seconds",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
             "formation.scheduled_enabled",
             "formation.scheduled_interval_seconds",
+            "formation.established_facts_enabled",
+            "formation.decay.floor_confidence",
+            "formation.decay.step",
+            "formation.decay.max_per_sweep",
             "retrieval.semantic_enabled",
             "retrieval.reciprocal_rank_fusion_k",
             "retrieval.durable_item_share",
             "retrieval.lifecycle_weights.active",
             "retrieval.lifecycle_weights.provisional",
-            "snapshots.interactive.max_items",
-            "snapshots.interactive.max_tokens",
-            "snapshots.interactive.max_window_ratio",
+            "retrieval.decay_tau_days.fact",
+            "retrieval.decay_tau_days.preference",
+            "retrieval.decay_tau_days.relationship",
+            "retrieval.decay_tau_days.user_model_attr",
+            "retrieval.decay_tau_days.procedure_pointer",
+            "retrieval.stale_penalty",
+            "retrieval.near_duplicate_penalty",
+            "retrieval.usage.cited_utility_delta",
+            "retrieval.usage.uncited_utility_delta",
             "snapshots.async.max_items",
             "snapshots.async.max_tokens",
             "snapshots.async.max_window_ratio",
             "snapshots.child.max_items",
             "snapshots.child.max_tokens",
             "snapshots.child.max_window_ratio",
+            "traces.operator_retention_days",
         ),
     }
 )
@@ -287,6 +315,23 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:scheduling.max_materializations_per_minute": 1,
         "runtime/limits.yaml:scheduling.daily_cost": 0.01,
         "runtime/limits.yaml:scheduling.monthly_cost": 0.01,
+        "runtime/limits.yaml:notifications.claim_batch": 1,
+        "runtime/limits.yaml:notifications.lease_seconds": 1,
+        "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
+        "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
+        "memory/profiles.yaml:formation.scheduled_interval_seconds": 1,
+        "memory/profiles.yaml:formation.decay.max_per_sweep": 1,
+        "memory/profiles.yaml:retrieval.reciprocal_rank_fusion_k": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.fact": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.preference": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.relationship": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.user_model_attr": 1,
+        "memory/profiles.yaml:retrieval.decay_tau_days.procedure_pointer": 1,
+        "memory/profiles.yaml:snapshots.async.max_items": 1,
+        "memory/profiles.yaml:snapshots.async.max_tokens": 1,
+        "memory/profiles.yaml:snapshots.child.max_items": 1,
+        "memory/profiles.yaml:snapshots.child.max_tokens": 1,
+        "memory/profiles.yaml:traces.operator_retention_days": 1,
         "tools/limits.yaml:circuit_breaker.identical_call_threshold": 2,
         "tools/limits.yaml:circuit_breaker.identical_denied_threshold": 1,
         "tools/limits.yaml:circuit_breaker.uncertain_threshold": 1,
@@ -354,6 +399,17 @@ def _read_private_credential_file(raw_path: str) -> str:
     if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
         raise ConfigurationError("browser control-plane credential file is invalid")
     return value
+
+
+def _validate_private_regular_file(path: Path, name: str) -> None:
+    if not path.is_absolute() or path.is_symlink():
+        raise ConfigurationError(f"{name} must be an absolute private regular file")
+    try:
+        metadata = path.stat()
+    except OSError as exc:
+        raise ConfigurationError(f"{name} is unavailable") from exc
+    if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o600:
+        raise ConfigurationError(f"{name} must be a regular file with mode 0600")
 
 
 def _read_yaml(path: Path) -> dict[str, Any]:
@@ -432,6 +488,23 @@ def _validate_config_document(
     interpolation: Mapping[str, str],
 ) -> None:
     _validate_document_value(relative, "", merged, shipped)
+    if relative == "runtime/limits.yaml":
+        retry_delays = merged["notifications"]["retry_delays_seconds"]
+        if (
+            not isinstance(retry_delays, list)
+            or not retry_delays
+            or any(
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not isfinite(value)
+                or value <= 0
+                for value in retry_delays
+            )
+        ):
+            raise ConfigurationError(
+                "runtime/limits.yaml:notifications.retry_delays_seconds "
+                "must contain positive numbers"
+            )
     if relative == "sandbox/limits.yaml":
         resources = merged["resources"]
         for name, value in resources.items():
@@ -481,7 +554,13 @@ def _validate_interpolation(
     interpolation: Mapping[str, str],
 ) -> None:
     serialized = yaml.safe_dump(dict(document), sort_keys=True)
-    missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
+    referenced = set(INTERPOLATION.findall(serialized))
+    if relative.startswith("policy/") and referenced:
+        raise ConfigurationError(
+            f"{relative} cannot use policy-semantic interpolation; policy hashes must cover "
+            "the effective rules"
+        )
+    missing = sorted(referenced - interpolation.keys())
     if missing:
         names = ", ".join(missing)
         raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")
@@ -599,6 +678,29 @@ def validate_settings(
             )
     if settings.skill_background_review_enabled and not settings.skill_authoring_enabled:
         raise ConfigurationError("skill background review requires skill authoring to be enabled")
+    if settings.notification_api_enabled != settings.notification_dispatch_enabled:
+        raise ConfigurationError(
+            "notification API and dispatch flags must be enabled or disabled together"
+        )
+    apns_values = {
+        "APNS_KEY_FILE": settings.apns_key_file,
+        "APNS_KEY_ID": settings.apns_key_id,
+        "APNS_TEAM_ID": settings.apns_team_id,
+        "APNS_TOPIC": settings.apns_topic,
+    }
+    configured_apns = [name for name, value in apns_values.items() if value is not None]
+    if settings.push_provider is PushProviderKind.APNS:
+        missing_apns = [name for name, value in apns_values.items() if value is None]
+        if missing_apns:
+            raise ConfigurationError("PUSH_PROVIDER=apns requires " + ", ".join(missing_apns))
+        if not settings.notification_dispatch_enabled:
+            raise ConfigurationError(
+                "PUSH_PROVIDER=apns requires notification dispatch to be enabled"
+            )
+        assert settings.apns_key_file is not None
+        _validate_private_regular_file(settings.apns_key_file, "APNS_KEY_FILE")
+    elif configured_apns:
+        raise ConfigurationError(", ".join(configured_apns) + " require PUSH_PROVIDER=apns")
     if require_auth_token and settings.auth_mode is AuthMode.TOKEN and settings.auth_token is None:
         raise ConfigurationError("AUTH_TOKEN is required when AUTH_MODE=token")
     if (
@@ -643,19 +745,25 @@ def validate_settings(
                 "token authentication requires a configured principal: " + ", ".join(missing)
             )
     if (
-        settings.browser_provider is not BrowserProviderKind.DISABLED
+        settings.browser_provider is BrowserProviderKind.PLAYWRIGHT
         and not settings.browser_allowed_origins
     ):
         raise ConfigurationError(
-            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER is enabled"
+            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER=playwright"
         )
     if settings.browser_provider is BrowserProviderKind.HOSTED:
         if settings.browser_profile_service_url is None:
             raise ConfigurationError(
                 "BROWSER_PROFILE_SERVICE_URL is required when BROWSER_PROVIDER=hosted"
             )
-        if settings.browser_profile_id is None:
-            raise ConfigurationError("BROWSER_PROFILE_ID is required when BROWSER_PROVIDER=hosted")
+        if settings.browser_profile_id is None and settings.browser_allowed_origins:
+            raise ConfigurationError(
+                "BROWSER_PROFILE_ID is required when hosted origins are configured"
+            )
+        if settings.browser_profile_id is not None and not settings.browser_allowed_origins:
+            raise ConfigurationError(
+                "BROWSER_ALLOWED_ORIGINS is required for a pinned hosted browser profile"
+            )
         if "browser_profile_control_plane" not in settings.credentials:
             raise ConfigurationError(
                 "a browser profile control-plane credential is required when "
@@ -668,6 +776,8 @@ def validate_settings(
         and settings.browser_provider is not BrowserProviderKind.HOSTED
     ):
         raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROVIDER=hosted")
+    if settings.browser_grant_id is not None and settings.browser_profile_id is None:
+        raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROFILE_ID")
     if settings.browser_run_purpose is not None and settings.browser_grant_id is None:
         raise ConfigurationError("BROWSER_RUN_PURPOSE requires BROWSER_GRANT_ID")
 
@@ -704,6 +814,18 @@ def load_schedule_worker_settings(
     environ: Mapping[str, str] | None = None,
 ) -> Settings:
     """Load the credential-minimized environment for the scheduler-only role."""
+
+    return _load_settings(
+        environ,
+        require_auth_token=False,
+        require_execution_environment=False,
+    )
+
+
+def load_notification_worker_settings(
+    environ: Mapping[str, str] | None = None,
+) -> Settings:
+    """Load the credential-minimized environment for the notify-only role."""
 
     return _load_settings(
         environ,
@@ -784,6 +906,18 @@ def _load_settings(
     )
     schedule_api_enabled = _parse_flag(values, "AGENT_SCHEDULE_API_ENABLED")
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
+    notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
+    notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
+    push_provider = _parse_enum(
+        PushProviderKind,
+        values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
+        "PUSH_PROVIDER",
+    )
+    raw_apns_key_file = values.get("APNS_KEY_FILE", "").strip()
+    apns_key_file = Path(raw_apns_key_file).expanduser() if raw_apns_key_file else None
+    apns_key_id = values.get("APNS_KEY_ID", "").strip() or None
+    apns_team_id = values.get("APNS_TEAM_ID", "").strip() or None
+    apns_topic = values.get("APNS_TOPIC", "").strip() or None
     artifact_root = Path(values.get("AGENT_ARTIFACT_ROOT", ".agent/artifacts")).expanduser()
     auth_tenant_id = values.get("AUTH_TENANT_ID", "").strip()
     auth_principal_id = values.get("AUTH_PRINCIPAL_ID", "").strip()
@@ -885,6 +1019,13 @@ def _load_settings(
         memory_provider_extraction_evidence=memory_provider_extraction_evidence,
         schedule_api_enabled=schedule_api_enabled,
         schedule_worker_enabled=schedule_worker_enabled,
+        notification_api_enabled=notification_api_enabled,
+        notification_dispatch_enabled=notification_dispatch_enabled,
+        push_provider=push_provider,
+        apns_key_file=apns_key_file,
+        apns_key_id=apns_key_id,
+        apns_team_id=apns_team_id,
+        apns_topic=apns_topic,
         artifact_root=artifact_root,
         auth_tenant_id=auth_tenant_id,
         auth_principal_id=auth_principal_id,

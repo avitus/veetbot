@@ -2,15 +2,44 @@
 title: Home
 ---
 
-# Modular General-Purpose AI Agent — Documentation
+<section class="veetbot-hero">
+  <div class="veetbot-hero__identity">
+    <img
+      src="assets/images/veetbot-icon.svg"
+      alt="Veetbot bracket-face mark"
+      width="88"
+      height="88"
+    >
+    <div>
+      <p class="veetbot-hero__eyebrow">Veetbot / Engineering documentation</p>
+      <p class="veetbot-hero__motto">Governed by design. Inspectable by default.</p>
+    </div>
+  </div>
+  <h1>A governed agent platform, designed in the open.</h1>
+  <p class="veetbot-hero__lede">
+    The canonical plan, runtime contracts, architecture decisions, and delivery
+    evidence for Veetbot's modular general-purpose agent platform.
+  </p>
+  <div class="veetbot-hero__actions">
+    <a class="md-button md-button--primary" href="plan/engineering-plan/">
+      Read the engineering plan
+    </a>
+    <a class="md-button" href="plan/current-milestone/">
+      See the current milestone
+    </a>
+  </div>
+  <div class="veetbot-hero__signals" aria-label="Veetbot documentation qualities">
+    <span><strong>Canonical</strong> Markdown and YAML</span>
+    <span><strong>Governed</strong> gates and decisions</span>
+    <span><strong>Traceable</strong> delivery evidence</span>
+  </div>
+</section>
 
-This repository is building the modular, general-purpose AI agent platform
-defined by the [engineering plan](plan/engineering-plan.md). This site is the
-navigable documentation for that project.
-
-The production delivery path publishes this complete site at
-[`docs.veetbot.com`](https://docs.veetbot.com/) after its one-time DNS and TLS
-prerequisites are provisioned.
+This repository is building the platform defined by the
+[engineering plan](plan/engineering-plan.md). The production delivery path
+publishes this complete site at
+[`docs.veetbot.com`](https://docs.veetbot.com/) from the same tested revision as
+the Veetbot API.
 
 ## Authoritative sources
 

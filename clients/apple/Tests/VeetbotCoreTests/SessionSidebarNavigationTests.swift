@@ -40,14 +40,23 @@ import Testing
         )
         let macImplementation = modernList[macStart.upperBound ..< macEnd.lowerBound]
 
-        #expect(macImplementation.contains("Button"))
-        #expect(macImplementation.contains("activate("))
+        #expect(macImplementation.contains("directlyActivatingList"))
         #expect(!macImplementation.contains("NavigationLink"))
+
+        let directListStart = try #require(
+            source.range(of: "private var directlyActivatingList: some View")
+        )
+        let pushingListStart = try #require(
+            source.range(of: "private var pushingList: some View")
+        )
+        let directList = source[directListStart.lowerBound ..< pushingListStart.lowerBound]
+        #expect(directList.contains("Button"))
+        #expect(directList.contains("activate("))
     }
     #endif
 
     @Test
-    func testModernIOSRowsPresentActivatingChatDestinations() throws {
+    func testModernIOSRowsAdaptToRegularAndCompactWidths() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -69,13 +78,29 @@ import Testing
         )
         let iosImplementation = modernList[iosStart.upperBound ..< iosEnd.lowerBound]
 
-        #expect(
-            iosImplementation.contains("ChatDestination(model: model, entry: nil)")
-        )
-        #expect(
-            iosImplementation.contains("ChatDestination(model: model, entry: entry)")
-        )
+        #expect(iosImplementation.contains("usesDirectActivation"))
+        #expect(iosImplementation.contains("directlyActivatingList"))
+        #expect(iosImplementation.contains("pushingList"))
         #expect(!iosImplementation.contains("NavigationLink(value:"))
         #expect(!iosImplementation.contains("value: SessionSidebarDestination"))
+
+        #expect(source.contains("horizontalSizeClass == .regular"))
+        #expect(source.contains("usesDirectActivation: usesDirectSidebarActivation"))
+        #expect(source.contains(".navigationDestination(isPresented:"))
+        #expect(!modernList.contains("isActive:"))
+        #expect(source.contains("private var pushingList: some View {\n        navigationList"))
+
+        let directListStart = try #require(
+            source.range(of: "private var directlyActivatingList: some View")
+        )
+        let pushingListStart = try #require(
+            source.range(of: "private var pushingList: some View")
+        )
+        let modernProperty = source[modernListStart.lowerBound ..< directListStart.lowerBound]
+        let directList = source[directListStart.lowerBound ..< pushingListStart.lowerBound]
+        let pushingList = source[pushingListStart.lowerBound ..< legacyListStart.lowerBound]
+        #expect(!modernProperty.contains(".navigationDestination(isPresented:"))
+        #expect(!directList.contains(".navigationDestination(isPresented:"))
+        #expect(pushingList.contains(".navigationDestination(isPresented:"))
     }
 }

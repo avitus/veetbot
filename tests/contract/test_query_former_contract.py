@@ -22,6 +22,17 @@ def test_query_former_does_not_fire_without_retrievable_signal() -> None:
     assert former.form(run(), WorkingState(), "   ") == []
 
 
+def test_query_former_takes_the_current_scope_from_the_caller_when_given() -> None:
+    """The turn's session names the project; the constructed scope is the default."""
+
+    former = DeterministicQueryFormer(principal())
+    default = former.form(run(), WorkingState(objective="Ship Atlas"), None)
+    assert [query.current_scope for query in default] == ["general"]
+
+    scoped = former.form(run(), WorkingState(objective="Ship Atlas"), None, current_scope="atlas")
+    assert [query.current_scope for query in scoped] == ["atlas"]
+
+
 def test_query_former_reads_open_questions_as_task_signal() -> None:
     queries = DeterministicQueryFormer(principal()).form(
         run(),

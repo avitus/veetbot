@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import re
 import subprocess
 import sys
@@ -74,11 +75,11 @@ def _candidate_files(root: Path) -> list[Path]:
     return sorted(candidates)
 
 
-def _secret_allowlist(root: Path) -> tuple[set[tuple[str, int, str]], list[str]]:
+def _secret_allowlist(root: Path) -> tuple[dict[tuple[str, int, str], str], list[str]]:
     path = root / "security" / "secret-allowlist.yaml"
     loaded: object = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
     rows = loaded.get("allow", []) if isinstance(loaded, dict) else []
-    allowed: set[tuple[str, int, str]] = set()
+    allowed: dict[tuple[str, int, str], str] = {}
     errors: list[str] = []
     if not isinstance(rows, list):
         return allowed, ["security/secret-allowlist.yaml allow must be a list"]
@@ -95,7 +96,11 @@ def _secret_allowlist(root: Path) -> tuple[set[tuple[str, int, str]], list[str]]
         except (KeyError, TypeError, ValueError):
             errors.append(f"secret allowlist entry {index} requires path, line, and rule")
             continue
-        allowed.add(key)
+        line_sha256 = str(row.get("line_sha256", "")).strip().casefold()
+        if re.fullmatch(r"[0-9a-f]{64}", line_sha256) is None:
+            errors.append(f"secret allowlist entry {index} requires a SHA-256 line hash")
+            continue
+        allowed[key] = line_sha256
     return allowed, errors
 
 
@@ -116,11 +121,12 @@ def secret_findings(root: Path) -> tuple[list[Finding], list[str]]:
                 if pattern.search(line) is None:
                     continue
                 key = (relative, line_number, rule)
-                if key in allowlist:
+                line_sha256 = hashlib.sha256(line.encode()).hexdigest()
+                if allowlist.get(key) == line_sha256:
                     observed_allowlist.add(key)
                 else:
                     findings.append(Finding(relative, line_number, rule))
-    for stale in sorted(allowlist - observed_allowlist):
+    for stale in sorted(allowlist.keys() - observed_allowlist):
         errors.append(f"stale secret allowlist entry: {stale[0]}:{stale[1]}:{stale[2]}")
     return findings, errors
 

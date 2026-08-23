@@ -18,6 +18,8 @@ from agent_core.adapters.persistence.sqlalchemy_models import (
     KnowledgeDocumentRow,
     MemoryRejectionRow,
     MemoryRow,
+    NotificationDeliveryRow,
+    NotificationOutboxRow,
     RecallTraceRow,
     RunRow,
     ScheduleOccurrenceRow,
@@ -90,6 +92,22 @@ class PostgresSessionDeletionRepository:
             (MemoryRow.source_session_id == session_id) | (MemoryRow.formation_run_id.in_(run_ids))
         )
         artifact_ids = [row.id for row in artifacts]
+
+        pending_notification_ids = select(NotificationOutboxRow.id).where(
+            NotificationOutboxRow.session_id == session_id,
+            NotificationOutboxRow.status == "pending",
+        )
+        await self._session.execute(
+            delete(NotificationDeliveryRow).where(
+                NotificationDeliveryRow.notification_id.in_(pending_notification_ids)
+            )
+        )
+        await self._session.execute(
+            delete(NotificationOutboxRow).where(
+                NotificationOutboxRow.session_id == session_id,
+                NotificationOutboxRow.status == "pending",
+            )
+        )
 
         await self._session.execute(
             update(ScheduleOccurrenceRow)
@@ -229,6 +247,7 @@ class InMemorySessionDeletionRepository:
         traces: Any,
         knowledge: Any,
         schedules: Any,
+        notification_outbox: Any,
     ) -> None:
         self._sessions = sessions
         self._runs = runs
@@ -244,6 +263,7 @@ class InMemorySessionDeletionRepository:
         self._traces = traces
         self._knowledge = knowledge
         self._schedules = schedules
+        self._notification_outbox = notification_outbox
         self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
@@ -270,6 +290,7 @@ class InMemorySessionDeletionRepository:
                     self._memories._lock,
                     self._traces._lock,
                     self._knowledge._lock,
+                    self._notification_outbox._lock,
                 )
             }.values(),
             key=id,
@@ -332,6 +353,26 @@ class InMemorySessionDeletionRepository:
             value.id
             for value in self._memories._records.values()
             if value.source_session_id == session_id or value.formation_run_id in run_ids
+        }
+        notification_rows = self._notification_outbox._notifications.items()
+        pending_notification_ids = {
+            notification_id
+            for notification_id, notification in notification_rows
+            if notification.session_id == session_id and notification.status.value == "pending"
+        }
+        self._notification_outbox._notifications = {
+            notification_id: notification
+            for notification_id, notification in notification_rows
+            if notification_id not in pending_notification_ids
+        }
+        self._notification_outbox._dedupe_keys = {
+            notification.dedupe_key
+            for notification in self._notification_outbox._notifications.values()
+        }
+        self._notification_outbox._deliveries = {
+            key: delivery
+            for key, delivery in self._notification_outbox._deliveries.items()
+            if delivery.notification_id not in pending_notification_ids
         }
 
         self._schedules._occurrences = {

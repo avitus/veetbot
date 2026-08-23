@@ -340,6 +340,7 @@ skill.write
 browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
+device.read       device.write       notification.read
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow
@@ -452,11 +453,12 @@ route requires; the table above is the API's half of one namespace.
 ### The Milestone 12 device and notification extension
 
 [notifications-and-devices.md](notifications-and-devices.md) adds seven
-application routes and three exact scopes in the same form, mounted on a
-feature-flagged router and absent from the OpenAPI document until
-`AGENT_NOTIFICATION_API_ENABLED` is set. They extend the closed vocabulary when
-that milestone's code lands; the enumerated block above and the twenty-two
-count remain the executable vocabulary until then.
+application routes and three exact scopes in the same form. The three scopes
+extend the executable closed vocabulary to twenty-five strings unconditionally;
+the exact-match and no-wildcard rules are unchanged. The router is mounted only
+when `AGENT_NOTIFICATION_API_ENABLED` is set, so the routes are absent from the
+OpenAPI document while the feature is disabled even though the scope vocabulary
+remains available for configuration validation.
 
 ```text
 POST   /v1/devices                                  device.write
@@ -505,9 +507,10 @@ joins rather than trusting the caller.
 POST /v1/sessions
 ```
 
-Section 16 fixes the request and the response. This document adds four
+Section 16 fixes the request and the response. This document adds five
 things: the status vocabulary, the `agent_version` resolution rule, the
-metadata bound, and the read route the corpus never named.
+metadata bound, the optional trusted browser-profile binding, and the read
+route the corpus never named.
 
 ### `SessionStatus`
 
@@ -566,10 +569,10 @@ error, because the identifier names a resource that does not exist.
 
 ### Metadata is opaque, bounded, and never read by the agent
 
-`metadata` is a client-owned JSON object. The server stores it, returns
-it, and does not interpret it. Two bounds: it must be a JSON object at
-the top level, and its serialized form must not exceed 8 KiB. Exceeding
-either is `validation_error`.
+`metadata` is a client-owned JSON object. Except for reserved platform keys,
+the server stores it, returns it, and does not interpret it. It must be a JSON
+object at the top level, and its serialized form must not exceed 8 KiB. A
+client-supplied reserved key or either bound violation is `validation_error`.
 
 The important rule is the third one and it is a security rule.
 **Session metadata is never placed in a model prompt.** It is client
@@ -580,6 +583,15 @@ injection takes when somebody decides it would be convenient to show
 the model the client's `"user_note"`. If a value must reach the model it
 travels as message content, where the trust label
 [context-engine.md](context-engine.md) requires can be attached to it.
+
+Milestone 10 adds an optional top-level `browser_profile_id` to the creation
+request. It is not ordinary metadata: supplying it requires
+`browser.profile.read`, and the application re-reads that UUID under the
+authenticated tenant/principal and requires a `READY` profile before creating
+the session. The server then stores only the UUID under the reserved
+`browser_profile_id` metadata key. Clients cannot set that key through
+`metadata`, and neither form reaches the model. This is the trusted profile pin
+used by hosted browser composition when there is no deployment-wide profile.
 
 ### Reading a session
 
@@ -1404,6 +1416,13 @@ views never include provider references, key versions, lease references,
 launch capabilities after ceremony creation, cookies, storage state, or
 provider diagnostics. Cross-principal identifiers remain `404`, and every
 mutation uses the ordinary HTTP idempotency boundary.
+
+The profile routes create and authenticate the secret-bearing provider state;
+the optional `browser_profile_id` on `POST /v1/sessions` selects only its
+secret-free opaque identifier for that conversation. The existing
+`session.write` route scope remains the boundary declaration, while the
+application additionally requires `browser.profile.read` when that optional
+field is present.
 
 ## Health
 

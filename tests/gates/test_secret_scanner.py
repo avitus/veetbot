@@ -1,5 +1,6 @@
 """Committed-file secret scanner gate."""
 
+import hashlib
 import shutil
 import subprocess
 from pathlib import Path
@@ -73,7 +74,9 @@ def test_secret_allowlist_suppresses_exact_match_and_reports_stale_entry(tmp_pat
     subprocess.run([_git_executable(), "init", "-q"], cwd=tmp_path, check=True)
     source = tmp_path / "src" / "leak.py"
     source.parent.mkdir()
-    source.write_text("consume('sk-" + ("x" * 24) + "')\n", encoding="utf-8")
+    expected_line = "consume('sk-" + ("x" * 24) + "')"
+    source.write_text(expected_line + "\n", encoding="utf-8")
+    line_sha256 = hashlib.sha256(expected_line.encode()).hexdigest()
     allowlist = tmp_path / "security" / "secret-allowlist.yaml"
     allowlist.parent.mkdir()
     allowlist.write_text(
@@ -81,6 +84,7 @@ def test_secret_allowlist_suppresses_exact_match_and_reports_stale_entry(tmp_pat
         "  - path: src/leak.py\n"
         "    line: 1\n"
         "    rule: provider_key\n"
+        f"    line_sha256: {line_sha256}\n"
         "    reason: synthetic scanner fixture\n",
         encoding="utf-8",
     )
@@ -88,13 +92,22 @@ def test_secret_allowlist_suppresses_exact_match_and_reports_stale_entry(tmp_pat
     assert findings == []
     assert errors == []
 
+    source.write_text("consume('sk-" + ("y" * 24) + "')\n", encoding="utf-8")
+    findings, errors = secret_findings(tmp_path)
+    assert [finding.render() for finding in findings] == ["src/leak.py:1: provider_key"]
+    assert errors == ["stale secret allowlist entry: src/leak.py:1:provider_key"]
+
+    source.write_text(expected_line + "\n", encoding="utf-8")
+
     allowlist.write_text(
         "allow:\n"
         "  - path: src/leak.py\n"
         "    line: 2\n"
         "    rule: provider_key\n"
+        f"    line_sha256: {line_sha256}\n"
         "    reason: intentionally stale fixture\n",
         encoding="utf-8",
     )
-    _findings, errors = secret_findings(tmp_path)
+    findings, errors = secret_findings(tmp_path)
+    assert [finding.render() for finding in findings] == ["src/leak.py:1: provider_key"]
     assert errors == ["stale secret allowlist entry: src/leak.py:2:provider_key"]

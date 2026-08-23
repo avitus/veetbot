@@ -61,6 +61,13 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var isSending = false
     @Published public private(set) var sessionBusy = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var notificationFeatureAvailable: Bool?
+    @Published public private(set) var notificationFocus: NotificationFocus?
+    @Published public private(set) var notificationNavigationID: UUID?
+    @Published public private(set) var browserProfiles: [BrowserProfileView] = []
+    @Published public private(set) var selectedBrowserProfileID: UUID?
+    @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
+    @Published public private(set) var isManagingWebsiteAccess = false
 
     public let runState: RunStateReducer
 
@@ -68,6 +75,7 @@ public final class ChatViewModel: ObservableObject {
     private let configurationStore: ConnectionConfigurationStore
     private let historyStore: any SessionHistoryStore
     private let artifactCache: ArtifactCache
+    private let deviceRegistrationCoordinator: DeviceRegistrationCoordinator
     private let urlSession: URLSession?
     private var api: VeetbotAPIClient?
     private var eventStream: ReconnectingEventStream?
@@ -78,12 +86,15 @@ public final class ChatViewModel: ObservableObject {
     private var deletingHistorySessionIDs: Set<UUID> = []
     private var historyReconciliationID: UUID?
     private var pendingSubmission: (text: String, key: String)?
+    private var pendingNotificationPayload: NotificationPushPayload?
 
     public init(
         tokenStore: any TokenStore = KeychainTokenStore(),
         configurationStore: ConnectionConfigurationStore = ConnectionConfigurationStore(),
         historyStore: (any SessionHistoryStore)? = nil,
         artifactCache: ArtifactCache = ArtifactCache(),
+        deviceRegistrationCoordinator: DeviceRegistrationCoordinator =
+            DeviceRegistrationCoordinator(),
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil
     ) {
@@ -91,6 +102,7 @@ public final class ChatViewModel: ObservableObject {
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
         self.artifactCache = artifactCache
+        self.deviceRegistrationCoordinator = deviceRegistrationCoordinator
         self.runState = runState ?? RunStateReducer()
         self.urlSession = urlSession
         Task { await bootstrap() }
@@ -101,13 +113,35 @@ public final class ChatViewModel: ObservableObject {
         do {
             let configuration = try ConnectionConfiguration(baseURLString: baseURLString)
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            let previousToken = try await tokenStore.readToken()
+            let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
             if !trimmedToken.isEmpty {
                 try await tokenStore.saveToken(trimmedToken)
             }
             guard try await tokenStore.readToken() != nil else {
                 throw HTTPTransportError.missingToken
             }
+            let previousConfiguration = await configurationStore.load()
             try await install(configuration)
+            if previousConfiguration?.baseURL != configuration.baseURL {
+                selectedBrowserProfileID = nil
+                browserProfiles = []
+                browserAuthentication = nil
+                await configurationStore.saveBrowserProfileID(nil)
+            } else if credentialsChanged {
+                browserProfiles = []
+                browserAuthentication = nil
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
+            }
             await configurationStore.save(configuration)
             requiresReauthentication = false
             errorMessage = nil
@@ -119,15 +153,102 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        var revokeError: Error?
+        if let api {
+            do {
+                _ = try await deviceRegistrationCoordinator.revoke(using: api)
+            } catch {
+                revokeError = error
+            }
+        }
         selectionRequestID = nil
         historyReconciliationID = nil
         watchTasks.cancel()
-        do { try await tokenStore.deleteToken() } catch { present(error) }
+        var tokenDeletionError: Error?
+        do {
+            try await tokenStore.deleteToken()
+        } catch {
+            tokenDeletionError = error
+        }
         api = nil
         eventStream = nil
+        browserProfiles = []
+        selectedBrowserProfileID = nil
+        browserAuthentication = nil
+        await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
+        if let revokeError {
+            present(revokeError)
+        } else if let tokenDeletionError {
+            present(tokenDeletionError)
+        }
+    }
+
+    public func registerRemoteNotifications(
+        deviceToken: Data,
+        descriptor: AppleDeviceDescriptor
+    ) async {
+        guard let api else { return }
+        do {
+            let outcome = try await deviceRegistrationCoordinator.register(
+                deviceToken: deviceToken,
+                descriptor: descriptor,
+                using: api
+            )
+            notificationFeatureAvailable = outcome != .unsupported
+        } catch {
+            present(error)
+        }
+    }
+
+    public func openNotification(_ payload: NotificationPushPayload) async {
+        guard let link = NotificationDeepLinkReducer.reduce(payload) else { return }
+        guard let api else {
+            pendingNotificationPayload = payload
+            return
+        }
+        do {
+            let entry: SessionHistoryEntry
+            if let existing = history.first(where: { $0.sessionID == link.sessionID }) {
+                entry = existing
+            } else {
+                let session = try await api.getSession(link.sessionID)
+                try await store(
+                    session: session,
+                    lastRunID: link.runID
+                )
+                guard let stored = history.first(where: { $0.sessionID == link.sessionID }) else {
+                    throw HTTPTransportError.invalidResponse
+                }
+                entry = stored
+            }
+            await selectSession(entry, preferredRunID: link.runID)
+            guard selectedSessionID == link.sessionID, runState.activeRunID == link.runID else {
+                return
+            }
+            if case .approval(let approvalID) = link.focus {
+                let approval = try await api.getApproval(approvalID)
+                guard approval.sessionID == link.sessionID, approval.runID == link.runID else {
+                    throw HTTPTransportError.invalidResponse
+                }
+                loadedApprovalIDs.insert(approval.id)
+                runState.mergeApproval(approval)
+            }
+            notificationFocus = link.focus
+            notificationNavigationID = UUID()
+        } catch {
+            present(error)
+        }
+    }
+
+    public func acknowledgeNotificationNavigation() {
+        notificationNavigationID = nil
+    }
+
+    public func reportNotificationRegistrationFailure(_ error: Error) {
+        present(error)
     }
 
     public func newSession() {
@@ -141,10 +262,15 @@ public final class ChatViewModel: ObservableObject {
         sessionBusy = false
         loadedApprovalIDs.removeAll()
         pendingSubmission = nil
+        notificationFocus = nil
+        notificationNavigationID = nil
         runState.reset()
     }
 
-    public func selectSession(_ entry: SessionHistoryEntry) async {
+    public func selectSession(
+        _ entry: SessionHistoryEntry,
+        preferredRunID: UUID? = nil
+    ) async {
         guard let api, !removedHistorySessionIDs.contains(entry.sessionID) else { return }
         let requestID = UUID()
         selectionRequestID = requestID
@@ -153,6 +279,8 @@ public final class ChatViewModel: ObservableObject {
         sessionBusy = false
         loadedApprovalIDs.removeAll()
         pendingSubmission = nil
+        notificationFocus = nil
+        notificationNavigationID = nil
         runState.reset()
         do {
             let session = try await api.getSession(entry.sessionID)
@@ -181,9 +309,16 @@ public final class ChatViewModel: ObservableObject {
             )
             guard selectionRequestID == requestID else { return }
             runState.restore(messages: messages)
-            if let runID = session.activeRunID ?? session.lastRunID ?? entry.lastRunID {
+            if let runID = preferredRunID
+                ?? session.activeRunID
+                ?? session.lastRunID
+                ?? entry.lastRunID
+            {
                 let run = try await api.getRun(runID)
                 guard selectionRequestID == requestID else { return }
+                guard run.sessionID == session.id else {
+                    throw HTTPTransportError.invalidResponse
+                }
                 runState.seed(run: run)
                 watch(runID: run.id, touchHistoryOnCompletion: run.status.isActive)
             }
@@ -378,7 +513,9 @@ public final class ChatViewModel: ObservableObject {
             if let selectedSessionID {
                 session = try await api.getSession(selectedSessionID)
             } else {
-                session = try await api.createSession()
+                session = try await api.createSession(
+                    browserProfileID: selectedBrowserProfileID
+                )
                 selectedSessionID = session.id
                 try await store(session: session, lastRunID: nil, suggestedTitle: text)
             }
@@ -545,6 +682,132 @@ public final class ChatViewModel: ObservableObject {
         await artifactCache.removeAll()
     }
 
+    public func refreshBrowserProfiles() async {
+        guard let api else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            try await reloadBrowserProfiles(using: api)
+            errorMessage = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    public func createWebsiteAccess(
+        origin: String,
+        loginURL: String
+    ) async -> URL? {
+        guard let api else { return nil }
+        let normalizedOrigin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedLoginURL = loginURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedOrigin.isEmpty, !normalizedLoginURL.isEmpty else {
+            errorMessage = "Enter both the website origin and its login page."
+            return nil
+        }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            let profile = try await api.createBrowserProfile(
+                allowedOrigins: [normalizedOrigin]
+            )
+            let ceremony = try await api.beginBrowserAuthentication(
+                profileID: profile.id,
+                loginURL: normalizedLoginURL
+            )
+            browserAuthentication = ceremony
+            browserProfiles.removeAll { $0.id == profile.id }
+            browserProfiles.append(profile)
+            errorMessage = nil
+            do {
+                try await reloadBrowserProfiles(using: api)
+            } catch {
+                present(error)
+            }
+            return ceremony.launchURL
+        } catch {
+            present(error)
+            return nil
+        }
+    }
+
+    public func refreshBrowserAuthentication() async {
+        guard let api, let browserAuthentication else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            let updated = try await api.getBrowserAuthentication(browserAuthentication.id)
+            self.browserAuthentication = updated
+            try await reloadBrowserProfiles(using: api)
+            if updated.status == .ready,
+                browserProfiles.contains(where: {
+                    $0.id == updated.profileID && $0.status == .ready
+                })
+            {
+                selectedBrowserProfileID = updated.profileID
+                await configurationStore.saveBrowserProfileID(updated.profileID)
+            }
+            errorMessage = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    public func selectBrowserProfile(_ profileID: UUID?) async {
+        guard profileID == nil
+            || browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
+        else { return }
+        selectedBrowserProfileID = profileID
+        await configurationStore.saveBrowserProfileID(profileID)
+    }
+
+    public func removeBrowserProfile(_ profileID: UUID) async {
+        guard let api else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            if let authentication = browserAuthentication,
+                authentication.profileID == profileID,
+                !authentication.status.isTerminal
+            {
+                _ = try await api.cancelBrowserAuthentication(authentication.id)
+            }
+            _ = try await api.revokeBrowserProfile(profileID)
+            try await api.deleteBrowserProfile(profileID)
+            if selectedBrowserProfileID == profileID {
+                selectedBrowserProfileID = nil
+                await configurationStore.saveBrowserProfileID(nil)
+            }
+            if browserAuthentication?.profileID == profileID {
+                browserAuthentication = nil
+            }
+            try await reloadBrowserProfiles(using: api)
+            errorMessage = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    private func reloadBrowserProfiles(using api: VeetbotAPIClient) async throws {
+        var profiles: [BrowserProfileView] = []
+        var cursor: String?
+        var seen: Set<String> = []
+        repeat {
+            let page = try await api.listBrowserProfiles(cursor: cursor)
+            profiles.append(contentsOf: page.items)
+            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seen)
+        } while cursor != nil
+        browserProfiles = profiles
+        if let selectedBrowserProfileID,
+            !profiles.contains(where: {
+                $0.id == selectedBrowserProfileID && $0.status == .ready
+            })
+        {
+            self.selectedBrowserProfileID = nil
+            await configurationStore.saveBrowserProfileID(nil)
+        }
+    }
+
     private func bootstrap() async {
         do {
             history = try await historyStore.list()
@@ -555,7 +818,20 @@ public final class ChatViewModel: ObservableObject {
             if let configuration = await configurationStore.load(),
                 try await tokenStore.readToken() != nil
             {
+                selectedBrowserProfileID = await configurationStore.loadBrowserProfileID()
                 try await install(configuration)
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        browserProfiles = []
+                        browserAuthentication = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
         } catch {
             present(error)
@@ -580,6 +856,10 @@ public final class ChatViewModel: ObservableObject {
             throw error
         }
         isConfigured = true
+        if let pendingNotificationPayload {
+            self.pendingNotificationPayload = nil
+            await openNotification(pendingNotificationPayload)
+        }
     }
 
     private func clearInstalledConnection() {

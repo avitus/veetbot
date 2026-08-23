@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import math
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -1988,6 +1989,38 @@ class PostgresProcessEventRepository:
         ).all()
         return [self._to_domain(row) for row in rows]
 
+    async def list_filtered(
+        self,
+        *,
+        tenant_id: str,
+        principal_id: str,
+        session_id: UUID | None,
+        event_types: frozenset[str],
+        limit: int,
+    ) -> builtins.list[ProcessEvent]:
+        if not event_types:
+            raise ValueError("process event types cannot be empty")
+        if limit <= 0:
+            raise ValueError("process event limit must be positive")
+        statement = select(ProcessEventRow).where(
+            ProcessEventRow.event_type.in_(event_types),
+            ProcessEventRow.payload["tenant_id"].as_string() == tenant_id,
+            ProcessEventRow.payload["principal_id"].as_string() == principal_id,
+        )
+        if session_id is not None:
+            statement = statement.where(
+                ProcessEventRow.payload["session_id"].as_string() == str(session_id)
+            )
+        rows = (
+            await self._session.scalars(
+                statement.order_by(
+                    ProcessEventRow.created_at.desc(),
+                    ProcessEventRow.id.desc(),
+                ).limit(limit)
+            )
+        ).all()
+        return [self._to_domain(row) for row in reversed(rows)]
+
 
 class PostgresIdempotencyRepository:
     def __init__(self, session: AsyncSession, clock: Clock) -> None:
@@ -2512,10 +2545,24 @@ class PostgresMaintenanceRepository:
             ),
             else_=None,
         )
+        latest_formation = (
+            select(
+                EventRow.session_id.label("session_id"),
+                func.max(EventRow.sequence).label("sequence"),
+            )
+            .where(EventRow.event_type == "memory.formation.requested")
+            .group_by(EventRow.session_id)
+            .subquery()
+        )
         rows = (
             await self._session.scalars(
                 select(SessionRow.id)
-                .join(EventRow, EventRow.session_id == SessionRow.id)
+                .join(latest_formation, latest_formation.c.session_id == SessionRow.id)
+                .join(
+                    EventRow,
+                    (EventRow.session_id == latest_formation.c.session_id)
+                    & (EventRow.sequence == latest_formation.c.sequence),
+                )
                 .outerjoin(
                     ConsolidationWatermarkRow,
                     (ConsolidationWatermarkRow.session_id == SessionRow.id)
@@ -2526,11 +2573,9 @@ class PostgresMaintenanceRepository:
                     SessionRow.tenant_id == principal.tenant_id,
                     SessionRow.principal_id == principal.principal_id,
                     SessionRow.updated_at <= idle_before,
-                    EventRow.event_type == "memory.formation.requested",
+                    latest_formation.c.sequence > watermark,
                     formation_not_before <= ready_at,
                 )
-                .group_by(SessionRow.id, ConsolidationWatermarkRow.sequence)
-                .having(func.max(EventRow.sequence) > watermark)
                 .order_by(SessionRow.updated_at, SessionRow.id)
                 .limit(limit)
             )

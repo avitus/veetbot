@@ -7,6 +7,18 @@
 - User authorization: replace unconditional provider-memory rollout with an
   evidence-gated implementation that does not burden ordinary users
 
+> **Updated by ADR-0068:** the semantic deterministic expansion and retryable
+> provider-failure lifecycle are deterministic `formation@5` and
+> provider-assisted `formation@6`. The `formation@4` evidence and version in this
+> record are historical and do not activate the repaired tuple.
+>
+> **Updated by ADR-0069:** admitting working-state established facts as
+> `AFFIRMED` candidates moves the active policies again, to deterministic
+> `formation@7` and provider-assisted `formation@8`. For an exact runtime tuple
+> with no matching reviewed `formation@8` evidence, `auto` falls back to the
+> deterministic extractor and `required` refuses startup; a tuple with matching
+> published evidence activates provider assistance.
+
 ## Context
 
 ADR-0051 completed the ordinary-conversation lifecycle and introduced a bounded
@@ -53,9 +65,12 @@ behavior.
    version, formation policy, model
    policy, provider, model, policy profile, and compiled policy version resolved
    by the composition.
-3. **Give the maintenance call its own fixed budget.** `formation@4` permits one
-   structured-output model call, at most 16,000 input tokens, 4,096 output tokens,
-   USD 0.05, and 30 seconds. Catalog pricing and a conservative input estimate
+3. **Give the original maintenance call its own fixed budget.** This decision
+   established the budget under historical `formation@4`: one structured-output
+   model call, at most 16,000 input tokens, 4,096 output tokens, USD 0.05, and
+   30 seconds. ADR-0068 and ADR-0069 later advanced the active
+   provider-assisted policy to `formation@8` without changing that budget.
+   Catalog pricing and a conservative input estimate
    cap requested output tokens before the call so the cost limit is preventive,
    not only retrospective. The request advertises no tools and requires the
    schema of a bounded semantic-claim batch. The provider selects a closed claim
@@ -89,16 +104,21 @@ behavior.
    through an explicit code-level evaluation flag that is mutually exclusive with
    activation and refused in production. Normal deployment composition constructs
    the provider extractor only after the evidence check passes.
-8. **Version provider assistance as `formation@4`.** The deterministic default
-   remains `formation@2`. Activating provider assistance records `formation@4` on
-   consolidation audits and beliefs so the two policies remain distinguishable
-   during replay, comparison, and later re-derivation.
+8. **Record the original provider-assistance version as `formation@4`.** At this
+   ADR's acceptance, the deterministic default was `formation@2`, and activating
+   provider assistance recorded `formation@4` on consolidation audits and
+   beliefs so the two policies remained distinguishable during replay,
+   comparison, and later re-derivation. ADR-0068 and ADR-0069 subsequently
+   advanced the active versions to deterministic `formation@7` and
+   provider-assisted `formation@8`; the older values remain historical audit
+   identifiers only.
 9. **Generate evidence instead of asking users to author it.** `agent eval
    memory-formation` runs the checked-in labeled corpus through isolated paired
    deterministic and provider-assisted arms. It computes supported, fabricated,
    and rejected-policy counts and atomically writes an artifact only when the
-   activation schema passes. The checked-in corpus contains twenty positive and
-   four protected no-memory cases, scored against explicit normalized labels
+   activation schema passes. At this ADR's acceptance, the checked-in corpus
+   contained twenty positive and four protected no-memory cases, scored against
+   explicit normalized labels
    without another model judge. Both arms use identical scoring and fabrication
    accounting. Every result retains normalized beliefs, consolidation counts,
    content-free provider audit counts, and shared-versus-provider-added belief

@@ -85,6 +85,10 @@ class MemorySearchTool:
             query,
             session_id=context.session_id,
             run_id=context.run_id,
+            # The turn is the run: a belief this search surfaced is part of
+            # what the answer had in front of it, so usage feedback and the
+            # user's recall trace must both see it.
+            turn_id=context.run_id,
             moment=RecallMoment.IN_TURN.value,
         )
         structured = {

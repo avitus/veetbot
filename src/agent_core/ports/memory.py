@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -14,9 +16,13 @@ from agent_core.domain.memory import (
     ConsolidationResult,
     ConsolidationRun,
     EpisodeQuery,
+    MemoryAuthority,
     MemoryCandidate,
+    MemoryCorrection,
     MemoryEdit,
+    MemoryExtractionResult,
     MemoryRecord,
+    Polarity,
     RecalledBelief,
     RecallQuery,
     RecallResult,
@@ -28,6 +34,8 @@ from agent_core.domain.runs import Run
 
 class MemoryStore(Protocol):
     async def next_position(self) -> int: ...
+
+    async def head_position(self, principal: Principal) -> int: ...
 
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord: ...
 
@@ -56,6 +64,15 @@ class MemoryStore(Protocol):
         include_inactive: bool = False,
         session_id: UUID | None = None,
         limit: int = 200,
+    ) -> list[MemoryRecord]: ...
+
+    async def list_idle(
+        self,
+        principal: Principal,
+        *,
+        reinforced_before: datetime,
+        decay_confidence_ceiling: float | None = None,
+        limit: int,
     ) -> list[MemoryRecord]: ...
 
     async def edit(
@@ -111,7 +128,7 @@ class MemoryCandidateExtractor(Protocol):
         *,
         principal: Principal,
         scope: str,
-    ) -> list[MemoryCandidate]: ...
+    ) -> list[MemoryCandidate] | MemoryExtractionResult: ...
 
 
 class Salience(Protocol):
@@ -120,7 +137,15 @@ class Salience(Protocol):
 
 class ConflictResolver(Protocol):
     def relationship(
-        self, existing: MemoryRecord, statement: str, source_event_ids: list[int]
+        self,
+        existing: MemoryRecord,
+        statement: str,
+        source_event_ids: list[int],
+        *,
+        authority: MemoryAuthority = MemoryAuthority.USER,
+        polarity: Polarity = Polarity.ASSERT,
+        session_id: UUID | None = None,
+        at: datetime | None = None,
     ) -> str: ...
 
 
@@ -136,6 +161,14 @@ class MemoryRetriever(Protocol):
         surface_id: str = "private",
     ) -> RecallResult: ...
 
+    async def corrections(
+        self,
+        *,
+        snapshot_id: UUID,
+        watermark: int,
+        as_of: datetime | None = None,
+    ) -> list[MemoryCorrection]: ...
+
 
 class QueryFormer(Protocol):
     def form(
@@ -143,6 +176,8 @@ class QueryFormer(Protocol):
         run: Run,
         working_state: WorkingState,
         message: str | None,
+        *,
+        current_scope: str | None = None,
     ) -> list[RecallQuery]: ...
 
 
@@ -163,8 +198,14 @@ class TraceStore(Protocol):
 
     async def get(self, trace_id: UUID, principal: Principal) -> RecallTrace: ...
 
+    async def mark_cited(
+        self, trace_id: UUID, principal: Principal, cited: Sequence[UUID]
+    ) -> RecallTrace: ...
+
     async def user_view(
         self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str
     ) -> RecallTraceView: ...
+
+    async def expire_operator_fields(self, now: datetime, limit: int) -> int: ...
 
     async def mark_document_deleted(self, tenant_id: str, document_id: UUID) -> None: ...

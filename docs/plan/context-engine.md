@@ -623,6 +623,16 @@ candidates, not beliefs: they enter the ordinary formation pipeline and are subj
 to every eligibility gate, including the untrusted-content write ban. This gives
 formation a second high-quality input without giving it a bypass.
 
+Milestone 16 builds that offer.
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) reads
+the last working-state update in the consolidation window, admits each fact
+only when `source_event_ids` is non-empty and every referenced event belongs to
+the owning principal and is a trusted user source, and enters it as a candidate
+at `AFFIRMED` authority — above an extractor inference and below a direct user
+statement — behind a profile flag and under the same candidate ceiling. The
+same document adds the recall delta and the correction lines this builder
+assembles beside the recall block.
+
 ## Ports and data model
 
 `ContextBuilder` (Section 7) is unchanged. These are additions.

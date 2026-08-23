@@ -99,12 +99,21 @@ eligible for in-turn injection, and a correction to a belief *inside* the snapsh
 injected as an explicit override in the user turn:
 
 ```text
-correction: [m:8f21] no longer holds as of 2026-07-24;
-            superseded by [m:9d02].
+correction: [m:8f21a0c3] no longer holds as of 2026-07-24T00:00:00Z;
+            superseded by [m:9d02b117].
 ```
 
 The prefix is never rewritten. The stable platform text tells the model that
 corrections and the current user turn outrank the memory block.
+
+Milestone 16 implements the delta and the correction line.
+[memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) makes
+the watermark the store head rather than the highest position a recall
+happened to return, adds a minimum-position bound to the recall query, and
+places the correction lines in the fixed body where budget pressure cannot
+yield them. The same document implements the usage feedback below and the time
+decay it feeds, and it supplies the benchmark that measures the metrics this
+document names.
 
 ## Sizing the snapshot
 
@@ -371,11 +380,18 @@ Filling the budget is not the objective.
 - **Unresolved conflicts surface as conflicts.** Where two beliefs are linked by
   `conflicts_with` with no supersession, return **both** with an explicit marker rather
   than silently picking one. Formation deliberately refused to resolve these; retrieval
-  must not quietly resolve them at read time.
+  must not quietly resolve them at read time. The marker names each partner by the same
+  short identifier the reader cites with, `conflicts=[m:xxxxxxxx]`.
 - **Per-subject cap.** At most *n* beliefs per subject, so one heavily-discussed entity
-  cannot consume the budget.
-- **Redundancy trim.** Drop near-duplicates by statement similarity, keeping the
-  higher-scored one and merging their provenance in the trace.
+  cannot consume the budget. A conflict partner is exempt: two beliefs in conflict share
+  a subject by construction, so the cap would cut exactly the half that makes the marker
+  mean anything. The link is read in both directions, so the partner is kept whichever
+  of the two the ranking preferred.
+- **Redundancy trim.** Drop an exact restatement, keeping the higher-scored one and
+  merging their provenance in the trace. Milestone 16 narrows the trim to that exact
+  collapse and demotes the merely similar with the near-duplicate penalty instead, so a
+  genuine second fact about one subject is not deleted for resembling the first
+  ([memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)).
 
 ### 7. Safety pass
 
@@ -504,6 +520,7 @@ class RecallTrace(BaseModel):
     returned: list[UUID]
     cited: list[UUID]                  # ids the model cited -> "used"
     dropped_for_budget: list[UUID]     # operator tier
+    dropped_for_budget_count: int      # survives the operator expiry
     blocked: list[UUID]
     carried_in: list[UUID]             # promotion candidates
     retrieval_policy_version: str
@@ -547,6 +564,7 @@ class QueryFormer(Protocol):
         run: Run,
         working_state: WorkingState,
         message: str | None,
+        current_scope: str | None = None,  # the turn's session project
     ) -> list[RecallQuery]: ...
 
 class Ranker(Protocol):
@@ -565,6 +583,9 @@ class TraceStore(Protocol):
     async def record(self, trace: RecallTrace) -> None: ...
     async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...
     async def get(self, trace_id: UUID, principal: Principal) -> RecallTrace: ...
+    async def expire_operator_fields(         # bounded retention sweep
+        self, now: datetime, limit: int
+    ) -> int: ...
     async def user_view(
         self,
         turn_id: UUID,

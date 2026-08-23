@@ -1,0 +1,2 @@
+field: failure_message
+value: "Authentication failed with bearer top-secret-token."

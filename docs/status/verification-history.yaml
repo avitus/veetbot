@@ -527,3 +527,779 @@ verification:
           PostgreSQL FTS, evaluation carry, tool classification, retained
           source, and context-snapshot choices are approved and implemented.
     remaining: []
+  milestone_10:
+    recorded_at: 2026-08-21T15:22:36Z
+    status: complete
+    evidence:
+      - check: test-driven memory maturation gates
+        outcome: passed_locally
+        detail: >-
+          The initial red run failed all six ordinary-conversation and lifecycle
+          tests, the correction/topic expansion failed its two new cases, and an
+          adversarial extractor failed both service-boundary cases. Review-driven
+          red tests then exposed negated possessive duplication, generic
+          preference collisions, pending-session starvation, inaccurate action
+          counters, and the missing consolidation claim. A second hosted review
+          drove four more red regressions for non-positive batch limits,
+          independent clause and text-part boundaries, truthful overflow audits,
+          and inferred-confidence authority. A third hosted review drove two
+          further red cases for canonical preference reinforcement and complete
+          audit reconciliation. The latest full review added red regressions for
+          temporal-hint preservation, coordinated possessive retractions, the
+          persisted formation deadline, and the formation-scan index. After the
+          corresponding implementation steps, the next full review exposed a
+          duplicate possessive proposal; its red audit-reconciliation regression
+          now passes. A later PostgreSQL red regression proved that one malformed
+          deadline could poison a sweep; malformed and timezone-naive deadlines
+          are now rejected consistently. All 28 Milestone 10 memory gate tests
+          pass.
+      - check: routed rich memory extraction reference contract
+        outcome: passed_locally
+        detail: >-
+          Five focused model-extraction tests prove that a strict-schema routed
+          policy forms a relationship the deterministic grammar misses, records
+          normalized usage in a content-free process event, rejects an
+          unsupported named entity, falls back on malformed output, and rejects
+          output beyond its dedicated budget. The existing memory formation,
+          source-integrity, injection, candidate-cap, and no-policy-regression
+          gates remain unchanged. Accepted ADR-0057 now owns the stricter
+          composition boundary: the reference extractor remains covered directly,
+          while normal composition requires exact activation evidence and the
+          balanced OpenAI/default tuple has passing release-bundled evidence.
+      - check: Milestone 10A skill-authoring gates
+        outcome: passed_locally
+        detail: >-
+          All six registered gates passed through eleven focused tests covering
+          trust and exact scope denials, canonical bounded approvals, default-off
+          construction, confined child reviews, non-fatal review failure,
+          durable provenance and replay, optimistic conflicts, and the
+          self-authored case 27 outcome change.
+      - check: governed memory inspection surface
+        outcome: passed_locally
+        detail: >-
+          Red tests first failed because consolidation audits, belief get, and
+          trace inspection were unreachable. The implemented agent memory CLI
+          now lists and gets full belief records, filters by source session,
+          edits and deletes through the governed service, lists formation audits,
+          and reads principal-scoped retrieval traces. All 55 focused unit and
+          contract tests passed, and the PostgreSQL idle-formation integration
+          proves session-filtered beliefs and audit counts survive the durable
+          adapter.
+      - check: evaluation-gated provider-assisted memory extraction
+        outcome: passed_locally
+        detail: >-
+          Red tests first showed that activation accepted no evidence boundary,
+          provider extraction had no implementation, composition could not select
+          it, and an evidence-gathering build mode did not exist. The restricted
+          maintenance extractor now makes one tool-free schema-constrained call,
+          records content-free identity, policy, budget, deadline, usage, cost,
+          source, and outcome audit data, falls back deterministically, and sends
+          every proposal through the existing source and safety gates. Automatic
+          startup selection activates matching operator or release-bundled
+          evidence and otherwise retains deterministic formation; off and
+          required modes preserve explicit no-resolution and fail-closed choices.
+          The 24-case paired CLI evaluator derives the corpus and model tuple and
+          creates no artifact unless lift, fabrication, and policy gates pass.
+          Focused provider, evaluator, CLI, configuration, and
+          review-remediation tests pass, including distinct candidate polarity,
+          belief types, statements, and sources; dotted-number grounding; export
+          consent handling; JSON export; and memory-list boundary validation.
+      - check: formal memory gate and extractor contract reconciliation
+        outcome: passed_locally
+        detail: >-
+          Red accounting tests first failed because the governed inspection and
+          provider-assisted guarantees had no registry identities and only the
+          deterministic extractor was named by the shared port contract. Six new
+          Milestone 10 gates now cover principal-scoped inspection and mutation,
+          all shipped extractor implementations, exact activation evidence,
+          provider safety authority, audited deterministic fallback, and evidence
+          publication. The extractor contract runs deterministic, model-assisted,
+          and provider-assisted implementations against the same separate,
+          scope-correct, provenance-bound proposal assertions, with both assisted
+          paths forced through deterministic fallback. The registry reconciles at
+          200 entries, including 34 at Milestone 10.
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 476 source and test
+          files, 970 static tests, 325 contracts, deployment-script checks,
+          156 citation checks, and strict documentation builds pass on the
+          current head. The gate registry contains 305 reconciled entries and
+          retains 166 as the verified ceiling through Milestone 9.
+      - check: PostgreSQL integration and resilience partition
+        outcome: passed
+        detail: >-
+          An isolated Compose PostgreSQL 16 database upgraded from empty through
+          revision d2a6f8b1c304 and all 96 integration and resilience tests
+          passed, including memory formation, durable skill-authoring approval
+          and provenance, capability persistence, persisted web invocations and
+          web-enabled recomposition, browser profile, authentication, and
+          standing-grant persistence, transcript restoration, migrations, and
+          re-composition.
+      - check: default-off rollout boundary
+        outcome: passed_locally
+        detail: >-
+          Foreground authoring and background review both default off;
+          configuration refuses background review without foreground authoring,
+          and skill.manage is absent from the registry until explicitly enabled.
+      - check: provider-neutral web access contract
+        outcome: passed_locally
+        detail: >-
+          The focused 112-test web partition covers shared Tavily and Firecrawl
+          search/fetch contracts, domain and URL validation, capability-level
+          composition, stable auth and retry failures, public-HTTPS fetch
+          validation, fixed-target policy, default-off registration, bounded
+          search output, the untrusted envelope reaching the next model step,
+          same-turn trust escalation blocking memory writes, and persisted
+          external-untrusted invocations with web-enabled recomposition on
+          PostgreSQL. Seven formal gate.web entries cover that contract;
+          `agent eval gates
+          --milestone 10 --area web` reports seven passed, zero failed, and zero
+          pending.
+      - check: authenticated browser automation and formal gates
+        outcome: passed_locally
+        detail: >-
+          `agent eval gates --milestone 10 --area browser` reports all ten
+          provider, default-off, origin-isolation, observation-trust,
+          revision-binding, action-authority, uncertain-write, profile-lifecycle,
+          authentication, and standing-grant gates passed with zero failures or
+          pending placeholders. The provider-neutral tools support bounded
+          navigation, observation, and approval-governed actions through both
+          ephemeral Playwright and hosted stateful providers. Stable handles,
+          exact page revisions, trusted profile-origin binding, conservative
+          consequence classification, effect watermarking, uncertain-outcome
+          persistence, DNS-pinned egress, and external-untrusted observations
+          preserve the documented authority and trust boundaries.
+
+          The hosted control plane now provides generation-fenced profile
+          lifecycle, leased sessions, a five-minute user-direct login ceremony,
+          bounded interactive events and screenshots, durable authentication
+          records, and exact routine-action standing grants. Public profile,
+          authentication, and grant routes enforce their dedicated scopes; the
+          execution pipeline re-runs deterministic policy before honoring a
+          matching grant and records the authorization kind and reference.
+          Authenticated session creation may bind one principal-owned READY
+          profile by opaque UUID. Reserved metadata prevents client
+          impersonation, and hosted composition resolves that binding per
+          session before acquiring a lease or applying its exact origin policy.
+          Profile material remains outside PostgreSQL in versioned AES-256-GCM
+          envelopes whose authenticated metadata binds tenant, principal,
+          profile generation, origin scope, format, revocation, and key version.
+          The three browser tables use forced tenant RLS and migrations pass
+          from an empty database through revision d2a6f8b1c304.
+
+          The isolated service authenticates before bounded request buffering,
+          accepts only private-file credentials and key material, returns bounded
+          generic failures, and is the only additional approved process
+          composition root for its secret-bearing package. Its production image
+          installs Chromium and runs as uid 65532 with dropped capabilities,
+          no-new-privileges, a read-only root, private secret mounts, resource
+          limits, a separate outbound network, and only a loopback host binding
+          behind the configured HTTPS reverse proxy. The production Compose
+          overlay validates, the image builds, and an in-container Playwright
+          smoke test launched Chromium 151.0.7922.34 as the unprivileged runtime
+          user. A second smoke test ran the real service entry point as uid
+          65532 with a read-only root, all capabilities dropped, and
+          pre-provisioned private secret and material volumes; its authenticated
+          control-plane flow provisioned a profile, acquired a lease, launched
+          Chromium, navigated through the audited proxy to `https://example.org`,
+          sealed the session, revoked the profile, and deleted its encrypted
+          material. Release preflight validates the service-auth, session-secret,
+          key, and HTTPS ceremony inputs and waits for service health.
+      - check: Apple client and signing regression suite
+        outcome: passed
+        detail: >-
+          All 98 Swift Testing cases passed, including direct isolated website
+          login setup, secret-free browser-profile selection for new sessions,
+          complete historical
+          transcript restoration, sidebar conversation navigation,
+          forward-compatible message-role decoding, system composer sizing,
+          connection-settings layout, and the missing-keychain-entitlement
+          regression.
+      - check: real-Docker sandbox security partition
+        outcome: passed
+        detail: All 10 sandbox security tests passed against a freshly built image.
+      - check: accepted ADR-0051
+        outcome: approved_and_implemented
+        detail: >-
+          The durable post-run flag, 30-second idle boundary, structured
+          extractor port, source and scope rechecks, semantic conflict subjects,
+          independently audited extractor and service caps, inferred-confidence
+          ceiling, temporal-hint preservation, transactional replacement,
+          formation-scan index, hybrid extractor reference implementation,
+          content-free model-usage audit, deterministic fallback, and formation@3
+          policy boundary are approved and implemented. ADR-0051 remains accepted
+          architecture for the automatic-memory lifecycle, while accepted ADR-0057
+          supersedes its unconditional routed-policy activation and provider budget
+          with the stricter version-bound evidence gate.
+      - check: proposed ADR-0052
+        outcome: owner_review_requested
+        detail: >-
+          The independently authorized tranche, invocation idempotency, durable
+          provenance across session erasure, dedicated child-session placement,
+          disabled-candidate activation, no-review-archive rule, and quantitative
+          rollout threshold are recorded for owner review.
+      - check: proposed ADR-0054
+        outcome: owner_review_requested
+        detail: >-
+          The provider-neutral web port, capability-level provider selection,
+          fixed HTTPS endpoints, external-untrusted labeling, and default-off
+          registration are recorded for owner review.
+      - check: accepted ADR-0055
+        outcome: approved_and_implemented
+        detail: >-
+          The configurable CLI run wait with its positive-value boundary and
+          300-second default is approved and implemented.
+      - check: intended-production-model memory evaluation
+        outcome: failed_gate
+        detail: >-
+          The checked-in 24-case corpus ran against the balanced policy resolved
+          to OpenAI gpt-5.6-sol. Both arms supported zero labeled candidates. The
+          provider arm committed two unsupported beliefs, including one protected
+          secret case, and therefore published no activation artifact. Diagnosis
+          identified an under-specified free-form candidate schema, statement-only
+          safety checks that lost source hazards after paraphrasing, asymmetric
+          evaluator diagnostics, and an aggregate lift threshold without a
+          positive-case coverage floor.
+      - check: formation@4 evaluation-pipeline regression suite
+        outcome: passed
+        detail: >-
+          Regression coverage now proves canonical local rendering from closed
+          semantic provider claims, exact evidence-quote grounding, authoritative
+          source hazard rechecks, symmetric arm scoring and fabrication reporting,
+          inspectable failed-run diagnostics, non-zero failed CLI status, and a
+          sixteen-of-twenty positive-case publication floor. The final repository
+          check passed formatting, lint, type checking, 853 static tests, 324
+          contract tests, deployment-script tests, and strict documentation and
+          227-entry gate-registry reconciliation. After Docker became available,
+          all 10 real-container sandbox security tests passed and the unrestricted
+          repository suite completed with 1,182 passed and 94 explicitly skipped.
+      - check: formation@4 intended-production-model activation evaluation
+        outcome: passed
+        detail: >-
+          The version-bound 24-case evaluation at immutable build
+          7de9a98f550e60130f7f7131d78ca537e720685b resolved the balanced policy to
+          OpenAI gpt-5.6-sol and the default compiled policy to
+          default@8905b6f85895+hb03f69cf. The provider arm completely supported
+          18 of 20 positive cases and 19 candidates versus 9 deterministic
+          candidates, with zero fabrication and zero policy failures in both
+          arms. The protected question, transient, secret, and injection cases
+          remained empty. Schema-v2 evidence for corpus hash
+          b10ae25558d3236b9a0a47cad59d4b89ff6824085cba79656cc90740bc7d8c43 is
+          bundled under the provider-memory release-evidence trust boundary.
+      - check: accepted ADR-0057
+        outcome: approved_and_implemented
+        detail: >-
+          The dedicated maintenance placement, exact evidence binding, fixed
+          provider budget, user-episode selection, deterministic safety authority,
+          content-free call audit, non-production evaluation mode, fallback, and
+          formation@4 semantic-claim, source-safety, diagnostic, and positive-case
+          coverage boundaries are accepted, implemented, and backed by passing
+          intended-production-model evidence.
+      - check: accepted ADR-0068 memory-formation repair
+        outcome: passed_locally
+        detail: >-
+          Exact regression coverage forms separate soprano activity, tenor
+          experience, and recurring right-thumb pain memories from the reported
+          production wording. Provider failures now retain safe normalized
+          diagnostics, use durable 60-second and 300-second formation retries,
+          preserve the watermark until success or the third attempt, and emit a
+          terminal exhaustion event. Principal-scoped diagnosis and confirmed
+          source-event replay use the governed service. Deterministic formation
+          is versioned as formation@5 and provider-assisted formation as
+          formation@6, invalidating the historical formation@4 activation tuple.
+      - check: hosted CircleCI and CodeRabbit for pull request 37
+        outcome: passed
+        detail: >-
+          Final head 90e9142 passed the static, contract, PostgreSQL integration,
+          real-Docker sandbox, Apple, and GitGuardian hosted checks. CodeRabbit
+          completed on that same head with success; all eighteen review threads
+          were resolved and no conversation remained open. Pull request 37
+          merged as bc1b471 on 2026-08-21.
+    remaining: []
+    activation_pending:
+      # Tenant activation is not a completion condition (ADR-0061); it is
+      # roadmap item B1 and stays default-off until the evidence rule passes.
+      - Record at least 30 paired rollout samples for each model-policy,
+        policy-profile, and authoring-version combination; require at least five
+        absolute percentage points of completion lift, a positive 95 percent
+        Clopper-Pearson lower bound, and zero additional policy failures before
+        enabling skill authoring for a tenant.
+  milestone_11:
+    recorded_at: 2026-08-21T15:22:36Z
+    status: complete
+    evidence:
+      - check: focused gate-registry red-green cycle
+        outcome: passed
+        detail: >-
+          The valid red run failed three assertions because the registry parser
+          rejected Milestone 11 and schedule gate identifiers and the census
+          still expected 177 gates through Milestone 10. The implementation
+          step admitted the schedule area and Milestone 11, initially
+          registered fifteen functional gates, and updated the census; all nine
+          focused tests passed.
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting, strict mypy over 375 source and test
+          files, 504 static tests, 191 contracts, deployment-script checks,
+          123 citation checks, and strict documentation builds pass. The gate
+          registry initially contained 192 entries and retained 166 as the
+          verified ceiling through Milestone 9. This evidence predates the
+          persistence-discipline gate expansion.
+      - check: proposed ADR-0059
+        outcome: owner_review_requested
+        detail: >-
+          The ordinary-run execution model, immutable revisions, civil-time and
+          daylight-saving rules, bounded misfires, fresh authority, occurrence
+          idempotency, non-overlap, quotas, and default-off rollout boundary are
+          recorded for owner review.
+      - check: recurrence and civil-time red-green cycle
+        outcome: passed_locally
+        detail: >-
+          After an import-only scaffold made the behavioral test collect, the
+          valid red run failed all seven cadence and recurrence tests. The
+          implementation now validates one-time, daily, and weekly definitions,
+          normalizes aware instants and weekdays, computes next and latest-due
+          occurrences without backlog iteration, preserves civil time across
+          offset changes, advances spring gaps, and chooses the earlier fall-fold
+          instant. Seven focused tests, including generated cases across five
+          time zones, pass; gate.schedule.civil_time now names the real property
+          check. The later gate expansion does not alter that evidence.
+      - check: scheduling persistence discipline red-green cycle
+        outcome: passed
+        detail: >-
+          A valid registry red failed at 192 rather than 200 entries, and the
+          existing contract-coverage gate reported missing named contracts for
+          the occurrence and idempotency ports. The registry now contains 200
+          entries, including eight explicit domain, contract, schema,
+          migration, transaction, erasure, and isolation gates. All three
+          scheduling ports have shared in-memory and PostgreSQL adapter
+          contracts. Domain, schema, repository, gate-registry, static, and
+          contract lanes pass. A repository-managed PostgreSQL 16 service then
+          passed all six focused migration and scheduling-persistence tests and
+          all 109 integration and resilience tests, including unit-of-work
+          rollback, erasure, isolation, and migration behavior.
+      - check: schedule materialization red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The valid behavioral red run failed three tests at the unimplemented
+          principal-directory and materializer seams. Shared principal-directory,
+          due-lock, advance, and occurrence-lookup contracts now pass. The
+          materializer revalidates current scopes and enabled state, stamps only
+          requested scopes and finite revision limits on a priority-10 ordinary
+          run, creates its session, event sequence, seed checkpoint, process
+          event, occurrence, and schedule advance in one transaction, and uses
+          deferred occurrence-link foreign keys so the natural-key occurrence is
+          written first. PostgreSQL gates prove two concurrent schedulers commit
+          exactly one result and injected crashes after each of nine write
+          boundaries leave no partial state; retry returns the one complete
+          occurrence. The three registry entries materialize_once,
+          materialize_atomic, and authority_fresh now point to those executable
+          checks. The final local verification passes Ruff, mypy over 385 files,
+          516 static tests, 197 contract tests, deployment checks, strict docs
+          and citation validation, and all 111 PostgreSQL integration and
+          resilience tests, including both materialization gates.
+      - check: schedule overlap and admission red-green cycles
+        outcome: passed_locally
+        detail: >-
+          The valid overlap red materialized a second run while the preceding
+          occurrence remained queued. The implementation adds a contracted
+          latest-materialized occurrence query for both memory and PostgreSQL,
+          records one SKIPPED_OVERLAP decision without incrementing failures,
+          leaves the linked run unchanged, and allows another schedule to
+          progress. The admission red separately failed at the unimplemented
+          development controller and because the materializer ignored retry;
+          the closed controller contract now distinguishes ALLOW, transient
+          RETRY with no write, and terminal REJECT recorded as MISSED. Seventeen
+          focused registry, contract, and static tests and all seven focused
+          PostgreSQL schedule persistence and materialization tests pass. The
+          final repository verification passes Ruff, mypy over 387 files, 518
+          static tests, 198 contract tests, deployment and strict documentation
+          checks, and all 112 PostgreSQL integration and resilience tests.
+      - check: PostgreSQL schedule admission red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The valid PostgreSQL red failed at the unimplemented production
+          controller. The controller now shares the materialization transaction,
+          takes a tenant-derived advisory transaction lock, and decides against
+          committed active scheduled runs, one-minute materializations, active
+          maximum-cost reservations, and daily and monthly scheduled usage. Four
+          positive versioned ceilings extend the executable configuration
+          inventory from 106 to 110. Empty-tenant, decision-matrix, and concurrent
+          last-slot tests pass; the race admits exactly one run and leaves the
+          other schedule due without an occurrence. Final verification passes
+          Ruff, mypy over 388 files, 518 static tests, 198 contract tests,
+          deployment and strict documentation checks, and all 115 PostgreSQL
+          integration and resilience tests.
+      - check: bounded schedule worker red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The valid worker red failed at the unimplemented run_once method. The
+          worker now scans one deterministic bounded due batch, materializes
+          each definition in its own transaction, isolates definition and scan
+          failures while propagating cancellation, and waits for the earlier of
+          the next durable fire time and a bounded fallback poll. Already-due
+          work uses an admission backoff. Shared repository contracts cover the
+          next-fire query, the worker-service contract includes the new role,
+          and a PostgreSQL integration proof leaves the third of three due
+          definitions untouched when the batch is two. Three positive
+          versioned limits extend the executable inventory from 110 to 113.
+          Composition exposes the worker for development but fails closed for
+          non-development identity until a durable principal directory exists;
+          production deployment remains default-off. Final verification passes
+          Ruff, mypy over 391 files, 520 static tests, 198 contract tests,
+          deployment and strict documentation checks, and all 126 PostgreSQL
+          integration and resilience tests.
+      - check: schedule lifecycle and public-boundary red-green cycles
+        outcome: passed_locally
+        detail: >-
+          Valid reds first exposed absent lifecycle operations, absent
+          default-off flags and routes, incomplete definition ceilings, and
+          missing terminal accounting. Create, list, point read, update, pause,
+          resume, cancel, and occurrence history now enforce exact scopes,
+          optimistic revisions, immutable definitions, request idempotency,
+          stable bounded cursors, principal isolation, and secret-shaped input
+          rejection. Materialized run completion is linked back to its owner,
+          accounted exactly once, and resets or increments the consecutive
+          failure counter before applying the automatic-pause threshold. The
+          offline boundary recovers completed, failed, cancelled, missed, and
+          overlap-skipped outcomes through exact durable run links.
+      - check: isolated production topology, wakeup, fairness, and metrics red-green cycles
+        outcome: passed_locally
+        detail: >-
+          Valid reds exposed the missing lean production builder, async worker
+          factory, schedule systemd unit, cross-process wakeup, and telemetry
+          vocabulary. The sole bootstrap root now builds a least-privilege
+          PostgreSQL schedule role with configured content-versioned authority
+          and no execution or API credential. Fixed-channel LISTEN/NOTIFY
+          interrupts a bounded durable poll without becoming a correctness
+          dependency. Interactive and async workers claim disjoint priority
+          classes; production release tests exercise both default-off and
+          enabled scheduler activation. Content-free OpenTelemetry instruments
+          cover scans, lag, dispositions, misfires, admission, cost, outcomes,
+          auto-pause, cancellation, lease reclaim, and class-specific claim
+          latency. Six definition ceilings and two reserved-capacity limits
+          extend the executable configuration inventory from 113 to 121.
+      - check: complete Milestone 11 executable gate contract
+        outcome: passed_locally
+        detail: >-
+          Every one of the twenty-three gate.schedule registry entries names a
+          real test, property, corpus, contract, migration, or structural check;
+          none uses a provisional target. The canonical gate runner reports
+          23 passed, zero failed, and zero pending for Milestone 11. Integration
+          with the current origin/dev head produced valid cumulative reds for
+          documentation allowlist drift and a class-only provider-evidence
+          selector that pytest could not collect. Exact allowlist locations, an
+          executable test-method selector, and nested-selector registry
+          validation corrected those failures. The final canonical run reports
+          all 223 cumulative gates passed with zero failed or pending.
+      - check: complete local static, contract, deployment, migration, integration, and resilience lanes
+        outcome: passed_locally
+        detail: >-
+          On the final rebased origin/dev head, Ruff formatting and linting,
+          strict mypy over 469 source and test files, 760 static tests, 305 adapter
+          contracts, both production deployment script suites, strict
+          documentation and 121 citation checks, and 102 PostgreSQL integration
+          and resilience tests pass. Migration coverage upgrades an empty
+          PostgreSQL 16 database through the Milestone 10 browser revisions and
+          then to schedule head b6f4c2d8e901; the integration partition exercises
+          the Milestone 11 clean and stepwise migration boundary. The cumulative
+          canonical runner reports all 223 gates passed with zero failed or
+          pending.
+      - check: hosted CircleCI and CodeRabbit for pull request 37
+        outcome: passed
+        detail: >-
+          Final head 90e9142 passed the static, contract, PostgreSQL integration,
+          real-Docker sandbox, Apple, and GitGuardian hosted checks. The final
+          227-gate registry was clean; CodeRabbit completed successfully on the
+          same head, and all eighteen review threads were resolved. Milestone 10
+          closed on the same delivery, so the verified ceiling advances through
+          Milestone 11. Pull request 37 merged as bc1b471 on 2026-08-21.
+    remaining: []
+  milestone_12:
+    recorded_at: 2026-08-22T21:14:08Z
+    status: complete
+    evidence:
+      - check: notification-domain and content-free-payload red-green cycle
+        outcome: passed_locally
+        detail: >-
+          After the import-only scaffold made the behavioral test collect, the
+          valid red run reported thirteen expected failures and ten passing
+          boundary checks. The implemented domain slice now defines the closed
+          device, provider, notification, delivery, subject-status, and severity
+          vocabularies; validates kind-specific identifier sets, fixed titles,
+          registry tool names, ops-only fields, aware lifecycle instants, push
+          token secrecy, APNs and Telegram routing, revocation, outbox settlement,
+          and delivery attempts; and constructs every declared deduplication key.
+          All twenty-four focused tests pass.
+      - check: first executable Milestone 12 gate
+        outcome: passed_locally
+        detail: >-
+          gate.notify.content_free resolves to a twelve-member corpus containing
+          message, argument, approval, question, failure, schedule, reasoning,
+          traceback, API-key, bearer-token, and cookie-shaped content. Generated
+          tests cover the deduplication-key rules, while gate.notify.dedupe stays
+          pending until an outbox repository can prove one durable row under
+          repeated triggers. The focused domain and gate-registry partition passes
+          all forty-seven tests.
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 520 files, strict mypy over 479 source
+          and test files, 987 static tests, 324 contracts, deployment-script
+          tests, 156 citation checks, and strict documentation builds pass. The
+          gate registry contains 305 entries and retains 227 as the verified
+          ceiling through Milestone 11 while Milestone 12 is in progress.
+      - check: notification persistence red-green cycle
+        outcome: passed_locally
+        detail: >-
+          Six executable shared-contract tests first failed at the deliberately
+          unimplemented device and outbox adapters, and the structural schema
+          check separately failed because all three tables were absent. The
+          in-memory device registry and outbox now pass registration, token move,
+          lifecycle target removal, stable cursor, durable deduplication, claim,
+          settlement, delivery uniqueness, and principal-listing contracts; the
+          ORM metadata check proves the declared keys, constraints, partial token
+          index, and dispatch and listing indexes.
+      - check: PostgreSQL notification persistence and migrations
+        outcome: passed_locally
+        detail: >-
+          A dedicated nonsuperuser PostgreSQL database upgraded from base through
+          revision c7e9a4f2d105. Seven integration tests pass the same device and
+          outbox contracts against PostgreSQL, prove shared commit and rollback,
+          create one durable row for each of thirty-two repeated deduplication
+          keys, reject cross-principal delivery links, hide all three tables after
+          a tenant switch, and inspect forced row-level security. Both the clean
+          migration and predecessor downgrade and re-upgrade checks pass with no
+          SQLAlchemy metadata drift. The complete PostgreSQL 16.15 integration
+          and resilience lane passes all 114 selected tests.
+      - check: second Milestone 12 — Notifications and device identity gate tranche
+        outcome: passed_locally
+        detail: >-
+          gate.device.register_idempotent, gate.device.token_unique,
+          gate.device.persistence_schema, gate.device.persistence_isolated,
+          gate.notify.dedupe, gate.notify.migration_clean, and
+          gate.notify.migration_stepwise now point at exact executable checks.
+          Together with gate.notify.content_free, eight of twenty gates are
+          executable while the verified cumulative ceiling remains at Milestone
+          11 — Scheduled runs. Completion and hosted review for Milestone 12 —
+          Notifications and device identity — are still pending.
+      - check: make check after notification persistence
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 528 files, strict mypy over 486 source
+          and test files, 988 static tests, 330 contract tests, all deployment
+          script tests, 156 citation checks, and the strict documentation builds
+          pass with the eight executable gates for Milestone 12 — Notifications
+          and device identity recorded but the cumulative verified ceiling held
+          through Milestone 11 — Scheduled runs.
+      - check: transactional notification producers
+        outcome: passed_locally
+        detail: >-
+          The terminal writer, scheduling accountant, and scheduling materializer
+          invoke one content-free notification producer inside their existing unit
+          of work. PostgreSQL crash injection after every write boundary on all
+          three paths proves that a trigger and its outbox row commit together or
+          both roll back. A deliberately invalid outbox insert rolls back inside
+          the repository savepoint while the run reaches its intended terminal
+          status and the same transaction appends a content-free
+          notification.enqueue_failed process event without database or failure
+          text. Replays deduplicate by the specified transition keys.
+      - check: notification erasure semantics
+        outcome: passed_locally
+        detail: >-
+          PostgreSQL and deterministic repository tests prove that session erasure
+          deletes pending notification rows and their delivery attempts before the
+          session graph, while retaining settled content-free notification rows as
+          audit facts. The exact transition catalog rejects interactive completion
+          and missing identifiers and produces only the five declared kinds.
+      - check: third Milestone 12 — Notifications and device identity gate tranche
+        outcome: passed_locally
+        detail: >-
+          gate.notify.enqueue_atomic and gate.notify.trigger_catalog now resolve to
+          exact executable checks. Ten of twenty gates are executable while the
+          cumulative verified ceiling remains at Milestone 11 — Scheduled runs.
+      - check: make check after transactional notification producers
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 531 files, strict mypy over 489 source
+          and test files, 991 static tests, 330 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass. The focused PostgreSQL producer, persistence, materializer, and
+          schedule-lifecycle partition passes all seventeen tests.
+      - check: notification dispatcher and APNs red-green cycle
+        outcome: passed_locally
+        detail: >-
+          Ten APNs authentication, addressing, response-mapping, network-failure,
+          and private-key checks first failed at the deliberately unimplemented
+          adapter. The implemented HTTP/2 adapter signs verifiable ES256 provider
+          tokens from a mode-0600 P-256 key, refreshes them at twenty minutes and
+          after ExpiredProviderToken, selects the APNs host per device, sends the
+          topic, alert type, priority, collapse key, expiration, and content-free
+          body, and maps success, retry, unregistered, and rejected outcomes without
+          logging the key or device token.
+      - check: notification claim, dispatch, retry, and staleness contracts
+        outcome: passed_locally
+        detail: >-
+          PostgreSQL FOR UPDATE SKIP LOCKED claims are filtered by pending target
+          provider before the bounded lock, and thirteen focused integration tests
+          pass persistence, transactional production, two-dispatcher exclusion,
+          and accepted-send crash replay. Deterministic contracts prove the closed
+          retry schedule and ceiling, expiry suppression, every stale-subject case,
+          provider partitioning, per-target delivery attempts, one-time token
+          invalidation for Unregistered and BadDeviceToken, and no invalidation for
+          429 or 5xx outcomes.
+      - check: fourth Milestone 12 — Notifications and device identity gate tranche
+        outcome: passed_locally
+        detail: >-
+          gate.notify.dispatch_once, gate.notify.retry_bounded,
+          gate.notify.stale_suppressed, gate.notify.token_revoked_on_410,
+          gate.notify.apns_auth, and gate.notify.port_contracts now resolve to exact
+          executable checks. Sixteen of twenty gates are executable while the
+          cumulative verified ceiling remains at Milestone 11 — Scheduled runs.
+      - check: make check after notification dispatch and APNs
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 538 files, strict mypy over 496 source
+          and test files, 1013 static tests, 333 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass. The focused PostgreSQL persistence, producer, dispatcher, and
+          accepted-send replay partition passes all thirteen tests.
+      - check: least-privilege notification role and wakeup red-green cycle
+        outcome: passed_locally
+        detail: >-
+          Focused tests first failed because notification production was not
+          composed, outbox commits did not wake a dispatcher, and the dedicated
+          CLI and deployment role did not exist. The notify-only composition now
+          exposes exactly approvals, checkpoints, devices, notification outbox,
+          process events, runs, and sessions; rejects disabled, non-production,
+          credential-bearing, non-PostgreSQL, and incomplete APNs settings; and
+          builds without model, tool, browser, web, sandbox, or API-bearer
+          capability. PostgreSQL NOTIFY is issued in the enqueue transaction and
+          becomes visible only after commit, while the worker retains a bounded
+          polling fallback and graceful stop.
+      - check: notification deployment confinement
+        outcome: passed_locally
+        detail: >-
+          The CLI exposes a dedicated notify role. The notification environment
+          contains only database identity, two enable flags, and the four APNs
+          configuration fields; the systemd unit does not load the application
+          environment, execution service, Docker socket, or writable paths. The
+          release harness proves default-off disablement and enabled-unit
+          environment rewriting and restart behavior. The APNs adapter enforces
+          an absolute regular mode-0600 P-256 key at construction.
+      - check: make check after least-privilege notification role
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 542 files, strict mypy over 500 source
+          and test files, 1023 static tests, 333 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass. The focused notification worker, transport, persistence, and
+          PostgreSQL wakeup partition passes all forty tests.
+      - check: device lifecycle and offline inbox red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The boundary test first observed a not-found response because the
+          feature router and application services did not exist. All seven routes
+          now require the exact device.read, device.write, or notification.read
+          scope; registration refreshes one natural identity, returns only a
+          six-character token fingerprint, rejects malformed provider and routing
+          combinations with stable device reason codes, and paginates by opaque
+          stable cursors. Register, token update, provider invalidation, revoke,
+          and delete each append one content-free process event, while a targeted
+          test notification never reaches a different device and a revoked target
+          is absent before the next dispatch.
+      - check: offline notification recovery and PostgreSQL application service
+        outcome: passed_locally
+        detail: >-
+          With no transport configured, the feature-gated inbox returns all eight
+          closed notification kinds plus status and per-device delivery outcomes
+          through stable pagination. A PostgreSQL integration test registers,
+          replays, updates, test-enqueues, reads, revokes, and deletes a device and
+          observes exactly the four corresponding durable lifecycle events. All
+          sixteen focused PostgreSQL notification tests pass.
+      - check: final Milestone 12 gate registration tranche
+        outcome: passed_locally
+        detail: >-
+          gate.device.revoke_immediate, gate.device.lifecycle_audited,
+          gate.notify.offline_inbox, and gate.notify.default_off now resolve to
+          exact executable checks. All twenty gates are executable while the
+          cumulative verified ceiling remains at Milestone 11 — Scheduled runs
+          until the Apple and hosted delivery lanes complete.
+      - check: make check after device lifecycle and offline inbox
+        outcome: passed
+        detail: >-
+          Ruff formatting and linting over 544 files, strict mypy over 502 source
+          and test files, 1027 static tests, 333 contract tests, all deployment
+          script tests, 156 citation checks, and both strict documentation builds
+          pass after the seven device and notification routes and all twenty
+          executable gates landed.
+      - check: native Apple registration and deep-link red-green cycle
+        outcome: passed_locally
+        detail: >-
+          The coordinator test first failed because no registration API,
+          installation identity store, closed push model, or deep-link reducer
+          existed. The client now mints one nonsynchronizing Data Protection
+          Keychain identity, uploads every APNs token with the build-derived
+          environment, revokes on disconnect, and treats a missing device router
+          as an older compatible server. A notification tap restores the durable
+          transcript, attaches to the payload's exact run, and focuses the named
+          approval or question without persisting notification state.
+      - check: native Apple build and test lanes
+        outcome: passed_locally
+        detail: >-
+          All 105 Swift transport, coordinator, reducer, history, and presentation
+          tests pass under full Xcode. Debug and release unsigned iOS Simulator
+          builds and the unsigned macOS build pass with the tracked aps-environment
+          entitlement. The iPhone and iPad simulator UI lanes pass with their debug
+          fixture suppressing notification authorization.
+      - check: production schedule notification topology audit
+        outcome: passed_locally
+        detail: >-
+          A regression first showed that the credential-minimized schedule
+          environment omitted both notification flags, so enabled production
+          scheduling would silently skip its named notification producers. The
+          schedule template now carries default-off flags and release validation
+          requires them to change together and exactly match the application
+          flags. The schedule role can enqueue outcomes but still never loads the
+          APNs key; the release harness proves a mismatch fails closed.
+      - check: review-driven notification hardening
+        outcome: passed_locally
+        detail: >-
+          Red regressions proved that device-registration hashes varied across
+          Python hash seeds, a second-target transport exception discarded a
+          prior accepted outcome, Apple token refreshes reused an incompatible
+          request key, and notification-focus tests did not execute navigation
+          or scroll targeting. Request bodies now hash deterministically,
+          transport failures become content-free per-target retry outcomes,
+          Apple keys identify the full registration body, queued notification
+          responses drive authoritative navigation, and initial and changed
+          focus values resolve to their exact scroll identifiers.
+      - check: complete Milestone 12 — Notifications and device identity gate contract
+        outcome: passed_locally
+        detail: >-
+          Every one of the twenty gate.device and gate.notify registry entries
+          names an executable case, property, corpus, adapter contract, migration,
+          or structural check. The PostgreSQL-backed canonical runner reports all
+          247 cumulative gates through Milestone 12 passing with zero failures or
+          pending gates; later authorized milestones remain pending.
+      - check: complete local static, contract, deployment, PostgreSQL, and Apple lanes
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting over 546 files, strict mypy over 504 source
+          and test files, 1086 static tests, 335 adapter contracts, all deployment
+          script tests, strict documentation and 156 citation checks pass. The
+          PostgreSQL integration and resilience lane passes all 124 tests; clean
+          and stepwise migration plus metadata-drift checks pass. All 107 Apple
+          package tests, iPhone and iPad simulator UI lanes, and unsigned Release
+          iOS Simulator and macOS builds pass.
+      - check: hosted CircleCI and direct dev delivery
+        outcome: passed
+        detail: >-
+          Candidate 4f0c7c4 passed the static, contract, PostgreSQL
+          integration, real-Docker sandbox, Apple, and GitGuardian hosted checks.
+          All previously reported review conversations were resolved. The final
+          integration was delivered directly to dev; code review is reserved for
+          the final merge into main.
+    remaining: []

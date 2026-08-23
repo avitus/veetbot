@@ -1,6 +1,7 @@
 """Deployment configuration validation tests."""
 
 import os
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
@@ -16,9 +17,11 @@ from agent_core.config import (
     ConfigurationError,
     DeploymentMode,
     MemoryProviderExtractionMode,
+    PushProviderKind,
     SandboxMechanism,
     WebProviderKind,
     load_config_document,
+    load_notification_worker_settings,
     load_schedule_worker_settings,
     load_settings,
     validate_runtime_identity,
@@ -71,7 +74,10 @@ def test_playwright_browser_provider_requires_explicit_origins() -> None:
         "https://static.example.org",
     )
 
-    with pytest.raises(ConfigurationError, match="BROWSER_ALLOWED_ORIGINS"):
+    with pytest.raises(
+        ConfigurationError,
+        match="BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER=playwright",
+    ):
         load_settings({**base_environment(), "BROWSER_PROVIDER": "playwright"})
 
 
@@ -95,6 +101,21 @@ def test_hosted_browser_provider_requires_trusted_profile_and_service_configurat
     assert settings.browser_run_purpose == "daily-language-practice"
     assert settings.browser_profile_service_url == "https://browser.internal.example"
     assert "browser_profile_control_plane" in settings.credentials
+
+
+def test_hosted_browser_provider_supports_principal_selected_session_profiles() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        }
+    )
+
+    assert settings.browser_provider.value == "hosted"
+    assert settings.browser_profile_id is None
+    assert settings.browser_allowed_origins == ()
 
 
 @pytest.mark.parametrize(
@@ -136,6 +157,22 @@ def test_browser_grant_pin_requires_hosted_provider_and_valid_uuid() -> None:
                 "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
                 "BROWSER_PROFILE_ID": PROFILE_ID,
                 "BROWSER_GRANT_ID": "not-a-uuid",
+                "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            }
+        )
+
+
+def test_browser_grant_pin_requires_a_hosted_profile_id() -> None:
+    with pytest.raises(
+        ConfigurationError,
+        match="BROWSER_GRANT_ID requires BROWSER_PROFILE_ID",
+    ):
+        load_settings(
+            {
+                **base_environment(),
+                "BROWSER_PROVIDER": "hosted",
+                "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+                "BROWSER_GRANT_ID": GRANT_ID,
                 "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
             }
         )
@@ -226,6 +263,136 @@ def test_schedule_roles_require_independent_explicit_enablement() -> None:
     )
     assert settings.schedule_api_enabled is True
     assert settings.schedule_worker_enabled is True
+
+
+def test_notification_roles_and_provider_default_off() -> None:
+    settings = load_settings(base_environment())
+    assert settings.notification_api_enabled is False
+    assert settings.notification_dispatch_enabled is False
+    assert settings.push_provider is PushProviderKind.DISABLED
+    assert settings.apns_key_file is None
+
+
+@pytest.mark.parametrize(
+    ("enabled", "disabled"),
+    [
+        ("AGENT_NOTIFICATION_API_ENABLED", "AGENT_NOTIFICATION_DISPATCH_ENABLED"),
+        ("AGENT_NOTIFICATION_DISPATCH_ENABLED", "AGENT_NOTIFICATION_API_ENABLED"),
+    ],
+)
+def test_notification_roles_must_change_together(enabled: str, disabled: str) -> None:
+    with pytest.raises(ConfigurationError, match="notification API and dispatch"):
+        load_settings(
+            {
+                **base_environment(),
+                enabled: "1",
+                disabled: "0",
+            }
+        )
+
+
+def test_notification_worker_settings_load_without_api_bearer(tmp_path: Path) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    values = {
+        **base_environment(),
+        "DEPLOYMENT_MODE": "production",
+        "AUTH_MODE": "token",
+        "AUTH_TENANT_ID": "tenant-a",
+        "AUTH_PRINCIPAL_ID": "notify-a",
+        "AUTH_SCOPES": "notification.read",
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(key_file),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+
+    settings = load_notification_worker_settings(values)
+
+    assert settings.auth_token is None
+    assert settings.notification_api_enabled is True
+    assert settings.notification_dispatch_enabled is True
+    assert settings.push_provider is PushProviderKind.APNS
+    assert settings.apns_key_file == key_file
+    assert settings.apns_key_id == "KEY123"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    ["APNS_KEY_FILE", "APNS_KEY_ID", "APNS_TEAM_ID", "APNS_TOPIC"],
+)
+def test_apns_provider_requires_complete_private_configuration(
+    tmp_path: Path,
+    missing: str,
+) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    values = {
+        **base_environment(),
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(key_file),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+    values.pop(missing)
+
+    with pytest.raises(ConfigurationError, match=missing):
+        load_settings(values)
+
+
+def test_disabled_push_provider_rejects_apns_configuration(tmp_path: Path) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+
+    with pytest.raises(ConfigurationError, match=r"APNS_.*PUSH_PROVIDER=apns"):
+        load_settings({**base_environment(), "APNS_KEY_FILE": str(key_file)})
+
+
+@pytest.mark.parametrize("unsafe", ["relative", "symlink", "permissive"])
+def test_apns_key_file_must_be_absolute_regular_and_private(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unsafe: str,
+) -> None:
+    key_file = tmp_path / "AuthKey_TEST.p8"
+    key_file.write_text("test APNs private key material", encoding="ascii")
+    key_file.chmod(0o600)
+    configured = key_file
+    if unsafe == "relative":
+        monkeypatch.chdir(tmp_path)
+        configured = Path(key_file.name)
+    elif unsafe == "symlink":
+        configured = tmp_path / "AuthKey_LINK.p8"
+        configured.symlink_to(key_file)
+    else:
+        key_file.chmod(0o640)
+    values = {
+        **base_environment(),
+        "AGENT_NOTIFICATION_API_ENABLED": "1",
+        "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        "PUSH_PROVIDER": "apns",
+        "APNS_KEY_FILE": str(configured),
+        "APNS_KEY_ID": "KEY123",
+        "APNS_TEAM_ID": "TEAM123",
+        "APNS_TOPIC": "com.veetbot.app",
+    }
+
+    with pytest.raises(ConfigurationError, match="APNS_KEY_FILE"):
+        load_settings(values)
+
+
+def test_unknown_push_provider_is_refused() -> None:
+    with pytest.raises(ConfigurationError, match="PUSH_PROVIDER"):
+        load_settings({**base_environment(), "PUSH_PROVIDER": "surprise"})
 
 
 def test_web_provider_selection_is_per_capability() -> None:
@@ -513,6 +680,11 @@ def test_valid_top_level_overlay_is_accepted(tmp_path: Path) -> None:
             r"run_defaults must be a mapping",
         ),
         (
+            "runtime/limits.yaml",
+            "notifications:\n  retry_delays_seconds: []\n",
+            r"notifications\.retry_delays_seconds must contain positive numbers",
+        ),
+        (
             "tools/limits.yaml",
             "circuit_breaker:\n  identical_call_threshold: 1\n",
             r"identical_call_threshold must be at least 2",
@@ -543,6 +715,20 @@ def test_undeclared_interpolation_is_refused(tmp_path: Path) -> None:
     overlay.write_text("unexpected: ${UNDECLARED_VALUE}\n", encoding="utf-8")
     values = {**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)}
     with pytest.raises(ConfigurationError, match="UNDECLARED_VALUE"):
+        load_settings(values)
+
+
+def test_policy_semantic_interpolation_is_refused_even_when_declared(tmp_path: Path) -> None:
+    overlay = tmp_path / "policy" / "default.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("name: ${OPENAI_MODEL}\n", encoding="utf-8")
+    values = {
+        **base_environment(),
+        "AGENT_CONFIG_DIR": str(tmp_path),
+        "OPENAI_MODEL": "deployment-specific-policy-name",
+    }
+
+    with pytest.raises(ConfigurationError, match="policy-semantic interpolation"):
         load_settings(values)
 
 
@@ -656,11 +842,11 @@ def test_sandbox_overlay_values_are_semantically_validated(
         load_settings({**base_environment(), "AGENT_CONFIG_DIR": str(tmp_path)})
 
 
-def test_all_121_versioned_knobs_are_present_and_non_null() -> None:
+def test_all_137_versioned_knobs_are_present_and_non_null() -> None:
     qualified_paths = {
         f"{relative}:{path}" for relative, paths in SHIPPED_KNOB_PATHS.items() for path in paths
     }
-    assert len(qualified_paths) == 121
+    assert len(qualified_paths) == 137
 
     for relative, paths in SHIPPED_KNOB_PATHS.items():
         loaded: object = yaml.safe_load((PACKAGE_ROOT / relative).read_text(encoding="utf-8"))
@@ -671,3 +857,27 @@ def test_all_121_versioned_knobs_are_present_and_non_null() -> None:
                 assert isinstance(value, dict), f"{relative}:{path} is not a mapping path"
                 value = cast(dict[str, object], value)[component]
             assert value is not None, f"{relative}:{path} is null"
+
+
+def _leaf_paths(document: Mapping[str, object], prefix: str = "") -> set[str]:
+    leaves: set[str] = set()
+    for key, value in document.items():
+        path = f"{prefix}.{key}" if prefix else str(key)
+        if isinstance(value, Mapping):
+            leaves |= _leaf_paths(cast(Mapping[str, object], value), path)
+        else:
+            leaves.add(path)
+    return leaves
+
+
+def test_memory_profiles_knob_paths_match_document() -> None:
+    loaded: object = yaml.safe_load(
+        (PACKAGE_ROOT / "memory/profiles.yaml").read_text(encoding="utf-8")
+    )
+    assert isinstance(loaded, dict)
+    document = cast(Mapping[str, object], loaded)
+
+    declared = set(SHIPPED_KNOB_PATHS["memory/profiles.yaml"])
+
+    assert declared == _leaf_paths(document) - {"schema_version"}
+    assert len(declared) == 28

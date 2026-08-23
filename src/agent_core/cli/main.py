@@ -23,7 +23,12 @@ from typer.core import TyperGroup
 
 from agent_core import __version__
 from agent_core.api import create_app
-from agent_core.bootstrap import build, build_schedule_worker, serve_execution_service
+from agent_core.bootstrap import (
+    build,
+    build_notification_worker,
+    build_schedule_worker,
+    serve_execution_service,
+)
 from agent_core.config import ConfigurationError
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import (
@@ -59,6 +64,7 @@ class WorkerRole(StrEnum):
     ASYNC = "async"
     MAINTENANCE = "maintenance"
     SCHEDULE = "schedule"
+    NOTIFY = "notify"
 
 
 class QueuedRunTimeoutError(TimeoutError):
@@ -127,12 +133,50 @@ class _CapabilityModule(Protocol):
         build_ref: str | None,
     ) -> Any | None: ...
 
+    def resolve_build_ref(self, repository_root: Path, explicit: str | None) -> str: ...
+
 
 class _MemoryFormationEvalModule(Protocol):
     async def run_live_evaluation(
         self,
         repository_root: Path,
         *,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> Any | None: ...
+
+
+class _MemoryBenchmarkModule(Protocol):
+    async def run_benchmark(
+        self,
+        repository_root: Path,
+        *,
+        deterministic_only: bool,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path | None,
+        baseline_output: Path | None,
+    ) -> Any | None: ...
+
+
+class _MemoryBenchmarkLiveModule(Protocol):
+    def incomplete_run_diagnostics(self, live: Any) -> list[str]: ...
+
+
+class _MemoryBenchmarkExternalModule(Protocol):
+    async def run_external_benchmark(
+        self,
+        repository_root: Path,
+        *,
+        dataset: str,
+        path: Path,
+        sample: int | None,
+        seed: int,
+        principal_speaker: str,
+        deterministic_only: bool,
         model_policy: str,
         policy_profile: str,
         build_ref: str,
@@ -432,6 +476,10 @@ async def _create_session() -> UUID:
 
 
 async def _serve_worker(role: WorkerRole) -> None:
+    if role is WorkerRole.NOTIFY:
+        async with build_notification_worker() as notification_service:
+            await _run_worker_service(notification_service)
+        return
     if role is WorkerRole.SCHEDULE:
         async with build_schedule_worker() as schedule_service:
             await _run_worker_service(schedule_service)
@@ -475,11 +523,13 @@ def worker_command(
         WorkerRole,
         typer.Option(
             "--role",
-            help="Process role: interactive, async, maintenance, schedule, or legacy worker.",
+            help=(
+                "Process role: interactive, async, maintenance, schedule, notify, or legacy worker."
+            ),
         ),
     ] = WorkerRole.WORKER,
 ) -> None:
-    """Execute an interactive, async, maintenance, schedule, or legacy worker role."""
+    """Execute an interactive, async, maintenance, schedule, notify, or legacy worker role."""
 
     try:
         asyncio.run(_serve_worker(role))
@@ -668,6 +718,64 @@ def memory_formations(
         typer.echo(str(exc), err=True)
         raise typer.Exit(4) from exc
     typer.echo(json.dumps([row.model_dump(mode="json") for row in rows], default=str))
+
+
+async def _memory_diagnose(session_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.diagnose(session_id)
+
+
+@memory_app.command("diagnose")
+def memory_diagnose(
+    session_id: Annotated[
+        UUID,
+        typer.Option("--session", help="Diagnose formation for one source session."),
+    ],
+) -> None:
+    """Inspect flags, watermarks, provider attempts, audits, and formed beliefs."""
+
+    try:
+        diagnosis = asyncio.run(_memory_diagnose(session_id))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except NotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    payload = diagnosis if isinstance(diagnosis, dict) else diagnosis.model_dump(mode="json")
+    typer.echo(json.dumps(payload, default=str))
+
+
+async def _memory_replay(session_id: UUID) -> Any:
+    async with build(storage="postgres") as composition:
+        return await composition.memory.replay(session_id)
+
+
+@memory_app.command("replay")
+def memory_replay(
+    session_id: Annotated[
+        UUID,
+        typer.Option("--session", help="Replay formation for one source session."),
+    ],
+    confirm: Annotated[
+        bool,
+        typer.Option("--confirm", help="Confirm the auditable formation replay."),
+    ] = False,
+) -> None:
+    """Reprocess original session evidence through the governed formation path."""
+
+    if not confirm:
+        typer.echo("memory replay requires --confirm", err=True)
+        raise typer.Exit(2)
+    try:
+        result = asyncio.run(_memory_replay(session_id))
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except NotFoundError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+    typer.echo(result.model_dump_json())
 
 
 async def _memory_trace(trace_id: UUID) -> Any:
@@ -927,3 +1035,225 @@ def eval_memory_formation(
     if not result.passed:
         typer.echo(f"memory-formation evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
+
+
+@eval_app.command("memory-benchmark")
+def eval_memory_benchmark(
+    deterministic_only: Annotated[
+        bool,
+        typer.Option(
+            "--deterministic-only/--no-deterministic-only",
+            help="Run only the deterministic arm; the live arm is opt-in.",
+        ),
+    ] = True,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", help="Write passing live evidence to this path."),
+    ] = None,
+    write_baseline: Annotated[
+        Path | None,
+        typer.Option("--write-baseline", help="Record this run as the deterministic baseline."),
+    ] = None,
+    build_ref: Annotated[
+        str | None,
+        typer.Option("--build-ref", help="Commit or build identifier; defaults to CI or Git."),
+    ] = None,
+    model_policy: Annotated[
+        str,
+        typer.Option("--model-policy", help="Evaluate one declared model policy."),
+    ] = "balanced",
+    policy_profile: Annotated[
+        str,
+        typer.Option("--policy-profile", help="Evaluate one policy profile."),
+    ] = "default",
+    external: Annotated[
+        str | None,
+        typer.Option(
+            "--external",
+            help="Run a local dataset instead: longmemeval, locomo, or halumem.",
+        ),
+    ] = None,
+    path: Annotated[
+        Path | None,
+        typer.Option("--path", help="Local dataset file; it is never committed."),
+    ] = None,
+    sample: Annotated[
+        int | None,
+        typer.Option("--sample", help="Draw this many instances from the dataset."),
+    ] = None,
+    seed: Annotated[
+        int,
+        typer.Option("--seed", help="Seed the dataset sample so a run repeats."),
+    ] = 0,
+    principal_speaker: Annotated[
+        str,
+        typer.Option(
+            "--principal-speaker",
+            help="Which LoCoMo speaker is the formation source: a or b.",
+        ),
+    ] = "a",
+) -> None:
+    """Measure what memory forms across sessions and recalls when probed."""
+
+    if external is not None:
+        _run_external_memory_benchmark(
+            dataset=external,
+            path=path,
+            sample=sample,
+            seed=seed,
+            principal_speaker=principal_speaker,
+            deterministic_only=deterministic_only,
+            model_policy=model_policy,
+            policy_profile=policy_profile,
+            build_ref=build_ref,
+            output=output,
+            write_baseline=write_baseline,
+        )
+        return
+    for name, value in (("--path", path), ("--sample", sample)):
+        if value is not None:
+            raise typer.BadParameter(
+                f"{name} belongs to an external dataset run; pass --external too",
+                param_hint=name,
+            )
+    if deterministic_only:
+        if output is not None:
+            raise typer.BadParameter(
+                "--output belongs to the live arm; "
+                "the deterministic arm records a baseline with --write-baseline",
+                param_hint="--output",
+            )
+    else:
+        if output is None:
+            raise typer.BadParameter(
+                "--output is required for a live run, which publishes its evidence there",
+                param_hint="--output",
+            )
+        if build_ref is None:
+            raise typer.BadParameter(
+                "--build-ref is required for a live run and is never guessed from the tree",
+                param_hint="--build-ref",
+            )
+    try:
+        capability = cast(_CapabilityModule, importlib.import_module("agent_core.evals.capability"))
+        module = cast(
+            _MemoryBenchmarkModule,
+            importlib.import_module("agent_core.evals.memory_benchmark_driver"),
+        )
+        result = asyncio.run(
+            module.run_benchmark(
+                Path.cwd(),
+                deterministic_only=deterministic_only,
+                model_policy=model_policy,
+                policy_profile=policy_profile,
+                build_ref=capability.resolve_build_ref(Path.cwd(), build_ref),
+                output=output,
+                baseline_output=write_baseline,
+            )
+        )
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"memory-benchmark evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to run the live memory benchmark")
+        return
+    typer.echo(result.model_dump_json())
+    if not result.passed:
+        for line in _incomplete_run_diagnostics(getattr(result, "live", None)):
+            typer.echo(line, err=True)
+        typer.echo(f"memory-benchmark evaluation failed: {result.failure_summary}", err=True)
+        raise typer.Exit(1)
+
+
+def _incomplete_run_diagnostics(live: Any) -> list[str]:
+    """Describe every run the live arm left incomplete, content-free.
+
+    The one-line summary says how many runs ended without an answer; these say
+    which, why, and at what cost, so a failed live arm is diagnosable from the
+    command's own output rather than only from the metrics document.  A
+    deterministic run has no live arm and prints nothing extra.
+    """
+
+    if live is None:
+        return []
+    module = cast(
+        _MemoryBenchmarkLiveModule,
+        importlib.import_module("agent_core.evals.memory_benchmark_live"),
+    )
+    return module.incomplete_run_diagnostics(live)
+
+
+def _run_external_memory_benchmark(
+    *,
+    dataset: str,
+    path: Path | None,
+    sample: int | None,
+    seed: int,
+    principal_speaker: str,
+    deterministic_only: bool,
+    model_policy: str,
+    policy_profile: str,
+    build_ref: str | None,
+    output: Path | None,
+    write_baseline: Path | None,
+) -> None:
+    """Run one locally supplied dataset and print its informational metrics.
+
+    The dataset arm publishes metrics rather than activation evidence, so it
+    takes an `--output` in either arm and records no baseline: the authored
+    corpus is the arm a baseline is compared against.
+    """
+
+    if dataset not in {"longmemeval", "locomo", "halumem"}:
+        raise typer.BadParameter(
+            f"unknown dataset {dataset!r}; expected longmemeval, locomo, or halumem",
+            param_hint="--external",
+        )
+    if path is None:
+        raise typer.BadParameter(
+            "--path is required for an external dataset, which is read locally and never committed",
+            param_hint="--path",
+        )
+    if output is None:
+        raise typer.BadParameter(
+            "--output is required for an external dataset, which publishes its metrics there",
+            param_hint="--output",
+        )
+    if write_baseline is not None:
+        raise typer.BadParameter(
+            "an external dataset records no baseline; the authored corpus does",
+            param_hint="--write-baseline",
+        )
+    if principal_speaker not in {"a", "b"}:
+        raise typer.BadParameter(
+            f"unknown principal speaker {principal_speaker!r}; expected a or b",
+            param_hint="--principal-speaker",
+        )
+    try:
+        capability = cast(_CapabilityModule, importlib.import_module("agent_core.evals.capability"))
+        module = cast(
+            _MemoryBenchmarkExternalModule,
+            importlib.import_module("agent_core.evals.memory_benchmark_external"),
+        )
+        result = asyncio.run(
+            module.run_external_benchmark(
+                Path.cwd(),
+                dataset=dataset,
+                path=path,
+                sample=sample,
+                seed=seed,
+                principal_speaker=principal_speaker,
+                deterministic_only=deterministic_only,
+                model_policy=model_policy,
+                policy_profile=policy_profile,
+                build_ref=capability.resolve_build_ref(Path.cwd(), build_ref),
+                output=output,
+            )
+        )
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
+        typer.echo(f"memory-benchmark evaluation failed: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if result is None:
+        typer.echo("skipped: set RUN_LIVE_MODEL_TESTS=1 to run the live memory benchmark")
+        return
+    typer.echo(result.model_dump_json())
