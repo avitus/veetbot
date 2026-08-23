@@ -580,6 +580,50 @@ async def test_conflict_emits_needs_confirmation_and_counts_as_committed() -> No
     ]
 
 
+async def test_replaying_a_conflicted_session_is_a_no_op() -> None:
+    """A conflict pair is convergent: replaying its evidence rebuilds nothing.
+
+    The conflict branch lifts the existing belief above the replacement it just
+    wrote, so the ordering that reaches the most recent related belief first
+    reaches the belief that was contradicted, not the record already produced
+    from this evidence. The same-source shortcut therefore has to be decided
+    over every related belief before any of them is acted on.
+    """
+
+    clock, factory, service, _retriever = await formation_stack()
+    stated = await user_event(factory, "Concise answers, please.")
+    await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers.",
+        subject="answer style",
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        source_event_ids=[stated],
+    )
+    clock.advance(timedelta(seconds=1))
+    await user_event(factory, "I prefer detailed answers.")
+    formed = await service.run(trigger="session_idle", scope="project-a", session_id=SESSION_ID)
+    assert formed.conflicted == 1
+    before = {record.id: record for record in await service.list_memories(include_inactive=True)}
+
+    replayed = await service.replay(SESSION_ID)
+
+    after = {record.id: record for record in await service.list_memories(include_inactive=True)}
+    assert set(after) == set(before)
+    assert [record.store_position for record in after.values()] == [
+        record.store_position for record in before.values()
+    ]
+    assert sorted(len(record.conflicts_with) for record in after.values()) == [1, 1]
+    assert (await _memory_event_types(factory)).count("memory.needs_confirmation") == 1
+    assert replayed.conflicted == 0
+    assert replayed.run.committed == 0
+    assert replayed.run.superseded == 0
+    assert replayed.run.candidates_proposed == 1
+    assert replayed.run.rejected == 1
+    assert replayed.beliefs == []
+
+
 async def test_later_user_statement_still_supersedes() -> None:
     """Equal authority with a later source or a later instant is still ordered."""
 

@@ -883,18 +883,34 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
-            for current in sorted(related, key=lambda item: item.store_position, reverse=True):
-                relation = self._resolver.relationship(
+            classified = [
+                (
                     current,
-                    clean_statement,
-                    sources,
-                    authority=authority,
-                    polarity=polarity,
-                    session_id=session_id,
-                    at=self._clock.now(),
+                    self._resolver.relationship(
+                        current,
+                        clean_statement,
+                        sources,
+                        authority=authority,
+                        polarity=polarity,
+                        session_id=session_id,
+                        at=self._clock.now(),
+                    ),
                 )
-                if relation == "same_source":
-                    return current, "unchanged"
+                for current in sorted(related, key=lambda item: item.store_position, reverse=True)
+            ]
+            # A replay is a no-op whichever related belief the ordering reaches
+            # first, so it is decided over all of them before any is acted on.
+            # A conflict leaves both halves of the pair live and lifts the
+            # existing belief above the replacement it just wrote, so
+            # re-consolidating the same evidence meets the belief that was
+            # contradicted before it meets the record that evidence produced.
+            replay = next(
+                (current for current, relation in classified if relation == "same_source"),
+                None,
+            )
+            if replay is not None:
+                return replay, "unchanged"
+            for current, relation in classified:
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))

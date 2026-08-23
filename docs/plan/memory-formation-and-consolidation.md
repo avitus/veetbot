@@ -234,8 +234,11 @@ event, or a different session with the existing belief not older than the
 incoming instant. Polarity is never the deciding factor, so an ordinary
 retraction still supersedes what it retracts, and a resolver that is not told
 the incoming instant keeps the ordering it had before the rule existed, exactly
-as one that is not told the session keeps the sequence-only comparison. The
-rule and what a conflict then commits are stated in
+as one that is not told the session keeps the sequence-only comparison. A
+conflict leaves both of its beliefs live, so the same-source shortcut is decided
+over every related belief before any of them is acted on, and re-consolidating a
+conflicted session is a no-op like any other replay. The rule and what a
+conflict then commits are stated in
 [memory-evaluation-and-lifecycle.md:835-853](memory-evaluation-and-lifecycle.md:835-853).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
