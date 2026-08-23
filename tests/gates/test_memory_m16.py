@@ -9,7 +9,10 @@ from pathlib import Path
 
 import pytest
 
+from agent_core.adapters.determinism import FixedClock
+from agent_core.bootstrap import build
 from agent_core.config import Settings
+from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.evals.memory_benchmark import (
     PROBE_CATEGORIES,
     BenchmarkProbe,
@@ -31,6 +34,12 @@ from agent_core.evals.memory_benchmark_driver import (
     run_deterministic_scenario,
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
+from agent_core.memory.profiles import (
+    FormationProfile,
+    MemoryProfiles,
+    RetrievalProfile,
+    SnapshotProfiles,
+)
 from tests.integration.m2_support import memory_settings
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -398,3 +407,35 @@ async def test_bench_formed_updates_never_render_superseded(benchmark_settings: 
     assert len(corrections) >= 2 * _MINIMUM_PROBES_PER_CATEGORY
     for probe in corrections:
         assert probe.currency_violations == 0
+
+
+async def test_memory_profiles_are_loaded_and_mirror_shipped_defaults(tmp_path: Path) -> None:
+    """The composition reads `memory/profiles.yaml`, defaults included."""
+
+    shipped_settings = replace(memory_settings(), artifact_root=tmp_path / "artifacts")
+    async with build(
+        settings=shipped_settings,
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=FixedClock(_START),
+    ) as composition:
+        assert composition.memory_profiles == MemoryProfiles()
+        assert composition.memory_retriever.retrieval_profile == RetrievalProfile()
+        assert composition.memory.formation_profile == FormationProfile()
+
+    config_dir = tmp_path / "config"
+    overlay = config_dir / "memory" / "profiles.yaml"
+    overlay.parent.mkdir(parents=True)
+    overlay.write_text("retrieval:\n  reciprocal_rank_fusion_k: 7\n", encoding="utf-8")
+    overlaid_settings = replace(shipped_settings, config_dir=config_dir)
+
+    async with build(
+        settings=overlaid_settings,
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=FixedClock(_START),
+    ) as composition:
+        assert composition.memory_profiles.retrieval.reciprocal_rank_fusion_k == 7
+        assert composition.memory_retriever.retrieval_profile.reciprocal_rank_fusion_k == 7
+        assert composition.memory_profiles.formation == FormationProfile()
+        assert composition.memory_profiles.snapshots == SnapshotProfiles()

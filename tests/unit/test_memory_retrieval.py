@@ -10,10 +10,12 @@ caps, budget-bound assembly, and the recall audit event.
 from __future__ import annotations
 
 import hashlib
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
 
+from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -22,8 +24,10 @@ from agent_core.domain.memory import (
     RecallMoment,
     RecallProfile,
 )
+from agent_core.memory.profiles import LifecycleWeights, RetrievalProfile, TraceProfile
 from agent_core.memory.retrieval import (
     RETRIEVAL_POLICY_VERSION,
+    HybridMemoryRetriever,
     _rrf_fuse,
     _score,
     render_memory,
@@ -312,3 +316,98 @@ async def test_snapshot_uses_the_core_profile_and_is_reproducible() -> None:
 
     again = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
     assert again.rendered == snapshot.rendered
+
+
+def _ids(start: int) -> SequenceIdFactory:
+    return SequenceIdFactory(UUID(int=value) for value in range(start, start + 1_000))
+
+
+async def test_rrf_k_and_lifecycle_weights_come_from_the_retrieval_profile() -> None:
+    clock, factory, _service, retriever = await formation_stack()
+    async with factory() as uow:
+        await uow.memories.upsert_belief(
+            memory(belief_id=661).model_copy(
+                update={"subject": "style-a", "confidence": 0.9, "store_position": 1}
+            )
+        )
+        await uow.memories.upsert_belief(
+            memory(belief_id=662).model_copy(
+                update={"subject": "style-b", "confidence": 0.7, "store_position": 2}
+            )
+        )
+    tight = HybridMemoryRetriever(
+        factory,
+        clock,
+        _ids(4_000),
+        principal(),
+        profile=RetrievalProfile(reciprocal_rank_fusion_k=1),
+    )
+
+    shipped_fusion = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    tight_fusion = await tight.recall(recall_query(), session_id=SESSION_ID)
+
+    assert [item.belief_id for item in shipped_fusion.items] == [
+        item.belief_id for item in tight_fusion.items
+    ]
+    assert tight_fusion.items[1].score < shipped_fusion.items[1].score
+
+    provisional = memory().model_copy(update={"status": MemoryStatus.PROVISIONAL})
+    shipped_score = _score(provisional, recall_query())
+    downweighted = _score(
+        provisional,
+        recall_query(),
+        profile=RetrievalProfile(lifecycle_weights=LifecycleWeights(provisional=0.1)),
+    )
+    assert shipped_score is not None and downweighted is not None
+    assert downweighted.score < shipped_score.score
+
+
+async def test_snapshot_reserves_durable_share() -> None:
+    _clock, factory, _service, retriever = await formation_stack()
+    preference = memory(belief_id=671).model_copy(
+        update={
+            "confidence": 0.3,
+            "authority": MemoryAuthority.INFERRED,
+            "store_position": 1,
+        }
+    )
+    facts = [
+        memory(belief_id=672 + index, statement=f"Deploy region {index} is eu-west-1").model_copy(
+            update={
+                "subject": f"deploy region {index}",
+                "belief_type": BeliefType.FACT,
+                "confidence": 0.95,
+                "store_position": index + 2,
+            }
+        )
+        for index in range(4)
+    ]
+    async with factory() as uow:
+        for record in (preference, *facts):
+            await uow.memories.upsert_belief(record)
+
+    snapshot = await retriever.snapshot(
+        session_id=SESSION_ID, current_scope="project-a", max_items=3
+    )
+
+    assert len(snapshot.items) == 3
+    assert preference.id in {item.belief_id for item in snapshot.items}
+
+
+async def test_trace_retention_uses_profile_days() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        _ids(5_000),
+        principal(),
+        trace_retention=TraceProfile(operator_retention_days=7),
+    )
+    async with factory() as uow:
+        await uow.memories.upsert_belief(memory())
+
+    result = await retriever.recall(recall_query(), session_id=SESSION_ID)
+
+    async with factory() as uow:
+        trace = await uow.traces.get(result.trace_id, principal())
+    assert trace.operator_fields_expire_at == NOW + timedelta(days=7)
