@@ -27,6 +27,7 @@ from agent_core.domain.memory import (
     RecallResult,
     RecallTrace,
     Sensitivity,
+    lexical_terms,
 )
 from agent_core.domain.runs import Run
 from agent_core.memory.profiles import (
@@ -39,6 +40,10 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 RETRIEVAL_POLICY_VERSION = "retrieval@1"
+# Episode search reads the session stream in bounded pages: never the whole
+# stream at once, and never more pages than a bounded read is worth.
+EPISODE_PAGE_MINIMUM = 256
+EPISODE_MAX_PAGES = 64
 _DURABLE_TYPES = frozenset({BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR})
 _INJECTION = re.compile(
     r"(?:ignore\s+(?:all\s+)?previous|system\s+prompt|developer\s+message|"
@@ -68,6 +73,8 @@ class DeterministicQueryFormer:
         run: Run,
         working_state: WorkingState,
         message: str | None,
+        *,
+        current_scope: str | None = None,
     ) -> list[RecallQuery]:
         del run
         fragments = [working_state.objective or "", *working_state.open_questions, message or ""]
@@ -79,7 +86,9 @@ class DeterministicQueryFormer:
             RecallQuery(
                 tenant_id=self._principal.tenant_id,
                 principal_id=self._principal.principal_id,
-                current_scope=self._scope,
+                # The turn's session names the project; the scope the former
+                # was constructed with is the default a caller may override.
+                current_scope=current_scope or self._scope,
                 text=text or None,
                 subjects=subjects,
                 profile=RecallProfile.TASK,
@@ -289,25 +298,34 @@ class EventEpisodeSearch:
             query.principal_id != self._principal.principal_id
         ):
             return []
-        async with self._uow_factory() as uow:
-            events = await uow.events.list_after(
-                query.session_id,
-                0,
-                self._principal,
-                created_at_or_after=query.since,
-                created_before=query.until,
-                # A text predicate is applied to explicit payload fields below;
-                # limiting first could hide later matches.
-                limit=query.limit if not query.text else None,
-            )
-        result = []
+        # The text predicate is applied to explicit payload fields below, so a
+        # match can sit anywhere in the stream. The stream is read in bounded
+        # pages rather than whole: the cursor walks the event sequence until
+        # the caller's limit is met, a short page proves the stream is spent,
+        # or the page budget runs out.
+        result: list[EventEnvelope] = []
         needle = (query.text or "").casefold()
-        for event in events:
-            if needle and not _payload_contains(event.payload, needle):
-                continue
-            result.append(event)
-            if len(result) >= query.limit:
+        page = max(query.limit * 8, EPISODE_PAGE_MINIMUM)
+        cursor = 0
+        for _ in range(EPISODE_MAX_PAGES):
+            async with self._uow_factory() as uow:
+                events = await uow.events.list_after(
+                    query.session_id,
+                    cursor,
+                    self._principal,
+                    created_at_or_after=query.since,
+                    created_before=query.until,
+                    limit=page,
+                )
+            for event in events:
+                if needle and not _payload_contains(event.payload, needle):
+                    continue
+                result.append(event)
+                if len(result) >= query.limit:
+                    return result
+            if len(events) < page:
                 break
+            cursor = events[-1].sequence
         return result
 
 
@@ -363,7 +381,7 @@ def _score(
     *,
     profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
 ) -> RecalledBelief | None:
-    text_terms = _terms(query.text or "")
+    text_terms = lexical_terms(query.text or "")
     subject_terms = {subject.casefold() for subject in query.subjects}
     record_text = f"{record.subject} {record.statement}".casefold()
     lexical = (
@@ -488,14 +506,6 @@ def _line(item: RecalledBelief) -> str:
         f"[m:{str(item.belief_id)[:8]}]{origin} {html.escape(item.statement)} "
         f"({item.authority.value}, {item.confidence_band}){conflict}"
     )
-
-
-def _terms(text: str) -> set[str]:
-    return {
-        part.strip(".,:;!?()[]{}\"'")
-        for part in text.casefold().split()
-        if len(part.strip(".,:;!?()[]{}\"'")) >= 3
-    }
 
 
 def _entities(text: str) -> set[str]:

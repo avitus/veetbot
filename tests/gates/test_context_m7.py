@@ -152,13 +152,15 @@ class _StaticQueryFormer:
         active_run: Run,
         working_state: WorkingState,
         message: str | None,
+        *,
+        current_scope: str | None = None,
     ) -> list[RecallQuery]:
         del active_run, working_state, message
         return [
             RecallQuery(
                 tenant_id=principal().tenant_id,
                 principal_id=principal().principal_id,
-                current_scope="project-a",
+                current_scope=current_scope or "project-a",
                 text="concise answers",
                 budget_tokens=500,
                 max_items=5,

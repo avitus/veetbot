@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
@@ -131,6 +132,85 @@ def minimum_supported_case_count(positive_case_count: int) -> int:
     """Return the exact eighty-percent positive-coverage floor."""
 
     return (positive_case_count * 4 + 4) // 5
+
+
+MINIMUM_LEXICAL_TERM_LENGTH = 3
+_TERM_PUNCTUATION = ".,:;!?()[]{}\"'"
+# One run of alphanumerics, or several joined by the characters PostgreSQL's
+# default parser keeps inside a single token: a host, a path, an address, a
+# decimal, a hyphenated word. Underscore separates, as it does there.
+_LEXEME_ATOM = re.compile(r"[^\W_]+(?:[-'\u2019./:@][^\W_]+)*")
+_LEXEME_APOSTROPHE = re.compile(r"['\u2019]")
+
+
+def lexical_terms(text: str) -> set[str]:
+    """Split text into the terms lexical recall matches on."""
+
+    return {
+        stripped
+        for part in text.casefold().split()
+        if len(stripped := part.strip(_TERM_PUNCTUATION)) >= MINIMUM_LEXICAL_TERM_LENGTH
+    }
+
+
+def lexical_tokens(text: str) -> set[str]:
+    """Split text into the lexemes a `simple` full-text vector would hold.
+
+    Both belief stores must answer a text query the same way, and PostgreSQL
+    answers it by matching whole lexemes of `to_tsvector('simple', ...)`: it
+    lowercases and never stems, so `themes` is not `theme`, it keeps a run
+    joined by dots, slashes, colons, or an at sign whole the way a host, path,
+    or address stays whole, it splits an apostrophe into its parts, and it
+    emits a hyphenated word both whole and in parts.
+
+    The approximation ends at the parser's edges: a URL carrying a query
+    string, and a date, are divided differently there. Lexical recall is a
+    ranking arm rather than an isolation predicate, so an edge that differs
+    changes what the ranker is offered and never what a principal may see.
+    """
+
+    tokens: set[str] = set()
+    for atom in _LEXEME_ATOM.findall(text.casefold()):
+        for part in _LEXEME_APOSTROPHE.split(atom):
+            if not part:
+                continue
+            tokens.add(part)
+            if "-" in part:
+                tokens.update(piece for piece in part.split("-") if piece)
+    return tokens
+
+
+def lexical_term_lexemes(terms: Iterable[str]) -> list[frozenset[str]]:
+    """The lexemes each query term needs, the way `plainto_tsquery` ands them."""
+
+    return [frozenset(lexical_tokens(term)) for term in terms]
+
+
+def lexical_text_matches(term_lexemes: Iterable[frozenset[str]], text: str) -> bool:
+    """Whether any term's lexemes all appear in this text.
+
+    A term that reduces to no lexeme matches nothing, as an empty tsquery does.
+    """
+
+    tokens = lexical_tokens(text)
+    return any(lexemes and lexemes <= tokens for lexemes in term_lexemes)
+
+
+def lexical_query_terms(text: str | None) -> list[str]:
+    """Order the query's lexical terms so both belief stores match the same set.
+
+    Every store answers a text query with any-term semantics: a record matches
+    when it overlaps one term or more. Text too short to yield a term is still
+    a query, so it is matched whole rather than matching everything.
+    """
+
+    if text is None:
+        return []
+    terms = sorted(lexical_terms(text))
+    if terms:
+        return terms
+    collapsed = " ".join(text.casefold().split())
+    return [collapsed] if collapsed else []
 
 
 class ProviderExtractionEvaluationEvidence(BaseModel):
@@ -369,6 +449,9 @@ class RecallTrace(BaseModel):
     returned: list[UUID] = Field(default_factory=list)
     cited: list[UUID] = Field(default_factory=list)
     dropped_for_budget: list[UUID] = Field(default_factory=list)
+    # The operator sweep nulls the identifiers above and leaves this count, so
+    # the user-safe projection can still say how many beliefs were considered.
+    dropped_for_budget_count: int = Field(default=0, ge=0)
     blocked: list[UUID] = Field(default_factory=list)
     carried_in: list[UUID] = Field(default_factory=list)
     beliefs: list[RecalledBelief] = Field(default_factory=list)
@@ -376,6 +459,18 @@ class RecallTrace(BaseModel):
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime
+
+    @property
+    def has_operator_fields(self) -> bool:
+        """Whether the operator tier still holds anything an expiry would null."""
+
+        return bool(self.arm_latencies_ms or self.candidates or self.dropped_for_budget)
+
+    @property
+    def considered_not_shown(self) -> int:
+        """Beliefs dropped for budget: by identifier, or by count once expired."""
+
+        return len(self.dropped_for_budget) or self.dropped_for_budget_count
 
 
 class TracedBelief(BaseModel):

@@ -292,7 +292,11 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
 from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
-from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
+from agent_core.domain.sessions import (
+    DEFAULT_PROJECT_SCOPE,
+    SESSION_BROWSER_PROFILE_METADATA_KEY,
+    project_scope,
+)
 from agent_core.domain.skills import SkillPackage, SkillSource
 from agent_core.domain.tools import ToolExecutionContext
 from agent_core.execution.egress import validate_destination
@@ -1642,6 +1646,17 @@ async def _compose(
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
         )
+
+        async def session_project_scope(session_id: UUID) -> str:
+            """Name the project a session belongs to, for formation and recall."""
+
+            try:
+                async with uow_factory() as uow:
+                    session = await uow.sessions.get(session_id, principal)
+            except NotFoundError:
+                return DEFAULT_PROJECT_SCOPE
+            return project_scope(session.metadata)
+
         context_builder = BudgetedContextBuilder(
             context_planner,
             estimator,
@@ -1649,6 +1664,7 @@ async def _compose(
             working_state,
             memory_retriever,
             query_former,
+            session_project_scope,
         )
         compactor = StructuredCompactor(
             estimator,
@@ -1664,6 +1680,7 @@ async def _compose(
             clock,
             ids,
             principal,
+            trace_retention=memory_profiles.traces,
         )
         registry.register(KnowledgeIngestTool(knowledge_service, uow_factory))
         registry.register(KnowledgeSearchTool(knowledge_service))
@@ -1686,6 +1703,9 @@ async def _compose(
         async def sweep_memory() -> int:
             return len(await memory_service.expire())
 
+        async def sweep_traces() -> int:
+            return await memory_service.expire_traces()
+
         async def sweep_memory_consolidation() -> int:
             if not memory_profiles.formation.session_boundary_enabled:
                 return 0
@@ -1702,7 +1722,7 @@ async def _compose(
                 try:
                     await memory_service.run(
                         trigger="session_idle",
-                        scope="general",
+                        scope=await session_project_scope(session_id),
                         session_id=session_id,
                     )
                 except Exception:
@@ -1888,7 +1908,7 @@ async def _compose(
                 return
             await memory_service.run(
                 trigger="session_close",
-                scope="general",
+                scope=await session_project_scope(session_id),
                 session_id=session_id,
             )
 
@@ -2063,6 +2083,7 @@ async def _compose(
                     sweep_sandboxes=None if storage == "memory" else sandbox_manager.reap,
                     sweep_artifact_orphans=reconcile_artifact_orphans,
                     sweep_memory=sweep_memory,
+                    sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
                     sweep_session_deletions=sweep_session_deletions,
                 ),

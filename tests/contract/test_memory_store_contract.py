@@ -272,9 +272,88 @@ async def test_query_applies_ceiling_type_and_bitemporal_filters() -> None:
     )
     await store.upsert_belief(superseded)
     assert superseded.id not in {record.id for record in await store.query(recall_query())}
-    historical = await store.query(recall_query(as_of=NOW - timedelta(days=1, hours=12)))
+    # Lexical recall is any-term, so a historical query for a belief that
+    # shares no term with the default text names its subject instead.
+    historical = await store.query(
+        recall_query(as_of=NOW - timedelta(days=1, hours=12), text=None, subjects=["notes"])
+    )
     assert [record.id for record in historical] == [superseded.id]
     # Bi-temporal validity outranks include_superseded: a belief whose validity
     # ended is not live even when the caller asks to see superseded records.
     included = await store.query(recall_query(include_superseded=True))
     assert superseded.id not in {record.id for record in included}
+
+
+async def test_query_excludes_zero_overlap_text_and_caps_candidates_newest_first() -> None:
+    """Lexical recall is any-term, newest-first, and bounded before ranking.
+
+    The store answers with candidates, not with a ranking, so a record sharing
+    no term with the query is left out unless its subject was named, and the
+    candidate set is capped at `max(max_items * 8, 64)` newest records.
+    """
+
+    store = _store()
+    overlapping = [
+        memory(
+            belief_id=1_000 + position, statement=f"User prefers concise answers {position}"
+        ).model_copy(update={"subject": f"answer style {position}", "store_position": position})
+        for position in range(1, 71)
+    ]
+    unrelated = memory(belief_id=1_900, statement="Deployment runs on Fridays").model_copy(
+        update={"subject": "release cadence", "store_position": 71}
+    )
+    for record in (*overlapping, unrelated):
+        await store.upsert_belief(record)
+
+    capped = await store.query(recall_query(text="concise answers", max_items=1))
+    assert [record.store_position for record in capped] == list(range(70, 6, -1))
+    assert unrelated.id not in {record.id for record in capped}
+
+    named = await store.query(
+        recall_query(text="concise answers", subjects=["release cadence"], max_items=1)
+    )
+    assert named[0].id == unrelated.id
+    assert len(named) == 64
+
+
+async def test_query_matches_whole_words_the_way_full_text_search_does() -> None:
+    """The in-memory predicate matches lexemes, not substrings.
+
+    PostgreSQL matches `to_tsvector('simple', ...)` against a per-term
+    `plainto_tsquery`, which compares whole lexemes and never stems under the
+    `simple` configuration. A substring predicate would make the in-memory tier
+    the more permissive of the two stores, and it is the tier the benchmark
+    measures, so it compares tokens the same way.
+    """
+
+    store = _store()
+    plural = memory(belief_id=1_100, statement="Dashboards use the emerald themes").model_copy(
+        update={"subject": "dashboard palette", "store_position": 1}
+    )
+    prefixed = memory(belief_id=1_101, statement="Apple Watch charges overnight").model_copy(
+        update={"subject": "wearables", "store_position": 2}
+    )
+    exact = memory(belief_id=1_102, statement="The theme is emerald").model_copy(
+        update={"subject": "editor colours", "store_position": 3}
+    )
+    hyphenated = memory(belief_id=1_103, statement="The e-mail digest is weekly").model_copy(
+        update={"subject": "digest cadence", "store_position": 4}
+    )
+    for record in (plural, prefixed, exact, hyphenated):
+        await store.upsert_belief(record)
+
+    # "theme" is not "themes" and "app" is not "Apple": neither is a lexeme of
+    # the record it reads as a substring of.
+    assert [record.id for record in await store.query(recall_query(text="theme"))] == [exact.id]
+    assert await store.query(recall_query(text="app")) == []
+    assert [record.id for record in await store.query(recall_query(text="themes"))] == [plural.id]
+    assert [record.id for record in await store.query(recall_query(text="apple"))] == [prefixed.id]
+    # A hyphenated word is its own lexeme and each of its parts, as the
+    # PostgreSQL parser splits it.
+    assert [record.id for record in await store.query(recall_query(text="mail"))] == [hyphenated.id]
+    assert [record.id for record in await store.query(recall_query(text="e-mail"))] == [
+        hyphenated.id
+    ]
+    # Query text that reduces to no lexeme matches nothing, as an empty
+    # `plainto_tsquery` does, rather than matching everything.
+    assert await store.query(recall_query(text="...")) == []

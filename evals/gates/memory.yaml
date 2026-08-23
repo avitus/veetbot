@@ -244,7 +244,7 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Operator trace fields expire on schedule.** A trace past its operator expiry loses its arm latencies, candidate counts, and dropped-for-budget identifiers while its user-safe fields survive intact, an unexpired trace is untouched, and a second sweep changes nothing."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_trace_operator_fields_expire_on_schedule
 - id: gate.memory.decay_lifecycle
   milestone: 16
   kind: case

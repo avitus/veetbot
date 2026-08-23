@@ -188,6 +188,7 @@ class MaintenanceWorker:
         sweep_sandboxes: SandboxSweep | None = None,
         sweep_artifact_orphans: Callable[[], Awaitable[int]] | None = None,
         sweep_memory: Callable[[], Awaitable[int]] | None = None,
+        sweep_traces: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
@@ -201,6 +202,7 @@ class MaintenanceWorker:
         self._sweep_sandboxes = sweep_sandboxes
         self._sweep_artifact_orphans = sweep_artifact_orphans
         self._sweep_memory = sweep_memory
+        self._sweep_traces = sweep_traces
         self._sweep_memory_consolidation = sweep_memory_consolidation
         self._sweep_session_deletions = sweep_session_deletions
         if artifact_orphan_interval_seconds <= 0:
@@ -258,6 +260,11 @@ class MaintenanceWorker:
                 await self._sweep_memory()
             except Exception:
                 logger.exception("memory expiry sweep failed")
+        if self._sweep_traces is not None:
+            try:
+                await self._sweep_traces()
+            except Exception:
+                logger.exception("recall trace operator-field expiry sweep failed")
         if self._sweep_memory_consolidation is not None:
             try:
                 await self._sweep_memory_consolidation()

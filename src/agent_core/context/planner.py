@@ -18,7 +18,7 @@ from agent_core.domain.errors import ConflictError, ContextOverflow
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
-from agent_core.domain.sessions import Session
+from agent_core.domain.sessions import Session, project_scope
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryRetriever
@@ -227,7 +227,7 @@ class EventContextPlanner:
                 RecallQuery(
                     tenant_id=principal.tenant_id,
                     principal_id=principal.principal_id,
-                    current_scope=str(session.metadata.get("project_scope", "general")),
+                    current_scope=project_scope(session.metadata),
                     profile=RecallProfile.CORE,
                     budget_tokens=int(memory_config["max_tokens"]),
                     max_items=int(memory_config["max_items"]),

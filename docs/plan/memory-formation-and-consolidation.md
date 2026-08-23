@@ -209,6 +209,15 @@ For each surviving candidate, match against existing beliefs by subject + semant
 | Refinement | Update/extend the existing belief (e.g. more specific). |
 | Contradiction | **Never overwrite.** Insert the new belief and link `conflicts_with` / `supersedes`; apply the conflict policy below. |
 
+**A replay is only a replay inside its own session.** The same-source shortcut
+that makes re-consolidating an already-consolidated episode a no-op compares
+event sequences, and sequences are allocated per session, so it applies only
+when the existing belief's source session is the session being consolidated. A
+later session numbers its own first event one as well; treating that as the same
+source would classify every later session as a replay and leave the belief it
+contradicts live. A resolver that is not told which session is consolidating
+keeps the sequence-only comparison.
+
 **Conflict-resolution policy (default).** Resolve by **source authority, then
 recency**: a direct user statement supersedes an inferred one; a more recent user
 statement supersedes an older user statement. The superseded belief is retained

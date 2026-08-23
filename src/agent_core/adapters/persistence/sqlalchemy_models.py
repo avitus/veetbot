@@ -951,6 +951,7 @@ class RecallTraceRow(Base):
     __table_args__ = (
         Index("ix_recall_traces_turn", "turn_id", "created_at"),
         Index("ix_recall_traces_trace_gin", "trace", postgresql_using="gin"),
+        Index("ix_recall_traces_operator_expiry", "operator_fields_expire_at"),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)

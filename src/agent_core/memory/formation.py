@@ -45,6 +45,8 @@ MAX_AUTOMATIC_CANDIDATES = 12
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
 SESSION_IDLE_SECONDS = 30
+# How many recall traces one maintenance pass may strip of their operator tier.
+TRACE_EXPIRY_SWEEP_LIMIT = 500
 PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
 PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
 _SECRET = re.compile(
@@ -526,9 +528,18 @@ class DeterministicConflictResolver:
         return " ".join(value.casefold().split())
 
     def relationship(
-        self, existing: MemoryRecord, statement: str, source_event_ids: list[int]
+        self,
+        existing: MemoryRecord,
+        statement: str,
+        source_event_ids: list[int],
+        *,
+        session_id: UUID | None = None,
     ) -> str:
-        if set(source_event_ids).issubset(existing.source_event_ids):
+        # Event sequences are allocated per session, so the same number means
+        # the same episode only within one session. A caller that cannot name
+        # the consolidating session keeps the legacy sequence-only comparison.
+        same_session = session_id is None or existing.source_session_id == session_id
+        if same_session and set(source_event_ids).issubset(existing.source_event_ids):
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
@@ -701,7 +712,9 @@ class GovernedMemoryService:
                 belief_type,
             )
             for current in sorted(related, key=lambda item: item.store_position, reverse=True):
-                relation = self._resolver.relationship(current, clean_statement, sources)
+                relation = self._resolver.relationship(
+                    current, clean_statement, sources, session_id=session_id
+                )
                 if relation == "same_source":
                     return current, "unchanged"
                 if relation == "duplicate":
@@ -1310,6 +1323,19 @@ class GovernedMemoryService:
     async def expire(self) -> list[MemoryRecord]:
         async with self._uow_factory() as uow:
             return await uow.memories.expire(self._principal)
+
+    async def expire_traces(
+        self, now: datetime | None = None, *, limit: int = TRACE_EXPIRY_SWEEP_LIMIT
+    ) -> int:
+        """Null the operator tier of recall traces past their operator expiry.
+
+        The user-safe tier is untouched, so this is retention rather than
+        deletion; the bound keeps one sweep's write set small enough that the
+        maintenance pass stays predictable however many traces are due.
+        """
+
+        async with self._uow_factory() as uow:
+            return await uow.traces.expire_operator_fields(now or self._clock.now(), limit)
 
     async def _new_record(
         self,
