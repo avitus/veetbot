@@ -137,7 +137,7 @@ lifecycle is already specified work.
   decay, usage feedback, the recall delta, correction lines, established facts,
   conflicts, re-derivation, trace expiry, lexical parity, and the profile
   document.
-- The shipped operator-reviewable knob inventory grows from 121 to 132 as the
+- The shipped operator-reviewable knob inventory grows from 126 to 137 as the
   memory profile document becomes real, and three interactive snapshot knobs
   move to the context plan.
 - One migration is added, for the trace operator-expiry index.

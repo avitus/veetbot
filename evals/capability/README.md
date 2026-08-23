@@ -126,6 +126,11 @@ covered every run. The thresholds are derived from the counts inside the
 artifact rather than written into it, so an artifact that exists is an artifact
 that passed, and a failing run prints its diagnostics and writes nothing.
 
+The evidence rows carry each arm's answer text verbatim. That is safe only
+because every probe in this corpus is synthetic — the artifact quotes invented
+people and invented facts — so a corpus drawn from real conversations would
+have to hash those answers rather than publish them.
+
 Two artifacts are comparable only when they share the corpus digest, the
 benchmark version, the formation and retrieval policy versions, and the
 provider, model, and policy tuple — all of which the artifact carries. Live

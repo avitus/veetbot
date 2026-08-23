@@ -1,6 +1,6 @@
 """Memory conflict-resolution contract."""
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.domain.memory import MemoryAuthority, Polarity
@@ -49,6 +49,48 @@ def test_conflict_resolver_reads_a_replay_only_inside_the_belief_source_session(
     )
     # A caller that cannot name the session keeps the sequence-only comparison.
     assert resolver.relationship(value, value.statement, [1]) == "same_source"
+
+
+def test_conflict_resolver_measures_cross_session_recency_against_evidence_onset() -> None:
+    """Across sessions the incoming instant is weighed against `valid_from`.
+
+    `updated_at` moves whenever a belief is cited, decays, or is linked into a
+    conflict, so it says when the record was last touched rather than when its
+    evidence arrived. Weighing an incoming instant against it let a belief that
+    had merely been read look newer than a genuinely later statement, and let a
+    replay of older evidence look newer than the belief that replaced it. The
+    evidence-onset instant is the one that orders the two: incoming evidence
+    supersedes only when it is strictly newer, and equal-or-older evidence at
+    equal authority is a conflict.
+    """
+
+    resolver = DeterministicConflictResolver()
+    touched = memory().model_copy(
+        update={
+            "authority": MemoryAuthority.INFERRED,
+            "valid_from": NOW,
+            "updated_at": NOW + timedelta(days=1),
+        }
+    )
+    other_session = UUID(int=0x5E55)
+
+    def resolve(at: datetime) -> str:
+        return resolver.relationship(
+            touched,
+            "User prefers detailed answers",
+            [1],
+            authority=MemoryAuthority.INFERRED,
+            session_id=other_session,
+            at=at,
+        )
+
+    # Older evidence than the existing belief's onset never supersedes it.
+    assert resolve(NOW - timedelta(seconds=1)) == "conflict"
+    # The same instant in a different session orders nothing either.
+    assert resolve(NOW) == "conflict"
+    # Strictly newer evidence supersedes, even though the record was touched
+    # after that evidence arrived.
+    assert resolve(NOW + timedelta(seconds=1)) == "contradiction"
 
 
 def test_conflict_resolver_reports_conflicts_for_lower_authority_and_unordered_equal_authority() -> (  # noqa: E501

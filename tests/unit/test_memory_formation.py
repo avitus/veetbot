@@ -519,6 +519,59 @@ async def test_a_later_session_supersedes_across_colliding_source_sequences() ->
     assert replay.statement == "User lives in Portland."
 
 
+async def test_replaying_an_older_session_does_not_supersede_a_newer_belief() -> None:
+    """Re-derivation must never revert currency.
+
+    `agent memory replay --session <id> --confirm` re-consolidates one
+    session's original evidence, so the statement it proposes is exactly as old
+    as that evidence however long ago it was spoken. Anchoring the
+    cross-session recency test on the consolidation instant made every replay
+    look later than the belief that had already replaced it, and the stale
+    statement superseded the current one. The incoming instant is the newest
+    source event backing the candidate, so replaying older evidence against a
+    newer successor is a conflict: the newer belief keeps standing, the
+    replayed statement enters beside it, both are flagged, and the user is
+    asked which holds.
+    """
+
+    clock, factory, service, _retriever = await formation_stack()
+    await user_event(factory, "I live in Seattle.")
+    first = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+    (seattle,) = first.beliefs
+
+    clock.advance(timedelta(minutes=5))
+    later = await _second_session(factory)
+    await _session_event(factory, later, "I live in Portland.")
+    second = await service.run(trigger="session_idle", scope="general", session_id=later)
+    (portland,) = second.beliefs
+    assert second.run.superseded == 1
+
+    clock.advance(timedelta(minutes=5))
+    replayed = await service.replay(SESSION_ID)
+
+    records = {record.id: record for record in await service.list_memories(include_inactive=True)}
+    # The newer belief is untouched by the replay: nothing retires it.
+    assert records[portland.id].status is MemoryStatus.PROVISIONAL
+    assert records[portland.id].superseded_by is None
+    assert records[portland.id].valid_to is None
+    # The stale belief stays retired, and the evidence behind it re-enters
+    # beside the current statement as a flagged conflict instead of replacing
+    # it or being silently dropped.
+    assert records[seattle.id].status is MemoryStatus.SUPERSEDED
+    (restated,) = replayed.beliefs
+    assert restated.statement == seattle.statement
+    assert restated.conflicts_with == [portland.id]
+    assert restated.flagged_for_review is True
+    assert records[portland.id].conflicts_with == [restated.id]
+    assert records[portland.id].flagged_for_review is True
+
+    assert replayed.conflicted == 1
+    assert replayed.run.committed == 1
+    assert replayed.run.superseded == 0
+    assert (await _memory_event_types(factory)).count("memory.needs_confirmation") == 1
+    assert "memory.superseded" not in await _memory_event_types(factory)
+
+
 async def test_inferred_contradiction_of_a_user_belief_is_conflicted_flagged_and_linked_both_ways() -> (  # noqa: E501
     None
 ):
