@@ -24,8 +24,8 @@ import agent_core.cli.main as cli_main
 import scripts.check_production_deployment as production_check
 from agent_core.bootstrap import build
 from agent_core.cli.main import app
-from agent_core.config import load_settings
-from agent_core.domain.errors import ExportConsentError
+from agent_core.config import ConfigurationError, load_settings
+from agent_core.domain.errors import ExportConsentError, NotFoundError
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import ConsolidationResult, ConsolidationRun, MemoryEdit
 from agent_core.domain.messages import AssistantMessage, TextPart
@@ -1101,6 +1101,46 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
         ("replay", SESSION_ID),
         ("delete", belief.id),
     ]
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_exit_code"),
+    [
+        (ConfigurationError("invalid memory configuration"), 4),
+        (NotFoundError("memory session not found"), 1),
+    ],
+)
+def test_memory_diagnose_and_replay_distinguish_configuration_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+    expected_exit_code: int,
+) -> None:
+    async def fail(_session_id: UUID) -> object:
+        raise error
+
+    monkeypatch.setattr(cli_main, "_memory_diagnose", fail)
+    monkeypatch.setattr(cli_main, "_memory_replay", fail)
+    runner = CliRunner()
+
+    diagnosed = runner.invoke(app, ["memory", "diagnose", "--session", str(SESSION_ID)])
+    replayed = runner.invoke(
+        app,
+        ["memory", "replay", "--session", str(SESSION_ID), "--confirm"],
+    )
+
+    assert diagnosed.exit_code == expected_exit_code
+    assert replayed.exit_code == expected_exit_code
+    assert str(error) in diagnosed.stderr
+    assert str(error) in replayed.stderr
+
+
+def test_docs_stylesheet_uses_portable_linter_compatible_declarations() -> None:
+    stylesheet = (ROOT / "docs/assets/stylesheets/extra.css").read_text(encoding="utf-8")
+
+    assert "Consolas" not in stylesheet
+    assert "currentColor" not in stylesheet
+    assert "word-break: break-word" not in stylesheet
+    assert "overflow-wrap: anywhere" in stylesheet
 
 
 async def test_in_memory_composition_round_trips_a_recall_trace_through_the_public_service(

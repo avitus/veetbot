@@ -37,7 +37,7 @@ passes. Passing requires lift over the deterministic arm, complete support for a
 least 17 of the 21 positive cases, zero fabrication in both arms, and no policy
 regression. Every run prints structured per-case arm diagnostics; a failed run
 exits non-zero and prints those diagnostics without creating an activation
-artifact. The 24 provider calls have a combined USD 1.20 policy ceiling. Startup
+artifact. The 25 provider calls have a combined USD 1.25 policy ceiling. Startup
 still checks the artifact against the exact active extraction tuple.
 
 ## Memory benchmark

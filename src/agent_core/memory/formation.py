@@ -1094,7 +1094,13 @@ class GovernedMemoryService:
                 session_id=session_id,
                 limit=200,
             )
-            process_events = await uow.process_events.list()
+            completed_events = await uow.process_events.list("memory.provider_extraction.completed")
+            failed_events = await uow.process_events.list("memory.provider_extraction.failed")
+            selection_events = await uow.process_events.list("memory.provider_extraction.selection")
+            process_events = sorted(
+                [*completed_events, *failed_events, *selection_events],
+                key=lambda event: (event.created_at, event.id.int),
+            )
         formation_requests = [
             event for event in events if event.event_type == "memory.formation.requested"
         ]

@@ -472,12 +472,15 @@ def create_app(
         body: CreateSessionRequest,
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> SessionView:
-        return await services.sessions.create(
-            authenticated,
-            body.agent_id,
-            body.metadata,
-            browser_profile_id=body.browser_profile_id,
-        )
+        try:
+            return await services.sessions.create(
+                authenticated,
+                body.agent_id,
+                body.metadata,
+                browser_profile_id=body.browser_profile_id,
+            )
+        except ValueError as exc:
+            raise MalformedRequestError("session metadata is malformed") from exc
 
     @app.get(
         "/v1/sessions",

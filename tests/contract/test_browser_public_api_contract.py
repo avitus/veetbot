@@ -188,6 +188,18 @@ class Sessions:
         )
 
 
+class MetadataRejectingSessions(Sessions):
+    async def create(
+        self,
+        owner: Principal,
+        agent_id: str,
+        metadata: dict[str, object],
+        browser_profile_id: UUID | None = None,
+    ) -> SessionView:
+        del owner, agent_id, metadata, browser_profile_id
+        raise ValueError("session metadata is invalid")
+
+
 def settings() -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://unused/agent",
@@ -291,6 +303,33 @@ async def test_public_session_creation_passes_only_the_opaque_browser_profile_bi
     assert sessions.browser_profile_id == PROFILE_ID
     assert response.json()["metadata"] == {"browser_profile_id": str(PROFILE_ID)}
     assert "password" not in response.text
+
+
+async def test_session_metadata_service_validation_is_a_malformed_request() -> None:
+    services = SimpleNamespace(
+        sessions=MetadataRejectingSessions(),
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=Profiles(),
+        browser_grants=Grants(),
+    )
+    owner = principal().model_copy(update={"scopes": {"session.write"}})
+    app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://127.0.0.1",
+    ) as client:
+        response = await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": "general",
+                "metadata": {"browser_profile_id": str(PROFILE_ID)},
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "malformed_request"
 
 
 async def test_browser_write_requests_reject_malformed_origins_and_grant_windows() -> None:

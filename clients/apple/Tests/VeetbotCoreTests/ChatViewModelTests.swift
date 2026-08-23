@@ -594,6 +594,129 @@ import Testing
         #expect(json["password"] == nil)
     }
 
+    @Test
+    func testSameOriginCredentialChangeRevalidatesSelectedWebsiteProfile() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b4")
+        )
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configurationStore = ConnectionConfigurationStore(defaults: defaults)
+        let lock = NSLock()
+        var profileRequests = 0
+        let session = urlSession { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/browser-profiles"):
+                let attempt = lock.withLock { () -> Int in
+                    profileRequests += 1
+                    return profileRequests
+                }
+                let items = attempt == 1
+                    ? #"[{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"ready","generation":1,"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:01:00Z","last_used_at":null}]"#
+                    : "[]"
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: "{\"items\":\(items),\"next_cursor\":null}"
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: "principal-one"),
+            configurationStore: configurationStore,
+            historyStore: VolatileSessionHistoryStore(),
+            urlSession: session
+        )
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: ""
+            )
+        )
+        await model.refreshBrowserProfiles()
+        await model.selectBrowserProfile(profileID)
+        #expect(model.selectedBrowserProfileID == profileID)
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "principal-two"
+            )
+        )
+
+        #expect(lock.withLock { profileRequests } == 2)
+        #expect(model.browserProfiles.isEmpty)
+        #expect(model.selectedBrowserProfileID == nil)
+        #expect(await configurationStore.loadBrowserProfileID() == nil)
+    }
+
+    @Test
+    func testBootstrapClearsARevokedPersistedWebsiteProfile() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000b5")
+        )
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configurationStore = ConnectionConfigurationStore(defaults: defaults)
+        await configurationStore.save(
+            try ConnectionConfiguration(baseURLString: "https://veetbot.test")
+        )
+        await configurationStore.saveBrowserProfileID(profileID)
+        let lock = NSLock()
+        var profileRequests = 0
+        let session = urlSession { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/browser-profiles"):
+                lock.withLock { profileRequests += 1 }
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"revoked","generation":2,"created_at":"2026-08-22T12:00:00Z","updated_at":"2026-08-22T12:01:00Z","last_used_at":null}],"next_cursor":null}"#
+                )
+            default:
+                throw URLError(.badURL)
+            }
+        }
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(token: "persisted-principal"),
+            configurationStore: configurationStore,
+            historyStore: VolatileSessionHistoryStore(),
+            urlSession: session
+        )
+
+        for _ in 0 ..< 100 {
+            if lock.withLock({ profileRequests }) == 1,
+                model.isConfigured,
+                model.selectedBrowserProfileID == nil
+            {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+
+        #expect(lock.withLock { profileRequests } == 1)
+        #expect(model.isConfigured)
+        #expect(model.selectedBrowserProfileID == nil)
+        #expect(await configurationStore.loadBrowserProfileID() == nil)
+    }
+
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
         let data: Data
         if let body = request.httpBody {

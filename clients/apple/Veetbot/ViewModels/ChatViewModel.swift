@@ -113,6 +113,8 @@ public final class ChatViewModel: ObservableObject {
         do {
             let configuration = try ConnectionConfiguration(baseURLString: baseURLString)
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            let previousToken = try await tokenStore.readToken()
+            let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
             if !trimmedToken.isEmpty {
                 try await tokenStore.saveToken(trimmedToken)
             }
@@ -126,6 +128,19 @@ public final class ChatViewModel: ObservableObject {
                 browserProfiles = []
                 browserAuthentication = nil
                 await configurationStore.saveBrowserProfileID(nil)
+            } else if credentialsChanged {
+                browserProfiles = []
+                browserAuthentication = nil
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
             await configurationStore.save(configuration)
             requiresReauthentication = false
@@ -791,6 +806,18 @@ public final class ChatViewModel: ObservableObject {
             {
                 selectedBrowserProfileID = await configurationStore.loadBrowserProfileID()
                 try await install(configuration)
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        browserProfiles = []
+                        browserAuthentication = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
         } catch {
             present(error)

@@ -15,7 +15,7 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -232,6 +232,30 @@ async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
     assert edited.statement == "User prefers direct answers."
     await service.delete(edited.id, trace_id=recalled.trace_id)
     assert await service.list_memories(include_inactive=True) == []
+
+
+async def test_memory_diagnosis_queries_only_required_process_event_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    async with factory() as uow:
+        process_events = uow.process_events
+    original_list = process_events.list
+    queried_types: list[str | None] = []
+
+    async def recording_list(event_type: str | None = None) -> list[ProcessEvent]:
+        queried_types.append(event_type)
+        return await original_list(event_type)
+
+    monkeypatch.setattr(process_events, "list", recording_list)
+
+    await service.diagnose(SESSION_ID)
+
+    assert queried_types == [
+        "memory.provider_extraction.completed",
+        "memory.provider_extraction.failed",
+        "memory.provider_extraction.selection",
+    ]
 
 
 def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:

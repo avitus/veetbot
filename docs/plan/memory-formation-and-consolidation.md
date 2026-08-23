@@ -568,7 +568,7 @@ flag, is mutually exclusive with `required`, and is refused in production.
 evaluation opt-in, it runs a checked-in labeled corpus through isolated paired
 deterministic and provider-assisted arms, derives the active model tuple and
 corpus hash, and atomically writes evidence only when the schema's lift, coverage,
-fabrication, and policy conditions pass. The current corpus has twenty-one
+fabrication, and policy conditions pass. The current 25-case corpus has twenty-one
 positive examples and four protected no-memory examples; scoring uses checked-in normalized labels,
 not a second model judge. Every result reports per-case normalized beliefs,
 consolidation counts, shared fallback beliefs, provider-added beliefs, and

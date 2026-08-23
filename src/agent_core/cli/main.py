@@ -732,7 +732,10 @@ def memory_diagnose(
 
     try:
         diagnosis = asyncio.run(_memory_diagnose(session_id))
-    except (ConfigurationError, NotFoundError) as exc:
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except NotFoundError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     payload = diagnosis if isinstance(diagnosis, dict) else diagnosis.model_dump(mode="json")
@@ -762,7 +765,10 @@ def memory_replay(
         raise typer.Exit(2)
     try:
         result = asyncio.run(_memory_replay(session_id))
-    except (ConfigurationError, NotFoundError) as exc:
+    except ConfigurationError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(4) from exc
+    except NotFoundError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(1) from exc
     typer.echo(result.model_dump_json())
