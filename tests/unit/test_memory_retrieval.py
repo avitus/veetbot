@@ -411,3 +411,131 @@ async def test_trace_retention_uses_profile_days() -> None:
     async with factory() as uow:
         trace = await uow.traces.get(result.trace_id, principal())
     assert trace.operator_fields_expire_at == NOW + timedelta(days=7)
+
+
+def test_reinforcement_decays_with_time_since_last_reinforced_per_belief_type() -> None:
+    """Reinforcement fades with idleness, at the belief type's own time constant.
+
+    Scoring the same record at two instants isolates the time term, and scoring
+    it as a fact and as a preference at one age isolates the tau table.
+    """
+
+    tau = RetrievalProfile().decay_tau_days
+    fact = memory(belief_id=681, statement="Deploy region is eu-west-1").model_copy(
+        update={
+            "subject": "deploy region",
+            "belief_type": BeliefType.FACT,
+            "corroboration_count": 4,
+        }
+    )
+    preference = fact.model_copy(update={"belief_type": BeliefType.PREFERENCE})
+    query = recall_query(text=None, subjects=["deploy region"])
+    aged_at = NOW + timedelta(days=2 * tau.fact)
+
+    fresh = _score(fact, query, now=NOW)
+    aged_fact = _score(fact, query, now=aged_at)
+    aged_preference = _score(preference, query, now=aged_at)
+    undated = _score(fact, query)
+
+    assert fresh is not None and aged_fact is not None and aged_preference is not None
+    assert undated is not None
+    # An unstamped call carries no elapsed time, which is what the units that
+    # score without a clock have always measured.
+    assert undated.score == pytest.approx(fresh.score)
+    assert aged_fact.score < fresh.score
+    assert aged_preference.score > aged_fact.score
+    assert aged_preference.score < fresh.score
+
+
+def test_stale_penalty_applies_to_historical_expired_rows() -> None:
+    """Expired, retired, and past-expiry rows are demoted, not hidden.
+
+    Only an as-of or include-superseded query reaches them at all; when one
+    does, the penalty says the row is history rather than current belief.
+    """
+
+    penalty = RetrievalProfile().stale_penalty
+    query = recall_query(include_superseded=True)
+    provisional = memory().model_copy(update={"status": MemoryStatus.PROVISIONAL})
+    baseline = _score(provisional, query, now=NOW)
+    expired = _score(
+        provisional.model_copy(update={"status": MemoryStatus.EXPIRED, "valid_to": NOW}),
+        query,
+        now=NOW,
+    )
+    retired = _score(
+        provisional.model_copy(update={"status": MemoryStatus.RETIRED, "valid_to": NOW}),
+        query,
+        now=NOW,
+    )
+    past_hint = memory().model_copy(update={"expires_at": NOW - timedelta(seconds=1)})
+    live = _score(memory(), query, now=NOW)
+    hinted = _score(past_hint, query, now=NOW)
+
+    assert baseline is not None and expired is not None and retired is not None
+    assert live is not None and hinted is not None
+    assert expired.score == pytest.approx(baseline.score - penalty)
+    assert retired.score == pytest.approx(baseline.score - penalty)
+    assert hinted.score == pytest.approx(live.score - penalty)
+
+
+def test_lexical_arm_scores_whole_lexemes_the_stores_filter_on() -> None:
+    """The ranking arm and the store predicate read one tokenizer.
+
+    A store that keeps only whole-lexeme matches must not be handed a score
+    built from substrings, or "theme" ranks a belief about "themes" the query
+    can never retrieve.
+    """
+
+    record = memory(statement="User prefers dark themes")
+
+    assert _score(record, recall_query(text="theme")) is None
+    assert _score(record, recall_query(text="themes")) is not None
+
+
+def test_retrieval_policy_version_is_retrieval_2_in_render_header() -> None:
+    """Time decay and the penalties are a new ranking policy, and say so."""
+
+    assert RETRIEVAL_POLICY_VERSION == "retrieval@2"
+    assert 'policy="retrieval@2"' in render_memory([], as_of=NOW)
+
+
+async def test_near_duplicate_penalty_demotes_but_keeps_the_second_statement() -> None:
+    """A second phrasing of the same belief is demoted, never dropped.
+
+    Two retrievers differing only in the penalty isolate it: the near-duplicate
+    loses exactly the profile's penalty while the belief it echoes and an
+    unrelated belief about the same subject keep their scores.
+    """
+
+    clock, factory, _service, retriever = await formation_stack()
+    primary = memory(belief_id=691, statement="User prefers concise answers")
+    near = memory(belief_id=692, statement="User prefers concise answers always").model_copy(
+        update={"confidence": 0.7, "store_position": 2}
+    )
+    distinct = memory(belief_id=693, statement="User prefers answers with examples").model_copy(
+        update={"confidence": 0.7, "store_position": 3}
+    )
+    async with factory() as uow:
+        for record in (primary, near, distinct):
+            await uow.memories.upsert_belief(record)
+    unpenalized_retriever = HybridMemoryRetriever(
+        factory,
+        clock,
+        _ids(6_000),
+        principal(),
+        profile=RetrievalProfile(near_duplicate_penalty=0.0),
+    )
+
+    penalized = await retriever.recall(recall_query(), session_id=SESSION_ID)
+    unpenalized = await unpenalized_retriever.recall(recall_query(), session_id=SESSION_ID)
+
+    scored = {item.belief_id: item.score for item in penalized.items}
+    plain = {item.belief_id: item.score for item in unpenalized.items}
+    assert set(scored) == set(plain) == {UUID(int=691), UUID(int=692), UUID(int=693)}
+    assert scored[UUID(int=692)] == pytest.approx(
+        plain[UUID(int=692)] - RetrievalProfile().near_duplicate_penalty
+    )
+    assert scored[UUID(int=691)] == pytest.approx(plain[UUID(int=691)])
+    assert scored[UUID(int=693)] == pytest.approx(plain[UUID(int=693)])
+    assert "always" in penalized.rendered

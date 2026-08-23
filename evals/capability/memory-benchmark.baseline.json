@@ -4,10 +4,10 @@
   "corpus_sha256": "a6231758930c9f810cbd1a7f73549a96a80e1cc8480dccf23014cb30c5a0acfe",
   "formation_policy_version": "formation@5",
   "provider_formation_policy_version": "formation@6",
-  "retrieval_policy_version": "retrieval@1",
+  "retrieval_policy_version": "retrieval@2",
   "extractor_name": "deterministic-formation-v2",
-  "build_ref": "c6a0a71a2a3ac270381648d5a720c25c35aeb7c8",
-  "recorded_at": "2026-08-23T04:00:18.976861Z",
+  "build_ref": "415746cfa0fd7d7f449daeeee390045d36374d86",
+  "recorded_at": "2026-08-23T04:31:25.898115Z",
   "metrics": {
     "scenario_count": 16,
     "probe_count": 66,

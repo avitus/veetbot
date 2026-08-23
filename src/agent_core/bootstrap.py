@@ -1583,6 +1583,7 @@ async def _compose(
         extractor=memory_extractor,
         policy_version=memory_policy_version,
         formation_profile=memory_profiles.formation,
+        decay_tau_days=memory_profiles.retrieval.decay_tau_days,
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
@@ -1705,6 +1706,12 @@ async def _compose(
 
         async def sweep_traces() -> int:
             return await memory_service.expire_traces()
+
+        async def sweep_memory_decay() -> int:
+            if not memory_profiles.formation.scheduled_enabled:
+                return 0
+            result = await memory_service.decay()
+            return result.decayed + result.retired
 
         async def sweep_memory_consolidation() -> int:
             if not memory_profiles.formation.session_boundary_enabled:
@@ -2085,7 +2092,11 @@ async def _compose(
                     sweep_memory=sweep_memory,
                     sweep_traces=sweep_traces,
                     sweep_memory_consolidation=sweep_memory_consolidation,
+                    sweep_memory_decay=sweep_memory_decay,
                     sweep_session_deletions=sweep_session_deletions,
+                    memory_decay_interval_seconds=(
+                        memory_profiles.formation.scheduled_interval_seconds
+                    ),
                 ),
                 schedule_worker_factory=schedule_worker_factory,
                 sandbox=sandbox_manager,

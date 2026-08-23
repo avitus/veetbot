@@ -190,8 +190,10 @@ class MaintenanceWorker:
         sweep_memory: Callable[[], Awaitable[int]] | None = None,
         sweep_traces: Callable[[], Awaitable[int]] | None = None,
         sweep_memory_consolidation: Callable[[], Awaitable[int]] | None = None,
+        sweep_memory_decay: Callable[[], Awaitable[int]] | None = None,
         sweep_session_deletions: Callable[[], Awaitable[int]] | None = None,
         artifact_orphan_interval_seconds: float = 3600,
+        memory_decay_interval_seconds: float = 86_400,
     ) -> None:
         self._uow_factory = uow_factory
         self._clock = clock
@@ -204,11 +206,18 @@ class MaintenanceWorker:
         self._sweep_memory = sweep_memory
         self._sweep_traces = sweep_traces
         self._sweep_memory_consolidation = sweep_memory_consolidation
+        self._sweep_memory_decay = sweep_memory_decay
         self._sweep_session_deletions = sweep_session_deletions
         if artifact_orphan_interval_seconds <= 0:
             raise ValueError("artifact orphan interval must be positive")
+        if memory_decay_interval_seconds <= 0:
+            raise ValueError("memory decay interval must be positive")
         self._artifact_orphan_interval = timedelta(seconds=artifact_orphan_interval_seconds)
         self._last_artifact_orphan_sweep_at: datetime | None = None
+        # Decay is a slow sweep on its own timer: the maintenance pass runs
+        # every few seconds, and a belief may lose one step per interval.
+        self._memory_decay_interval = timedelta(seconds=memory_decay_interval_seconds)
+        self._last_memory_decay_sweep_at: datetime | None = None
         self._stopping = False
 
     def stop(self) -> None:
@@ -270,6 +279,16 @@ class MaintenanceWorker:
                 await self._sweep_memory_consolidation()
             except Exception:
                 logger.exception("memory consolidation sweep failed")
+        decay_sweep_due = (
+            self._last_memory_decay_sweep_at is None
+            or self._clock.now() - self._last_memory_decay_sweep_at >= self._memory_decay_interval
+        )
+        if self._sweep_memory_decay is not None and decay_sweep_due:
+            self._last_memory_decay_sweep_at = self._clock.now()
+            try:
+                await self._sweep_memory_decay()
+            except Exception:
+                logger.exception("memory decay sweep failed")
         if self._sweep_session_deletions is not None:
             try:
                 await self._sweep_session_deletions()

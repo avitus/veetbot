@@ -250,7 +250,7 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Unused provisional beliefs decay and retire.** Under the sweep an idle provisional belief loses confidence and one below the floor is retired with its validity closed, while an active user-stated belief and a recently reinforced belief are untouched."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_decay_sweep_lowers_unused_provisional_and_retires_below_floor
 - id: gate.memory.usage_feedback
   milestone: 16
   kind: case
