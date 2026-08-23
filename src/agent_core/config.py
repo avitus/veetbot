@@ -554,7 +554,13 @@ def _validate_interpolation(
     interpolation: Mapping[str, str],
 ) -> None:
     serialized = yaml.safe_dump(dict(document), sort_keys=True)
-    missing = sorted(set(INTERPOLATION.findall(serialized)) - interpolation.keys())
+    referenced = set(INTERPOLATION.findall(serialized))
+    if relative.startswith("policy/") and referenced:
+        raise ConfigurationError(
+            f"{relative} cannot use policy-semantic interpolation; policy hashes must cover "
+            "the effective rules"
+        )
+    missing = sorted(referenced - interpolation.keys())
     if missing:
         names = ", ".join(missing)
         raise ConfigurationError(f"{relative} references unavailable interpolation: {names}")

@@ -25,6 +25,25 @@ class NotificationKind(StrEnum):
     TEST = "test"
 
 
+TEST_NOTIFICATION_DEDUPE_PREFIX = "device.test:"
+
+
+def test_notification_target_device_id(dedupe_key: str) -> UUID | None:
+    """Return the device selected by a TEST dedupe key, failing closed."""
+
+    if not dedupe_key.startswith(TEST_NOTIFICATION_DEDUPE_PREFIX):
+        return None
+    raw_device_id, separator, _idempotency_key = dedupe_key.removeprefix(
+        TEST_NOTIFICATION_DEDUPE_PREFIX
+    ).partition(":")
+    if not separator:
+        return None
+    try:
+        return UUID(raw_device_id)
+    except ValueError:
+        return None
+
+
 class NotificationStatus(StrEnum):
     PENDING = "pending"
     DISPATCHED = "dispatched"

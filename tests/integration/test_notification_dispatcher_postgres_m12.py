@@ -226,13 +226,11 @@ async def test_postgres_concurrent_dispatch_and_accepted_send_replay_are_bounded
         assert (
             replay_transport.calls[0][1].dedupe_key
             == replay_transport.calls[1][1].dedupe_key
-            == "test:accepted-send-replay"
+            == replay.dedupe_key
         )
         async with composition.uow_factory() as uow:
             rows = await uow.notification_outbox.list(composition.principal, limit=10)
-            notification = next(
-                row for row in rows if row.dedupe_key == "test:accepted-send-replay"
-            )
+            notification = next(row for row in rows if row.dedupe_key == replay.dedupe_key)
             assert notification.status is NotificationStatus.DISPATCHED
             assert notification.attempts == 2
             [delivery] = await uow.notification_outbox.list_deliveries(notification.id)

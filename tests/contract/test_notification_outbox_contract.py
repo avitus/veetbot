@@ -134,7 +134,13 @@ async def assert_notification_claim_is_partitioned_by_provider(
     outbox: NotificationOutbox,
     registry: DeviceRegistry,
 ) -> None:
-    surface_values = device(token=None).model_dump()
+    await registry.upsert(device(), principal())
+    surface_id = UUID(int=DEVICE_ID.int + 1)
+    surface_values = device(
+        device_id=surface_id,
+        client_device_id="surface-device-a",
+        token=None,
+    ).model_dump()
     surface_values.update(
         {
             "kind": DeviceKind.SURFACE,
@@ -145,7 +151,12 @@ async def assert_notification_claim_is_partitioned_by_provider(
         }
     )
     await registry.upsert(Device.model_validate(surface_values), principal())
-    assert await outbox.enqueue(new_notification()) is not None
+    assert (
+        await outbox.enqueue(
+            new_notification(dedupe_key=f"device.test:{surface_id}:provider-partition")
+        )
+        is not None
+    )
 
     assert (
         await outbox.claim_due(

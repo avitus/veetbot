@@ -653,6 +653,68 @@ def test_blank_non_abstention_answers_are_omitted_without_aborting_records(
     assert [probe.answer.values for probe in halumem_scenarios[0].probes] == [["Thing"]]
 
 
+def test_blank_answers_are_filtered_before_probe_capping(tmp_path: Path) -> None:
+    locomo_answers: list[object] = ["Thing", None, None, None, None, None, None]
+    locomo = _write(
+        tmp_path / "cap-after-filter-locomo.json",
+        [
+            {
+                "sample_id": "locomo-cap",
+                "conversation": {
+                    "speaker_a": "Ana",
+                    "speaker_b": "Bo",
+                    "session_1": [{"speaker": "Ana", "dia_id": "D1", "text": "A named thing."}],
+                    "session_1_date_time": "10:00 am on 4 May, 2024",
+                    "session_2": [{"speaker": "Bo", "dia_id": "D2", "text": "Acknowledged."}],
+                    "session_2_date_time": "10:00 am on 5 May, 2024",
+                },
+                "qa": [
+                    {
+                        "question": f"Question {index}",
+                        "answer": answer,
+                        "evidence": ["D1"],
+                        "category": 4,
+                    }
+                    for index, answer in enumerate(locomo_answers)
+                ],
+            }
+        ],
+    )
+    halumem_answers: list[object] = [None, None, None, None, "Thing", None, None]
+    halumem = _write(
+        tmp_path / "cap-after-filter-halumem.json",
+        [
+            {
+                "uuid": "halu-cap",
+                "sessions": [
+                    {
+                        "session_id": "halu-cap-s1",
+                        "timestamp": "2024-01-01 10:00:00",
+                        "dialogue": [{"role": "user", "content": "A named thing."}],
+                    },
+                    {
+                        "session_id": "halu-cap-s2",
+                        "timestamp": "2024-01-02 10:00:00",
+                        "dialogue": [{"role": "assistant", "content": "Acknowledged."}],
+                    },
+                ],
+                "questions": [
+                    {"question": f"Question {index}", "answer": answer}
+                    for index, answer in enumerate(halumem_answers)
+                ],
+            }
+        ],
+    )
+
+    [locomo_scenario] = load_locomo(locomo, principal_speaker="a", seed=0)
+    [halumem_scenario] = load_halumem(halumem, seed=0)
+
+    assert [probe.answer.values for probe in locomo_scenario.probes] == [["Thing"]]
+    assert [probe.answer.values for probe in halumem_scenario.probes] == [["Thing"]]
+    assert [probe.id for probe in locomo_scenario.probes] == ["p01"]
+    assert [probe.id for probe in halumem_scenario.probes] == ["p01"]
+
+
 def _oversized_longmemeval() -> list[dict[str, object]]:
     return [
         {

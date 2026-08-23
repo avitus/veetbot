@@ -735,13 +735,15 @@ def _locomo_scenario(
         for entry in _sequence(sample, "qa", where)
         if isinstance(entry, dict) and _locomo_is_scorable(entry, located)
     ]
-    mapped_probes = [
-        _locomo_probe(entry, located, index)
-        for index, entry in enumerate(
-            _capped(eligible, seed=seed, salt=f"locomo:{sample_id}"), start=1
+    valid_probes = [
+        probe for entry in eligible if (probe := _locomo_probe(entry, located, 1)) is not None
+    ]
+    probes = [
+        probe.model_copy(update={"id": f"p{index:02d}"})
+        for index, probe in enumerate(
+            _capped(valid_probes, seed=seed, salt=f"locomo:{sample_id}"), start=1
         )
     ]
-    probes = [probe for probe in mapped_probes if probe is not None]
     if not probes:
         if eligible:
             return None
@@ -847,13 +849,13 @@ def _halumem_scenario(
 
     beliefs = _halumem_beliefs(points, sessions)
     questions = [entry for entry in user.get("questions") or [] if isinstance(entry, dict)]
-    mapped_probes = [
-        _halumem_probe(entry, index)
-        for index, entry in enumerate(
-            _capped(questions, seed=seed, salt=f"halumem:{user_id}"), start=1
+    valid_probes = [probe for entry in questions if (probe := _halumem_probe(entry, 1)) is not None]
+    probes = [
+        probe.model_copy(update={"id": f"p{index:02d}"})
+        for index, probe in enumerate(
+            _capped(valid_probes, seed=seed, salt=f"halumem:{user_id}"), start=1
         )
     ]
-    probes = [probe for probe in mapped_probes if probe is not None]
     if not probes:
         if questions:
             return None

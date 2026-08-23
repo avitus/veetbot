@@ -497,7 +497,7 @@ async def test_transient_provider_failure_retries_the_same_prefix_after_backoff(
     )
     diagnosis = await service.diagnose(SESSION_ID)
 
-    assert len(first.beliefs) == 3
+    assert first.beliefs == []
     assert first.run.watermark_after == 0
     assert diagnosis.watermark == 0
     assert diagnosis.pending_retry is True
