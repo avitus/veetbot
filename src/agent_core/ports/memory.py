@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID
@@ -178,6 +179,10 @@ class TraceStore(Protocol):
     async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...
 
     async def get(self, trace_id: UUID, principal: Principal) -> RecallTrace: ...
+
+    async def mark_cited(
+        self, trace_id: UUID, principal: Principal, cited: Sequence[UUID]
+    ) -> RecallTrace: ...
 
     async def user_view(
         self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str

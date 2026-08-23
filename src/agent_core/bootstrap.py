@@ -290,7 +290,7 @@ from agent_core.domain.messages import (
     UsageEvent,
 )
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, Run, RunLimits, RunStatus
 from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
 from agent_core.domain.sessions import (
     DEFAULT_PROJECT_SCOPE,
@@ -1584,6 +1584,7 @@ async def _compose(
         policy_version=memory_policy_version,
         formation_profile=memory_profiles.formation,
         decay_tau_days=memory_profiles.retrieval.decay_tau_days,
+        usage=memory_profiles.retrieval.usage,
     )
     registry.register(LegacyMemoryRememberTool(memory_service))
     registry.register(MemoryRememberTool(memory_service))
@@ -1797,11 +1798,13 @@ async def _compose(
                 await schedule_accountant.account(run_id)
             except Exception:
                 logger.exception("schedule_run_accounting_failed", extra={"run_id": str(run_id)})
+            completed: Run | None = None
             try:
                 async with uow_factory() as uow:
                     run = await uow.runs.get(run_id, principal)
                     if run.status not in TERMINAL_RUN_STATUSES:
                         return
+                    completed = run
                     await uow.events.append(
                         NewEvent(
                             session_id=run.session_id,
@@ -1820,6 +1823,24 @@ async def _compose(
                     )
             except Exception:
                 logger.exception("memory_formation_enqueue_failed", extra={"run_id": str(run_id)})
+            # What the answer cited is only knowable once the answer exists, so
+            # usage feedback is the completion's own step: its own error
+            # boundary, its own units of work, and no external call inside one.
+            if (
+                completed is not None
+                and completed.status is RunStatus.COMPLETED
+                and completed.final_message
+            ):
+                try:
+                    plan = await context_planner.current(completed.session_id)
+                    await memory_service.record_usage(
+                        session_id=completed.session_id,
+                        run_id=completed.id,
+                        final_text=completed.final_message,
+                        snapshot_trace_id=None if plan is None else plan.snapshot_id,
+                    )
+                except Exception:
+                    logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 

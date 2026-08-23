@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -334,6 +335,27 @@ class InMemoryTraceStore:
                 or trace.principal_id != principal.principal_id
             ):
                 raise NotFoundError("recall trace not found")
+            return trace.model_copy(deep=True)
+
+    async def mark_cited(
+        self, trace_id: UUID, principal: Principal, cited: Sequence[UUID]
+    ) -> RecallTrace:
+        async with self._lock:
+            trace = self._traces.get(trace_id)
+            if trace is None or (
+                trace.tenant_id != principal.tenant_id
+                or trace.principal_id != principal.principal_id
+            ):
+                raise NotFoundError("recall trace not found")
+            marked = list(trace.cited)
+            known = set(marked)
+            for belief_id in cited:
+                if belief_id not in known:
+                    known.add(belief_id)
+                    marked.append(belief_id)
+            if marked != trace.cited:
+                trace = trace.model_copy(update={"cited": marked})
+                self._traces[trace_id] = trace
             return trace.model_copy(deep=True)
 
     async def expire_operator_fields(self, now: datetime, limit: int) -> int:

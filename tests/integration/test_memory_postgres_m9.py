@@ -22,7 +22,7 @@ import pytest
 from agent_core.adapters.memory.in_memory import InMemoryMemoryStore
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
@@ -567,6 +567,86 @@ async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
         assert swept.rendered == recorded.rendered
         assert [belief.belief_id for belief in view.beliefs] == [first.id]
         assert view.considered_not_shown == 1
+
+
+async def test_postgres_mark_cited_unions_into_the_trace_and_feeds_usage_back(
+    tmp_path: Path,
+) -> None:
+    """The locked JSONB rewrite unions citations and moves utility, not confidence.
+
+    Two beliefs are recalled into one turn and the answer cites one of them, so
+    the row-locked rewrite is observed marking exactly that belief used in the
+    user view, raising its utility while its confidence stands, and lowering
+    the other's. A later mark widens the set instead of replacing it, repeating
+    it changes nothing, and a foreign principal cannot reach the trace at all.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memcite{uuid4().hex[:10]}"
+        cited = await _remember(
+            composition,
+            session_id,
+            f"The {marker} standup is at nine",
+            subject=f"standup-{marker}",
+        )
+        uncited = await _remember(
+            composition,
+            session_id,
+            f"The {marker} retro is on Friday",
+            subject=f"retro-{marker}",
+        )
+        # The trace and the citation event both reference a real run, which is
+        # what the events foreign key requires of anything the hook writes.
+        turn_id = await composition.runs.submit(f"What about {marker}?", session_id)
+        result = await composition.memory_retriever.recall(
+            _query(composition, text=marker),
+            session_id=session_id,
+            run_id=turn_id,
+            turn_id=turn_id,
+        )
+        assert {item.belief_id for item in result.items} == {cited.id, uncited.id}
+
+        feedback = await composition.memory.record_usage(
+            session_id=session_id,
+            run_id=turn_id,
+            final_text=f"[m:{str(cited.id)[:8]}] answers it.",
+        )
+
+        assert (feedback.cited, feedback.uncited, feedback.traces) == (1, 1, 1)
+        async with composition.uow_factory() as uow:
+            stored = await uow.traces.get(result.trace_id, composition.principal)
+            view = await uow.traces.user_view(turn_id, "private", "restricted")
+            foreign = composition.principal.model_copy(update={"principal_id": f"other-{marker}"})
+            with pytest.raises(NotFoundError):
+                await uow.traces.mark_cited(result.trace_id, foreign, [cited.id])
+        assert stored.cited == [cited.id]
+        assert {belief.belief_id: belief.used for belief in view.beliefs} == {
+            cited.id: True,
+            uncited.id: False,
+        }
+        beliefs = {belief.id: belief for belief in await composition.memory.list_memories()}
+        assert beliefs[cited.id].utility > 0
+        assert beliefs[cited.id].confidence == cited.confidence
+        assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
+        assert beliefs[uncited.id].utility < 0
+        assert beliefs[uncited.id].confidence == uncited.confidence
+        # The unique store position survives the in-place update, and neither
+        # belief is republished to the recall delta for having been read.
+        assert beliefs[cited.id].store_position == cited.store_position
+        assert beliefs[uncited.id].store_position == uncited.store_position
+
+        async with composition.uow_factory() as uow:
+            widened = await uow.traces.mark_cited(
+                result.trace_id, composition.principal, [uncited.id]
+            )
+        assert widened.cited == [cited.id, uncited.id]
+        async with composition.uow_factory() as uow:
+            repeated = await uow.traces.mark_cited(
+                result.trace_id, composition.principal, [cited.id, uncited.id]
+            )
+            assert repeated == widened
+            assert await uow.traces.get(result.trace_id, composition.principal) == widened
 
 
 async def test_postgres_trace_round_trip_user_view_and_conflict_detection(

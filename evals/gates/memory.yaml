@@ -256,7 +256,7 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Citing a belief resists decay and never raises confidence.** A belief whose short identifier appears in a completed run's final message is marked cited on its trace, gains utility and a fresh reinforcement instant, and keeps its confidence exactly; a returned-but-uncited belief loses utility; repeating the completion changes nothing."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_usage_feedback_marks_cited_and_never_raises_confidence
 - id: gate.memory.recall_delta
   milestone: 16
   kind: case

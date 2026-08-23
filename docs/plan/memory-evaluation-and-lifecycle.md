@@ -734,7 +734,12 @@ idempotent. `GovernedMemoryService.record_usage` extracts the short belief
 identifiers from the run's final message with the same eight-hex form the
 renderer emits, resolves the run's in-turn traces and the session's snapshot
 trace, and for each trace marks the returned beliefs whose short identifier
-appears and were not already cited. A cited belief's `utility` rises by
+appears and were not already cited. A short identifier that fits more than one
+returned belief identifies none of them: it credits nothing, charges nothing,
+and is counted as ambiguous, because the deterministic identifiers the
+evaluation harness issues render every belief the same way and a citing live
+arm would otherwise credit whatever it recalled. A cited belief's `utility`
+rises by
 `usage.cited_utility_delta` to a ceiling of 1 and its `last_reinforced_at`
 moves to now; a returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches

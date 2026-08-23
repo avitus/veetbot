@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -590,6 +591,38 @@ class PostgresTraceStore:
         if row is None:
             raise NotFoundError("recall trace not found")
         return RecallTrace.model_validate(row.trace)
+
+    async def mark_cited(
+        self, trace_id: UUID, principal: Principal, cited: Sequence[UUID]
+    ) -> RecallTrace:
+        # The row is locked before the document is read, so two completions
+        # racing on the same trace union their citations instead of one
+        # rewriting the JSONB the other had already widened.
+        row = (
+            await self._session.scalars(
+                select(RecallTraceRow)
+                .where(
+                    RecallTraceRow.id == trace_id,
+                    RecallTraceRow.tenant_id == principal.tenant_id,
+                    RecallTraceRow.principal_id == principal.principal_id,
+                )
+                .with_for_update()
+            )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundError("recall trace not found")
+        trace = RecallTrace.model_validate(row.trace)
+        marked = list(trace.cited)
+        known = set(marked)
+        for belief_id in cited:
+            if belief_id not in known:
+                known.add(belief_id)
+                marked.append(belief_id)
+        if marked == trace.cited:
+            return trace
+        updated = trace.model_copy(update={"cited": marked})
+        row.trace = updated.model_dump(mode="json")
+        return updated
 
     async def expire_operator_fields(self, now: datetime, limit: int) -> int:
         if limit < 0:
