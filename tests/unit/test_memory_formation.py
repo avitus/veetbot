@@ -21,6 +21,7 @@ from agent_core.domain.errors import ConflictError, ToolValidationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     BeliefType,
+    DecayResult,
     MemoryAuthority,
     MemoryEdit,
     MemoryRecord,
@@ -505,8 +506,8 @@ async def test_service_names_the_candidate_extractor_it_was_configured_with() ->
 async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor() -> None:
     """An idle provisional belief loses a step; one below the floor retires.
 
-    Both outcomes are written through the reinforcement path, so each takes a
-    fresh store position and announces itself as an event.
+    Both outcomes are written through the reinforcement path and announce
+    themselves as events; only the closing one takes a fresh store position.
     """
 
     clock, factory, service, _retriever = await formation_stack()
@@ -532,14 +533,52 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor() -
     assert decayed.confidence == pytest.approx(0.5)
     assert decayed.status is MemoryStatus.PROVISIONAL
     assert decayed.valid_to is None
-    assert decayed.store_position > idle.store_position
+    assert decayed.store_position == idle.store_position
     assert decayed.updated_at == clock.now()
     assert retired.confidence == pytest.approx(0.15)
     assert retired.status is MemoryStatus.RETIRED
     assert retired.valid_to == clock.now()
+    assert retired.store_position > weak.store_position
     assert sorted(
         event for event in await _memory_event_types(factory) if event != "memory.formed"
     ) == ["memory.decayed", "memory.retired"]
+
+
+async def test_decay_moves_a_store_position_only_when_it_closes_the_belief() -> None:
+    """Lowering confidence keeps the position; retiring the belief takes a new one.
+
+    A session reads a position above its snapshot watermark as a belief formed
+    or corrected since, so republishing a belief for having quietly lost a step
+    of confidence would report a change to the user that never happened. Being
+    closed is that change, and it is the one the correction lines select on.
+    """
+
+    clock, factory, service, retriever = await formation_stack()
+    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    weak = await _form(
+        factory,
+        service,
+        "The staging cluster is us-east-2.",
+        subject="staging cluster",
+        explicit=False,
+        confidence=0.2,
+    )
+    snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
+    assert {idle.id, weak.id} <= {item.belief_id for item in snapshot.items}
+
+    clock.advance(timedelta(days=31))
+    assert (await service.decay()) == DecayResult(decayed=1, retired=1)
+
+    beliefs = {belief.id: belief for belief in await service.list_memories(include_inactive=True)}
+    assert beliefs[idle.id].confidence == pytest.approx(0.5)
+    assert beliefs[idle.id].store_position == idle.store_position
+    assert beliefs[weak.id].status is MemoryStatus.RETIRED
+    assert beliefs[weak.id].store_position > snapshot.watermark
+
+    corrections = await retriever.corrections(
+        snapshot_id=snapshot.trace_id, watermark=snapshot.watermark
+    )
+    assert [item.belief_id for item in corrections] == [weak.id]
 
 
 async def test_decay_sweep_skips_active_user_stated_and_recently_reinforced() -> None:

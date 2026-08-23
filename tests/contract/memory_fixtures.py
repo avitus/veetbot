@@ -142,6 +142,7 @@ def recall_query(
     budget_tokens: int = 500,
     max_items: int = 10,
     min_score: float = 0.1,
+    min_store_position: int = 0,
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED,
 ) -> RecallQuery:
     return RecallQuery(
@@ -154,6 +155,7 @@ def recall_query(
         as_of=as_of,
         include_superseded=include_superseded,
         profile=profile,
+        min_store_position=min_store_position,
         budget_tokens=budget_tokens,
         max_items=max_items,
         min_score=min_score,

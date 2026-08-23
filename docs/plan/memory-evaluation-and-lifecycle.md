@@ -684,18 +684,22 @@ interval, which is the guard against decaying the same belief twice in a
 window. Each selected belief loses `decay.step` of confidence; a belief that
 falls below `decay.floor_confidence` is retired with `valid_to` set to the
 sweep instant. Both outcomes are events, `memory.decayed` and `memory.retired`,
-written through the existing reinforcement path so provenance and position
-ordering are unchanged. Explicit user statements are `ACTIVE` at high
-confidence and are never eligible.
+written through the existing reinforcement path so provenance is unchanged.
+Only the retiring outcome takes a fresh store position. A session reads a
+position past its snapshot watermark as a belief formed or corrected since, so
+a quiet loss of confidence keeps the position it had — republishing it to the
+next turn would report a change nobody made — while a retirement is exactly the
+change the correction lines below select on. Explicit user statements are
+`ACTIVE` at high confidence and are never eligible.
 
 `MemoryStore` gains `list_idle(principal, reinforced_before, limit)` — live
 beliefs last reinforced at or before an instant, least recently reinforced
 first — and the sweep reads its window through it, cut at the shortest time
 constant any belief type carries and bounded by `decay.max_per_sweep`. The
-ordering is the point: decay gives every belief it touches a fresh store
-position, so a window ordered newest-first would refill with rows the sweep had
-just written while beliefs idle for years sank below the bound and were never
-swept. PostgreSQL serves it from `ix_memories_principal_idle`, since the
+ordering is the point: a window ordered newest-first would refill with the rows
+a retiring sweep had just written while beliefs idle for years sank below the
+bound and were never swept, and idleness is the property the sweep selects on
+in any case. PostgreSQL serves it from `ix_memories_principal_idle`, since the
 existing `ix_memories_principal_live_position` orders by store position and can
 only filter the principal.
 
@@ -760,11 +764,13 @@ is invisible to it and a belief inside it that has since been superseded goes
 on being rendered until the next session. The retrieval specification already
 describes the fix (memory-retrieval-and-ranking.md:93) and names its two parts.
 
-`MemoryStore` gains `head_position(principal)`, the maximum live store position
-for that principal, and recall sets the session's `snapshot_watermark` from it
-rather than from the maximum position it happened to return. `RecallQuery`
-gains `min_store_position`, and both adapters filter on it, which makes the
-delta a query rather than a post-filter.
+`MemoryStore` gains `head_position(principal)`, the newest store position that
+principal has written whatever its status — a retirement moves the head, or the
+correction it produces would sit below the watermark that has to notice it —
+and zero when the principal has written nothing. Recall sets the session's
+`snapshot_watermark` from it rather than from the maximum position it happened
+to return. `RecallQuery` gains `min_store_position`, and both adapters filter
+on it, which makes the delta a query rather than a post-filter.
 
 `MemoryRetriever` gains `corrections(snapshot_id, watermark, as_of)`. It reads
 the snapshot trace, finds the beliefs it returned that are now superseded,
@@ -786,6 +792,13 @@ yielding, so a correction cannot be squeezed out by a long conversation, and if
 they alone overflow the window that is the fixed-body overflow failure the
 context engine already defines. The cached prefix is never rewritten, which the
 prefix-stability gate continues to prove.
+
+Two smaller rules follow from that shape. A belief the base recall already
+returned is dropped from the delta rather than stated twice in one turn, since
+two blocks saying the same thing is two voices on one fact. And a snapshot
+trace that has expired or was never recorded yields neither delta nor
+corrections: the turn takes its base recall and no more, because a session that
+cannot read its own snapshot has nothing to report a change against.
 
 ## Established facts enter formation
 

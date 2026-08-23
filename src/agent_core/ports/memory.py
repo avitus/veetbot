@@ -17,6 +17,7 @@ from agent_core.domain.memory import (
     ConsolidationRun,
     EpisodeQuery,
     MemoryCandidate,
+    MemoryCorrection,
     MemoryEdit,
     MemoryRecord,
     RecalledBelief,
@@ -30,6 +31,8 @@ from agent_core.domain.runs import Run
 
 class MemoryStore(Protocol):
     async def next_position(self) -> int: ...
+
+    async def head_position(self, principal: Principal) -> int: ...
 
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord: ...
 
@@ -150,6 +153,14 @@ class MemoryRetriever(Protocol):
         moment: str = "in_turn",
         surface_id: str = "private",
     ) -> RecallResult: ...
+
+    async def corrections(
+        self,
+        *,
+        snapshot_id: UUID,
+        watermark: int,
+        as_of: datetime | None = None,
+    ) -> list[MemoryCorrection]: ...
 
 
 class QueryFormer(Protocol):

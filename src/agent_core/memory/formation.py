@@ -1357,14 +1357,18 @@ class GovernedMemoryService:
         The window is the least recently reinforced beliefs past the shortest
         time constant any type carries, bounded by the per-sweep ceiling.
         Ordering it by idleness rather than by write position is what keeps the
-        sweep working in a large store: decay hands every belief it touches a
-        fresh store position, so a newest-first window would refill with rows
-        the sweep had just written while long-idle beliefs sank out of reach.
+        sweep working in a large store, and it is also what lets the lowered
+        belief keep its position: the window never has to be re-found.
 
         A belief the step carries below the floor is retired with its validity
-        closed at the sweep instant. Both outcomes are written through the
-        reinforcement path, so each takes a fresh store position and announces
-        itself, and the sweep is bounded by the profile's per-sweep ceiling.
+        closed at the sweep instant. Only that branch takes a fresh store
+        position. A session reads a position above its snapshot watermark as a
+        belief formed or corrected since, so a quiet loss of confidence keeps
+        the position it had — republishing it would report a change the user
+        never made — while being closed is exactly the change the next turn's
+        correction lines exist to state. Both outcomes are written through the
+        reinforcement path and announce themselves as events, and the sweep is
+        bounded by the profile's per-sweep ceiling.
         """
 
         instant = now or self._clock.now()
@@ -1386,11 +1390,16 @@ class GovernedMemoryService:
                 retiring = confidence < decay.floor_confidence
                 update: dict[str, object] = {
                     "confidence": confidence,
-                    "store_position": await uow.memories.next_position(),
                     "updated_at": instant,
                 }
                 if retiring:
-                    update.update({"status": MemoryStatus.RETIRED, "valid_to": instant})
+                    update.update(
+                        {
+                            "status": MemoryStatus.RETIRED,
+                            "valid_to": instant,
+                            "store_position": await uow.memories.next_position(),
+                        }
+                    )
                 stored = await uow.memories.reinforce(record.model_copy(update=update, deep=True))
                 await self._append_event(
                     uow,

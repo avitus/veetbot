@@ -262,13 +262,13 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The recall delta surfaces beliefs formed after the snapshot.** A belief written after a session's snapshot is injected in the next turn through the delta query bounded by the snapshot watermark, without rewriting the cached prefix."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_recall_delta_surfaces_post_snapshot_beliefs
 - id: gate.memory.correction_lines
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Correction lines are never yielded and never move the prefix.** When a snapshot member is superseded mid-session the next turn carries its correction line, that line survives budget pressure that drops recall blocks, it is never offered for yielding, and the prefix digest is unchanged."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_snapshot_correction_lines_never_yield_and_prefix_is_stable
 - id: gate.memory.established_facts_form
   milestone: 16
   kind: case

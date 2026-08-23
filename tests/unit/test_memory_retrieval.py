@@ -10,20 +10,25 @@ caps, budget-bound assembly, and the recall audit event.
 from __future__ import annotations
 
 import hashlib
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
+from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
+    MemoryCorrection,
+    MemoryRecord,
     MemoryStatus,
     Portability,
     RecallMoment,
     RecallProfile,
+    Sensitivity,
 )
+from agent_core.memory.formation import GovernedMemoryService
 from agent_core.memory.profiles import LifecycleWeights, RetrievalProfile, TraceProfile
 from agent_core.memory.retrieval import (
     RETRIEVAL_POLICY_VERSION,
@@ -38,8 +43,31 @@ from tests.contract.memory_fixtures import (
     recall_query,
     recalled,
     session_events,
+    user_event,
 )
 from tests.contract.support import NOW, SESSION_ID, principal
+
+
+async def _remember(
+    factory: MemoryUnitOfWorkFactory,
+    service: GovernedMemoryService,
+    statement: str,
+    *,
+    subject: str = "answer style",
+) -> MemoryRecord:
+    """State one belief the way a user turn would, with real provenance."""
+
+    sequence = await user_event(factory, statement)
+    return await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement=statement,
+        subject=subject,
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        sensitivity=Sensitivity.INTERNAL,
+        source_event_ids=[sequence],
+    )
 
 
 def test_score_enforces_the_relevance_floor() -> None:
@@ -539,3 +567,120 @@ async def test_near_duplicate_penalty_demotes_but_keeps_the_second_statement() -
     assert scored[UUID(int=691)] == pytest.approx(plain[UUID(int=691)])
     assert scored[UUID(int=693)] == pytest.approx(plain[UUID(int=693)])
     assert "always" in penalized.rendered
+
+
+async def test_recall_watermark_is_the_store_head_not_the_max_returned_position() -> None:
+    """The watermark a session freezes is the store head, not what it matched.
+
+    A belief no query text reaches still occupies a store position. Reporting
+    the highest position a recall happened to return would leave every belief
+    above it looking new to the next turn's delta, so the watermark is read
+    from the store instead of from the result.
+    """
+
+    _clock, factory, _service, retriever = await formation_stack()
+    matched = memory()
+    unmatched = memory(belief_id=671, statement="Deploy region is eu-west-1").model_copy(
+        update={
+            "subject": "deploy region",
+            "belief_type": BeliefType.FACT,
+            "portability": Portability.CONTEXTUAL,
+            "store_position": 9,
+        }
+    )
+    async with factory() as uow:
+        for record in (matched, unmatched):
+            await uow.memories.upsert_belief(record)
+
+    result = await retriever.recall(recall_query(text="concise answers"), session_id=SESSION_ID)
+
+    assert [item.belief_id for item in result.items] == [matched.id]
+    assert result.watermark == 9
+
+
+async def test_recall_delta_query_returns_only_beliefs_written_after_the_watermark() -> None:
+    """A minimum-position query is how the delta reaches past the snapshot."""
+
+    _clock, factory, _service, retriever = await formation_stack()
+    before = memory()
+    after = memory(belief_id=672, statement="User prefers tabs over spaces").model_copy(
+        update={"subject": "indentation", "store_position": 5}
+    )
+    async with factory() as uow:
+        for record in (before, after):
+            await uow.memories.upsert_belief(record)
+
+    delta = await retriever.recall(
+        recall_query(
+            text=None,
+            profile=RecallProfile.CORE,
+            min_store_position=before.store_position,
+        ),
+        session_id=SESSION_ID,
+    )
+
+    assert [item.belief_id for item in delta.items] == [after.id]
+    assert delta.watermark == 5
+
+
+def test_correction_line_rendering() -> None:
+    """One line per corrected belief, and the successor clause only when there is one."""
+
+    ended = datetime(2026, 7, 24, tzinfo=UTC)
+    superseded = MemoryCorrection(
+        belief_id=UUID("8f21a0c3-1111-4111-8111-111111111111"),
+        replacement_id=UUID("9d02b117-2222-4222-8222-222222222222"),
+        ended_at=ended,
+    )
+    closed = MemoryCorrection(
+        belief_id=UUID("8f21a0c3-1111-4111-8111-111111111111"), ended_at=ended
+    )
+
+    assert superseded.render() == (
+        "correction: [m:8f21a0c3] no longer holds as of 2026-07-24T00:00:00Z; "
+        "superseded by [m:9d02b117]."
+    )
+    assert closed.render() == "correction: [m:8f21a0c3] no longer holds as of 2026-07-24T00:00:00Z."
+
+
+async def test_corrections_list_superseded_snapshot_members_after_the_watermark() -> None:
+    """A snapshot member closed since the snapshot is corrected; nothing else is.
+
+    The frozen snapshot goes on rendering what it captured, so the correction
+    is what tells the turn that one of those beliefs no longer holds. A belief
+    the snapshot never returned, and one closed before the watermark, are not
+    this session's business.
+    """
+
+    clock, factory, service, retriever = await formation_stack()
+    stated = await _remember(factory, service, "User prefers concise answers")
+    untouched = await _remember(factory, service, "User prefers dark themes", subject="theme")
+    snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
+    assert {stated.id, untouched.id} <= {item.belief_id for item in snapshot.items}
+
+    clock.advance(timedelta(days=1))
+    replacement = await _remember(factory, service, "User prefers detailed answers")
+    assert replacement.id != stated.id
+
+    corrections = await retriever.corrections(
+        snapshot_id=snapshot.trace_id, watermark=snapshot.watermark
+    )
+
+    assert [(item.belief_id, item.replacement_id) for item in corrections] == [
+        (stated.id, replacement.id)
+    ]
+    assert corrections[0].ended_at == clock.now()
+    assert corrections[0].render().startswith(f"correction: [m:{str(stated.id)[:8]}]")
+    # The same reading taken against the store head reports nothing: the
+    # correction is only news to a session that froze its snapshot before it.
+    async with factory() as uow:
+        head = await uow.memories.head_position(principal())
+    assert await retriever.corrections(snapshot_id=snapshot.trace_id, watermark=head) == []
+
+
+async def test_corrections_are_empty_when_the_snapshot_trace_is_gone() -> None:
+    """A session whose snapshot cannot be read takes the turn without corrections."""
+
+    _clock, _factory, _service, retriever = await formation_stack()
+
+    assert await retriever.corrections(snapshot_id=UUID(int=4_242), watermark=0) == []

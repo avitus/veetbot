@@ -493,9 +493,12 @@ async def _recall_traces(
 ) -> tuple[RecallTrace | None, list[RecallTrace]]:
     """Read the probe run's recall traces back, split by moment.
 
-    A probe run plans once and takes one turn, so it records one snapshot trace
-    and one in-turn trace; the first snapshot in event order is the one the
-    frozen prefix carried, and every in-turn trace counts.
+    A probe run plans once and takes one turn, so it records one snapshot
+    trace; the first snapshot in event order is the one the frozen prefix
+    carried. The turn itself records the base recall and, over a frozen
+    snapshot, the delta bounded by its watermark, and every in-turn trace
+    counts: a probe is scored on what the turn was told, from whichever read
+    told it.
     """
 
     snapshot: RecallTrace | None = None

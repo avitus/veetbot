@@ -57,6 +57,18 @@ class InMemoryMemoryStore:
             self._position += 1
             return self._position
 
+    async def head_position(self, principal: Principal) -> int:
+        async with self._lock:
+            return max(
+                (
+                    record.store_position
+                    for record in self._records.values()
+                    if record.tenant_id == principal.tenant_id
+                    and record.principal_id == principal.principal_id
+                ),
+                default=0,
+            )
+
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord:
         async with self._lock:
             record = self._records.get(belief_id)
@@ -75,6 +87,8 @@ class InMemoryMemoryStore:
             result = []
             for record in self._records.values():
                 if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
+                    continue
+                if record.store_position <= query.min_store_position:
                     continue
                 if (
                     not query.include_superseded

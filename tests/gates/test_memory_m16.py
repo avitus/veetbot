@@ -12,6 +12,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.config import Settings
 from agent_core.domain.events import NewEvent
@@ -19,10 +20,18 @@ from agent_core.domain.memory import (
     BeliefType,
     MemoryStatus,
     RecallMoment,
+    RecallProfile,
     RecallQuery,
     Sensitivity,
 )
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedTurn,
+    TextPart,
+    UserMessage,
+)
+from agent_core.domain.policies import TrustLevel
+from agent_core.domain.runs import RunCheckpoint, RunStatus
 from agent_core.evals.memory_benchmark import (
     PROBE_CATEGORIES,
     BenchmarkProbe,
@@ -837,3 +846,192 @@ async def test_usage_feedback_marks_cited_and_never_raises_confidence(tmp_path: 
         )
         assert (repeated.cited, repeated.uncited, repeated.traces) == (0, 0, 0)
         assert {belief.id: belief for belief in await composition.memory.list_memories()} == beliefs
+
+
+def _memory_blocks(request: Any) -> list[str]:
+    """The memory-trust messages of one request's body, envelopes and all.
+
+    The frozen prefix carries the session-open snapshot as a memory-trust
+    message of its own, so the body begins after the region-A items the
+    request counted.
+    """
+
+    body = request.conversation[int(request.metadata["region_a_items"]) :]
+    return [
+        "\n".join(part.text for part in item.content if isinstance(part, TextPart))
+        for item in body
+        if isinstance(item, UserMessage) and item.trust is TrustLevel.MEMORY
+    ]
+
+
+async def _in_turn_traces(composition: Any, session_id: UUID, run_id: UUID) -> list[Any]:
+    """Every in-turn recall trace one run recorded, in event order."""
+
+    async with composition.uow_factory() as uow:
+        events = await uow.events.list_after(session_id, 0, composition.principal)
+        traces = [
+            await uow.traces.get(UUID(str(event.payload["trace_id"])), composition.principal)
+            for event in events
+            if event.event_type == "memory.recalled" and event.run_id == run_id
+        ]
+    return [trace for trace in traces if trace.moment is RecallMoment.IN_TURN]
+
+
+async def test_recall_delta_surfaces_post_snapshot_beliefs(tmp_path: Path) -> None:
+    """A belief written after the snapshot reaches the next turn through the delta.
+
+    The session's first turn freezes the prefix and its snapshot. The belief
+    stated afterwards is invisible to that snapshot and to a base recall the
+    turn's own words never reach, so the only thing that can carry it is the
+    delta query bounded by the snapshot watermark — and it arrives without the
+    cached prefix being rewritten.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        provider = composition.executor._model_provider
+        planner = composition.executor._context_planner
+        assert isinstance(provider, FakeModelProvider)
+        session_id = await composition.sessions.create()
+        before = await _stated_belief(composition, session_id, "User prefers dark themes", "theme")
+        await composition.runs.wait_terminal(
+            await composition.runs.submit("How should you answer?", session_id)
+        )
+        opening = provider.requests[-1]
+        plan = await planner.current(session_id)
+        assert plan is not None and plan.snapshot_id is not None
+        assert plan.snapshot_watermark == before.store_position
+
+        stated = await _stated_belief(
+            composition, session_id, "User prefers concise answers", "answer style"
+        )
+        assert stated.store_position > plan.snapshot_watermark
+
+        later_run = await composition.runs.wait_terminal(
+            await composition.runs.submit("What is the plan for tomorrow?", session_id)
+        )
+        latest = provider.requests[-1]
+
+        # The prefix is frozen: the delta is a Region B addition, never a rewrite.
+        assert latest.metadata["prefix_sha256"] == opening.metadata["prefix_sha256"]
+        unrotated = await planner.current(session_id)
+        assert unrotated is not None
+        assert unrotated.snapshot_id == plan.snapshot_id
+        assert any(stated.statement in block for block in _memory_blocks(latest))
+
+        traces = await _in_turn_traces(composition, session_id, later_run.id)
+        base = [trace for trace in traces if trace.query.text is not None]
+        delta = [trace for trace in traces if trace.query.text is None]
+        assert len(base) == 1
+        assert len(delta) == 1
+        # The turn's own words never reached the belief; the delta did, and it
+        # reached only what the snapshot had not already seen.
+        assert stated.id not in base[0].returned
+        assert delta[0].returned == [stated.id]
+        assert delta[0].query.profile is RecallProfile.CORE
+        assert delta[0].query.min_store_position == plan.snapshot_watermark
+        assert before.id not in delta[0].returned
+
+
+async def test_snapshot_correction_lines_never_yield_and_prefix_is_stable(
+    tmp_path: Path,
+) -> None:
+    """A superseded snapshot member is corrected in the next turn, and stays corrected.
+
+    The snapshot lives in the cached prefix and is never rewritten, so the
+    correction line is the only thing that can say the belief it renders no
+    longer holds. It is fixed body: budget pressure that drops both recall
+    blocks leaves it in place, and it is never offered for yielding.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        provider = composition.executor._model_provider
+        planner = composition.executor._context_planner
+        builder = composition.executor._context_builder
+        assert isinstance(provider, FakeModelProvider)
+        session_id = await composition.sessions.create()
+        stated = await _stated_belief(
+            composition, session_id, "User prefers concise answers", "answer style"
+        )
+        await composition.runs.wait_terminal(
+            await composition.runs.submit("How should you answer?", session_id)
+        )
+        opening = provider.requests[-1]
+        plan = await planner.current(session_id)
+        assert plan is not None
+        assert f"[m:{str(stated.id)[:8]}]" in plan.memory_snapshot
+
+        clock.advance(timedelta(days=1))
+        replacement = await _stated_belief(
+            composition, session_id, "User prefers detailed answers", "answer style"
+        )
+        assert replacement.id != stated.id
+        beliefs = {
+            belief.id: belief
+            for belief in await composition.memory.list_memories(include_inactive=True)
+        }
+        assert beliefs[stated.id].status is MemoryStatus.SUPERSEDED
+        assert beliefs[stated.id].store_position > plan.snapshot_watermark
+
+        run_id = await composition.runs.submit("What now?", session_id)
+        later_run = await composition.runs.wait_terminal(run_id)
+        latest = provider.requests[-1]
+        line = (
+            f"correction: [m:{str(stated.id)[:8]}] no longer holds as of "
+            f"{clock.now().isoformat().replace('+00:00', 'Z')}; "
+            f"superseded by [m:{str(replacement.id)[:8]}]."
+        )
+
+        assert latest.metadata["prefix_sha256"] == opening.metadata["prefix_sha256"]
+        assert plan.memory_snapshot in "\n".join(
+            "\n".join(part.text for part in item.content if isinstance(part, TextPart))
+            for item in latest.conversation
+            if isinstance(item, UserMessage)
+        )
+        assert any(line in block for block in _memory_blocks(latest))
+
+        # Budget pressure that drops both recall blocks leaves the correction.
+        async with composition.uow_factory() as uow:
+            agent = await uow.agents.get_version(later_run.agent_id, later_run.agent_version)
+        checkpoint = RunCheckpoint(
+            run_id=later_run.id,
+            version=1,
+            status=RunStatus.RUNNING,
+            conversation=[UserMessage(content=[TextPart(text="What now?")])],
+            created_at=clock.now(),
+        )
+        roomy = await builder.assemble(later_run, checkpoint, agent, composition.principal)
+        crowded = checkpoint.model_copy(
+            update={
+                "conversation": [
+                    UserMessage(
+                        content=[
+                            TextPart(text="What now? " + "context filler. " * 20_000),
+                        ]
+                    )
+                ]
+            }
+        )
+        squeezed = await builder.assemble(later_run, crowded, agent, composition.principal)
+
+        assert roomy.pressure.yield_steps == ()
+        assert any(line in block for block in _memory_blocks(roomy.request))
+        assert squeezed.pressure.yield_steps[0] == "recall"
+        assert "corrections" not in squeezed.pressure.yield_steps
+        # Every memory block the squeezed body still carries is the correction:
+        # the recall blocks yielded, the override did not.
+        squeezed_blocks = _memory_blocks(squeezed.request)
+        assert len(squeezed_blocks) == 1
+        assert line in squeezed_blocks[0]
+        assert "<memory" not in squeezed_blocks[0]
