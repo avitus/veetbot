@@ -1092,6 +1092,11 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     --session --confirm` refuses without an explicit confirmation, and with it
     re-consolidates from watermark zero without resurrecting a rejected belief.
     Registered as `gate.memory.rederive_opt_in`, case. **M16.**
+20. **Expanded positive formation coverage is current.** Provider assistance
+    fully supports at least seventeen of the twenty-one labeled positive cases
+    in the expanded corpus before Milestone 16 evidence can be published,
+    independently of Milestone 10's historical sixteen-of-twenty gate.
+    Registered as `gate.memory.provider_positive_coverage_v2`, case. **M16.**
 
 ## Open questions
 

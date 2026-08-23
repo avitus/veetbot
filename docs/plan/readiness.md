@@ -89,7 +89,7 @@ rather than smoothed.
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
-| 16 | Memory evaluation and lifecycle | Authorized | 19 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
+| 16 | Memory evaluation and lifecycle | Authorized | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -1422,7 +1422,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2521` against
-    `model-gateway.md:1795` and `milestone-map.md:1299`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1303`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP

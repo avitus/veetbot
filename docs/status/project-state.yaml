@@ -160,7 +160,7 @@ milestones:
     authorized_on: 2026-08-22
     design: docs/plan/memory-evaluation-and-lifecycle.md
     adr: docs/adr/0069-milestone-16-memory-evaluation-and-lifecycle.md
-    gates_registered: 19
+    gates_registered: 20
     authorized_scope:
       - multi-session benchmark corpus, deterministic arm, exact baseline
       - opt-in live arm with cost ceiling and self-validating evidence
@@ -176,25 +176,29 @@ milestones:
       - check: make check
         outcome: passed_locally
         detail: >-
-          Ruff formatting over 559 files and Ruff linting pass, strict mypy
-          reports no issue in 515 source files, the static partition passes
-          1220 tests, the contract partition passes 350, the release, manual
+          Ruff formatting over 561 files and Ruff linting pass, strict mypy
+          reports no issue in 516 source files, the static partition passes
+          1236 tests, the contract partition passes 354, the release, manual
           rollback, and nginx deployment-script tests pass, and the strict
           documentation build passes with 171 citations checked. The gate
-          registry reconciles 324 entries with 247 active through Milestone 12.
-          Measured on ce695b0 plus the task-12 review fix round, which is what
-          last_reviewed_commit names.
-      - check: nineteen Milestone 16 gate.memory.* gates
+          registry reconciles 325 entries with 247 active through Milestone 12.
+          Measured on the Milestone 10/16 gate-versioning review-fix tree;
+          last_reviewed_commit remains the last clean reviewed milestone head.
+      - check: twenty Milestone 16 gate.memory.* gates
         outcome: passed_locally
         detail: >-
-          The nineteen registered Milestone 16 entries in evals/gates/memory.yaml
-          resolve to nineteen distinct checks — sixteen in
-          tests/gates/test_memory_m16.py, two in
+          The twenty registered Milestone 16 entries in evals/gates/memory.yaml
+          resolve to twenty distinct checks — sixteen in
+          tests/gates/test_memory_m16.py, one in
+          tests/unit/test_memory_formation_eval.py, two in
           tests/unit/test_memory_benchmark_eval.py, and one in
-          tests/unit/test_memory_benchmark_external.py — and all nineteen pass
+          tests/unit/test_memory_benchmark_external.py — and all twenty pass
           when executed by node identifier. The whole
           tests/gates/test_memory_m16.py file passes its twenty tests. The
-          harness cannot execute these nineteen through agent eval gates yet:
+          separately versioned gate.memory.provider_positive_coverage_v2 binds
+          the expanded 17-of-21 corpus evidence while Milestone 10's completed
+          16-of-20 gate remains unchanged. The harness cannot execute these
+          twenty through agent eval gates yet:
           --milestone means treat every gate at or below MILESTONE as active, so
           --milestone 16 activates the fifty-eight still-pending Milestone 13
           through 15 gates and the registry validator correctly refuses. They
@@ -204,11 +208,11 @@ milestones:
         outcome: passed_locally
         detail: >-
           agent eval gates reports 247 active gates across Milestones 0 through
-          12 with 247 passing and none failing, and 77 pending across Milestones
-          13 through 16, for the 324 registry entries the milestone map
+          12 with 247 passing and none failing, and 78 pending across Milestones
+          13 through 16, for the 325 registry entries the milestone map
           declares. agent eval gates --area memory reports Milestone 9 with
           fourteen passing, Milestone 10 with fifteen passing, and Milestone 16
-          with nineteen pending. Both invocations exit zero. The verified gate
+          with twenty pending. Both invocations exit zero. The verified gate
           ceiling stays at Milestone 12.
       - check: PostgreSQL integration lane
         outcome: passed_locally
@@ -393,7 +397,7 @@ readiness:
     operational-hardening.md with sixteen; every authorized milestone has a
     design document and the census reports no zero row. Milestone 16 memory
     evaluation and lifecycle is authorized as a parallel workstream with
-    nineteen registered gates. Model routing remains
+    twenty registered gates. Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
@@ -402,5 +406,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T10:15:00Z
+last_updated: 2026-08-23T19:43:44Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

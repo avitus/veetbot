@@ -31,7 +31,7 @@ title: Current Milestone
   `main`. Milestones 13 through 15 remain
   authorized and specified with twenty-one, twenty-one, and sixteen registered
   gates; none has started. Milestone 16, the parallel memory-evaluation
-  workstream, has implemented all nineteen of its gates, republished the
+  workstream, has implemented all twenty of its gates, republished the
   provider evidence at `formation@8`, and re-recorded its baseline; hosted CI
   on the final head and the CodeRabbit review loop on the `dev` to `main` pull
   request remain. Its live benchmark arm ran three times — the first two failed
@@ -81,7 +81,7 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 [operational-hardening.md](operational-hardening.md) and ADR-0065 with sixteen
 `gate.ops.*` entries; no authorized milestone reports a zero row. Milestone
 16's [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
-and ADR-0069 landed the same way, with nineteen further `gate.memory.*`
+and ADR-0069 landed the same way, with twenty further `gate.memory.*`
 entries in the existing area, and it never showed a zero row because its
 authorization and its specification arrived together.
 
@@ -149,7 +149,7 @@ twenty-one `gate.surface.*` entries plus the plan's acceptance criteria and
 the [inbound-surfaces design](inbound-surfaces.md); Milestone 15's is its
 sixteen `gate.ops.*` entries plus the plan's acceptance criteria and the
 [operational-hardening design](operational-hardening.md); and Milestone 16's
-is its nineteen `gate.memory.*` entries plus the plan's acceptance criteria
+is its twenty `gate.memory.*` entries plus the plan's acceptance criteria
 and the
 [memory-evaluation-and-lifecycle design](memory-evaluation-and-lifecycle.md),
 whose benchmark baseline is re-recorded deliberately by every change that

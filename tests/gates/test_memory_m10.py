@@ -112,6 +112,19 @@ def _provider_evidence(build_ref: str) -> ProviderExtractionEvaluationEvidence:
     )
 
 
+def test_provider_evidence_preserves_m10_positive_coverage_floor() -> None:
+    evidence = _provider_evidence("m10-evidence")
+
+    assert evidence.positive_case_count == 20
+    assert evidence.minimum_supported_case_count == 16
+    assert evidence.provider_supported_case_count == 16
+
+    below_floor = evidence.model_dump()
+    below_floor["provider_supported_case_count"] = 15
+    with pytest.raises(ValueError, match="positive coverage floor"):
+        ProviderExtractionEvaluationEvidence.model_validate(below_floor)
+
+
 async def test_ordinary_conversation_forms_one_memory_per_durable_entity() -> None:
     _clock, factory, service, _retriever = await formation_stack()
     source = await user_event(

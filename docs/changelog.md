@@ -45,7 +45,9 @@ title: Changelog
   falls back safely for every other one. The provider arm fully supported
   seventeen of twenty-one positive cases against the deterministic arm's nine,
   supported twenty labeled candidates against twelve, and both arms fabricated
-  nothing and regressed no policy.
+  nothing and regressed no policy. The expanded threshold is the separately
+  versioned Milestone 16 gate `gate.memory.provider_positive_coverage_v2`;
+  Milestone 10's completed sixteen-of-twenty gate and evidence remain unchanged.
 - Re-recorded the deterministic benchmark baseline as the milestone's closing
   act. The whole diff is the build reference and the recording timestamp: the
   aggregate metrics and all sixty-six probe rows are unchanged, so no metric
@@ -103,11 +105,11 @@ title: Changelog
   query-former paths, time-decayed reinforcement with a forgetting sweep, usage
   feedback that never raises confidence, the recall delta and its correction
   lines, established facts at affirmed authority, surfaced conflicts, and
-  opt-in re-derivation; nineteen hard gates.
-- Registered the nineteen gates in the existing `memory` area, which now spans
+  opt-in re-derivation; twenty hard gates.
+- Registered the twenty gates in the existing `memory` area, which now spans
   three declaring specifications: the registry bound and declaring-spec census,
   the milestone-map area paragraph, per-spec table, gate-table digits (22
-  specs, 318 subject gates, 327 declarations, 324 entries), census row for
+  specs, 319 subject gates, 328 declarations, 325 entries), census row for
   Milestone 16 and its Decision 9 note, readiness verdict, current milestone,
   project state, AGENTS.md routing row and scope bullet, mkdocs nav, ADR index,
   forward-looking notes in the two memory specifications, the evaluation

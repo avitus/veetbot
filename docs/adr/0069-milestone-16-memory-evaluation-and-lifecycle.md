@@ -114,10 +114,12 @@ lifecycle is already specified work.
     policy, and replays outstanding rejections so nothing a user rejected
     returns. Re-derivation remains opt-in per principal, as the formation
     design requires.
-12. **One gate area, `memory`, nineteen gates.** The existing area takes them:
+12. **One gate area, `memory`, twenty gates.** The existing area takes them:
     the benchmark measures the same subject the area already covers, and its
     gates cross-reference formation and retrieval gates rather than standing
-    apart from them. The `memory` area now spans three declaring
+    apart from them. The twentieth gate versions the expanded provider corpus's
+    seventeen-of-twenty-one coverage independently of Milestone 10's completed
+    sixteen-of-twenty gate. The `memory` area now spans three declaring
     specifications.
 
 ## Consequences
@@ -132,7 +134,9 @@ lifecycle is already specified work.
 - The provider-assisted extraction evidence is invalidated by the
   `formation@8` bump until it is republished; under the automatic mode the
   composition falls back to deterministic extraction with a content-free audit,
-  and under the required mode startup refuses.
+  and under the required mode startup refuses. Its expanded-corpus coverage is
+  registered as `gate.memory.provider_positive_coverage_v2` rather than
+  rewriting Milestone 10's historical evidence.
 - Ten lifecycle gates land behavior the corpus has described since Milestone 9:
   decay, usage feedback, the recall delta, correction lines, established facts,
   conflicts, re-derivation, trace expiry, lexical parity, and the profile

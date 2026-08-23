@@ -115,8 +115,8 @@
   milestone: 10
   kind: case
   spec: docs/plan/memory-formation-and-consolidation.md#hard-gates
-  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least seventeen of the twenty-one labeled positive cases before evidence can be published."
-  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_lift_without_minimum_positive_coverage_does_not_publish
+  statement: "**Positive formation coverage** — aggregate lift alone is insufficient: provider assistance must fully support at least sixteen of the twenty labeled positive cases before evidence can be published."
+  check: tests/gates/test_memory_m10.py::test_provider_evidence_preserves_m10_positive_coverage_floor
 - id: gate.memory.provider_source_safety
   milestone: 10
   kind: case
@@ -179,6 +179,12 @@
   spec: docs/plan/memory-retrieval-and-ranking.md#hard-gates
   statement: "**No triple regression** — retrieval improves target eval cases **without** increasing policy failures, without regressing cache utilization, and without raising noise ratio."
   check: tests/gates/test_memory_m9.py::test_no_triple_regress
+- id: gate.memory.provider_positive_coverage_v2
+  milestone: 16
+  kind: case
+  spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
+  statement: "**Expanded positive formation coverage is current.** Provider assistance must fully support at least seventeen of the twenty-one labeled positive cases in the expanded corpus before Milestone 16 evidence can be published."
+  check: tests/unit/test_memory_formation_eval.py::TestProviderEvidencePublicationGate::test_lift_without_minimum_positive_coverage_does_not_publish
 - id: gate.memory.bench_corpus_shape
   milestone: 16
   kind: structural
