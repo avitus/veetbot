@@ -14,13 +14,20 @@ title: Current Milestone
   hardening — is specified by
   [operational-hardening.md](operational-hardening.md) with sixteen gates and
   follows Milestone 14; its backup tranche has no dependency on the three
-  before it.
+  before it. Milestone 17 — the memory read API and the native memory
+  browser — is specified by
+  [memory-read-api-and-browser.md](memory-read-api-and-browser.md) with ten
+  gates and is a second parallel workstream rather than a successor: it shares
+  no file with Milestones 13 through 15 and may proceed alongside them.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
   (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an
   independently advancing parallel workstream whose gate ceiling cannot move
-  ahead of Milestone 15 (ADR-0069); it completed on 2026-08-23.
+  ahead of Milestone 15 (ADR-0069); it completed on 2026-08-23. Milestone 17,
+  the memory read API and the native memory browser, was authorized on
+  2026-08-23 as a second such workstream (ADR-0070), on the same terms: its
+  gates may go green independently and move the verified ceiling no further.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -40,7 +47,9 @@ title: Current Milestone
   probe arm, and the third published
   `evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json`
   with four retried runs and a lift of forty-five — which is milestone evidence
-  rather than one of the two completion conditions below.
+  rather than one of the two completion conditions below. Milestone 17, the
+  second parallel workstream, is authorized and specified with ten registered
+  gates and has not started.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -83,7 +92,10 @@ ADR-0063 with twenty-one `gate.delegate.*` entries, and Milestone 14's
 16's [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
 and ADR-0069 landed the same way, with twenty further `gate.memory.*`
 entries in the existing area, and it never showed a zero row because its
-authorization and its specification arrived together.
+authorization and its specification arrived together. Milestone 17's
+[memory-read-api-and-browser.md](memory-read-api-and-browser.md) and ADR-0070
+landed on the same day as that milestone's authorization, adding ten more
+`gate.memory.*` entries to the same area.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -124,6 +136,7 @@ substitute.
 - [Milestone 14 — inbound surfaces and pairing](engineering-plan.md#milestone-14-inbound-surfaces-and-pairing)
 - [Milestone 15 — operational hardening](engineering-plan.md#milestone-15-operational-hardening)
 - [Milestone 16 — memory evaluation and lifecycle](engineering-plan.md#milestone-16-memory-evaluation-and-lifecycle)
+- [Milestone 17 — memory read API and browser](engineering-plan.md#milestone-17-memory-read-api-and-browser)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -153,7 +166,13 @@ is its twenty `gate.memory.*` entries plus the plan's acceptance criteria
 and the
 [memory-evaluation-and-lifecycle design](memory-evaluation-and-lifecycle.md),
 whose benchmark baseline is re-recorded deliberately by every change that
-moves it.
+moves it. Milestone 17's contract is its ten `gate.memory.*` entries —
+`read_api_ceiling_required`, `read_api_ceiling_filter`,
+`read_api_principal_isolation`, `read_api_pagination`, `read_api_filters`,
+`read_api_read_only`, `read_api_flag_absent`, `browse_contract_parity`,
+`read_api_view_projection`, and `read_api_error_vocabulary` — plus the plan's
+acceptance criteria and the
+[memory-read-api-and-browser design](memory-read-api-and-browser.md).
 
 ## Completion rule
 
@@ -184,3 +203,9 @@ which still advances only after every earlier milestone has completed.
 Milestone 16 completed on those terms on 2026-08-23: every declared gate and
 the cumulative registry passed, the PostgreSQL lanes passed, and hosted CI and
 the final CodeRabbit review finished clean on the `dev` to `main` pull request.
+
+Milestone 17 completes on the same terms, with its own additional condition:
+the native Apple package and simulator lanes pass, because the browser is half
+of what the milestone delivers and no Python gate observes Swift. Being a
+parallel workstream changes nothing about the ceiling, which still advances
+only after every earlier milestone has completed.

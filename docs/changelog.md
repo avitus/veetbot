@@ -7,6 +7,38 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-23 — Milestone 17 specified: the memory read API and browser
+
+- Added `docs/plan/memory-read-api-and-browser.md` and proposed ADR-0070: two
+  read-only routes under `/v1/memories`, a keyset-paginated list and a detail
+  route, both GET, both requiring the exact scope `memory.read` and mounted
+  only when `AGENT_MEMORY_API_ENABLED` is set, which is off by default; a
+  sensitivity `ceiling` that every request must supply and the server never
+  infers, filtered strictly, with an above-ceiling belief indistinguishable
+  from one that does not exist; status, belief-type, subject, source-session,
+  and text filters, the text filter answered identically by both store
+  adapters through the shared lexical helpers; a `MemoryView` built from an
+  explicit exposure list that withholds tenant identity, retriever-internal
+  utility, cursor internals, and — as a recommendation flagged for owner
+  sign-off — three operator-tier provenance fields; and a browsing surface in
+  the native Apple client that declares the `restricted` ceiling explicitly
+  and degrades gracefully against a server without the flag. Ten hard gates.
+- ADR-0070 supersedes ADR-0045's closure of the HTTP route set for inspection
+  only, on the precedent ADR-0050 set, and is the authorized contract and
+  security review ADR-0049 requires before the server is expanded for the
+  native client. Writes over HTTP, recall-trace viewing, consolidation audit
+  routes, and knowledge documents stay out; trace viewing is additionally
+  blocked until `PostgresTraceStore.for_turn` gains tenant and principal
+  predicates.
+- Registered the ten gates in the existing `memory` area, which now spans four
+  declaring specifications: the registry bound and declaring-spec census, the
+  milestone-map area paragraph, per-spec table, gate-table digits (23 specs,
+  329 subject gates, 338 declarations, 335 entries), census row for Milestone
+  17 and its Decision 9 note, readiness verdict and section, current
+  milestone, project state, AGENTS.md routing row and scope bullet, mkdocs
+  nav, ADR index, a route-extension subsection in the API design, the review
+  log, and this changelog. Raised the plan to version 2.6.
+
 ## 2026-08-23 — Milestone 16 complete
 
 - Milestone 16, memory evaluation and lifecycle, completed as the parallel
