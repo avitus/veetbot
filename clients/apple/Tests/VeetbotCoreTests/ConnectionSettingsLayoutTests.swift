@@ -8,6 +8,7 @@ import Testing
         #expect(
             ConnectionSettingsSection.allCases == [
                 .connection,
+                .websiteAccess,
                 .appearance,
                 .dataAndPrivacy,
             ]

@@ -8,7 +8,10 @@ from uuid import UUID
 
 import pytest
 
-from agent_core.adapters.browser.hosted_provider import HostedBrowserProvider
+from agent_core.adapters.browser.hosted_provider import (
+    HostedBrowserProvider,
+    SessionBoundHostedBrowserProvider,
+)
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings, load_settings
@@ -23,7 +26,7 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     BrowserProviderError,
 )
-from agent_core.domain.errors import NotFoundError
+from agent_core.domain.errors import InvalidStateTransition, NotFoundError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
@@ -38,6 +41,7 @@ from tests.unit.test_config import base_environment
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000e7")
 GRANT_ID = UUID("00000000-0000-0000-0000-0000000000e8")
 GRANT_NOW = datetime(2026, 8, 19, 12, tzinfo=UTC)
+SESSION_BROWSER_PROFILE_METADATA_KEY = "browser_profile_id"
 
 
 class GrantBrowserProvider(FakeBrowserProvider):
@@ -56,6 +60,7 @@ async def seed_browser_authority(
     composition: Composition,
     *,
     revoked: bool = False,
+    profile_status: BrowserProfileStatus = BrowserProfileStatus.READY,
 ) -> None:
     owner = composition.principal
     profile = BrowserProfile(
@@ -65,7 +70,7 @@ async def seed_browser_authority(
         provider_name="hosted-isolated",
         provider_ref="opaque-provider-reference",
         allowed_origins=("https://example.org",),
-        status=BrowserProfileStatus.READY,
+        status=profile_status,
         generation=3,
         encryption_key_version="key-v1",
         created_at=GRANT_NOW,
@@ -169,6 +174,81 @@ async def test_configured_hosted_provider_binds_the_trusted_profile_adapter() ->
 
         assert isinstance(navigate.implementation, BrowserNavigateTool)
         assert isinstance(navigate.implementation._provider, HostedBrowserProvider)
+
+
+async def test_configured_hosted_provider_can_select_a_profile_from_each_session() -> None:
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        }
+    )
+
+    async with build(settings=settings) as composition:
+        navigate = cast(
+            RegisteredTool,
+            composition.tool_pipeline._registry.get("browser.navigate"),
+        )
+
+        assert isinstance(navigate.implementation, BrowserNavigateTool)
+        assert isinstance(
+            navigate.implementation._provider,
+            SessionBoundHostedBrowserProvider,
+        )
+
+
+async def test_session_creation_binds_only_a_ready_principal_owned_browser_profile() -> None:
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(settings=settings) as composition:
+        await seed_browser_authority(composition)
+
+        created = await composition.services.sessions.create(
+            composition.principal,
+            "general",
+            {},
+            browser_profile_id=PROFILE_ID,
+        )
+        async with composition.uow_factory() as uow:
+            stored = await uow.sessions.get(created.id, composition.principal)
+
+    assert created.metadata == {SESSION_BROWSER_PROFILE_METADATA_KEY: str(PROFILE_ID)}
+    assert stored.metadata == {SESSION_BROWSER_PROFILE_METADATA_KEY: str(PROFILE_ID)}
+
+
+async def test_session_metadata_cannot_impersonate_the_trusted_browser_profile_binding() -> None:
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(settings=settings) as composition:
+        await seed_browser_authority(composition)
+
+        with pytest.raises(ValueError, match="reserved"):
+            await composition.services.sessions.create(
+                composition.principal,
+                "general",
+                {SESSION_BROWSER_PROFILE_METADATA_KEY: str(PROFILE_ID)},
+            )
+
+
+async def test_session_creation_refuses_a_profile_that_still_requires_login() -> None:
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(settings=settings) as composition:
+        await seed_browser_authority(
+            composition,
+            profile_status=BrowserProfileStatus.AUTHENTICATION_REQUIRED,
+        )
+
+        with pytest.raises(InvalidStateTransition, match="browser profile is not ready"):
+            await composition.services.sessions.create(
+                composition.principal,
+                "general",
+                {},
+                browser_profile_id=PROFILE_ID,
+            )
 
 
 async def test_browser_navigation_persists_policy_checked_untrusted_result() -> None:

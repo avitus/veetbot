@@ -863,10 +863,14 @@ closed through the CLI decision in ADR-0045. `agent memory list`, `get`, `edit`,
 and `delete` call the governed service and expose full provenance and lifecycle
 metadata; listing can include inactive beliefs and filter by source session.
 `agent memory formations` exposes consolidation policy, watermark, and outcome
-counts, while `agent memory trace` exposes the authenticated principal's
-persisted retrieval diagnostics. Boundary and repository tests cover the
-commands, tenant/principal isolation, ordering, and session filters. The HTTP
-route set remains unchanged.
+counts; `agent memory diagnose --session` joins the flag, watermark, provider
+selection and attempt audits, consolidations, and resulting beliefs; and
+`agent memory replay --session --confirm` reprocesses original source events
+through the same principal-scoped formation service. `agent memory trace`
+exposes the authenticated principal's persisted retrieval diagnostics. Boundary
+and repository tests cover the commands, tenant/principal isolation, ordering,
+session filters, and provenance-preserving replay. The HTTP route set remains
+unchanged.
 
 One item was absent, and it was the larger one. **Knowledge documents
 had no design.** The milestone's own heading is *"Long-term memory and
@@ -1183,7 +1187,7 @@ raises confidence, the recall delta and its correction lines, established
 working-state facts entering formation at affirmed authority, conflicts
 committed flagged and surfaced instead of silently resolved, and re-derivation
 as an explicit operator action. Nineteen hard gates in the `memory` area;
-ADR-0068 records the decisions.
+ADR-0069 records the decisions.
 
 The readiness verdict is therefore **Authorized**: there is no unnamed design
 choice between the corpus and the first red tests. What remains outside the

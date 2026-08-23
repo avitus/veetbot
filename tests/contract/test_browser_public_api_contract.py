@@ -21,7 +21,8 @@ from agent_core.domain.browser import (
     BrowserProfileStatus,
     BrowserProfileView,
 )
-from agent_core.domain.views import Page
+from agent_core.domain.sessions import SessionStatus
+from agent_core.domain.views import Page, SessionView
 from tests.contract.support import NOW, principal
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000d7")
@@ -160,6 +161,33 @@ class Grants:
         del owner, grant_id
 
 
+class Sessions:
+    def __init__(self) -> None:
+        self.browser_profile_id: UUID | None = None
+
+    async def create(
+        self,
+        owner: Principal,
+        agent_id: str,
+        metadata: dict[str, object],
+        browser_profile_id: UUID | None = None,
+    ) -> SessionView:
+        del owner
+        self.browser_profile_id = browser_profile_id
+        return SessionView(
+            id=UUID("00000000-0000-0000-0000-0000000000da"),
+            status=SessionStatus.ACTIVE,
+            agent_id=agent_id,
+            agent_version="1",
+            title=None,
+            metadata={**metadata, "browser_profile_id": str(browser_profile_id)},
+            created_at=NOW,
+            updated_at=NOW,
+            active_run_id=None,
+            last_run_id=None,
+        )
+
+
 def settings() -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://unused/agent",
@@ -232,6 +260,37 @@ async def test_public_profile_authentication_and_grant_creation_are_secret_free(
     assert "provider_ref" not in serialized
     assert "storage_state" not in serialized
     assert "encryption_key_version" not in serialized
+
+
+async def test_public_session_creation_passes_only_the_opaque_browser_profile_binding() -> None:
+    sessions = Sessions()
+    services = SimpleNamespace(
+        sessions=sessions,
+        runs=None,
+        approvals=None,
+        artifacts=None,
+        browser_profiles=Profiles(),
+        browser_grants=Grants(),
+    )
+    owner = principal().model_copy(update={"scopes": {"session.write"}})
+    app = create_app(services, settings(), owner, lambda: str(PROFILE_ID), _ready)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url="http://127.0.0.1",
+    ) as client:
+        response = await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": "general",
+                "metadata": {},
+                "browser_profile_id": str(PROFILE_ID),
+            },
+        )
+
+    assert response.status_code == 201
+    assert sessions.browser_profile_id == PROFILE_ID
+    assert response.json()["metadata"] == {"browser_profile_id": str(PROFILE_ID)}
+    assert "password" not in response.text
 
 
 async def test_browser_write_requests_reject_malformed_origins_and_grant_windows() -> None:

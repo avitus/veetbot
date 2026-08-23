@@ -939,7 +939,7 @@ them is the whole fix.
 
 **`credential_ref` is a name, never a value.** The field is validated
 against the shape of an environment variable name, and a value matching any
-family of the secret scanner at `bootstrap-and-composition.md:1116-1153` is
+family of the secret scanner at `bootstrap-and-composition.md:1120-1157` is
 rejected at load with the match not printed. This is the one field where a
 mistake gets committed to a repository, and
 `gate.structure.no_committed_secrets` catches it a second time.
@@ -1449,7 +1449,7 @@ renames are.
 
 ### The PLATFORM default is a privilege inversion, and it is bounded here
 
-`engineering-plan.md:612` defaults `ProviderReasoningItem.trust_level` to
+`engineering-plan.md:619` defaults `ProviderReasoningItem.trust_level` to
 `TrustLevel.PLATFORM`. That is the highest trust tier in the system, and
 `policy-and-approvals.md:859-888` maps trust tiers to policy restrictiveness,
 so on its face this hands model-generated content the same standing as

@@ -125,6 +125,7 @@ class CreateSessionRequest(BaseModel):
 
     agent_id: str = Field(min_length=1)
     metadata: dict[str, object] = Field(default_factory=dict)
+    browser_profile_id: UUID | None = None
 
 
 class MessageRequest(BaseModel):
@@ -364,7 +365,12 @@ def create_app(
         body: CreateSessionRequest,
         authenticated: Annotated[Principal, secured("session.write")],
     ) -> SessionView:
-        return await services.sessions.create(authenticated, body.agent_id, body.metadata)
+        return await services.sessions.create(
+            authenticated,
+            body.agent_id,
+            body.metadata,
+            browser_profile_id=body.browser_profile_id,
+        )
 
     @app.get(
         "/v1/sessions",

@@ -31,7 +31,10 @@ from agent_core.adapters.browser.authentications import (
 )
 from agent_core.adapters.browser.grants import InMemoryBrowserGrantRepository
 from agent_core.adapters.browser.hosted_profiles import HostedBrowserProfileControlPlane
-from agent_core.adapters.browser.hosted_provider import HostedBrowserProvider
+from agent_core.adapters.browser.hosted_provider import (
+    HostedBrowserProvider,
+    SessionBoundHostedBrowserProvider,
+)
 from agent_core.adapters.browser.hosted_sessions import HostedBrowserSessionControlPlane
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.adapters.browser.profiles import InMemoryBrowserProfileRepository
@@ -236,6 +239,7 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.execution import (
     EgressDestination,
@@ -259,7 +263,9 @@ from agent_core.domain.messages import (
 from agent_core.domain.policies import LoadedRuleset, PolicyProfileRecord
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, CancelReason, RunLimits
 from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinitionLimits
+from agent_core.domain.sessions import SESSION_BROWSER_PROFILE_METADATA_KEY
 from agent_core.domain.skills import SkillPackage, SkillSource
+from agent_core.domain.tools import ToolExecutionContext
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
@@ -1267,7 +1273,7 @@ async def _compose(
             evidence_corpus_sha256 or "none",
         )
     )
-    selection_key = f"memory.provider_extraction.selection:{selection_identity}"
+    selection_key = f"memory.provider_extraction.selection:v2:{selection_identity}"
     async with uow_factory() as uow:
         await uow.process_events.append(
             ProcessEvent(
@@ -1276,6 +1282,8 @@ async def _compose(
                 actor_type="composition-root",
                 actor_id=principal.principal_id,
                 payload={
+                    "tenant_id": principal.tenant_id,
+                    "principal_id": principal.principal_id,
                     "mode": memory_mode.value,
                     "outcome": selection_outcome,
                     "reason": selection_reason,
@@ -1852,6 +1860,7 @@ def _browser_provider(
     profile_id: UUID | None,
     profiles: UnitOfWorkFactory,
     sessions: BrowserSessionControlPlane | None,
+    now: Callable[[], datetime],
 ) -> BrowserProvider | None:
     if kind is BrowserProviderKind.DISABLED:
         return None
@@ -1861,7 +1870,7 @@ def _browser_provider(
             allowed_origins=allowed_origins,
         )
     if kind is BrowserProviderKind.HOSTED:
-        if profile_id is None or sessions is None:
+        if sessions is None:
             raise ConfigurationError("hosted browser provider composition is incomplete")
 
         async def load_profile(
@@ -1871,12 +1880,29 @@ def _browser_provider(
             async with profiles() as uow:
                 return await uow.browser_profiles.get(requested_profile_id, owner)
 
-        return HostedBrowserProvider(
+        if profile_id is not None:
+            return HostedBrowserProvider(
+                principal=principal,
+                profile_id=profile_id,
+                allowed_origins=allowed_origins,
+                profiles=load_profile,
+                sessions=sessions,
+            )
+
+        async def select_session_profile(context: ToolExecutionContext) -> UUID:
+            async with profiles() as uow:
+                session = await uow.sessions.get(context.session_id, context.principal)
+            value = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+            if not isinstance(value, str):
+                raise NotFoundError("browser profile binding not found")
+            return UUID(value)
+
+        return SessionBoundHostedBrowserProvider(
             principal=principal,
-            profile_id=profile_id,
-            allowed_origins=allowed_origins,
             profiles=load_profile,
+            profile_selector=select_session_profile,
             sessions=sessions,
+            now=now,
         )
     raise ConfigurationError(f"unsupported browser provider {kind.value!r}")
 
@@ -2258,6 +2284,7 @@ async def build(
                 profile_id=effective_settings.browser_profile_id,
                 profiles=uow_factory,
                 sessions=browser_sessions,
+                now=effective_clock.now,
             )
         )
         for package, source in skill_packages:

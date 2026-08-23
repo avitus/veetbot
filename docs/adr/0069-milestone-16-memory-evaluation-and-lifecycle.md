@@ -1,4 +1,4 @@
-# ADR-0068: Milestone 16 memory evaluation and lifecycle
+# ADR-0069: Milestone 16 memory evaluation and lifecycle
 
 - Status: Proposed
 - Date: 2026-08-22
@@ -83,11 +83,12 @@ lifecycle is already specified work.
    a filter and drops beliefs the ranker should merely demote; the divergence
    also meant the in-memory tier was not a real adapter.
 7. **Three policy versions move, each once.** Deterministic formation goes
-   `formation@2` to `formation@5` and provider-assisted formation `formation@4`
-   to `formation@6` in the change that admits established facts; retrieval goes
+   `formation@5` to `formation@7` and provider-assisted formation `formation@6`
+   to `formation@8` in the change that admits established facts (ADR-0068 had
+   already moved them from `formation@2` and `formation@4`); retrieval goes
    `retrieval@1` to `retrieval@2` in the change that adds time decay and the
    near-duplicate penalty. The provider bump invalidates the bundled release
-   evidence, so the milestone republishes it at `formation@6`, deletes the
+   evidence, so the milestone republishes it at `formation@8`, deletes the
    superseded artifact, and records the automatic-mode fallback and
    required-mode refusal in the release notes.
 8. **Forgetting is decay over unused, provisional or low-confidence beliefs.**
@@ -129,7 +130,7 @@ lifecycle is already specified work.
 - A live evaluation costs money, is opt-in, and produces an artifact that is
   never overwritten; a re-record is a deliberate deletion.
 - The provider-assisted extraction evidence is invalidated by the
-  `formation@6` bump until it is republished; under the automatic mode the
+  `formation@8` bump until it is republished; under the automatic mode the
   composition falls back to deterministic extraction with a content-free audit,
   and under the required mode startup refuses.
 - Ten lifecycle gates land behavior the corpus has described since Milestone 9:

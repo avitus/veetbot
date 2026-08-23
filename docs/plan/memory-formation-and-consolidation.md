@@ -158,7 +158,11 @@ Candidates are **proposals, not writes.**
 Candidate boundaries are semantic boundaries. Separate first-person clauses and
 separate text parts are extracted independently; a conjunction such as “I prefer
 tea and we decided to deploy Fridays” must not turn the decision into part of the
-preference. The deterministic extractor has a separate 256-proposal scan ceiling
+preference. Ordinary experience narratives use the same rule: a newly started
+activity, prior experience with a related activity, and a recurring physical
+symptom are independently correctable beliefs with semantic subjects rather than
+one generic hobby or user bucket. Physical symptoms are sensitive and flagged for
+review. The deterministic extractor has a separate 256-proposal scan ceiling
 for resource safety. The governed service, not the extractor, applies the smaller
 twelve-candidate commit ceiling and records the number the extractor returned plus
 every proposal it rejected, including overflow. The `rejected` audit count also
@@ -245,7 +249,10 @@ call (Section 9):
 - Emit a `memory.formed` / `memory.reinforced` / `memory.superseded` /
   `memory.needs_confirmation` event to the log — memory changes are themselves
   auditable episodes (and part of what makes re-derivation possible).
-- Advance the consolidation watermark.
+- Advance the consolidation watermark after successful extraction, a
+  non-retryable provider failure, or bounded retry exhaustion. A retryable
+  provider failure commits deterministic proposals but leaves the source prefix
+  pending until the provider succeeds or exhausts the fixed retry policy.
 - If the belief is a `user_model_attr`, update the **user-model projection** (a
   curated view over user-scoped beliefs — the "deepening model of who you are").
 
@@ -422,8 +429,13 @@ The initial human surface is `agent memory`: `list` (optionally including
 inactive beliefs or filtering by source session), `get`, `edit`, and `delete`
 make the belief store inspectable and reversible. `formations` exposes the
 principal-scoped consolidation audits, including model, policy, watermarks, and
-candidate outcome counts. This is a local/operator CLI surface over the same
-composition as the runtime; no separate write path exists.
+candidate outcome counts. `diagnose --session` joins formation flags, the current
+watermark, provider selection and attempt audits, consolidation runs, and formed
+beliefs without exposing prompt or response bodies. `replay --session --confirm`
+reprocesses the original session events through the same governed service and
+retains their source-event provenance; it never inserts a belief directly. This
+is a local/operator CLI surface over the same composition as the runtime; no
+separate write path exists.
 
 ## Milestone 10 ordinary-conversation maturation
 
@@ -445,7 +457,7 @@ the deterministic fallback while preserving the model-assisted design above:
 2. Full extraction remains off the interactive path. The maintenance role selects
    flagged sessions after 30 seconds without committed activity and invokes
    consolidation; an explicit session close remains an immediate boundary. The
-   fixed delay is part of `formation@2`, not a deployment override that can
+   fixed delay is part of deterministic `formation@5`, not a deployment override that can
    silently change the policy represented by that version. Both the session-idle
    cutoff and the flag's persisted `not_before` must be satisfied; `not_before` is
    authoritative even when the session is otherwise idle, while legacy flags
@@ -489,6 +501,17 @@ the deterministic fallback while preserving the model-assisted design above:
    PostgreSQL supersession uses a nested transaction so a stale-current conflict
    rolls back its just-inserted replacement even when the caller catches the
    conflict and continues the outer consolidation transaction.
+7. Provider failure is a formation outcome, not a successful watermark advance.
+   Failure audits retain only normalized safe fields: failure kind, provider code,
+   HTTP status, provider parameter, whether the stream produced output, and
+   retryability. Transient and protocol failures retain the original prefix and
+   append an idempotent `memory.formation.requested` retry after 60 seconds and
+   then 300 seconds. Maintenance selects only the latest formation request, so an
+   older ready flag cannot bypass the retry delay. After three total attempts the
+   watermark advances and a content-free
+   `memory.provider_extraction.retry_exhausted` process event records the terminal
+   disposition. Deterministic candidates committed on an earlier attempt remain
+   idempotent same-source outcomes on every replay.
 
 ADR-0051 introduced a schema-constrained hybrid reference extractor over trusted
 principal-authored events and a compact existing-belief view. Its focused tests
@@ -497,10 +520,13 @@ content-free `memory.extraction.completed` auditing, and deterministic fallback.
 Those tests are not production activation evidence. Accepted ADR-0057 supersedes
 the earlier routed-policy selection rule. Normal composition does not select a
 provider extractor until a version-bound artifact for the exact runtime tuple
-passes startup validation; the balanced OpenAI `gpt-5.6-sol` and default-policy
-tuple now has bundled passing evidence from the checked-in 24-case corpus.
+passes startup validation. The balanced OpenAI `gpt-5.6-sol` and default-policy
+tuple has historical passing `formation@4` evidence from the checked-in 24-case
+corpus. The semantic deterministic expansion and retry lifecycle invalidate that
+artifact for the current policies, so `auto` selects deterministic `formation@5`
+until reviewed `formation@6` evidence is published.
 
-### Evaluation-gated provider assistance (`formation@4`)
+### Evaluation-gated provider assistance (`formation@6`)
 
 The first provider-assisted implementation is a dedicated maintenance extractor,
 not an interactive call or a general-purpose subagent. It implements the same
@@ -542,8 +568,8 @@ flag, is mutually exclusive with `required`, and is refused in production.
 evaluation opt-in, it runs a checked-in labeled corpus through isolated paired
 deterministic and provider-assisted arms, derives the active model tuple and
 corpus hash, and atomically writes evidence only when the schema's lift, coverage,
-fabrication, and policy conditions pass. The corpus has twenty positive examples
-and four protected no-memory examples; scoring uses checked-in normalized labels,
+fabrication, and policy conditions pass. The current corpus has twenty-one
+positive examples and four protected no-memory examples; scoring uses checked-in normalized labels,
 not a second model judge. Every result reports per-case normalized beliefs,
 consolidation counts, shared fallback beliefs, provider-added beliefs, and
 content-free extraction-audit counts for both arms. A failed run exits non-zero,
@@ -557,15 +583,19 @@ authenticate an otherwise unsigned release.
 Every attempted provider extraction emits one process-scoped audit containing its
 principal and session, agent and policy versions, authorized scope, empty tool
 scopes, exact source-event sequences, provider and model, evidence identifiers,
-budget, deadline, usage, cost, and outcome. Prompt and response bodies are never
-stored there; only their SHA-256 hashes are retained. A failed, timed-out,
-malformed, or over-budget call records failure and returns deterministic proposals.
+budget, deadline, usage, cost, outcome, and safe normalized failure fields.
+Prompt and response bodies and exception messages are never stored there; only
+their SHA-256 hashes are retained. A failed, timed-out, malformed, or over-budget
+call records failure and returns deterministic proposals. Retryable failure keeps
+the prefix pending under the bounded schedule above; permanent failure and
+exhausted retry advance it.
 A cancelled call records the cancellation and propagates it rather than disguising
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through
 the same service gates. Provider-assisted consolidations and beliefs record
-`formation@4`; the default deterministic path continues to record `formation@2`.
-The reversible seam and activation decision are recorded in ADR-0057.
+`formation@6`; the default deterministic path records `formation@5`. The
+activation decision is recorded in ADR-0057, and the retry, diagnosis, replay,
+and policy-version correction is recorded in ADR-0068.
 
 ## Hard gates
 
@@ -603,8 +633,9 @@ first formation layer (Section 20).
     to coexist. **M10.**
 11. **Governed inspection and reversibility** — the public memory surface can
     list and inspect beliefs, source-session formation audits, and recall traces;
-    edit and delete use the same principal-scoped service, and a foreign
-    principal can observe or mutate none of them. **M10.**
+    diagnose one session's formation lifecycle and replay its original evidence;
+    edit, delete, diagnosis, and replay use the same principal-scoped service,
+    and a foreign principal can observe or mutate none of them. **M10.**
 12. **Extractor contract coverage** — every shipped
     `MemoryCandidateExtractor` implementation is registered against the shared
     contract for separate, scope-correct, provenance-bound proposals, including
@@ -619,8 +650,9 @@ first formation layer (Section 20).
     and secret-shaped source content cannot pass its safety checks.
     **M10.**
 15. **Audited deterministic fallback** — a failed provider attempt records a
-    content-free failed audit and returns the independently derived deterministic
-    proposals rather than suppressing memory formation. **M10.**
+    content-free failed audit with normalized failure fields and returns the
+    independently derived deterministic proposals rather than suppressing memory
+    formation. **M10.**
 16. **Evidence publication** — the checked-in paired evaluation derives the
     active provider tuple and corpus hash and atomically publishes activation
     evidence only after formation lift, at least eighty percent positive-case
@@ -636,7 +668,7 @@ first formation layer (Section 20).
     returns those diagnostics and the CLI exits non-zero without publishing an
     activation artifact. **M10.**
 19. **Positive formation coverage** — aggregate lift alone is insufficient:
-    provider assistance must fully support at least sixteen of the twenty labeled
+    provider assistance must fully support at least seventeen of the twenty-one labeled
     positive cases before evidence can be published. **M10.**
 20. **Authoritative source safety** — secret, injection, or transient markers in
     authoritative cited source text cannot be erased by provider normalization
