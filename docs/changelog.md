@@ -61,6 +61,8 @@ title: Changelog
   blip, and the arm records no terminal error class to name its cause.
   `gate.memory.bench_evidence_publish` is satisfied by the unit-level
   publication proof and is unaffected; the live artifact is milestone evidence.
+  The entry above records the harness change that answered this and the third
+  run that published.
 - Recorded Milestone 16's verification evidence in project state, which stays
   `authorized` pending hosted CI on the final head and the CodeRabbit review
   loop on the `dev` to `main` pull request.

@@ -32,9 +32,15 @@ title: Current Milestone
   authorized and specified with twenty-one, twenty-one, and sixteen registered
   gates; none has started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all nineteen of its gates, republished the
-  provider evidence at `formation@8`, published live benchmark evidence, and
-  re-recorded its baseline; hosted CI on the final head and the CodeRabbit
-  review loop on the `dev` to `main` pull request remain.
+  provider evidence at `formation@8`, and re-recorded its baseline; hosted CI
+  on the final head and the CodeRabbit review loop on the `dev` to `main` pull
+  request remain. Its live benchmark arm ran three times — the first two failed
+  only the absolute incomplete-runs condition, at two of 132 probe arms each,
+  after which the harness gained a content-free failure class and one retry per
+  probe arm, and the third published
+  `evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json`
+  with four retried runs and a lift of forty-five — which is milestone evidence
+  rather than one of the two completion conditions below.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;

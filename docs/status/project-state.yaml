@@ -172,11 +172,11 @@ milestones:
       - belief merge and global consolidation, HTTP memory surface
     evidence:
       - check: make check
-        outcome: passed
+        outcome: passed_locally
         detail: >-
-          Ruff formatting over 558 files and Ruff linting pass, strict mypy
-          reports no issue in 514 source files, the static partition passes
-          1213 tests, the contract partition passes 350, the release, manual
+          Ruff formatting over 559 files and Ruff linting pass, strict mypy
+          reports no issue in 515 source files, the static partition passes
+          1218 tests, the contract partition passes 350, the release, manual
           rollback, and nginx deployment-script tests pass, and the strict
           documentation build passes with 171 citations checked. The gate
           registry reconciles 324 entries with 247 active through Milestone 12.
@@ -215,7 +215,7 @@ milestones:
       - check: complete non-live suite
         outcome: passed_locally
         detail: >-
-          pytest -m "not live" passes all 1694 tests with 2 deselected.
+          pytest -m "not live" passes all 1708 tests with 2 deselected.
       - check: Alembic head round trip
         outcome: passed_locally
         detail: >-
@@ -225,7 +225,7 @@ milestones:
           detects no new upgrade operations, so the ORM metadata and the
           migration graph agree.
       - check: provider-memory evidence republished at formation@8
-        outcome: passed
+        outcome: passed_locally
         detail: >-
           One live run of agent eval memory-formation at build
           3b3c972b3003cdca6881d857b931401999f49545 passed the typed activation
@@ -386,5 +386,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T09:41:00Z
-last_reviewed_commit: 192a016
+last_updated: 2026-08-23T09:50:03Z
+last_reviewed_commit: e52f383
