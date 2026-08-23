@@ -1,0 +1,128 @@
+[
+  {
+    "uuid": "syn-user-1",
+    "persona_info": "A piano technician who keeps a narrowboat.",
+    "sessions": [
+      {
+        "session_id": "syn-user-1-s1",
+        "timestamp": "2024-04-02 09:00:00",
+        "dialogue": [
+          {"role": "user", "content": "I tune pianos for the conservatoire."},
+          {"role": "assistant", "content": "That is a careful trade."},
+          {"role": "user", "content": "My sister Pell crews the narrowboat with me."}
+        ]
+      },
+      {
+        "session_id": "syn-user-1-s2",
+        "timestamp": "2024-04-19 18:30:00",
+        "dialogue": [
+          {"role": "user", "content": "I have moved into restoring pianos instead of tuning them."},
+          {"role": "assistant", "content": "Restoration is slower work."}
+        ]
+      }
+    ],
+    "memory_points": [
+      {
+        "memory_id": "mp-1",
+        "session_id": "syn-user-1-s1",
+        "memory_content": "The user tunes pianos for the conservatoire.",
+        "memory_type": "Persona",
+        "memory_source": "primary",
+        "is_update": false,
+        "original_memories": [],
+        "timestamp": "2024-04-02 09:01:00",
+        "importance": 3
+      },
+      {
+        "memory_id": "mp-2",
+        "session_id": "syn-user-1-s1",
+        "memory_content": "The user's sister is Pell.",
+        "memory_type": "Relationship",
+        "memory_source": "primary",
+        "is_update": false,
+        "original_memories": [],
+        "timestamp": "2024-04-02 09:02:00",
+        "importance": 2
+      },
+      {
+        "memory_id": "mp-3",
+        "session_id": "syn-user-1-s2",
+        "memory_content": "The user restores pianos.",
+        "memory_type": "Persona",
+        "memory_source": "primary",
+        "is_update": true,
+        "original_memories": ["mp-1"],
+        "timestamp": "2024-04-19 18:31:00",
+        "importance": 3
+      }
+    ],
+    "questions": [
+      {
+        "question": "What does the user do with pianos now?",
+        "answer": "restores them",
+        "question_type": "knowledge-update"
+      },
+      {"question": "Who crews the narrowboat?", "answer": "Pell, the user's sister"}
+    ]
+  },
+  {
+    "uuid": "syn-user-2",
+    "persona_info": "A cartographer who races sculls.",
+    "sessions": [
+      {
+        "session_id": "syn-user-2-s1",
+        "timestamp": "2024-05-06 08:15:00",
+        "dialogue": [
+          {"role": "user", "content": "I draw coastal charts for the survey office."},
+          {"role": "assistant", "content": "Charts are unforgiving work."},
+          {"role": "user", "content": "Actually I draw inland charts now, not coastal ones."}
+        ],
+        "memory_points": [
+          {
+            "memory_id": "mp-10",
+            "memory_content": "The user draws coastal charts.",
+            "memory_type": "Event",
+            "memory_source": "primary",
+            "is_update": false,
+            "original_memories": [],
+            "timestamp": "2024-05-06 08:16:00",
+            "importance": 2
+          },
+          {
+            "memory_id": "mp-11",
+            "memory_content": "The user draws inland charts.",
+            "memory_type": "Event",
+            "memory_source": "primary",
+            "is_update": true,
+            "original_memories": ["mp-10"],
+            "timestamp": "2024-05-06 08:20:00",
+            "importance": 2
+          }
+        ]
+      },
+      {
+        "session_id": "syn-user-2-s2",
+        "timestamp": "2024-05-21 19:45:00",
+        "dialogue": [
+          {"role": "user", "content": "I race a single scull on the tidal reach."},
+          {"role": "assistant", "content": "The tide must set the timetable."}
+        ],
+        "memory_points": [
+          {
+            "memory_id": "mp-12",
+            "memory_content": "The user races a single scull.",
+            "memory_type": "Persona",
+            "memory_source": "primary",
+            "is_update": false,
+            "original_memories": [],
+            "timestamp": "2024-05-21 19:46:00",
+            "importance": 1
+          }
+        ]
+      }
+    ],
+    "questions": [
+      {"question": "What does the user race?", "answer": "a single scull", "question_type": "single_hop"}
+    ]
+  }
+]

@@ -493,6 +493,106 @@ def test_eval_memory_benchmark_live_requires_output(
     assert observed == []
 
 
+def _external_module(observed: list[dict[str, object]]) -> SimpleNamespace:
+    async def run_external_benchmark(
+        _root: object,
+        *,
+        dataset: str,
+        path: Path,
+        sample: int | None,
+        seed: int,
+        principal_speaker: str,
+        deterministic_only: bool,
+        model_policy: str,
+        policy_profile: str,
+        build_ref: str,
+        output: Path,
+    ) -> SimpleNamespace:
+        observed.append(
+            {
+                "dataset": dataset,
+                "path": path,
+                "sample": sample,
+                "seed": seed,
+                "principal_speaker": principal_speaker,
+                "deterministic_only": deterministic_only,
+                "build_ref": build_ref,
+                "output": output,
+            }
+        )
+        return SimpleNamespace(model_dump_json=lambda **_kwargs: '{"dataset":"locomo"}')
+
+    return SimpleNamespace(run_external_benchmark=run_external_benchmark)
+
+
+def test_eval_memory_benchmark_external_requires_path_and_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules, "agent_core.evals.memory_benchmark_external", _external_module(observed)
+    )
+    monkeypatch.setitem(
+        sys.modules, "agent_core.evals.memory_benchmark_driver", _benchmark_module([])
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+    dataset = tmp_path / "locomo10.json"
+    dataset.write_text("[]", encoding="utf-8")
+    metrics = tmp_path / "locomo-metrics.json"
+
+    missing_path = CliRunner().invoke(app, ["eval", "memory-benchmark", "--external", "locomo"])
+    missing_output = CliRunner().invoke(
+        app, ["eval", "memory-benchmark", "--external", "locomo", "--path", str(dataset)]
+    )
+    unknown = CliRunner().invoke(
+        app,
+        ["eval", "memory-benchmark", "--external", "nowhere", "--path", str(dataset)],
+    )
+    stray_path = CliRunner().invoke(app, ["eval", "memory-benchmark", "--path", str(dataset)])
+    accepted = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--external",
+            "locomo",
+            "--path",
+            str(dataset),
+            "--output",
+            str(metrics),
+            "--sample",
+            "3",
+            "--seed",
+            "11",
+            "--principal-speaker",
+            "b",
+        ],
+    )
+
+    assert missing_path.exit_code == 2
+    assert "--path is required" in missing_path.stderr
+    assert missing_output.exit_code == 2
+    assert "--output is required" in missing_output.stderr
+    assert unknown.exit_code == 2
+    assert "unknown dataset" in unknown.stderr
+    assert stray_path.exit_code == 2
+    assert "--path belongs to an external dataset run" in stray_path.stderr
+    assert accepted.exit_code == 0
+    assert '"dataset":"locomo"' in accepted.stdout
+    assert observed == [
+        {
+            "dataset": "locomo",
+            "path": dataset,
+            "sample": 3,
+            "seed": 11,
+            "principal_speaker": "b",
+            "deterministic_only": True,
+            "build_ref": "resolved-from-git",
+            "output": metrics,
+        }
+    ]
+
+
 def test_eval_memory_benchmark_returns_failure_for_a_regression(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
