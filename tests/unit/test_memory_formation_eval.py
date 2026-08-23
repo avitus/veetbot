@@ -20,6 +20,7 @@ from agent_core.evals.memory_formation import (
     load_corpus,
     score_case,
 )
+from agent_core.memory.provider_extraction import PROVIDER_FORMATION_POLICY_VERSION
 
 
 def test_score_case_counts_grounded_support_and_fabrication_once() -> None:
@@ -254,7 +255,7 @@ class TestProviderEvidencePublicationGate:
         persisted = type(evidence).model_validate_json(rendered)
         assert persisted == evidence
         assert persisted.extractor_version == "provider-assisted-v2"
-        assert persisted.formation_policy_version == "formation@6"
+        assert persisted.formation_policy_version == PROVIDER_FORMATION_POLICY_VERSION
         assert (
             persisted.model_policy,
             persisted.provider,

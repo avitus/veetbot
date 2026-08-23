@@ -11,14 +11,14 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 
-from agent_core.domain.memory import BeliefType
+from agent_core.domain.memory import BeliefType, MemoryAuthority
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import IdempotencyClass, TrustLevel
 from agent_core.memory.retrieval import EventEpisodeSearch
 from agent_core.tools.memory_recall_episodes import MemoryRecallEpisodesTool
 from agent_core.tools.memory_remember import MemoryRememberTool
 from agent_core.tools.memory_search import MemorySearchTool
-from tests.contract.memory_fixtures import formation_stack, memory, user_event
+from tests.contract.memory_fixtures import formation_stack, memory, session_events, user_event
 from tests.contract.support import SESSION_ID, principal, tool_context
 
 
@@ -118,4 +118,49 @@ async def test_remember_tool_accepts_verbatim_user_quotes_from_untrusted_turns()
     assert result.ok is True
     assert [item.statement for item in await service.list_memories()] == [
         "Deployment region is eu-west-1."
+    ]
+
+
+async def test_remember_tool_records_affirmed_authority_for_memory_trust_statements() -> None:
+    """The tool's authority follows the trust of the statement it was handed.
+
+    A statement arriving at memory trust is the agent affirming something it
+    already holds, which is `AFFIRMED` — below a direct user statement and
+    above an extractor inference — and the write is the memory speaking, so
+    the formation event's actor is memory rather than the principal.
+    """
+
+    _clock, factory, service, _retriever = await formation_stack()
+    await user_event(factory, "The deployment region is eu-west-1, remember it.")
+    tool = MemoryRememberTool(service)
+
+    affirmed = await tool.execute(
+        {
+            "statement": "Deployment region is eu-west-1.",
+            "subject": "deployment region",
+            "scope": "project-a",
+        },
+        replace(tool_context(), origin_trust=TrustLevel.MEMORY),
+    )
+    stated = await tool.execute(
+        {
+            "statement": "Rollbacks require a signed manifest.",
+            "subject": "rollback policy",
+            "scope": "project-a",
+        },
+        replace(tool_context(), origin_trust=TrustLevel.USER),
+    )
+
+    assert (affirmed.ok, stated.ok) == (True, True)
+    by_subject = {belief.subject: belief for belief in await service.list_memories()}
+    assert by_subject["deployment region"].authority is MemoryAuthority.AFFIRMED
+    assert by_subject["rollback policy"].authority is MemoryAuthority.USER
+    formation_actors = [
+        (event.actor_type, event.payload["belief"]["subject"])
+        for event in await session_events(factory)
+        if event.event_type == "memory.formed"
+    ]
+    assert formation_actors == [
+        ("memory", "deployment region"),
+        ("principal", "rollback policy"),
     ]

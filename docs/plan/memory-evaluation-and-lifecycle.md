@@ -21,7 +21,7 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:751), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:658).
+recall of consequential facts (memory-formation-and-consolidation.md:661).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
@@ -32,7 +32,7 @@ utility without ever raising confidence (memory-retrieval-and-ranking.md:793),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:788), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:685) are
+that is opt-in per principal (memory-formation-and-consolidation.md:688) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -815,7 +815,9 @@ must belong to the owning tenant and principal, and every reference must resolve
 to a trusted user event in the source session. Only a fact passing all three
 checks becomes a candidate at
 the maximum inferred confidence with a stable subject derived from its
-statement, proposed at the run's scope and at the portability ceiling for its
+statement — the first capitalized entity span, ignoring a word that only opens
+the sentence, and the first three words when the statement names no entity —
+proposed at the run's scope and at the portability ceiling for its
 type, and prepended before the candidate ceiling is applied — so an established
 fact may displace an extractor proposal, which is the intended ordering, and
 displaced proposals are counted as rejected rather than silently dropped.
@@ -853,7 +855,7 @@ resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:685), so it is a command and it demands
+(memory-formation-and-consolidation.md:688), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

@@ -39,8 +39,10 @@ tenant activation remains blocked until the evaluation threshold in the
 roadmap item B1 rather than a Milestone 10 completion condition (ADR-0061).
 The provider-assisted memory extractor's historical `formation@4` evidence
 passed on the intended production model and ADR-0057 is accepted. ADR-0068's
-semantic deterministic repair and retry lifecycle advance the active policies to
-deterministic `formation@5` and provider-assisted `formation@6`; `auto` now falls
+semantic deterministic repair and retry lifecycle advanced the active policies to
+deterministic `formation@5` and provider-assisted `formation@6`, and Milestone
+16's admission of working-state established facts advances them again to
+`formation@7` and `formation@8` (ADR-0069); `auto` now falls
 back safely until the current tuple is reevaluated. Tenant activation remains
 separate from Milestone completion under ADR-0061. The machine-readable [project
 state](../status/project-state.yaml) records progress and evidence.

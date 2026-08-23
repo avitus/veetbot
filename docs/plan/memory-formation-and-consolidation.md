@@ -466,7 +466,7 @@ the deterministic fallback while preserving the model-assisted design above:
 2. Full extraction remains off the interactive path. The maintenance role selects
    flagged sessions after 30 seconds without committed activity and invokes
    consolidation; an explicit session close remains an immediate boundary. The
-   fixed delay is part of deterministic `formation@5`, not a deployment override that can
+   fixed delay is part of deterministic `formation@7`, not a deployment override that can
    silently change the policy represented by that version. Both the session-idle
    cutoff and the flag's persisted `not_before` must be satisfied; `not_before` is
    authoritative even when the session is otherwise idle, while legacy flags
@@ -534,10 +534,10 @@ provider extractor until a version-bound artifact for the exact runtime tuple
 passes startup validation. The balanced OpenAI `gpt-5.6-sol` and default-policy
 tuple has historical passing `formation@4` evidence from the checked-in 24-case
 corpus. The semantic deterministic expansion and retry lifecycle invalidate that
-artifact for the current policies, so `auto` selects deterministic `formation@5`
-until reviewed `formation@6` evidence is published.
+artifact for the current policies, so `auto` selects deterministic `formation@7`
+until reviewed `formation@8` evidence is published.
 
-### Evaluation-gated provider assistance (`formation@6`)
+### Evaluation-gated provider assistance (`formation@8`)
 
 The first provider-assisted implementation is a dedicated maintenance extractor,
 not an interactive call or a general-purpose subagent. It implements the same
@@ -604,9 +604,12 @@ A cancelled call records the cancellation and propagates it rather than disguisi
 shutdown as successful formation.
 A successful batch is merged with the deterministic fallback and passes through
 the same service gates. Provider-assisted consolidations and beliefs record
-`formation@6`; the default deterministic path records `formation@5`. The
+`formation@8`; the default deterministic path records `formation@7`. The
 activation decision is recorded in ADR-0057, and the retry, diagnosis, replay,
-and policy-version correction is recorded in ADR-0068.
+and policy-version correction is recorded in ADR-0068. Admitting working-state
+established facts as `AFFIRMED` candidates advanced those versions from
+`formation@5` and `formation@6`, because it changes what formation produces
+from the same events (ADR-0069).
 
 ## Hard gates
 

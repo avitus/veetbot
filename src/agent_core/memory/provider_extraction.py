@@ -51,7 +51,7 @@ from agent_core.ports.models import ModelProvider
 from agent_core.ports.persistence import UnitOfWorkFactory
 
 PROVIDER_EXTRACTOR_VERSION = "provider-assisted-v2"
-PROVIDER_FORMATION_POLICY_VERSION = "formation@6"
+PROVIDER_FORMATION_POLICY_VERSION = "formation@8"
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ def provider_extraction_evidence_matches(
 
 
 class ProviderExtractionBudget(BaseModel):
-    """The fixed formation@6 ceiling for one provider-assisted consolidation."""
+    """The fixed formation@8 ceiling for one provider-assisted consolidation."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

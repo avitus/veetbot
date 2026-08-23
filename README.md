@@ -328,8 +328,8 @@ artifact is committed.
 Provider-assisted memory formation uses safe automatic selection by default.
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` activates matching operator or
 release-bundled evidence and otherwise records the reason and stays on
-deterministic `formation@5`. The bundled `formation@4` artifact is historical
-and does not match current provider-assisted `formation@6`. `off` does not even resolve a formation model;
+deterministic `formation@7`. The bundled `formation@4` artifact is historical
+and does not match current provider-assisted `formation@8`. `off` does not even resolve a formation model;
 `required` refuses startup without an exact extractor, model, profile, and
 compiled-policy-version match. An operator artifact can be supplied with
 `AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
