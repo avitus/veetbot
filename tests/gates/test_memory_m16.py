@@ -775,3 +775,65 @@ async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor(
             belief.id: belief
             for belief in await composition.memory.list_memories(include_inactive=True)
         } == beliefs
+
+
+async def test_usage_feedback_marks_cited_and_never_raises_confidence(tmp_path: Path) -> None:
+    """Citing a belief resists decay, moves utility, and leaves confidence alone.
+
+    One turn recalls two stated preferences and the answer cites one of them by
+    the identifier memory rendered, so the completion hook is observed marking
+    that belief used on the turn's trace, raising its utility, and moving its
+    reinforcement instant a day forward, while the belief that was returned and
+    never used loses utility instead. Neither confidence moves: usage is
+    evidence of usefulness, never of truth. Completing the run again finds its
+    own citation event and changes nothing.
+    """
+
+    clock = FixedClock(_START)
+    script = FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last")
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=clock,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        cited = await _stated_belief(
+            composition, session_id, "User prefers concise answers", "answer style"
+        )
+        uncited = await _stated_belief(composition, session_id, "User prefers dark themes", "theme")
+        clock.advance(timedelta(days=1))
+        # The model answers with the citation form the renderer emits, which is
+        # the only signal the hook reads out of a completed run.
+        script.turns[0] = ScriptedTurn(text=f"Per [m:{str(cited.id)[:8]}]: dark, and briefly.")
+
+        run_id = await composition.runs.submit("Theme and answer style?", session_id)
+        run = await composition.runs.get(run_id)
+        assert run.final_message is not None
+        assert str(cited.id)[:8] in run.final_message
+
+        async with composition.uow_factory() as uow:
+            view = await uow.traces.user_view(run_id, "private", "restricted")
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+        used = {belief.belief_id: belief.used for belief in view.beliefs}
+        assert used == {cited.id: True, uncited.id: False}
+
+        beliefs = {belief.id: belief for belief in await composition.memory.list_memories()}
+        assert beliefs[cited.id].utility > 0
+        assert beliefs[cited.id].confidence == cited.confidence
+        assert beliefs[cited.id].last_reinforced_at == clock.now()
+        assert beliefs[cited.id].last_reinforced_at > cited.last_reinforced_at
+        assert beliefs[uncited.id].utility < 0
+        assert beliefs[uncited.id].confidence == uncited.confidence
+        assert beliefs[uncited.id].last_reinforced_at == uncited.last_reinforced_at
+
+        citations = [event for event in events if event.event_type == "memory.cited"]
+        assert [event.payload["cited"] for event in citations] == [[str(cited.id)]]
+        assert citations[0].payload["uncited"] == [str(uncited.id)]
+
+        # The re-entrant completion path re-enters the hook with the same run.
+        repeated = await composition.memory.record_usage(
+            session_id=session_id, run_id=run_id, final_text=run.final_message
+        )
+        assert (repeated.cited, repeated.uncited, repeated.traces) == (0, 0, 0)
+        assert {belief.id: belief for belief in await composition.memory.list_memories()} == beliefs

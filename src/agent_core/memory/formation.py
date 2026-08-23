@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextlib import suppress
 from datetime import datetime, timedelta
 from uuid import UUID
 
@@ -33,6 +34,7 @@ from agent_core.domain.memory import (
     RecallTrace,
     RejectionKind,
     Sensitivity,
+    UsageFeedback,
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
@@ -41,6 +43,7 @@ from agent_core.memory.profiles import (
     DEFAULT_RETRIEVAL_PROFILE,
     DecayTauDays,
     FormationProfile,
+    UsageDeltas,
 )
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
@@ -55,6 +58,9 @@ SESSION_IDLE_SECONDS = 30
 TRACE_EXPIRY_SWEEP_LIMIT = 500
 PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
 PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
+# The citation form the renderer emits, read back exactly as it is written:
+# eight lower-case hex digits of the belief identifier (retrieval.py:576).
+_CITED_BELIEF = re.compile(r"\[m:([0-9a-f]{8})\]")
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
     re.I,
@@ -583,6 +589,7 @@ class GovernedMemoryService:
         policy_version: str = FORMATION_POLICY_VERSION,
         formation_profile: FormationProfile = DEFAULT_FORMATION_PROFILE,
         decay_tau_days: DecayTauDays = DEFAULT_RETRIEVAL_PROFILE.decay_tau_days,
+        usage: UsageDeltas = DEFAULT_RETRIEVAL_PROFILE.usage,
     ) -> None:
         if not policy_version:
             raise ValueError("memory formation policy version must not be empty")
@@ -598,6 +605,9 @@ class GovernedMemoryService:
         # The time constants are the ranker's table: the age at which a belief
         # stops counting as reinforced is the age at which decay begins.
         self._decay_tau_days = decay_tau_days
+        # Usage moves utility only. The deltas are the ranker's too, so what a
+        # citation is worth is stated once, in the retrieval profile.
+        self._usage = usage
 
     @property
     def formation_profile(self) -> FormationProfile:
@@ -1405,6 +1415,136 @@ class GovernedMemoryService:
         if instant - record.last_reinforced_at < tau:
             return False
         return record.updated_at < instant - interval
+
+    async def record_usage(
+        self,
+        *,
+        session_id: UUID,
+        run_id: UUID,
+        final_text: str,
+        snapshot_trace_id: UUID | None = None,
+        now: datetime | None = None,
+    ) -> UsageFeedback:
+        """Feed one completed run's citations back into the beliefs it read.
+
+        The answer names beliefs in the eight-hex form the renderer emits, so
+        the citations are read out of the final message and matched against
+        what the run's traces actually returned: an identifier the recall never
+        offered is an invention and moves nothing. A cited belief gains utility
+        and a fresh reinforcement instant, which is what makes it resist decay;
+        a belief returned and never used loses utility, so it stops winning the
+        ranking it kept winning for nothing.
+
+        Confidence is never touched in either direction
+        (memory-retrieval-and-ranking.md:793): a wrong belief that happens to
+        rank well would otherwise entrench itself by being retrieved, and
+        evidence has to come from the world rather than from the retriever.
+
+        One `memory.cited` event carries the run's identifier as its derivation
+        key, so the re-entrant completion path finds the run already accounted
+        for and changes nothing the second time.
+        """
+
+        instant = now or self._clock.now()
+        short_ids = set(_CITED_BELIEF.findall(final_text))
+        derivation_key = f"memory.cited:{run_id}"
+        async with self._uow_factory() as uow:
+            if await uow.events.get_by_derivation(derivation_key, self._principal) is not None:
+                return UsageFeedback()
+            traces = [
+                trace
+                for trace in await uow.traces.for_turn(run_id)
+                if trace.tenant_id == self._principal.tenant_id
+                and trace.principal_id == self._principal.principal_id
+            ]
+            if snapshot_trace_id is not None and not any(
+                trace.id == snapshot_trace_id for trace in traces
+            ):
+                # A session whose snapshot is gone is still a run whose in-turn
+                # recalls deserve their feedback.
+                with suppress(NotFoundError):
+                    traces.append(await uow.traces.get(snapshot_trace_id, self._principal))
+            cited: set[UUID] = set()
+            returned: set[UUID] = set()
+            for trace in traces:
+                returned.update(trace.returned)
+                cited.update(
+                    belief_id for belief_id in trace.returned if str(belief_id)[:8] in short_ids
+                )
+            if not returned:
+                # Nothing was recalled, so there is no feedback to record and
+                # nothing a repeated completion could double-count.
+                return UsageFeedback(traces=len(traces))
+            for trace in traces:
+                fresh = [
+                    belief_id
+                    for belief_id in trace.returned
+                    if belief_id in cited and belief_id not in set(trace.cited)
+                ]
+                if fresh:
+                    await uow.traces.mark_cited(trace.id, self._principal, fresh)
+            # A belief the answer cited is never also charged for going unused,
+            # however many of the run's traces returned it.
+            uncited = returned - cited
+            moved_cited = await self._move_utility(
+                uow, sorted(cited, key=str), self._usage.cited_utility_delta, instant, cited=True
+            )
+            moved_uncited = await self._move_utility(
+                uow,
+                sorted(uncited, key=str),
+                self._usage.uncited_utility_delta,
+                instant,
+                cited=False,
+            )
+            await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=run_id,
+                    event_type="memory.cited",
+                    actor_type="memory",
+                    actor_id=self._principal.principal_id,
+                    payload={
+                        "trace_ids": [str(trace.id) for trace in traces],
+                        "cited": [str(belief_id) for belief_id in sorted(cited, key=str)],
+                        "uncited": [str(belief_id) for belief_id in sorted(uncited, key=str)],
+                    },
+                    derivation_key=derivation_key,
+                )
+            )
+        return UsageFeedback(cited=moved_cited, uncited=moved_uncited, traces=len(traces))
+
+    async def _move_utility(
+        self,
+        uow: RepositoryUnitOfWork,
+        belief_ids: list[UUID],
+        delta: float,
+        instant: datetime,
+        *,
+        cited: bool,
+    ) -> int:
+        """Add one signed usage delta to each belief, bounded by [-1, 1].
+
+        A citation also moves `last_reinforced_at`, which is the whole point of
+        the mark: decay measures idleness from it. The unused side deliberately
+        leaves it alone, so ignoring a belief can never postpone its decay.
+        """
+
+        moved = 0
+        for belief_id in belief_ids:
+            try:
+                record = await uow.memories.get(belief_id, self._principal)
+            except NotFoundError:
+                # The belief was deleted between the recall and the completion.
+                continue
+            update: dict[str, object] = {
+                "utility": min(1.0, max(-1.0, record.utility + delta)),
+                "store_position": await uow.memories.next_position(),
+            }
+            if cited:
+                update.update({"last_reinforced_at": instant, "updated_at": instant})
+            await uow.memories.reinforce(record.model_copy(update=update, deep=True))
+            moved += 1
+        return moved
 
     async def expire_traces(
         self, now: datetime | None = None, *, limit: int = TRACE_EXPIRY_SWEEP_LIMIT

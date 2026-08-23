@@ -374,6 +374,23 @@ class DecayResult(BaseModel):
     retired: int = Field(default=0, ge=0)
 
 
+class UsageFeedback(BaseModel):
+    """What one completed run's citations fed back into the store.
+
+    `cited` and `uncited` count beliefs, not mentions: a belief returned by
+    several of the run's traces moves once, and a belief the answer cited is
+    never also counted as unused. `traces` counts the recall traces the
+    feedback read, which is zero when the run holds no recall trace at all and
+    when the run's feedback had already been recorded.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    cited: int = Field(default=0, ge=0)
+    uncited: int = Field(default=0, ge=0)
+    traces: int = Field(default=0, ge=0)
+
+
 class MemoryDiagnosis(BaseModel):
     """Principal-scoped evidence explaining formation state for one session."""
 

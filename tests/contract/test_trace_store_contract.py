@@ -7,7 +7,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.memory.in_memory import InMemoryTraceStore
-from agent_core.domain.errors import ConflictError
+from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.memory import RecallMoment, Sensitivity, TracedPassage
 from tests.contract.memory_fixtures import recalled, trace
 from tests.contract.support import NOW, RUN_ID, principal
@@ -191,3 +191,41 @@ async def test_expire_operator_fields_nulls_only_expired_operator_tier() -> None
     # and from the identifiers while the trace still carries them.
     view = await store.user_view(RUN_ID, "private", "restricted")
     assert view.considered_not_shown == 3
+
+
+async def test_mark_cited_marks_used_and_is_principal_scoped_and_idempotent() -> None:
+    """Citation unions into the trace, is scoped to its owner, and repeats cleanly.
+
+    A trace returns two beliefs and the answer cites one, so the mark is
+    observed changing the user view of exactly that belief; repeating the same
+    mark changes nothing, a later mark widens the set rather than replacing it,
+    and neither a foreign principal nor an unknown identifier can reach it.
+    """
+
+    store = InMemoryTraceStore()
+    used = recalled(belief_id=651, statement="Used preference")
+    unused = recalled(belief_id=652, statement="Unused preference", subject="theme")
+    value = trace().model_copy(
+        update={"beliefs": [used, unused], "returned": [used.belief_id, unused.belief_id]}
+    )
+    await store.record(value)
+
+    marked = await store.mark_cited(value.id, principal(), [used.belief_id])
+    assert marked.cited == [used.belief_id]
+    assert (await store.get(value.id, principal())).cited == [used.belief_id]
+    assert await store.mark_cited(value.id, principal(), [used.belief_id]) == marked
+
+    view = await store.user_view(RUN_ID, "private", "restricted")
+    assert {belief.belief_id: belief.used for belief in view.beliefs} == {
+        used.belief_id: True,
+        unused.belief_id: False,
+    }
+
+    foreign = principal().model_copy(update={"principal_id": "principal-b"})
+    with pytest.raises(NotFoundError):
+        await store.mark_cited(value.id, foreign, [used.belief_id])
+    with pytest.raises(NotFoundError):
+        await store.mark_cited(UUID(int=659), principal(), [used.belief_id])
+
+    widened = await store.mark_cited(value.id, principal(), [unused.belief_id])
+    assert widened.cited == [used.belief_id, unused.belief_id]
