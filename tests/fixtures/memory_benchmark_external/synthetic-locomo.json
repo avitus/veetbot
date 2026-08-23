@@ -1,0 +1,83 @@
+[
+  {
+    "sample_id": "syn-conv-1",
+    "conversation": {
+      "speaker_a": "Ana",
+      "speaker_b": "Bo",
+      "session_1_date_time": "10:15 am on 4 May, 2024",
+      "session_1": [
+        {"speaker": "Ana", "dia_id": "D1:1", "text": "I adopted a tabby cat named Marmalade."},
+        {"speaker": "Bo", "dia_id": "D1:2", "text": "Marmalade suits a tabby."},
+        {"speaker": "Ana", "dia_id": "D1:3", "text": "She sleeps on the bookcase all afternoon."}
+      ],
+      "session_2_date_time": "7:30 pm on 11 May, 2024",
+      "session_2": [
+        {"speaker": "Bo", "dia_id": "D2:1", "text": "I signed up for the harbour swim."},
+        {"speaker": "Ana", "dia_id": "D2:2", "text": "Marmalade knocked the fern off the sill."}
+      ]
+    },
+    "qa": [
+      {
+        "question": "What did Ana name her cat?",
+        "answer": "Marmalade",
+        "evidence": ["D1:1"],
+        "category": 4
+      },
+      {
+        "question": "Which event did Bo sign up for?",
+        "answer": "the harbour swim",
+        "evidence": ["D2:1"],
+        "category": 4
+      },
+      {
+        "question": "What did the cat knock over, and where does she nap?",
+        "answer": "the fern; the bookcase",
+        "evidence": ["D1:3", "D2:2"],
+        "category": 1
+      },
+      {
+        "question": "How long after adopting the cat did the fern fall?",
+        "answer": "a week",
+        "evidence": ["D1:1", "D2:2"],
+        "category": 2
+      },
+      {
+        "question": "Which breed of dog does Ana walk on Sundays?",
+        "adversarial_answer": "No information available",
+        "evidence": [],
+        "category": 5
+      }
+    ]
+  },
+  {
+    "sample_id": "syn-conv-2",
+    "conversation": {
+      "speaker_a": "Cyd",
+      "speaker_b": "Dev",
+      "session_1_date_time": "9:05 am on 2 June, 2024",
+      "session_1": [
+        {"speaker": "Cyd", "dia_id": "D1:1", "text": "I started keeping bees on the allotment."},
+        {"speaker": "Dev", "dia_id": "D1:2", "text": "Two hives or three?"}
+      ],
+      "session_2_date_time": "6:40 pm on 20 June, 2024",
+      "session_2": [
+        {"speaker": "Cyd", "dia_id": "D2:1", "text": "The second hive swarmed into the hedge."},
+        {"speaker": "Dev", "dia_id": "D2:2", "text": "Did you get them back?"}
+      ]
+    },
+    "qa": [
+      {
+        "question": "Where did Cyd start keeping bees?",
+        "answer": "on the allotment",
+        "evidence": ["D1:1"],
+        "category": 3
+      },
+      {
+        "question": "What did Dev ask about the hives?",
+        "answer": "whether there were two or three",
+        "evidence": ["D1:2"],
+        "category": 4
+      }
+    ]
+  }
+]

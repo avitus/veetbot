@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import importlib
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -28,7 +28,7 @@ from agent_core.config import Settings, load_settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import MemoryRecord, RecallMoment, RecallTrace
-from agent_core.domain.messages import FakeModelScript, ScriptedTurn
+from agent_core.domain.messages import AssistantMessage, FakeModelScript, ScriptedTurn, TextPart
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunLimits
 from agent_core.evals.memory_benchmark import (
     BENCHMARK_VERSION,
@@ -36,15 +36,19 @@ from agent_core.evals.memory_benchmark import (
     BenchmarkProbe,
     BenchmarkScenario,
     BenchmarkSession,
+    BenchmarkTurn,
     ConsolidationCounts,
     DeterministicBenchmarkResult,
     DeterministicScenarioResult,
     MemoryBenchmarkBaseline,
     MemoryBenchmarkCorpus,
     ProbeRetrievalResult,
+    SessionEvents,
     aggregate_deterministic,
     baseline_probe_rows,
     compare_to_baseline,
+    evidence_event_refs,
+    evidence_provenance_recalled,
     load_baseline,
     load_corpus,
     probe_run_facts,
@@ -290,6 +294,7 @@ async def scenario_composition(
     script: FakeModelScript | None = None,
     model_policy: str | None = None,
     replay_sessions: bool = True,
+    session_events: dict[str, SessionEvents] | None = None,
 ) -> AsyncIterator[tuple[Any, list[ConsolidationCounts]]]:
     """Compose one scenario's application graph and leave it open for probes.
 
@@ -321,7 +326,9 @@ async def scenario_composition(
     ) as composition:
         if replay_sessions:
             for session in scenario.sessions:
-                consolidations.append(await _converse(composition, composition.clock, session))
+                consolidations.append(
+                    await _converse(composition, composition.clock, session, session_events)
+                )
             await composition.maintenance_factory().run_once()
         yield composition, consolidations
 
@@ -332,22 +339,30 @@ async def run_deterministic_scenario(
     *,
     corpus: MemoryBenchmarkCorpus,
     policy_profile: str = "default",
+    session_events: dict[str, SessionEvents] | None = None,
 ) -> DeterministicScenarioResult:
     """Run one scenario's sessions and probes against a real composition.
 
     One composition serves the whole scenario, so every probe reads the store
     the scenario's own conversations built, and the scripted model keeps the
-    arm off the network.
+    arm off the network.  A caller that passes `session_events` is handed the
+    events each replayed turn appended and gets the evidence-provenance counts
+    on every probe; the authored corpus names labels rather than evidence and
+    passes nothing.
     """
 
     script = FakeModelScript(turns=[ScriptedTurn(text=PROBE_ACK_TEXT)], on_exhausted="repeat_last")
     probes: list[ProbeRetrievalResult] = []
     async with scenario_composition(
-        settings, scenario, policy_profile=policy_profile, script=script
+        settings,
+        scenario,
+        policy_profile=policy_profile,
+        script=script,
+        session_events=session_events,
     ) as (composition, consolidations):
         clock = composition.clock
         for probe in scenario.probes:
-            probes.append(await _probe(composition, clock, scenario, probe, corpus))
+            probes.append(await _probe(composition, clock, scenario, probe, corpus, session_events))
         extractor_name: str = composition.memory.extractor_name
         live: list[MemoryRecord] = await composition.memory.list_memories()
         every: list[MemoryRecord] = await composition.memory.list_memories(include_inactive=True)
@@ -368,24 +383,32 @@ async def run_deterministic_scenario(
     )
 
 
-async def _converse(composition: Any, clock: Any, session: BenchmarkSession) -> ConsolidationCounts:
-    """Replay one session's turns and consolidate what they stated."""
+async def _converse(
+    composition: Any,
+    clock: Any,
+    session: BenchmarkSession,
+    session_events: dict[str, SessionEvents] | None = None,
+) -> ConsolidationCounts:
+    """Replay one session's turns and consolidate what they stated.
+
+    A turn the scenario marks as the assistant's is appended as an assistant
+    message rather than as a principal one, so the conversation the dataset
+    recorded is replayed whole while the extractor, which reads principal user
+    messages only, can never form from it.  When `session_events` is given the
+    replay records the event each turn appended, which is what the
+    evidence-provenance metric joins a returned belief against.
+    """
 
     _advance(clock, session.advance_seconds)
     view = await _open_session(composition, session.project_scope)
+    sequences: list[int] = []
     for turn in session.turns:
         _advance(clock, turn.advance_seconds)
         async with composition.uow_factory() as uow:
-            await uow.events.append(
-                NewEvent(
-                    session_id=view.id,
-                    run_id=None,
-                    event_type="user.message.created",
-                    actor_type="principal",
-                    actor_id=EVALUATION_PRINCIPAL.principal_id,
-                    payload={"content": turn.text},
-                )
-            )
+            appended: EventEnvelope = await uow.events.append(_turn_event(view.id, turn))
+        sequences.append(appended.sequence)
+    if session_events is not None:
+        session_events[session.id] = SessionEvents(session_id=view.id, turn_sequences=sequences)
     scope = session.project_scope or DEFAULT_SCOPE
     result = await composition.memory.run(trigger="session_close", scope=scope, session_id=view.id)
     return ConsolidationCounts(
@@ -399,12 +422,35 @@ async def _converse(composition: Any, clock: Any, session: BenchmarkSession) -> 
     )
 
 
+def _turn_event(session_id: UUID, turn: BenchmarkTurn) -> NewEvent:
+    """Shape one replayed turn as the event its role would have appended."""
+
+    if turn.role == "user":
+        return NewEvent(
+            session_id=session_id,
+            run_id=None,
+            event_type="user.message.created",
+            actor_type="principal",
+            actor_id=EVALUATION_PRINCIPAL.principal_id,
+            payload={"content": turn.text},
+        )
+    message = AssistantMessage(content=[TextPart(text=turn.text)])
+    return NewEvent(
+        session_id=session_id,
+        run_id=None,
+        event_type="assistant.message.completed",
+        actor_type="runtime",
+        payload={"message": message.model_dump(mode="json")},
+    )
+
+
 async def _probe(
     composition: Any,
     clock: Any,
     scenario: BenchmarkScenario,
     probe: BenchmarkProbe,
     corpus: MemoryBenchmarkCorpus,
+    session_events: Mapping[str, SessionEvents] | None = None,
 ) -> ProbeRetrievalResult:
     """Ask one probe in a fresh session and score what it recalled."""
 
@@ -419,6 +465,13 @@ async def _probe(
         events: list[EventEnvelope] = await uow.events.list_after(view.id, 0, EVALUATION_PRINCIPAL)
     snapshot, in_turn = await _recall_traces(composition, events)
     distinct_prefixes, policy_failures, run_completed = probe_run_facts(events, run.status)
+    named = set() if session_events is None else evidence_event_refs(probe, session_events)
+    recalled = bool(named) and evidence_provenance_recalled(
+        probe,
+        [*([] if snapshot is None else [snapshot]), *in_turn],
+        session_events or {},
+        store=store_live,
+    )
     return score_probe(
         probe,
         scenario,
@@ -428,6 +481,8 @@ async def _probe(
         distinct_prefixes=distinct_prefixes,
         policy_failures=policy_failures,
         run_completed=run_completed,
+        evidence_total=int(bool(named)),
+        evidence_recalled=int(recalled),
         snapshot_trace_id=None if snapshot is None else snapshot.id,
         in_turn_trace_ids=[trace.id for trace in in_turn],
     )

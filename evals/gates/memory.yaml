@@ -232,7 +232,7 @@
   kind: structural
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The external adapters map their datasets without vendoring them.** Each of the three loaders round-trips a synthetic fixture shaped like its dataset into scenarios, labeled beliefs, and probes with evidence references, and the repository contains no dataset file."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_benchmark_external.py::test_adapters_round_trip_synthetic_fixtures
 - id: gate.memory.profiles_wired
   milestone: 16
   kind: structural
