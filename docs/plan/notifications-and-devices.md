@@ -27,7 +27,7 @@ pairing of untrusted senders, no device-scoped tool, no presence-based routing.
 Those are Milestone 14 and the roadmap.
 
 Milestones 10 through 12 are complete and the verified gate ceiling is 12.
-Milestone 13 is the next authorized milestone and has not started.
+Milestone 13 is the next sequential authorized milestone and has not started.
 
 ## Scope
 

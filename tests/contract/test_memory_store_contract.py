@@ -400,7 +400,11 @@ async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() ->
     eligible = idle(527, 300, 7).model_copy(
         update={"status": MemoryStatus.PROVISIONAL, "confidence": 0.3}
     )
+    eligible_high_confidence = idle(528, 250, 8).model_copy(
+        update={"status": MemoryStatus.PROVISIONAL, "confidence": 0.8}
+    )
     await store.upsert_belief(eligible)
+    await store.upsert_belief(eligible_high_confidence)
     decay_window = await store.list_idle(
         principal(),
         reinforced_before=cutoff,
@@ -412,7 +416,10 @@ async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() ->
     assert [record.id for record in bounded] == [oldest.id, middle.id]
     assert [record.id for record in cut] == [oldest.id]
     assert foreign == []
-    assert [record.id for record in decay_window] == [eligible.id]
+    assert [record.id for record in decay_window] == [
+        eligible.id,
+        eligible_high_confidence.id,
+    ]
 
 
 async def test_head_position_is_zero_when_empty_and_tracks_the_newest_position() -> None:

@@ -6,7 +6,7 @@ title: Current Milestone
 
 - **Active milestone:** Milestone 12 — notifications and device identity — is
   complete. Milestone 13 — general-purpose subagents and delegation — is the
-  next authorized milestone, is specified by
+  next sequential authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates, and has not started. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with

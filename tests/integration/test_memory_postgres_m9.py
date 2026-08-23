@@ -769,7 +769,7 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
 
     The shared database carries rows from other cases, so the ordering is
     asserted over whatever the window returns and membership over this case's
-    own beliefs: written newest-first, only the two past the cutoff come back,
+    own beliefs: written newest-first, only the three past the cutoff come back,
     oldest first, and neither the freshly reinforced nor the retired one does.
     """
 
@@ -778,7 +778,13 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
         marker = f"memidle{uuid4().hex[:10]}"
         now = composition.clock.now()
 
-        async def _seed(subject: str, idle_days: int, status: MemoryStatus) -> MemoryRecord:
+        async def _seed(
+            subject: str,
+            idle_days: int,
+            status: MemoryStatus,
+            *,
+            confidence: float = 0.5,
+        ) -> MemoryRecord:
             reinforced_at = now - timedelta(days=idle_days)
             async with composition.uow_factory() as uow:
                 record = MemoryRecord.model_validate(
@@ -791,7 +797,7 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
                         "statement": f"{subject} statement {marker}",
                         "source_session_id": session_id,
                         "source_event_ids": [1],
-                        "confidence": 0.5,
+                        "confidence": confidence,
                         "sensitivity": Sensitivity.INTERNAL,
                         "valid_from": now - timedelta(days=idle_days + 1),
                         "status": status,
@@ -813,6 +819,12 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
 
         fresh = await _seed("fresh", 1, MemoryStatus.PROVISIONAL)
         newer_idle = await _seed("newer-idle", 100, MemoryStatus.PROVISIONAL)
+        high_confidence_idle = await _seed(
+            "high-confidence-idle",
+            200,
+            MemoryStatus.PROVISIONAL,
+            confidence=0.8,
+        )
         oldest_idle = await _seed("oldest-idle", 400, MemoryStatus.PROVISIONAL)
         retired = await _seed("retired", 500, MemoryStatus.RETIRED)
 
@@ -837,13 +849,14 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
         stamps = [(record.last_reinforced_at, str(record.id)) for record in window]
         mine = [record.id for record in window if marker in record.subject]
         assert stamps == sorted(stamps)
-        assert mine == [oldest_idle.id, newer_idle.id]
+        assert mine == [oldest_idle.id, high_confidence_idle.id, newer_idle.id]
         assert fresh.id not in {record.id for record in window}
         assert retired.id not in {record.id for record in window}
         assert len(bounded) == 1
         assert bounded[0].id == window[0].id
         assert [record.id for record in decay_window if marker in record.subject] == [
             oldest_idle.id,
+            high_confidence_idle.id,
             newer_idle.id,
         ]
 

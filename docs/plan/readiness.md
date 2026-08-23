@@ -14,8 +14,9 @@ The original answer was that Milestones 0 through 5 were implementable from the
 documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
 were written. The present answer is different: Milestones 0 through 12 are
-complete, and Milestone 13 subagents and delegation is the next authorized,
-fully specified milestone.
+complete, and Milestone 13 subagents and delegation is the next sequential,
+fully specified milestone. Milestone 16 memory evaluation and lifecycle is
+separately authorized as a parallel workstream.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
