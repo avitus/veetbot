@@ -377,12 +377,12 @@ async def test_notification_rows_are_principal_isolated_and_rls_forced() -> None
             text("SELECT set_config('agent_core.tenant_id', 'another-tenant', true)")
         )
         counts = [
-            await uow.session.scalar(text(f"SELECT count(*) FROM {table}"))
-            for table in (
-                "devices",
-                "device_registration_idempotency_keys",
-                "notification_outbox",
-                "notification_deliveries",
+            await uow.session.scalar(statement)
+            for statement in (
+                text("SELECT count(*) FROM devices"),
+                text("SELECT count(*) FROM device_registration_idempotency_keys"),
+                text("SELECT count(*) FROM notification_outbox"),
+                text("SELECT count(*) FROM notification_deliveries"),
             )
         ]
         assert counts == [0, 0, 0, 0]

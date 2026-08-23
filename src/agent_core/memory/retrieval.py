@@ -329,14 +329,12 @@ class HybridMemoryRetriever:
             returned = set(trace.returned)
             if not returned:
                 return []
-            # Four rows per snapshot member is room for the superseding writes
-            # the members themselves produced, and the floor keeps a small
-            # snapshot from reading a uselessly narrow page.
-            records = await uow.memories.list_memories(
-                self._principal,
-                include_inactive=True,
-                limit=max(200, 4 * len(returned)),
-            )
+            records: list[MemoryRecord] = []
+            for belief_id in sorted(returned, key=str):
+                try:
+                    records.append(await uow.memories.get(belief_id, self._principal))
+                except NotFoundError:
+                    continue
         instant = as_of or self._clock.now()
         corrections = [
             MemoryCorrection(

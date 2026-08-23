@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import signal
+import socket
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
@@ -1151,7 +1152,7 @@ async def build_notification_worker(
             providers=frozenset({PushProvider.APNS}),
             clock=effective_clock,
             ids=effective_ids,
-            claimant=f"notify:{os.getpid()}",
+            claimant=f"notify:{socket.gethostname()}:{os.getpid()}",
             batch_size=int(notification_limits["claim_batch"]),
             lease_seconds=float(notification_limits["lease_seconds"]),
             retry_delays=tuple(

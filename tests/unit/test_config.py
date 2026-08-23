@@ -74,7 +74,10 @@ def test_playwright_browser_provider_requires_explicit_origins() -> None:
         "https://static.example.org",
     )
 
-    with pytest.raises(ConfigurationError, match="BROWSER_ALLOWED_ORIGINS"):
+    with pytest.raises(
+        ConfigurationError,
+        match="BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER=playwright",
+    ):
         load_settings({**base_environment(), "BROWSER_PROVIDER": "playwright"})
 
 
@@ -154,6 +157,22 @@ def test_browser_grant_pin_requires_hosted_provider_and_valid_uuid() -> None:
                 "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
                 "BROWSER_PROFILE_ID": PROFILE_ID,
                 "BROWSER_GRANT_ID": "not-a-uuid",
+                "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+            }
+        )
+
+
+def test_browser_grant_pin_requires_a_hosted_profile_id() -> None:
+    with pytest.raises(
+        ConfigurationError,
+        match="BROWSER_GRANT_ID requires BROWSER_PROFILE_ID",
+    ):
+        load_settings(
+            {
+                **base_environment(),
+                "BROWSER_PROVIDER": "hosted",
+                "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+                "BROWSER_GRANT_ID": GRANT_ID,
                 "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
             }
         )

@@ -12,7 +12,7 @@ from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
 from agent_core.adapters.persistence import notifications as notification_adapters
 from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
 from agent_core.application.notification_producer import NotificationProducer
-from agent_core.bootstrap import build
+from agent_core.bootstrap import Composition, build
 from agent_core.domain.devices import PushProvider
 from agent_core.domain.notifications import NotificationStatus
 from agent_core.domain.runs import (
@@ -44,6 +44,12 @@ NOW = datetime(2026, 8, 22, 21, tzinfo=UTC)
 
 class _InjectedCrashError(Exception):
     pass
+
+
+class _NoNotificationProducer:
+    async def for_schedule_occurrence(self, uow, *, schedule, occurrence):  # type: ignore[no-untyped-def]
+        del uow, schedule, occurrence
+        return False
 
 
 async def _running_context(composition, *, crash_at: str | None = None):  # type: ignore[no-untyped-def]
@@ -142,7 +148,12 @@ async def _create_schedule(composition, *, missed: bool):  # type: ignore[no-unt
     return schedule
 
 
-def _materializer(composition, *, crash_at: str | None = None):  # type: ignore[no-untyped-def]
+def _materializer(
+    composition: Composition,
+    *,
+    crash_at: str | None = None,
+    notification_producer: NotificationProducer | _NoNotificationProducer | None = None,
+) -> ScheduleMaterializer:
     def probe(boundary: str) -> None:
         if boundary == crash_at:
             raise _InjectedCrashError(boundary)
@@ -155,9 +166,10 @@ def _materializer(composition, *, crash_at: str | None = None):  # type: ignore[
         ids=composition.ids,
         seed_checkpoint=DurableCheckpointSeeder(composition.clock),
         write_probe=probe,
-        notification_producer=NotificationProducer(
-            clock=composition.clock,
-            ids=composition.ids,
+        notification_producer=(
+            notification_producer
+            if notification_producer is not None
+            else NotificationProducer(clock=composition.clock, ids=composition.ids)
         ),
     )
 
@@ -310,6 +322,22 @@ async def _assert_schedule_skip_notification_atomic() -> None:
             async with composition.uow_factory() as uow:
                 rows = await uow.notification_outbox.list(composition.principal, limit=100)
                 assert sum(row.occurrence_id == occurrence.id for row in rows) == 1
+
+
+async def test_schedule_skip_does_not_probe_a_notification_that_was_not_written() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        schedule = await _create_schedule(composition, missed=True)
+
+        occurrence = await _materializer(
+            composition,
+            crash_at="notification",
+            notification_producer=_NoNotificationProducer(),
+        ).materialize(schedule.id)
+
+        assert occurrence is not None
+        assert occurrence.disposition is OccurrenceDisposition.MISSED
 
 
 async def _assert_schedule_accounting_notification_atomic() -> None:

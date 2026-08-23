@@ -1046,8 +1046,8 @@ def test_memory_management_and_diagnostics_cli(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(cli_main, "_memory_delete", fake_delete)
     monkeypatch.setattr(cli_main, "_memory_formations", fake_formations)
     monkeypatch.setattr(cli_main, "_memory_trace", fake_trace)
-    monkeypatch.setattr(cli_main, "_memory_diagnose", fake_diagnose, raising=False)
-    monkeypatch.setattr(cli_main, "_memory_replay", fake_replay, raising=False)
+    monkeypatch.setattr(cli_main, "_memory_diagnose", fake_diagnose)
+    monkeypatch.setattr(cli_main, "_memory_replay", fake_replay)
     runner = CliRunner()
 
     listed = runner.invoke(

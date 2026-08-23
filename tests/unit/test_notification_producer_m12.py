@@ -172,6 +172,13 @@ async def test_exact_transition_catalog_builds_content_free_deduplicated_rows() 
         assert len(rows) == 8
         assert all(row.status is NotificationStatus.PENDING for row in rows)
         assert all("Sensitive" not in row.payload.model_dump_json() for row in rows)
+        approval = next(row for row in rows if row.kind is NotificationKind.APPROVAL_REQUESTED)
+        assert approval.expires_at == NOW + timedelta(minutes=10)
+        assert all(
+            row.expires_at == NOW + timedelta(hours=24)
+            for row in rows
+            if row.kind is not NotificationKind.APPROVAL_REQUESTED
+        )
 
         assert not await producer.for_run_transition(
             uow,

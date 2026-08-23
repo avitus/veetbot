@@ -457,7 +457,18 @@ class BrowserAuthenticationRow(Base):
 
 class ProcessEventRow(Base):
     __tablename__ = "process_events"
-    __table_args__ = (Index("ix_process_events_type_created", "event_type", "created_at"),)
+    __table_args__ = (
+        Index("ix_process_events_type_created", "event_type", "created_at"),
+        Index(
+            "ix_process_events_diagnostics_scope",
+            "event_type",
+            text("(payload ->> 'tenant_id')"),
+            text("(payload ->> 'principal_id')"),
+            text("(payload ->> 'session_id')"),
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
     event_type: Mapped[str] = mapped_column(Text)

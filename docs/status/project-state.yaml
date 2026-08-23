@@ -9,6 +9,8 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
+  # Milestone 16 was authorized as a parallel workstream on 2026-08-22
+  # (ADR-0069); its gates do not advance the verified ceiling past 15.
   authorized_milestones:
     - 0
     - 1

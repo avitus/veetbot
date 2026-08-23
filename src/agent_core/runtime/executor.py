@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -51,6 +50,7 @@ from agent_core.ports.context import (
 )
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.models import ModelProvider, ModelRouter
+from agent_core.ports.notifications import RunNotificationProducer
 from agent_core.ports.persistence import (
     CheckpointSeeder,
     RepositoryUnitOfWork,
@@ -76,20 +76,6 @@ type FinalizationWriteProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
 
 
-class _RunNotificationProducer(Protocol):
-    async def for_run_transition(
-        self,
-        uow: RepositoryUnitOfWork,
-        *,
-        run: Run,
-        principal_id: str,
-        status: RunStatus,
-        approval_id: UUID | None = None,
-        question_id: UUID | None = None,
-        approval_expires_at: datetime | None = None,
-    ) -> bool: ...
-
-
 @dataclass(slots=True)
 class _FinalizationContext:
     run: Run
@@ -100,7 +86,7 @@ class _FinalizationContext:
     ids: IdFactory
     token: RunCancellationToken
     principal: Principal
-    notification_producer: _RunNotificationProducer | None
+    notification_producer: RunNotificationProducer | None
     finalization_write_probe: FinalizationWriteProbe | None
 
 
@@ -129,7 +115,7 @@ class RunExecutor:
         on_token_complete: TokenCompleteCallback | None = None,
         on_run_complete: RunCompleteCallback | None = None,
         on_model_event: ModelEventCallback | None = None,
-        notification_producer: _RunNotificationProducer | None = None,
+        notification_producer: RunNotificationProducer | None = None,
         finalization_write_probe: FinalizationWriteProbe | None = None,
         max_internal_attempts: int = 3,
         identical_call_threshold: int = 5,

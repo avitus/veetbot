@@ -70,6 +70,7 @@ def test_notification_ports_have_executable_contracts_for_every_adapter() -> Non
             (
                 outbox_contract.test_notification_enqueue_deduplicates_and_lists_by_principal,
                 outbox_contract.test_notification_claim_settle_and_pagination,
+                outbox_contract.test_notification_claim_is_partitioned_by_provider,
                 outbox_contract.test_notification_delivery_attempt_is_unique,
                 postgres_contract.test_postgres_notification_outbox_satisfies_shared_contracts,
             ),

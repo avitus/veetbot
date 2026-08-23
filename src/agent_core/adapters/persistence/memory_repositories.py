@@ -384,18 +384,27 @@ class PostgresMemoryStore:
         principal: Principal,
         *,
         reinforced_before: datetime,
+        decay_confidence_ceiling: float | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
+        predicates: list[ColumnElement[bool]] = [
+            MemoryRow.tenant_id == principal.tenant_id,
+            MemoryRow.principal_id == principal.principal_id,
+            MemoryRow.status.in_(_LIVE),
+            MemoryRow.last_reinforced_at <= reinforced_before,
+        ]
+        if decay_confidence_ceiling is not None:
+            predicates.append(
+                or_(
+                    MemoryRow.status == MemoryStatus.PROVISIONAL.value,
+                    MemoryRow.confidence < decay_confidence_ceiling,
+                )
+            )
         rows = list(
             (
                 await self._session.scalars(
                     select(MemoryRow)
-                    .where(
-                        MemoryRow.tenant_id == principal.tenant_id,
-                        MemoryRow.principal_id == principal.principal_id,
-                        MemoryRow.status.in_(_LIVE),
-                        MemoryRow.last_reinforced_at <= reinforced_before,
-                    )
+                    .where(*predicates)
                     .order_by(MemoryRow.last_reinforced_at, MemoryRow.id)
                     .limit(limit)
                 )

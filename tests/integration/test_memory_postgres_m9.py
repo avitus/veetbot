@@ -827,6 +827,12 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
                 reinforced_before=now - timedelta(days=50),
                 limit=1,
             )
+            decay_window = await uow.memories.list_idle(
+                composition.principal,
+                reinforced_before=now - timedelta(days=50),
+                decay_confidence_ceiling=0.55,
+                limit=500,
+            )
 
         stamps = [(record.last_reinforced_at, str(record.id)) for record in window]
         mine = [record.id for record in window if marker in record.subject]
@@ -836,6 +842,10 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
         assert retired.id not in {record.id for record in window}
         assert len(bounded) == 1
         assert bounded[0].id == window[0].id
+        assert [record.id for record in decay_window if marker in record.subject] == [
+            oldest_idle.id,
+            newer_idle.id,
+        ]
 
 
 async def test_postgres_head_position_and_minimum_position_bound_the_recall_delta(

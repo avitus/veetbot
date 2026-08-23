@@ -820,8 +820,6 @@ verification:
     activation_pending:
       # Tenant activation is not a completion condition (ADR-0061); it is
       # roadmap item B1 and stays default-off until the evidence rule passes.
-      - Run and review the version-bound formation@6 provider-memory evaluation
-        before provider assistance can reactivate for the production tuple.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent

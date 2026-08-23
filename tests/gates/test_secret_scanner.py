@@ -108,5 +108,6 @@ def test_secret_allowlist_suppresses_exact_match_and_reports_stale_entry(tmp_pat
         "    reason: intentionally stale fixture\n",
         encoding="utf-8",
     )
-    _findings, errors = secret_findings(tmp_path)
+    findings, errors = secret_findings(tmp_path)
+    assert [finding.render() for finding in findings] == ["src/leak.py:1: provider_key"]
     assert errors == ["stale secret allowlist entry: src/leak.py:2:provider_key"]

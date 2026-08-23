@@ -197,6 +197,7 @@ class InMemoryMemoryStore:
         principal: Principal,
         *,
         reinforced_before: datetime,
+        decay_confidence_ceiling: float | None = None,
         limit: int,
     ) -> list[MemoryRecord]:
         async with self._lock:
@@ -207,6 +208,11 @@ class InMemoryMemoryStore:
                 and record.principal_id == principal.principal_id
                 and record.status in _LIVE_MEMORY
                 and record.last_reinforced_at <= reinforced_before
+                and (
+                    decay_confidence_ceiling is None
+                    or record.status is MemoryStatus.PROVISIONAL
+                    or record.confidence < decay_confidence_ceiling
+                )
             ]
             records.sort(key=lambda item: (item.last_reinforced_at, str(item.id)))
             return [item.model_copy(deep=True) for item in records[:limit]]

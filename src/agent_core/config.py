@@ -749,7 +749,7 @@ def validate_settings(
         and not settings.browser_allowed_origins
     ):
         raise ConfigurationError(
-            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER is enabled"
+            "BROWSER_ALLOWED_ORIGINS is required when BROWSER_PROVIDER=playwright"
         )
     if settings.browser_provider is BrowserProviderKind.HOSTED:
         if settings.browser_profile_service_url is None:

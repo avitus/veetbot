@@ -1,6 +1,6 @@
 # ADR-0069: Milestone 16 memory evaluation and lifecycle
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-08-22
 - Related: Sections 20, 21, and 24 of the engineering plan; ADR-0014,
   ADR-0018, ADR-0019, ADR-0022, ADR-0045, ADR-0051, ADR-0057, ADR-0061
@@ -39,7 +39,7 @@ alongside Milestones 12 through 15, rather than as a roadmap item, because the
 missing yardstick blocks every remaining memory decision and the missing
 lifecycle is already specified work.
 
-## Proposed decisions
+## Decisions
 
 1. **Milestone 16 is authorized as a parallel workstream.** It may be developed
    alongside Milestones 12 through 15 exactly as Milestone 11 was developed

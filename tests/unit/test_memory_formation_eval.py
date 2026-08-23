@@ -125,9 +125,9 @@ def test_provider_evaluation_guidance_tracks_current_corpus_cost() -> None:
     for relative_path in ("README.md", "evals/capability/README.md"):
         guidance = (repository_root / relative_path).read_text(encoding="utf-8")
         assert re.search(
-            rf"{expected_calls}(?: bounded)? provider calls.*USD\s+{expected_ceiling:.2f}",
+            rf"{expected_calls}(?: bounded)? provider calls[^\n]*"
+            rf"USD\s+{re.escape(f'{expected_ceiling:.2f}')}",
             guidance,
-            re.DOTALL,
         )
 
     design = (repository_root / "docs/plan/memory-formation-and-consolidation.md").read_text(

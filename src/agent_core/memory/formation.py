@@ -1694,6 +1694,7 @@ class GovernedMemoryService:
             candidates = await uow.memories.list_idle(
                 self._principal,
                 reinforced_before=instant - timedelta(days=horizon),
+                decay_confidence_ceiling=MAX_INFERRED_CONFIDENCE,
                 limit=decay.max_per_sweep,
             )
             for record in candidates:

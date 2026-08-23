@@ -71,6 +71,7 @@ class MemoryStore(Protocol):
         principal: Principal,
         *,
         reinforced_before: datetime,
+        decay_confidence_ceiling: float | None = None,
         limit: int,
     ) -> list[MemoryRecord]: ...
 

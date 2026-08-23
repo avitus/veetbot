@@ -739,6 +739,39 @@ async def test_corrections_list_superseded_snapshot_members_after_the_watermark(
     assert await retriever.corrections(snapshot_id=snapshot.trace_id, watermark=head) == []
 
 
+async def test_corrections_key_snapshot_members_beyond_the_recent_memory_page() -> None:
+    """Later unrelated writes cannot displace a corrected snapshot member."""
+
+    clock, factory, service, retriever = await formation_stack()
+    stated = await _remember(factory, service, "User prefers concise answers")
+    snapshot = await retriever.snapshot(session_id=SESSION_ID, current_scope="project-a")
+    assert stated.id in {item.belief_id for item in snapshot.items}
+
+    clock.advance(timedelta(days=1))
+    replacement = await _remember(factory, service, "User prefers detailed answers")
+    async with factory() as uow:
+        for offset in range(225):
+            unrelated = memory(
+                belief_id=20_000 + offset,
+                statement=f"Unrelated retained fact {offset}",
+            ).model_copy(
+                update={
+                    "subject": f"unrelated {offset}",
+                    "store_position": 100 + offset,
+                }
+            )
+            await uow.memories.upsert_belief(unrelated)
+
+    corrections = await retriever.corrections(
+        snapshot_id=snapshot.trace_id,
+        watermark=snapshot.watermark,
+    )
+
+    assert [(item.belief_id, item.replacement_id) for item in corrections] == [
+        (stated.id, replacement.id)
+    ]
+
+
 async def test_corrections_are_empty_when_the_snapshot_trace_is_gone() -> None:
     """A session whose snapshot cannot be read takes the turn without corrections."""
 

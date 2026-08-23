@@ -947,6 +947,46 @@ async def test_decay_sweep_reaches_the_oldest_idle_belief_past_its_window() -> N
     assert [beliefs[belief.id] for belief in newer] == newer
 
 
+async def test_decay_window_excludes_permanently_stable_beliefs_before_limiting() -> None:
+    """Stable explicit beliefs cannot crowd an eligible belief out of the sweep."""
+
+    clock, factory, _service, _retriever = await formation_stack()
+    ceiling = 3
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(8_000, 9_000)),
+        principal(),
+        formation_profile=FormationProfile(decay=DecayProfile(max_per_sweep=ceiling)),
+    )
+    stable = [
+        await _form(
+            factory,
+            service,
+            f"Deployment invariant {index} is explicit.",
+            subject=f"stable invariant {index}",
+        )
+        for index in range(ceiling)
+    ]
+    clock.advance(timedelta(days=1))
+    eligible = await _form(
+        factory,
+        service,
+        "The inferred rollout preference is provisional.",
+        subject="rollout preference",
+        explicit=False,
+        confidence=0.3,
+    )
+    clock.advance(timedelta(days=31))
+
+    result = await service.decay()
+
+    beliefs = {belief.id: belief for belief in await service.list_memories()}
+    assert (result.decayed, result.retired) == (1, 0)
+    assert beliefs[eligible.id].confidence == pytest.approx(0.25)
+    assert [beliefs[belief.id] for belief in stable] == stable
+
+
 def _citable_ids() -> SequenceIdFactory:
     """Identifiers whose eight-hex prefixes differ, as production's random ones do.
 

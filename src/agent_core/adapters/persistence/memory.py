@@ -236,6 +236,12 @@ class InMemoryRunRepository:
         async with self._lock:
             if run.id in self._runs:
                 raise ConflictError("run already exists")
+            if run.status not in TERMINAL_RUN_STATUSES and any(
+                candidate.session_id == run.session_id
+                and candidate.status not in TERMINAL_RUN_STATUSES
+                for candidate in self._runs.values()
+            ):
+                raise ConflictError("session already has an active run")
             if (
                 run.parent_run_id is not None
                 and run.kind is RunKind.SKILL_REVIEW

@@ -33,16 +33,18 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import (
     ModelAttempt,
-    ModelCompletedEvent,
     ModelEvent,
     ModelFailedEvent,
     ModelRequest,
     ModelTurn,
     ModelUsage,
+    ReasoningDeltaEvent,
     ResolvedModel,
     StopReason,
     SystemMessage,
+    TextDeltaEvent,
     TextPart,
+    ToolCallDeltaEvent,
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
@@ -714,6 +716,7 @@ class ProviderAssistedCandidateExtractor:
         evidence: ProviderExtractionEvaluationEvidence | None,
         fallback: MemoryCandidateExtractor,
         evaluation_mode: bool = False,
+        budget: ProviderExtractionBudget | None = None,
     ) -> None:
         if not evaluation_mode and (
             evidence is None
@@ -746,7 +749,7 @@ class ProviderAssistedCandidateExtractor:
         self._evidence = evidence
         self._evaluation_mode = evaluation_mode
         self._fallback = fallback
-        self._budget = ProviderExtractionBudget()
+        self._budget = budget or ProviderExtractionBudget()
 
     @classmethod
     def for_evaluation(
@@ -921,7 +924,10 @@ class ProviderAssistedCandidateExtractor:
                             or event.partial_turn.tool_calls
                             or event.partial_turn.provider_reasoning_items
                         )
-                elif not isinstance(event, ModelCompletedEvent):
+                elif isinstance(
+                    event,
+                    (TextDeltaEvent, ReasoningDeltaEvent, ToolCallDeltaEvent),
+                ):
                     stream_had_output = True
                 yield event
 

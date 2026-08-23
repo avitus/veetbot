@@ -708,7 +708,7 @@ first formation layer (Section 20).
     returns those diagnostics and the CLI exits non-zero without publishing an
     activation artifact. **M10.**
 19. **Positive formation coverage** — aggregate lift alone is insufficient:
-    provider assistance must fully support at least seventeen of the twenty-one labeled
+    provider assistance must fully support at least sixteen of the twenty labeled
     positive cases before evidence can be published. **M10.**
 20. **Authoritative source safety** — secret, injection, or transient markers in
     authoritative cited source text cannot be erased by provider normalization

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -127,6 +129,7 @@ async def test_lean_production_notification_role_constructs_without_app_credenti
     ) as worker:
         assert isinstance(worker, NotificationWorker)
         dispatcher = cast(Any, worker._dispatch_once).__self__
+        assert dispatcher._claimant == f"notify:{socket.gethostname()}:{os.getpid()}"
         async with dispatcher._uow_factory() as uow:
             assert {
                 "approvals",

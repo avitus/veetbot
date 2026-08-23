@@ -1088,8 +1088,8 @@ repository, and why the push key lives in one role.
 
 The readiness verdict is therefore **Complete**: all twenty notification and
 device gates and all 247 cumulative gates pass, with the full PostgreSQL, Apple,
-hosted CI, and final review lanes green on the final pull-request head. There is
-no unnamed design choice between the corpus and the implementation. The owner's
+and hosted CI lanes green on the recorded `4f0c7c4` candidate. There is no
+unnamed design choice between the corpus and the implementation. The owner's
 Apple Developer work — enabling the bundle identifier's push capability,
 regenerating provisioning profiles, and mounting a production APNs key — remains
 an external, default-off activation action rather than a repository completion
@@ -1192,10 +1192,9 @@ as an explicit operator action. Nineteen hard gates in the `memory` area;
 ADR-0069 records the decisions.
 
 The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's own copies of the three public datasets, a funded
-provider key for the live arm, and the republished provider-extraction evidence
-at the new formation policy version.
+choice between the corpus and the first red tests. The owner's own copies of
+the three public datasets and provider credentials for opt-in future live-arm
+reruns remain external activation inputs, not repository design gaps.
 
 ## The three plan sections no specification expanded
 

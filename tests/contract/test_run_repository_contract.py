@@ -21,6 +21,20 @@ async def test_run_repository_guards_state_transitions() -> None:
         await repository.update_counters(mutated)
 
 
+async def test_run_repository_atomically_rejects_a_second_active_run_for_a_session() -> None:
+    _clock, _sessions, repository, _events = await memory_stack()
+    await repository.create(run())
+
+    with pytest.raises(ConflictError, match="active run"):
+        await repository.create(run().model_copy(update={"id": UUID(int=RUN_ID.int + 1)}))
+
+    await repository.transition(RUN_ID, RunStatus.QUEUED, RunStatus.RUNNING)
+    await repository.transition(RUN_ID, RunStatus.RUNNING, RunStatus.COMPLETED)
+    replacement = run().model_copy(update={"id": UUID(int=RUN_ID.int + 2)})
+    await repository.create(replacement)
+    assert await repository.get(replacement.id, principal()) == replacement
+
+
 async def test_latest_for_sessions_silently_filters_inaccessible_ids() -> None:
     _clock, sessions, repository, _events = await memory_stack()
     await repository.create(run())

@@ -196,9 +196,6 @@ private struct SessionSidebar: View {
                 pushingList
             }
         }
-        .navigationDestination(isPresented: notificationNavigationBinding) {
-            ChatView(model: model)
-        }
         #endif
     }
 
@@ -238,8 +235,12 @@ private struct SessionSidebar: View {
         }
     }
 
+    @available(iOS 16.0, macOS 13.0, *)
     private var pushingList: some View {
         navigationList
+            .navigationDestination(isPresented: notificationNavigationBinding) {
+                ChatView(model: model)
+            }
     }
 
     private var legacyList: some View {
@@ -291,7 +292,6 @@ private struct SessionSidebar: View {
         }
     }
 
-    #if !os(macOS)
     private var notificationNavigationBinding: Binding<Bool> {
         Binding(
             get: { model.notificationNavigationID != nil },
@@ -300,7 +300,6 @@ private struct SessionSidebar: View {
             }
         )
     }
-    #endif
 
     private var newConversationLabel: some View {
         HStack(spacing: 10) {

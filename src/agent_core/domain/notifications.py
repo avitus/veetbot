@@ -352,7 +352,7 @@ def schedule_occurrence_skipped_key(occurrence_id: UUID) -> str:
 def device_test_key(device_id: UUID, idempotency_key: str) -> str:
     if not idempotency_key or not idempotency_key.strip() or len(idempotency_key) > 255:
         raise ValueError("device test idempotency key must contain 1 to 255 characters")
-    return f"device.test:{device_id}:{idempotency_key}"
+    return f"{TEST_NOTIFICATION_DEDUPE_PREFIX}{device_id}:{idempotency_key}"
 
 
 def ops_alert_key(tenant_id: str, signal: str, episode: int) -> str:
