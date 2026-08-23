@@ -20,6 +20,10 @@ remain the enforcement path rather than being bypassed by a separate agent.
 
 1. Add a provider-neutral `BrowserProvider` whose implementation is bound by
    trusted composition to one principal, opaque profile, and origin policy.
+   Hosted composition may use a deployment-wide pin or resolve a
+   principal-selected `READY` profile from reserved session metadata written by
+   the authenticated session-creation surface; model arguments and ordinary
+   client metadata can do neither.
 2. Separate read-only `browser.navigate` and `browser.observe` from mutating
    `browser.act`. Classify the first pair as bounded `NETWORK_READ`; classify
    every generic browser action conservatively as `EXTERNAL_WRITE`, `HIGH`, and

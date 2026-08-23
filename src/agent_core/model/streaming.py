@@ -13,6 +13,7 @@ from agent_core.domain.messages import (
     ModelCompletedEvent,
     ModelEvent,
     ModelFailedEvent,
+    ModelFailure,
     ModelTurn,
     ModelUsage,
     ProviderMetadata,
@@ -30,6 +31,10 @@ from agent_core.domain.messages import (
 
 class ModelStreamError(ValueError):
     """A normalized adapter stream broke a provider-neutral invariant."""
+
+    def __init__(self, message: str, *, failure: ModelFailure | None = None) -> None:
+        super().__init__(message)
+        self.failure = failure
 
 
 SECRET_VALUE = re.compile(
@@ -200,5 +205,8 @@ async def collect_turn(source: AsyncIterable[ModelEvent]) -> ModelTurn:
     if isinstance(terminal, ModelCompletedEvent):
         return terminal.turn
     if isinstance(terminal, ModelFailedEvent):
-        raise ModelStreamError(f"model attempt failed: {terminal.error.kind}")
+        raise ModelStreamError(
+            f"model attempt failed: {terminal.error.kind}",
+            failure=terminal.error,
+        )
     raise ModelStreamError("stream did not produce a terminal turn")

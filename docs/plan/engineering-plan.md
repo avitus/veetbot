@@ -64,7 +64,7 @@ Version 2.4 (roadmap pass, 2026-08-20):
 
 Version 2.5 (memory evaluation pass, 2026-08-22):
 
-- Section 21 gains Milestone 16 — memory evaluation and lifecycle — authorized by the repository owner as a parallel workstream alongside Milestones 12 through 15 and specified by a detailed-design document that declares its nineteen gates before implementation begins (ADR-0068).
+- Section 21 gains Milestone 16 — memory evaluation and lifecycle — authorized by the repository owner as a parallel workstream alongside Milestones 12 through 15 and specified by a detailed-design document that declares its nineteen gates before implementation begins (ADR-0069).
 - Memory acquires a yardstick: a checked-in multi-session benchmark with a deterministic in-CI arm, an exact baseline, an opt-in live arm with a cost ceiling and self-validating evidence, and opt-in loaders for three public long-horizon datasets that are never vendored. No model judges an answer.
 - The memory lifecycle the Milestone 9 specifications describe — decay, usage feedback, the recall delta and its correction lines, established facts as a formation input, surfaced conflicts, opt-in re-derivation, and the memory profile document — becomes implemented behavior rather than described behavior.
 - Roadmap item B6 narrows to the residue Milestone 16 does not take, and each remaining item's entry condition becomes that milestone's benchmark evidence.
@@ -3264,7 +3264,7 @@ Acceptance criteria:
 
 ### Milestone 16: Memory evaluation and lifecycle
 
-The owner authorized this milestone on 2026-08-22 (ADR-0068) as a parallel
+The owner authorized this milestone on 2026-08-22 (ADR-0069) as a parallel
 workstream alongside Milestones 12 through 15. Memory carries twenty-nine
 registered gates and every one of them is a safety statement; nothing measures
 how well memory works, so roadmap item B6's entry condition — evaluation
@@ -3274,7 +3274,7 @@ The same specifications describe a lifecycle that is written and unbuilt. This
 milestone supplies the yardstick and then the lifecycle, in that order. The
 detailed design is
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) and
-ADR-0068; the design declares this milestone's nineteen gates.
+ADR-0069; the design declares this milestone's nineteen gates.
 
 Implement:
 

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, PositiveInt, model_validator
+
+from agent_core.domain.events import EventEnvelope, ProcessEvent
 
 
 class MemoryStatus(StrEnum):
@@ -95,6 +98,33 @@ class MemoryCandidate(BaseModel):
     sensitivity_guess: Sensitivity
     valid_from: datetime | None = None
     expires_hint: datetime | None = None
+
+
+class ProviderExtractionFailure(BaseModel):
+    """Safe normalized metadata for a failed provider extraction attempt."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    error_class: str = Field(min_length=1, max_length=256)
+    failure_kind: Literal["transient", "permanent", "protocol"]
+    provider_code: str | None = Field(default=None, max_length=128)
+    http_status: int | None = Field(default=None, ge=100, le=599)
+    provider_parameter: str | None = Field(default=None, max_length=128)
+    stream_had_output: bool = False
+    retryable: bool
+
+
+class MemoryExtractionResult(list[MemoryCandidate]):
+    """List-compatible extractor output with optional content-free failure metadata."""
+
+    def __init__(
+        self,
+        candidates: Iterable[MemoryCandidate] = (),
+        *,
+        provider_failure: ProviderExtractionFailure | None = None,
+    ) -> None:
+        super().__init__(candidates)
+        self.provider_failure = provider_failure
 
 
 def minimum_supported_case_count(positive_case_count: int) -> int:
@@ -248,6 +278,21 @@ class ConsolidationResult(BaseModel):
 
     run: ConsolidationRun
     beliefs: list[MemoryRecord] = Field(default_factory=list)
+
+
+class MemoryDiagnosis(BaseModel):
+    """Principal-scoped evidence explaining formation state for one session."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    session_id: UUID
+    watermark: int = Field(ge=0)
+    formation_requests: list[EventEnvelope] = Field(default_factory=list)
+    provider_selection: ProcessEvent | None = None
+    provider_attempts: list[ProcessEvent] = Field(default_factory=list)
+    consolidations: list[ConsolidationRun] = Field(default_factory=list)
+    beliefs: list[MemoryRecord] = Field(default_factory=list)
+    pending_retry: bool = False
 
 
 class RecallQuery(BaseModel):

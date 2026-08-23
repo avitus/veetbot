@@ -228,6 +228,8 @@ composition:
 uv run agent memory list --session <session-id> --include-inactive
 uv run agent memory get <belief-id>
 uv run agent memory formations --session <session-id>
+uv run agent memory diagnose --session <session-id>
+uv run agent memory replay --session <session-id> --confirm
 uv run agent memory trace <trace-id>
 uv run agent memory edit <belief-id> --statement "Corrected statement"
 uv run agent memory delete <belief-id>
@@ -236,8 +238,11 @@ uv run agent memory delete <belief-id>
 The commands emit JSON to stdout. Belief records carry their source session,
 source event ids, formation-run id, policy version, lifecycle, authority, and
 sensitivity. Formation records show extraction watermarks and candidate outcome
-counts; trace records show the retrieval query, ranking scores and arms, safety
-blocks, and budget drops. Trace ids appear in `memory.recalled` events.
+counts. Diagnosis joins formation flags, watermarks, provider attempts, audits,
+and beliefs for one session; confirmed replay reprocesses the original evidence
+through the governed path. Trace records show the retrieval query, ranking scores
+and arms, safety blocks, and budget drops. Trace ids appear in `memory.recalled`
+events.
 
 Hosted checks use [CircleCI](https://circleci.com/) via
 `.circleci/config.yml`. Connect the repository as a CircleCI project for the
@@ -323,7 +328,8 @@ artifact is committed.
 Provider-assisted memory formation uses safe automatic selection by default.
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` activates matching operator or
 release-bundled evidence and otherwise records the reason and stays on
-deterministic `formation@2`. `off` does not even resolve a formation model;
+deterministic `formation@5`. The bundled `formation@4` artifact is historical
+and does not match current provider-assisted `formation@6`. `off` does not even resolve a formation model;
 `required` refuses startup without an exact extractor, model, profile, and
 compiled-policy-version match. An operator artifact can be supplied with
 `AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.

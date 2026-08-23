@@ -9,7 +9,7 @@ project:
   active_milestone: 11
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061) and Milestone 16 on 2026-08-22 as a parallel workstream
-  # (ADR-0068); each begins with its detailed-design document and ADR.
+  # (ADR-0069); each begins with its detailed-design document and ADR.
   authorized_milestones:
     - 0
     - 1
@@ -158,7 +158,7 @@ milestones:
     status: authorized
     authorized_on: 2026-08-22
     design: docs/plan/memory-evaluation-and-lifecycle.md
-    adr: docs/adr/0068-milestone-16-memory-evaluation-and-lifecycle.md
+    adr: docs/adr/0069-milestone-16-memory-evaluation-and-lifecycle.md
     gates_registered: 19
     authorized_scope:
       - multi-session benchmark corpus, deterministic arm, exact baseline
@@ -271,13 +271,11 @@ verification:
       - check: make check
         outcome: passed
         detail: >-
-          Ruff formatting and linting, strict mypy over 439 source and test
-          files, 717 static tests, 296 contracts, deployment-script checks,
-          121 citation checks, and strict documentation builds pass on the
-          integrated head. The static count includes the 25-case evaluation
-          front end relocated from the DB-gated integration directory. The
-          gate registry contains 200 entries and retains 166 as the verified
-          ceiling through Milestone 9.
+          Ruff formatting and linting, strict mypy over 476 source and test
+          files, 970 static tests, 325 contracts, deployment-script checks,
+          156 citation checks, and strict documentation builds pass on the
+          current head. The gate registry contains 305 reconciled entries and
+          retains 166 as the verified ceiling through Milestone 9.
       - check: PostgreSQL integration and resilience partition
         outcome: passed
         detail: >-
@@ -330,6 +328,10 @@ verification:
           authentication, and grant routes enforce their dedicated scopes; the
           execution pipeline re-runs deterministic policy before honoring a
           matching grant and records the authorization kind and reference.
+          Authenticated session creation may now bind one principal-owned READY
+          profile by opaque UUID. Reserved metadata prevents client
+          impersonation, and hosted composition can resolve that binding per
+          session before acquiring a lease or applying its exact origin policy.
           Profile material remains outside PostgreSQL in versioned AES-256-GCM
           envelopes whose authenticated metadata binds tenant, principal,
           profile generation, origin scope, format, revocation, and key version.
@@ -357,7 +359,9 @@ verification:
       - check: Apple client and signing regression suite
         outcome: passed
         detail: >-
-          All 82 Swift Testing cases passed, including complete historical
+          All 98 Swift Testing cases passed, including direct isolated website
+          login setup, secret-free browser-profile selection for new sessions,
+          complete historical
           transcript restoration, sidebar conversation navigation,
           forward-compatible message-role decoding, system composer sizing,
           connection-settings layout, and the missing-keychain-entitlement
@@ -442,12 +446,26 @@ verification:
           formation@4 semantic-claim, source-safety, diagnostic, and positive-case
           coverage boundaries are accepted, implemented, and backed by passing
           intended-production-model evidence.
+      - check: accepted ADR-0068 memory-formation repair
+        outcome: passed_locally
+        detail: >-
+          Exact regression coverage forms separate soprano activity, tenor
+          experience, and recurring right-thumb pain memories from the reported
+          production wording. Provider failures now retain safe normalized
+          diagnostics, use durable 60-second and 300-second formation retries,
+          preserve the watermark until success or the third attempt, and emit a
+          terminal exhaustion event. Principal-scoped diagnosis and confirmed
+          source-event replay use the governed service. Deterministic formation
+          is versioned as formation@5 and provider-assisted formation as
+          formation@6, invalidating the historical formation@4 activation tuple.
     remaining:
       - Run every hosted CI lane and complete the GitHub CodeRabbit review on
         the same final head, resolving every finding and conversation.
     activation_pending:
       # Tenant activation is not a completion condition (ADR-0061); it is
       # roadmap item B1 and stays default-off until the evidence rule passes.
+      - Run and review the version-bound formation@6 provider-memory evaluation
+        before provider assistance can reactivate for the production tuple.
       - Record at least 30 paired rollout samples for each model-policy,
         policy-profile, and authoring-version combination; require at least five
         absolute percentage points of completion lift, a positive 95 percent
@@ -674,7 +692,7 @@ readiness:
     inbound-surfaces.md with twenty-one, and Milestone 15 by
     operational-hardening.md with sixteen. On 2026-08-22 the owner authorized
     Milestone 16 memory evaluation and lifecycle as a parallel workstream
-    (ADR-0068), specified by memory-evaluation-and-lifecycle.md with nineteen
+    (ADR-0069), specified by memory-evaluation-and-lifecycle.md with nineteen
     registered gates; every authorized milestone has a
     design document and the census reports no zero row.
     Model routing remains deferred

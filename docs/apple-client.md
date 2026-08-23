@@ -47,8 +47,8 @@ Approval status uses the API's uppercase five-value wire vocabulary. A pending
 approval remains actionable in its tool card with Approve once and Deny controls.
 
 Settings use a compact header, a scrolling body, and a persistent action bar, so
-connection actions remain visible as sections grow. Connection, Appearance, and
-Data & Privacy cards group controls by user intent. Configured macOS clients open
+connection actions remain visible as sections grow. Connection, Website Access,
+Appearance, and Data & Privacy cards group controls by user intent. Configured macOS clients open
 settings in a separate window that resizes horizontally and vertically and
 restores its last frame; first-run setup remains embedded in the resizable main
 window. The main window has a separate persisted frame, so its last size and
@@ -59,6 +59,18 @@ immediately. System sizing preserves the platform's accessibility setting, while
 the three explicit sizes use deterministic scales on both platforms. The
 interface palette uses the app icon's turquoise, orange, and navy while retaining
 semantic colors for errors, approvals, and tool risk.
+
+Website Access lists the authenticated principal's browser profiles and lets the
+user choose one `READY` profile for new conversations. Adding access sends only
+the exact public-HTTPS origin and login-page URL to Veetbot, then opens the
+server's five-minute, single-use browser ceremony. The user enters usernames,
+passwords, passkeys, and MFA directly in that isolated browser surface; the app
+has no website-credential fields and receives no keystrokes, cookies, storage
+state, or provider material. It polls only the secret-free ceremony status.
+The selected opaque profile UUID is a device preference, is cleared when the
+server connection changes or credentials are forgotten, and is included only
+when the client creates a new session. The server revalidates ownership and
+readiness before persisting that binding.
 
 ## Runtime behavior
 

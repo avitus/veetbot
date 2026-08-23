@@ -1003,10 +1003,13 @@ Milestone 9's human-memory acceptance contract is the exception that later
 proved necessary: [memory-formation-and-consolidation.md](memory-formation-and-consolidation.md)
 and ADR-0045 add the `agent memory` noun. Its management commands are `list`,
 `get`, `edit`, and `delete`; its diagnostic commands are `formations`, which
-may filter by source session, and `trace`, which reads one principal-scoped
-retrieval trace. These remain CLI calls over the ordinary composition and
-repositories. They do not open an HTTP management surface or implement a
-second runtime loop.
+may filter by source session, `diagnose`, which joins one session's formation
+flags, watermarks, provider attempts, audits, and beliefs, and `trace`, which
+reads one principal-scoped retrieval trace. `replay --session --confirm` is an
+operator repair command that reprocesses original source events through the
+ordinary formation service. These remain CLI calls over the ordinary composition
+and repositories. They do not open an HTTP management surface, insert belief
+rows directly, or implement a second runtime loop.
 
 ### Options
 
@@ -1036,7 +1039,8 @@ CLI setting.
 The later `agent memory` extension is JSON-only and adds its own bounded
 inspection options: `--include-inactive`, `--session <id>`, and `--limit
 <1..200>`. The first applies only to belief listing; the source-session and
-limit filters apply to beliefs and formation audits. A successful
+limit filters apply to beliefs and formation audits. Diagnosis and replay require
+one `--session`; replay additionally requires `--confirm`. A successful
 `agent memory delete <id>` writes `{"id":"<id>"}` so deletion remains inside
 the same JSON-only contract.
 

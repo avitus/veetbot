@@ -643,7 +643,7 @@ def validate_settings(
                 "token authentication requires a configured principal: " + ", ".join(missing)
             )
     if (
-        settings.browser_provider is not BrowserProviderKind.DISABLED
+        settings.browser_provider is BrowserProviderKind.PLAYWRIGHT
         and not settings.browser_allowed_origins
     ):
         raise ConfigurationError(
@@ -654,8 +654,14 @@ def validate_settings(
             raise ConfigurationError(
                 "BROWSER_PROFILE_SERVICE_URL is required when BROWSER_PROVIDER=hosted"
             )
-        if settings.browser_profile_id is None:
-            raise ConfigurationError("BROWSER_PROFILE_ID is required when BROWSER_PROVIDER=hosted")
+        if settings.browser_profile_id is None and settings.browser_allowed_origins:
+            raise ConfigurationError(
+                "BROWSER_PROFILE_ID is required when hosted origins are configured"
+            )
+        if settings.browser_profile_id is not None and not settings.browser_allowed_origins:
+            raise ConfigurationError(
+                "BROWSER_ALLOWED_ORIGINS is required for a pinned hosted browser profile"
+            )
         if "browser_profile_control_plane" not in settings.credentials:
             raise ConfigurationError(
                 "a browser profile control-plane credential is required when "
@@ -668,6 +674,8 @@ def validate_settings(
         and settings.browser_provider is not BrowserProviderKind.HOSTED
     ):
         raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROVIDER=hosted")
+    if settings.browser_grant_id is not None and settings.browser_profile_id is None:
+        raise ConfigurationError("BROWSER_GRANT_ID requires BROWSER_PROFILE_ID")
     if settings.browser_run_purpose is not None and settings.browser_grant_id is None:
         raise ConfigurationError("BROWSER_RUN_PURPOSE requires BROWSER_GRANT_ID")
 
