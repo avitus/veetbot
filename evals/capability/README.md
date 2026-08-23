@@ -173,8 +173,20 @@ dataset's own evidence turn, falling back to session granularity when the turn
 is unknown. It is the difference between recalling the right fact and recalling
 it for the right reason.
 
+For LongMemEval and LoCoMo it is also the *only* recall figure to read. Those
+datasets name evidence turns rather than corpus labels, so every probe carries
+an empty `needed`, and the deterministic block therefore reports
+`needed_total = 0`, `needed_recalled = 0`, and `noise_total = returned_total`.
+Those numbers are **undefined without labels**, not a nought-per-cent recall and
+a hundred-per-cent noise; read `evidence_recalled / evidence_total` instead.
+HaluMem is the exception: its memory points are labels, so its `needed_*` and
+`noise_*` counts mean what they mean for the authored corpus.
+
 The caveats travel with the numbers, inside the document:
 
+- for a dataset that names no labels — LongMemEval and LoCoMo — the `needed_*`
+  and `noise_*` counts are undefined and evidence-provenance recall is the
+  recall figure;
 - there is no model judge; the published LongMemEval figures use one;
 - the baseline candidate extractor is deterministic and regex-based;
 - answers are scored by normalized token F1 and counted correct at 0.5;

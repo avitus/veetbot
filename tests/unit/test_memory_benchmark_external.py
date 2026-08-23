@@ -8,6 +8,7 @@ no derivative of one, is ever committed to this repository.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -34,8 +35,11 @@ from agent_core.evals.memory_benchmark import (
 )
 from agent_core.evals.memory_benchmark_driver import run_deterministic_scenario
 from agent_core.evals.memory_benchmark_external import (
+    DATASET_CAVEATS,
     DATASET_LICENSES,
+    LABEL_FREE_CAVEAT,
     NEVER_COMMIT_GLOBS,
+    ExternalDataset,
     MemoryBenchmarkExternalResult,
     load_halumem,
     load_locomo,
@@ -499,6 +503,130 @@ async def test_run_external_benchmark_publishes_metrics_without_dataset_content(
     assert str(_LONGMEMEVAL) not in published
     with pytest.raises(ValueError, match="refusing to overwrite"):
         await run()
+
+
+def _write(path: Path, records: list[dict[str, object]]) -> Path:
+    path.write_text(json.dumps(records), encoding="utf-8")
+    return path
+
+
+def _oversized_longmemeval() -> list[dict[str, object]]:
+    return [
+        {
+            "question_id": "syn_big_01",
+            "question_type": "single-session-user",
+            "question": "Which week did I repot the fig?",
+            "answer": "the third",
+            "question_date": "2024/12/31 (Tue) 09:00",
+            "haystack_session_ids": [f"syn_big_{index}" for index in range(101)],
+            "haystack_dates": [
+                f"2024/01/01 (Mon) {index // 60:02d}:{index % 60:02d}" for index in range(101)
+            ],
+            "haystack_sessions": [
+                [{"role": "user", "content": f"Note {index}."}] for index in range(101)
+            ],
+            "answer_session_ids": ["syn_big_0"],
+        }
+    ]
+
+
+def _oversized_locomo() -> list[dict[str, object]]:
+    conversation: dict[str, object] = {"speaker_a": "Ana", "speaker_b": "Bo"}
+    for number in range(1, 102):
+        conversation[f"session_{number}"] = [
+            {"speaker": "Ana", "dia_id": f"D{number}:1", "text": f"Note {number}."}
+        ]
+        conversation[f"session_{number}_date_time"] = f"10:{number % 60:02d} am on 4 May, 2024"
+    return [
+        {
+            "sample_id": "syn-big-1",
+            "conversation": conversation,
+            "qa": [
+                {
+                    "question": "What did Ana note first?",
+                    "answer": "Note 1",
+                    "evidence": ["D1:1"],
+                    "category": 4,
+                }
+            ],
+        }
+    ]
+
+
+def _oversized_halumem() -> list[dict[str, object]]:
+    return [
+        {
+            "uuid": "syn-big-user",
+            "sessions": [
+                {
+                    "session_id": f"syn-big-user-s{index}",
+                    "timestamp": f"2024-01-01 {index // 60:02d}:{index % 60:02d}:00",
+                    "dialogue": [{"role": "user", "content": f"Note {index}."}],
+                }
+                for index in range(101)
+            ],
+            "memory_points": [],
+            "questions": [{"question": "What did the user note?", "answer": "notes"}],
+        }
+    ]
+
+
+def test_an_instance_with_too_many_sessions_is_refused_by_name(tmp_path: Path) -> None:
+    """A dataset variant a scenario cannot name is refused, and says which and why."""
+
+    longmemeval = _write(tmp_path / "big-longmemeval.json", _oversized_longmemeval())
+    locomo = _write(tmp_path / "big-locomo.json", _oversized_locomo())
+    halumem = _write(tmp_path / "big-halumem.json", _oversized_halumem())
+
+    with pytest.raises(ValueError, match="more than the 99 sessions") as longmemeval_error:
+        load_longmemeval(longmemeval, sample=None, seed=1)
+    with pytest.raises(ValueError, match="more than the 99 sessions") as locomo_error:
+        load_locomo(locomo, principal_speaker="a", sample=None, seed=1)
+    with pytest.raises(ValueError, match="more than the 99 sessions") as halumem_error:
+        load_halumem(halumem, sample=None, seed=1)
+
+    for caught, named in (
+        (longmemeval_error, "longmemeval instance syn_big_01"),
+        (locomo_error, "locomo conversation syn-big-1"),
+        (halumem_error, "halumem user syn-big-user"),
+    ):
+        assert not isinstance(caught.value, ValidationError)
+        assert named in str(caught.value)
+        assert "run a smaller variant" in str(caught.value)
+
+
+async def test_label_free_datasets_publish_the_provenance_recall_caveat(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Without corpus labels the needed and noise counts are undefined, and say so."""
+
+    monkeypatch.setattr(memory_benchmark_external, "load_settings", memory_settings)
+
+    label_free: tuple[tuple[ExternalDataset, Path], ...] = (
+        ("longmemeval", _LONGMEMEVAL),
+        ("locomo", _LOCOMO),
+    )
+    for dataset, source in label_free:
+        output = tmp_path / f"{dataset}-metrics.json"
+        result = await memory_benchmark_external.run_external_benchmark(
+            _REPOSITORY,
+            dataset=dataset,
+            path=source,
+            sample=1,
+            seed=5,
+            principal_speaker="a",
+            deterministic_only=True,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+        assert result is not None
+        assert result.deterministic.needed_total == 0
+        assert LABEL_FREE_CAVEAT in result.caveats
+        assert LABEL_FREE_CAVEAT in output.read_text(encoding="utf-8")
+
+    assert LABEL_FREE_CAVEAT not in DATASET_CAVEATS["halumem"]
 
 
 def _corpus_for_prompting() -> MemoryBenchmarkCorpus:

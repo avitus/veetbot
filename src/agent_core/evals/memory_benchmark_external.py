@@ -119,6 +119,13 @@ DATASET_LICENSES: Mapping[ExternalDataset, DatasetLicense] = {
     ),
 }
 
+LABEL_FREE_CAVEAT = (
+    "this dataset names no corpus labels, so needed_total, needed_recalled, and "
+    "noise_total in the deterministic block are undefined here and must not be read "
+    "as recall or as noise; the recall figure for this dataset is evidence-provenance "
+    "recall, evidence_recalled over evidence_total"
+)
+
 _SHARED_CAVEATS: tuple[str, ...] = (
     "there is no model judge here; published figures for these datasets use one",
     "the baseline candidate extractor is deterministic and regex-based",
@@ -130,12 +137,14 @@ _SHARED_CAVEATS: tuple[str, ...] = (
 DATASET_CAVEATS: Mapping[ExternalDataset, tuple[str, ...]] = {
     "longmemeval": (
         *_SHARED_CAVEATS,
+        LABEL_FREE_CAVEAT,
         "single-session-assistant questions are excluded by design and reported "
         "separately: their answers lie in assistant turns, which never form beliefs",
         "an unrecognized question type is mapped to single_hop",
     ),
     "locomo": (
         *_SHARED_CAVEATS,
+        LABEL_FREE_CAVEAT,
         "only one speaker is the formation source; a question is kept only when "
         "every dia_id it cites belongs to that speaker's turns",
         "the category numbers are mapped by the dataset's documented meaning "
@@ -564,7 +573,7 @@ def _longmemeval_scenario(instance: Mapping[str, Any], position: int) -> Benchma
         turns, flags = _longmemeval_turns(raw, where)
         if not turns:
             continue
-        session_id = _session_id(len(sessions) + 1)
+        session_id = _session_id(len(sessions) + 1, where)
         when = _parse_slash_date(str(raw_dates[index]), where)
         advance = 0 if not dates else _elapsed(dates[-1], when)
         sessions.append(BenchmarkSession(id=session_id, advance_seconds=advance, turns=turns))
@@ -572,7 +581,6 @@ def _longmemeval_scenario(instance: Mapping[str, Any], position: int) -> Benchma
         turn_flags[session_id] = flags
         if index < len(dataset_ids):
             identifiers[dataset_ids[index]] = session_id
-    _check_session_count(sessions, where)
 
     answer_sessions = [str(value) for value in instance.get("answer_session_ids") or []]
     evidence = _longmemeval_evidence(answer_sessions, identifiers, turn_flags)
@@ -696,7 +704,7 @@ def _locomo_scenario(
         when = _parse_locomo_date(
             str(conversation.get(f"session_{number}_date_time") or ""), where, number
         )
-        session_id = _session_id(len(sessions) + 1)
+        session_id = _session_id(len(sessions) + 1, where)
         sessions.append(
             BenchmarkSession(
                 id=session_id,
@@ -708,7 +716,6 @@ def _locomo_scenario(
         for index, (dia_id, is_principal) in enumerate(identifiers):
             if dia_id:
                 located[dia_id] = (session_id, index, is_principal)
-    _check_session_count(sessions, where)
 
     eligible = [
         entry
@@ -789,7 +796,7 @@ def _halumem_scenario(user: Mapping[str, Any], position: int, seed: int) -> Benc
             continue
         when = _parse_iso_date(str(raw.get("timestamp") or raw.get("date") or ""), where)
         when = when if when is not None else _spaced(dates)
-        session_id = _session_id(len(sessions) + 1)
+        session_id = _session_id(len(sessions) + 1, where)
         sessions.append(
             BenchmarkSession(
                 id=session_id,
@@ -805,7 +812,6 @@ def _halumem_scenario(user: Mapping[str, Any], position: int, seed: int) -> Benc
             for point in raw.get("memory_points") or []
             if isinstance(point, dict)
         )
-    _check_session_count(sessions, where)
 
     for point in user.get("memory_points") or []:
         if not isinstance(point, dict):
@@ -1022,18 +1028,20 @@ def _seeded_order[T](values: Iterable[T], *, seed: int, salt: str) -> list[T]:
     )
 
 
-def _check_session_count(sessions: Sequence[BenchmarkSession], where: str) -> None:
-    """Refuse an instance the benchmark's session identifiers cannot name."""
+def _session_id(number: int, where: str) -> str:
+    """Name one replayed session, or refuse an instance too long to name.
 
-    if len(sessions) > MAXIMUM_SESSIONS_PER_SCENARIO:
+    A session identifier carries two digits, so the hundredth session of an
+    instance cannot be named at all.  Refusing here, where the instance is
+    known, is what makes the refusal legible: the alternative is the schema
+    rejecting `s100` with no dataset, no instance, and no remedy.
+    """
+
+    if number > MAXIMUM_SESSIONS_PER_SCENARIO:
         raise ValueError(
-            f"{where} carries {len(sessions)} sessions, more than the "
-            f"{MAXIMUM_SESSIONS_PER_SCENARIO} a scenario can name; run a smaller "
-            "variant of the dataset"
+            f"{where} carries more than the {MAXIMUM_SESSIONS_PER_SCENARIO} sessions "
+            "a scenario can name; run a smaller variant of the dataset"
         )
-
-
-def _session_id(number: int) -> str:
     return f"s{number:02d}"
 
 
