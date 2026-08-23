@@ -1377,7 +1377,7 @@ agent eval run --case NAME      one case, verbose
 agent eval gates                gate status by milestone
 agent eval capability --suite research    the live track
 agent eval memory-formation     paired provider-memory activation evidence
-agent eval memory-benchmark     the multi-session memory benchmark
+agent eval memory-benchmark --deterministic-only    the memory benchmark
 agent eval record --provider anthropic    a recorded fixture
 agent eval promote <run-id>     trajectory to case
 ```

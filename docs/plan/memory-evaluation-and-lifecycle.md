@@ -385,6 +385,7 @@ noise_*                    returned beliefs matching no needed label
 end_to_end_recall          needed_recalled / needed_total
 retrieval_recall_given_formed
                            needed_recalled / needed_formed
+noise_ratio                noise_total / returned_total
 blocked_rendered           the size of trace.blocked
 distinct_prefixes          distinct prefix digests over the probe's model calls
 run_completed              the run reached COMPLETED
@@ -464,7 +465,8 @@ token-bounded against the normalized text, and the answer did not abstain;
 abstained. A protected fragment appearing anywhere in an answer sets
 `leaked_protected`. There is no judge, and there is no partial credit outside
 the external-dataset adapters, which use token F1 because their published
-metrics do.
+metrics do; there an answer counts as correct at a normalized token F1 of 0.5
+or above.
 
 Thresholds are derived from counts inside the artifact rather than written
 down, so they cannot be tuned to a run:
@@ -575,7 +577,7 @@ FormationProfile   session_boundary_enabled | scheduled_enabled
                    scheduled_interval_seconds | established_facts_enabled
                    decay{floor_confidence, step, max_per_sweep}
 SnapshotProfiles   async | child
-TraceProfile       operator_retention_days
+TraceProfile       operator_retention_days (default 30)
 ```
 
 The shipped document is the defaults: a static test asserts that loading it
@@ -629,7 +631,10 @@ a filter and drops beliefs the ranker should merely have demoted.
 **Episode paging.** Episode search reads one page of events and stops, so a
 match beyond the first page is invisible. It becomes a bounded page loop with
 a cursor on the event sequence, stopping at a short page, at the caller's
-limit, or at sixty-four pages, whichever comes first.
+limit, or at sixty-four pages, whichever comes first. Paging here means the
+bounded reads behind the existing `memory.recall_episodes` tool path and
+nothing more: session history does not become a retrieval arm, which is an
+exclusion this milestone keeps.
 
 **Project scope on the paths that ignore it.** The closed-session
 consolidation, the idle sweep, and the in-turn query former all use the
@@ -850,9 +855,10 @@ Metrics carry no belief statement, no secret, and no local dataset path.
    pure scoring functions and their unit tests. **M16.**
 2. The deterministic driver, the metric aggregation, and the baseline
    comparison, proven on a single inline scenario. **M16.**
-3. Corpus v1 at sixteen scenarios, the recorded baseline, and the five
-   deterministic gates, with the structural-zero gates green before the
-   baseline is recorded. **M16.**
+3. Corpus v1 at sixteen scenarios, the recorded baseline, and gates 2 through
+   6, the five gates that read a run; gate 1, the corpus shape gate, lands with
+   the corpus it reads. The structural zeros hold before the baseline is
+   recorded. **M16.**
 4. The live arm, the evidence model with its self-validation, the pre-admission
    cost ceiling, the pricing guard, and the two publication gates. **M16.**
 5. The three external adapters, the evidence-provenance metric, and the

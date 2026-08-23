@@ -465,6 +465,17 @@ async def _publish_model_event(
         logger.warning("live_event_publish_failed", extra={"error_class": type(exc).__name__})
 
 
+def system_clock() -> Clock:
+    """Hand the wall clock to a caller that owns no composition.
+
+    Adapters are constructed here and nowhere else, so a command or an
+    evaluation harness that needs the time asks the composition root for a
+    clock rather than reading the ambient one.
+    """
+
+    return SystemClock()
+
+
 def default_fake_script() -> FakeModelScript:
     return FakeModelScript(
         turns=[
