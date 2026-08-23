@@ -220,13 +220,13 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Live evidence exists only when every pass condition held.** A passing live run publishes one artifact carrying the corpus digest, build reference, provider, model, policy profile, compiled policy version, and both memory policy versions, and its validator re-derives every threshold from the counts inside it; a failing run returns diagnostics and writes no artifact, and an existing artifact is never overwritten."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_benchmark_eval.py::TestBenchmarkEvidencePublicationGate::test_pass_publishes_exact_tuple
 - id: gate.memory.bench_cost_ceiling
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The live arm stops before it exceeds its ceiling.** The pre-admission check refuses the run that would cross USD 4.00, records that it stopped for the ceiling, and publishes nothing; a model priced at zero aborts the arm instead of defeating the check."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_memory_benchmark_eval.py::TestBenchmarkEvidencePublicationGate::test_cost_ceiling_stops_before_exceeding
 - id: gate.memory.bench_external_adapters
   milestone: 16
   kind: structural

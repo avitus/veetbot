@@ -418,7 +418,9 @@ def test_eval_memory_benchmark_deterministic_only_prints_metrics(
     ]
 
 
-def test_eval_memory_benchmark_reports_opt_in_skip(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_eval_memory_benchmark_reports_opt_in_skip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     observed: list[dict[str, object]] = []
     monkeypatch.setitem(
         sys.modules,
@@ -426,14 +428,69 @@ def test_eval_memory_benchmark_reports_opt_in_skip(monkeypatch: pytest.MonkeyPat
         _benchmark_module(observed, skipped=True),
     )
     monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+    evidence = tmp_path / "evidence.json"
 
     result = CliRunner().invoke(
-        app, ["eval", "memory-benchmark", "--no-deterministic-only", "--build-ref", "abc123"]
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--no-deterministic-only",
+            "--build-ref",
+            "abc123",
+            "--output",
+            str(evidence),
+        ],
     )
 
     assert result.exit_code == 0
     assert "skipped: set RUN_LIVE_MODEL_TESTS=1" in result.stdout
     assert observed[0]["deterministic_only"] is False
+    assert observed[0]["output"] == evidence
+
+
+def test_eval_memory_benchmark_live_requires_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    observed: list[dict[str, object]] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(observed),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    missing_output = CliRunner().invoke(
+        app, ["eval", "memory-benchmark", "--no-deterministic-only", "--build-ref", "abc123"]
+    )
+    missing_build_ref = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--no-deterministic-only",
+            "--output",
+            str(tmp_path / "evidence.json"),
+        ],
+    )
+    refused_output = CliRunner().invoke(
+        app,
+        [
+            "eval",
+            "memory-benchmark",
+            "--deterministic-only",
+            "--output",
+            str(tmp_path / "evidence.json"),
+        ],
+    )
+
+    assert missing_output.exit_code == 2
+    assert "--output is required" in missing_output.stderr
+    assert missing_build_ref.exit_code == 2
+    assert "--build-ref is required" in missing_build_ref.stderr
+    assert refused_output.exit_code == 2
+    assert "--output belongs to the live arm" in refused_output.stderr
+    assert observed == []
 
 
 def test_eval_memory_benchmark_returns_failure_for_a_regression(

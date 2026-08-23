@@ -13,8 +13,9 @@ may import the evaluation package.
 from __future__ import annotations
 
 import importlib
-import os
 import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -83,10 +84,11 @@ class MemoryBenchmarkResult(BaseModel):
     """One benchmark command's outcome, printed as the command's document.
 
     `baseline` carries the comparison against the recorded baseline, or None
-    when none is recorded yet.  `live` and `evidence` stay None here: the live
-    arm and the activation evidence it publishes land in a later task, and the
-    validator states the rule they answer to — a live arm publishes evidence
-    exactly when it passed, and evidence without a live arm is meaningless.
+    when none is recorded yet.  `live` and `evidence` are set by the live arm
+    in the sibling live module, and the validator states the rule they answer
+    to — a live arm publishes evidence exactly when it passed, and evidence
+    without a live arm is meaningless.  Both are typed as `BaseModel` here so
+    that the pure driver never imports the live arm that defines them.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -212,33 +214,46 @@ async def run_benchmark(
 ) -> MemoryBenchmarkResult | None:
     """Run the benchmark the command asked for and judge it.
 
-    The deterministic arm always runs and is compared against the recorded
-    baseline when there is one; drift and regression both fail the run.  The
-    live arm is opt-in and is not implemented yet, so asking for it without the
-    opt-in skips cleanly and asking for it with the opt-in says so plainly
-    rather than quietly reporting a deterministic-only result as a live one.
-    `model_policy` and `output` belong to that arm and are unused until it
-    lands.  `clock` stamps a recorded baseline and defaults to the composition
-    root's wall clock, because evaluation code never reads the ambient one.
+    This is the single entry point for both arms.  The live arm owns
+    `model_policy` and `output`, publishes its own evidence, and gates itself
+    on `RUN_LIVE_MODEL_TESTS`, returning None on a clean skip; it lives in a
+    sibling module imported lazily here so that the pure driver never depends
+    on it.  The deterministic arm writes no evidence, so an `--output` path
+    handed to it is a mistake rather than something to ignore, and it is
+    compared against the recorded baseline when there is one; drift and
+    regression both fail the run.  `clock` stamps a recorded baseline and
+    defaults to the composition root's wall clock, because evaluation code
+    never reads the ambient one.
     """
 
-    del model_policy, output
     if not deterministic_only:
-        if os.environ.get("RUN_LIVE_MODEL_TESTS") != "1":
-            return None
-        raise NotImplementedError(
-            "the live memory benchmark arm lands in Task 2; "
-            "run with --deterministic-only until then"
+        if output is None:
+            raise ValueError("the live memory benchmark arm requires an evidence output path")
+        live = importlib.import_module("agent_core.evals.memory_benchmark_live")
+        result: MemoryBenchmarkResult | None = await live.run_live_benchmark(
+            repository_root,
+            model_policy=model_policy,
+            policy_profile=policy_profile,
+            build_ref=build_ref,
+            output=output,
         )
-    result = await run_deterministic_benchmark(repository_root, policy_profile=policy_profile)
+        return result
+    if output is not None:
+        raise ValueError(
+            "an evidence output path belongs to the live arm; "
+            "the deterministic arm records a baseline instead"
+        )
+    deterministic = await run_deterministic_benchmark(
+        repository_root, policy_profile=policy_profile
+    )
     recorded = load_baseline(repository_root)
-    comparison = None if recorded is None else compare_to_baseline(result, recorded)
+    comparison = None if recorded is None else compare_to_baseline(deterministic, recorded)
     if baseline_output is not None:
         # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
         bootstrap = importlib.import_module("agent_core.bootstrap")
         recording_clock: Clock = clock or bootstrap.system_clock()
         write_baseline(
-            result,
+            deterministic,
             build_ref=build_ref,
             recorded_at=recording_clock.now(),
             path=baseline_output,
@@ -247,7 +262,7 @@ async def run_benchmark(
     return MemoryBenchmarkResult(
         passed=not failures,
         failure_summary="; ".join(failures) if failures else None,
-        deterministic=result,
+        deterministic=deterministic,
         baseline=comparison,
     )
 
@@ -266,30 +281,32 @@ def probe_prompt(probe: BenchmarkProbe, corpus: MemoryBenchmarkCorpus, *, live: 
     return f"{probe.question}\n{corpus.probe_instruction}"
 
 
-async def run_deterministic_scenario(
+@asynccontextmanager
+async def scenario_composition(
     settings: Settings,
     scenario: BenchmarkScenario,
     *,
-    corpus: MemoryBenchmarkCorpus,
-    policy_profile: str = "default",
-) -> DeterministicScenarioResult:
-    """Run one scenario's sessions and probes against a real composition.
+    policy_profile: str,
+    script: FakeModelScript | None = None,
+    model_policy: str | None = None,
+    replay_sessions: bool = True,
+) -> AsyncIterator[tuple[Any, list[ConsolidationCounts]]]:
+    """Compose one scenario's application graph and leave it open for probes.
 
-    One composition serves the whole scenario, so every probe reads the store
-    the scenario's own conversations built.  Sessions are consolidated by
-    calling the memory service directly rather than by closing them, because
-    the close hook and the idle sweep both consolidate at the `general` scope
-    and a project-scoped scenario closed through them would form nothing; this
-    is the documented harness path.  Maintenance runs exactly once, after the
-    last session and before the first probe, so that no probe can change the
-    store the next probe reads.
+    Sessions are consolidated by calling the memory service directly rather
+    than by closing them, because the close hook and the idle sweep both
+    consolidate at the `general` scope and a project-scoped scenario closed
+    through them would form nothing; this is the documented harness path.
+    Maintenance runs exactly once, after the last session and before the first
+    probe, so that no probe can change the store the next probe reads.  The
+    live arm reuses this with a real `model_policy` and no script, and its
+    without-memory arm reuses it with `replay_sessions=False`, which composes
+    the same graph over a store the scenario never spoke to.
     """
 
     # Defer the composition-root import to avoid an evaluation/bootstrap cycle.
     bootstrap = importlib.import_module("agent_core.bootstrap")
-    script = FakeModelScript(turns=[ScriptedTurn(text=PROBE_ACK_TEXT)], on_exhausted="repeat_last")
     consolidations: list[ConsolidationCounts] = []
-    probes: list[ProbeRetrievalResult] = []
     async with bootstrap.build(
         settings=settings,
         storage="memory",
@@ -300,11 +317,35 @@ async def run_deterministic_scenario(
         sequential_ids=True,
         enabled_tools=list(PROBE_TOOLS),
         limits=PROBE_RUN_LIMITS,
+        model_policy=model_policy,
     ) as composition:
+        if replay_sessions:
+            for session in scenario.sessions:
+                consolidations.append(await _converse(composition, composition.clock, session))
+            await composition.maintenance_factory().run_once()
+        yield composition, consolidations
+
+
+async def run_deterministic_scenario(
+    settings: Settings,
+    scenario: BenchmarkScenario,
+    *,
+    corpus: MemoryBenchmarkCorpus,
+    policy_profile: str = "default",
+) -> DeterministicScenarioResult:
+    """Run one scenario's sessions and probes against a real composition.
+
+    One composition serves the whole scenario, so every probe reads the store
+    the scenario's own conversations built, and the scripted model keeps the
+    arm off the network.
+    """
+
+    script = FakeModelScript(turns=[ScriptedTurn(text=PROBE_ACK_TEXT)], on_exhausted="repeat_last")
+    probes: list[ProbeRetrievalResult] = []
+    async with scenario_composition(
+        settings, scenario, policy_profile=policy_profile, script=script
+    ) as (composition, consolidations):
         clock = composition.clock
-        for session in scenario.sessions:
-            consolidations.append(await _converse(composition, clock, session))
-        await composition.maintenance_factory().run_once()
         for probe in scenario.probes:
             probes.append(await _probe(composition, clock, scenario, probe, corpus))
         extractor_name: str = composition.memory.extractor_name

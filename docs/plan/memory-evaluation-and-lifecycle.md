@@ -543,16 +543,20 @@ single-session-assistant is excluded by design.
 
 ```text
 agent eval memory-benchmark --deterministic-only
-agent eval memory-benchmark --output PATH --build-ref SHA [--model-policy P]
+agent eval memory-benchmark --no-deterministic-only --output PATH
+                            --build-ref SHA [--model-policy P]
                             [--policy-profile P]
 agent eval memory-benchmark --deterministic-only --write-baseline PATH
 agent eval memory-benchmark --external longmemeval --path DIR
                             [--sample N --seed S]
 ```
 
-`--output` is required for a live run and the harness refuses an existing path
-before it spends anything. `--build-ref` is required for a live run and may be
-resolved from the working tree for a deterministic one. The exit status is 0 on
+The live arm is selected by `--no-deterministic-only`. `--output` is required
+for a live run and the harness refuses an existing path before it spends
+anything; the deterministic arm publishes no evidence, so an `--output` handed
+to it is refused as a usage error rather than ignored. `--build-ref` is
+required for a live run and may be resolved from the working tree for a
+deterministic one. The exit status is 0 on
 a pass and on a clean opt-in skip, and 1 on drift, a regression, or a live
 failure; the result document is printed as JSON either way. The command lives
 beside `agent eval memory-formation` and, like it, reaches the composition root

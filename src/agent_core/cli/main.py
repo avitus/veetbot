@@ -1041,6 +1041,24 @@ def eval_memory_benchmark(
 ) -> None:
     """Measure what memory forms across sessions and recalls when probed."""
 
+    if deterministic_only:
+        if output is not None:
+            raise typer.BadParameter(
+                "--output belongs to the live arm; "
+                "the deterministic arm records a baseline with --write-baseline",
+                param_hint="--output",
+            )
+    else:
+        if output is None:
+            raise typer.BadParameter(
+                "--output is required for a live run, which publishes its evidence there",
+                param_hint="--output",
+            )
+        if build_ref is None:
+            raise typer.BadParameter(
+                "--build-ref is required for a live run and is never guessed from the tree",
+                param_hint="--build-ref",
+            )
     try:
         capability = cast(_CapabilityModule, importlib.import_module("agent_core.evals.capability"))
         module = cast(
@@ -1058,14 +1076,7 @@ def eval_memory_benchmark(
                 baseline_output=write_baseline,
             )
         )
-    except (
-        ConfigurationError,
-        ImportError,
-        NotImplementedError,
-        OSError,
-        RuntimeError,
-        ValueError,
-    ) as exc:
+    except (ConfigurationError, ImportError, OSError, RuntimeError, ValueError) as exc:
         typer.echo(f"memory-benchmark evaluation failed: {exc}", err=True)
         raise typer.Exit(1) from exc
     if result is None:
