@@ -7,6 +7,11 @@
 - User authorization: replace unconditional provider-memory rollout with an
   evidence-gated implementation that does not burden ordinary users
 
+> **Updated by ADR-0068:** the semantic deterministic expansion and retryable
+> provider-failure lifecycle are deterministic `formation@5` and
+> provider-assisted `formation@6`. The `formation@4` evidence and version in this
+> record are historical and do not activate the repaired tuple.
+
 ## Context
 
 ADR-0051 completed the ordinary-conversation lifecycle and introduced a bounded

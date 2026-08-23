@@ -11,6 +11,7 @@ from uuid import UUID
 import pytest
 
 from agent_core.adapters.determinism import FixedClock, SequenceIdFactory
+from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
@@ -26,10 +27,18 @@ from agent_core.domain.memory import (
     ProviderExtractionEvaluationEvidence,
     Sensitivity,
 )
-from agent_core.domain.messages import FakeModelScript, ResolvedModel, ScriptedTurn
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ModelTransientError,
+    ResolvedModel,
+    ScriptedTurn,
+)
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
-from agent_core.memory.provider_extraction import provider_extraction_evidence_matches
+from agent_core.memory.provider_extraction import (
+    ProviderAssistedCandidateExtractor,
+    provider_extraction_evidence_matches,
+)
 from agent_core.runtime.worker import MaintenanceWorker
 from tests.contract.memory_fixtures import (
     formation_stack,
@@ -76,6 +85,32 @@ class _AdvancingCandidateExtractor:
         return await self._delegate.extract(events, principal=principal, scope=scope)
 
 
+def _provider_evidence(build_ref: str) -> ProviderExtractionEvaluationEvidence:
+    return ProviderExtractionEvaluationEvidence(
+        extractor_version="provider-assisted-v2",
+        formation_policy_version="formation@6",
+        model_policy="fake",
+        provider="fake",
+        model="scripted",
+        policy_profile="default",
+        policy_version="default@test",
+        build_ref=build_ref,
+        corpus_sha256="a" * 64,
+        sample_count=20,
+        positive_case_count=20,
+        minimum_supported_case_count=16,
+        deterministic_supported_case_count=10,
+        provider_supported_case_count=16,
+        deterministic_supported_candidates=10,
+        provider_supported_candidates=16,
+        deterministic_fabricated_candidates=0,
+        provider_fabricated_candidates=0,
+        deterministic_policy_failures=0,
+        provider_policy_failures=0,
+        evaluated_at=NOW,
+    )
+
+
 async def test_ordinary_conversation_forms_one_memory_per_durable_entity() -> None:
     _clock, factory, service, _retriever = await formation_stack()
     source = await user_event(
@@ -101,6 +136,44 @@ async def test_ordinary_conversation_forms_one_memory_per_durable_entity() -> No
     assert all(belief.status is MemoryStatus.PROVISIONAL for belief in by_subject.values())
 
 
+async def test_saxophone_history_and_recurring_pain_form_separate_exact_memories() -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    source = await user_event(
+        factory,
+        "I\u2019ve started playing the soprano saxophone after many years of playing tenor "
+        "saxophone. On the soprano my right thumb is often hurting after half an hour of "
+        "playing.",
+    )
+
+    result = await service.run(
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+
+    assert [
+        (belief.subject, belief.statement, belief.sensitivity) for belief in result.beliefs
+    ] == [
+        (
+            "soprano saxophone",
+            "User started playing soprano saxophone.",
+            Sensitivity.INTERNAL,
+        ),
+        (
+            "tenor saxophone experience",
+            "User has many years of experience playing tenor saxophone.",
+            Sensitivity.INTERNAL,
+        ),
+        (
+            "right thumb pain while playing soprano saxophone",
+            "User's right thumb often hurts after half an hour of playing soprano saxophone.",
+            Sensitivity.SENSITIVE,
+        ),
+    ]
+    assert all(belief.source_event_ids == [source] for belief in result.beliefs)
+    assert result.beliefs[-1].flagged_for_review is True
+
+
 async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
     clock, factory, service, retriever = await formation_stack()
     source = await user_event(factory, "I prefer concise answers.")
@@ -120,6 +193,17 @@ async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
     assert belief.source_event_ids == [source]
     assert belief.formation_run_id == formed.run.id
 
+    diagnosis = await service.diagnose(SESSION_ID)
+    assert diagnosis.session_id == SESSION_ID
+    assert diagnosis.watermark == formed.run.watermark_after
+    assert diagnosis.consolidations == [formed.run]
+    assert diagnosis.beliefs == [belief]
+    assert diagnosis.pending_retry is False
+    replay = await service.replay(SESSION_ID)
+    assert replay.run.trigger == "operator_replay"
+    assert replay.beliefs == []
+    assert replay.run.rejected == 1
+
     foreign = GovernedMemoryService(
         factory,
         clock,
@@ -132,6 +216,10 @@ async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
         await foreign.get_memory(belief.id)
     with pytest.raises(NotFoundError):
         await foreign.get_recall_trace(recalled.trace_id)
+    with pytest.raises(NotFoundError):
+        await foreign.diagnose(SESSION_ID)
+    with pytest.raises(NotFoundError):
+        await foreign.replay(SESSION_ID)
     with pytest.raises(NotFoundError):
         await foreign.edit(belief.id, MemoryEdit(statement="Foreign edit"))
     with pytest.raises(NotFoundError):
@@ -155,7 +243,7 @@ def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:
     )
     evidence = ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@4",
+        formation_policy_version="formation@6",
         model_policy=resolved.policy_name,
         provider=resolved.provider,
         model=resolved.model,
@@ -280,6 +368,190 @@ async def test_terminal_run_is_flagged_then_consolidated_after_idle(tmp_path: Pa
         memories = await app.memory.list_memories()
 
     assert {memory.subject for memory in memories} == {"Apple Watch", "BMW X3"}
+
+
+async def test_transient_provider_failure_retries_the_same_prefix_after_backoff() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    await user_event(
+        factory,
+        "I\u2019ve started playing the soprano saxophone after many years of playing tenor "
+        "saxophone. On the soprano my right thumb is often hurting after half an hour of "
+        "playing.",
+    )
+    evidence = _provider_evidence("retry-gate")
+    provider = FakeModelProvider(
+        FakeModelScript(
+            turns=[
+                ScriptedTurn(
+                    fail_with=ModelTransientError(
+                        provider="fake",
+                        model="scripted",
+                        attempt_id=UUID(int=91),
+                        message="the model provider reported a transient failure",
+                        provider_code="transport_error",
+                        stream_had_output=False,
+                    )
+                ),
+                ScriptedTurn(text='{"candidates":[]}'),
+            ]
+        ),
+        clock,
+    )
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(9_500, 9_700)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=evidence,
+        fallback=DeterministicCandidateExtractor(),
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(9_700, 9_900)),
+        principal(),
+        extractor=extractor,
+        policy_version="formation@6",
+    )
+
+    first = await service.run(
+        trigger="session_idle",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+    diagnosis = await service.diagnose(SESSION_ID)
+
+    assert len(first.beliefs) == 3
+    assert first.run.watermark_after == 0
+    assert diagnosis.watermark == 0
+    assert diagnosis.pending_retry is True
+    assert diagnosis.formation_requests[-1].payload["trigger"] == "provider_retry"
+    assert diagnosis.formation_requests[-1].payload["attempt_number"] == 2
+    retry_at = datetime.fromisoformat(
+        cast(str, diagnosis.formation_requests[-1].payload["not_before"])
+    )
+    async with factory() as uow:
+        assert (
+            await uow.maintenance.pending_memory_sessions(
+                principal(),
+                idle_before=retry_at,
+                ready_at=retry_at - timedelta(microseconds=1),
+                limit=10,
+            )
+            == []
+        )
+        assert await uow.maintenance.pending_memory_sessions(
+            principal(),
+            idle_before=retry_at,
+            ready_at=retry_at,
+            limit=10,
+        ) == [SESSION_ID]
+
+    clock.advance(retry_at - clock.now())
+    second = await service.run(
+        trigger="provider_retry",
+        scope="general",
+        session_id=SESSION_ID,
+    )
+    after = await service.diagnose(SESSION_ID)
+
+    assert second.run.watermark_after > 0
+    assert after.pending_retry is False
+    assert len(after.beliefs) == 3
+
+
+async def test_retryable_provider_failure_is_bounded_and_audits_exhaustion() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    await user_event(factory, "I have an Apple Watch.")
+    failures = [
+        ScriptedTurn(
+            fail_with=ModelTransientError(
+                provider="fake",
+                model="scripted",
+                attempt_id=UUID(int=attempt),
+                message="transient provider failure",
+                provider_code="transport_error",
+            )
+        )
+        for attempt in range(1, 4)
+    ]
+    provider = FakeModelProvider(FakeModelScript(turns=failures), clock)
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=provider,
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(9_900, 10_100)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_provider_evidence("retry-exhaustion-gate"),
+        fallback=DeterministicCandidateExtractor(),
+    )
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(10_100, 10_300)),
+        principal(),
+        extractor=extractor,
+        policy_version="formation@6",
+    )
+
+    results = []
+    for attempt in range(1, 4):
+        results.append(
+            await service.run(
+                trigger="session_idle" if attempt == 1 else "provider_retry",
+                scope="general",
+                session_id=SESSION_ID,
+            )
+        )
+        diagnosis = await service.diagnose(SESSION_ID)
+        if attempt < 3:
+            assert diagnosis.pending_retry is True
+            retry_at = datetime.fromisoformat(
+                cast(str, diagnosis.formation_requests[-1].payload["not_before"])
+            )
+            clock.advance(retry_at - clock.now())
+
+    diagnosis = await service.diagnose(SESSION_ID)
+    async with factory() as uow:
+        exhausted = await uow.process_events.list("memory.provider_extraction.retry_exhausted")
+
+    assert len(provider.requests) == 3
+    assert [result.run.watermark_after for result in results[:2]] == [0, 0]
+    assert results[-1].run.watermark_after > 0
+    assert diagnosis.pending_retry is False
+    assert len(exhausted) == 1
+    assert exhausted[0].payload == {
+        "session_id": str(SESSION_ID),
+        "tenant_id": principal().tenant_id,
+        "principal_id": principal().principal_id,
+        "attempt_number": 3,
+        "failure_kind": "transient",
+        "provider_code": "transport_error",
+        "http_status": None,
+        "provider_parameter": None,
+        "stream_had_output": False,
+    }
 
 
 async def test_automatic_formation_caps_candidates_and_rejects_secrets() -> None:

@@ -61,6 +61,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var isSending = false
     @Published public private(set) var sessionBusy = false
     @Published public private(set) var errorMessage: String?
+    @Published public private(set) var browserProfiles: [BrowserProfileView] = []
+    @Published public private(set) var selectedBrowserProfileID: UUID?
+    @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
+    @Published public private(set) var isManagingWebsiteAccess = false
 
     public let runState: RunStateReducer
 
@@ -107,7 +111,14 @@ public final class ChatViewModel: ObservableObject {
             guard try await tokenStore.readToken() != nil else {
                 throw HTTPTransportError.missingToken
             }
+            let previousConfiguration = await configurationStore.load()
             try await install(configuration)
+            if previousConfiguration?.baseURL != configuration.baseURL {
+                selectedBrowserProfileID = nil
+                browserProfiles = []
+                browserAuthentication = nil
+                await configurationStore.saveBrowserProfileID(nil)
+            }
             await configurationStore.save(configuration)
             requiresReauthentication = false
             errorMessage = nil
@@ -125,6 +136,10 @@ public final class ChatViewModel: ObservableObject {
         do { try await tokenStore.deleteToken() } catch { present(error) }
         api = nil
         eventStream = nil
+        browserProfiles = []
+        selectedBrowserProfileID = nil
+        browserAuthentication = nil
+        await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
@@ -378,7 +393,9 @@ public final class ChatViewModel: ObservableObject {
             if let selectedSessionID {
                 session = try await api.getSession(selectedSessionID)
             } else {
-                session = try await api.createSession()
+                session = try await api.createSession(
+                    browserProfileID: selectedBrowserProfileID
+                )
                 selectedSessionID = session.id
                 try await store(session: session, lastRunID: nil, suggestedTitle: text)
             }
@@ -545,6 +562,128 @@ public final class ChatViewModel: ObservableObject {
         await artifactCache.removeAll()
     }
 
+    public func refreshBrowserProfiles() async {
+        guard let api else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            try await reloadBrowserProfiles(using: api)
+            errorMessage = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    public func createWebsiteAccess(
+        origin: String,
+        loginURL: String
+    ) async -> URL? {
+        guard let api else { return nil }
+        let normalizedOrigin = origin.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedLoginURL = loginURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedOrigin.isEmpty, !normalizedLoginURL.isEmpty else {
+            errorMessage = "Enter both the website origin and its login page."
+            return nil
+        }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            let profile = try await api.createBrowserProfile(
+                allowedOrigins: [normalizedOrigin]
+            )
+            let ceremony = try await api.beginBrowserAuthentication(
+                profileID: profile.id,
+                loginURL: normalizedLoginURL
+            )
+            browserAuthentication = ceremony
+            browserProfiles.removeAll { $0.id == profile.id }
+            browserProfiles.append(profile)
+            errorMessage = nil
+            do {
+                try await reloadBrowserProfiles(using: api)
+            } catch {
+                present(error)
+            }
+            return ceremony.launchURL
+        } catch {
+            present(error)
+            return nil
+        }
+    }
+
+    public func refreshBrowserAuthentication() async {
+        guard let api, let browserAuthentication else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            let updated = try await api.getBrowserAuthentication(browserAuthentication.id)
+            self.browserAuthentication = updated
+            try await reloadBrowserProfiles(using: api)
+            if updated.status == .ready {
+                selectedBrowserProfileID = updated.profileID
+                await configurationStore.saveBrowserProfileID(updated.profileID)
+            }
+            errorMessage = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    public func selectBrowserProfile(_ profileID: UUID?) async {
+        guard profileID == nil
+            || browserProfiles.contains(where: { $0.id == profileID && $0.status == .ready })
+        else { return }
+        selectedBrowserProfileID = profileID
+        await configurationStore.saveBrowserProfileID(profileID)
+    }
+
+    public func removeBrowserProfile(_ profileID: UUID) async {
+        guard let api else { return }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        do {
+            if let authentication = browserAuthentication,
+                authentication.profileID == profileID,
+                !authentication.status.isTerminal
+            {
+                _ = try await api.cancelBrowserAuthentication(authentication.id)
+            }
+            _ = try await api.revokeBrowserProfile(profileID)
+            try await api.deleteBrowserProfile(profileID)
+            if selectedBrowserProfileID == profileID {
+                selectedBrowserProfileID = nil
+                await configurationStore.saveBrowserProfileID(nil)
+            }
+            if browserAuthentication?.profileID == profileID {
+                browserAuthentication = nil
+            }
+            try await reloadBrowserProfiles(using: api)
+            errorMessage = nil
+        } catch {
+            present(error)
+        }
+    }
+
+    private func reloadBrowserProfiles(using api: VeetbotAPIClient) async throws {
+        var profiles: [BrowserProfileView] = []
+        var cursor: String?
+        var seen: Set<String> = []
+        repeat {
+            let page = try await api.listBrowserProfiles(cursor: cursor)
+            profiles.append(contentsOf: page.items)
+            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seen)
+        } while cursor != nil
+        browserProfiles = profiles
+        if let selectedBrowserProfileID,
+            !profiles.contains(where: {
+                $0.id == selectedBrowserProfileID && $0.status == .ready
+            })
+        {
+            self.selectedBrowserProfileID = nil
+            await configurationStore.saveBrowserProfileID(nil)
+        }
+    }
+
     private func bootstrap() async {
         do {
             history = try await historyStore.list()
@@ -555,6 +694,7 @@ public final class ChatViewModel: ObservableObject {
             if let configuration = await configurationStore.load(),
                 try await tokenStore.readToken() != nil
             {
+                selectedBrowserProfileID = await configurationStore.loadBrowserProfileID()
                 try await install(configuration)
             }
         } catch {

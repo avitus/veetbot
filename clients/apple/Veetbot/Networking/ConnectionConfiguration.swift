@@ -72,6 +72,7 @@ public struct ConnectionConfiguration: Codable, Hashable, Sendable {
 public actor ConnectionConfigurationStore {
     private let defaults: UserDefaults
     private let key = "veetbot.connection.baseURL"
+    private let browserProfileKey = "veetbot.browser.selectedProfileID"
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -85,5 +86,18 @@ public actor ConnectionConfigurationStore {
     public func save(_ configuration: ConnectionConfiguration) {
         // The bearer token is deliberately not stored here; it lives in Keychain.
         defaults.set(configuration.baseURL.absoluteString, forKey: key)
+    }
+
+    public func loadBrowserProfileID() -> UUID? {
+        guard let value = defaults.string(forKey: browserProfileKey) else { return nil }
+        return UUID(uuidString: value)
+    }
+
+    public func saveBrowserProfileID(_ profileID: UUID?) {
+        if let profileID {
+            defaults.set(profileID.uuidString, forKey: browserProfileKey)
+        } else {
+            defaults.removeObject(forKey: browserProfileKey)
+        }
     }
 }

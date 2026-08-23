@@ -10,6 +10,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 SESSION_TITLE_MAX_LENGTH = 64
+SESSION_BROWSER_PROFILE_METADATA_KEY = "browser_profile_id"
 
 
 def conversation_title(text: str) -> str | None:

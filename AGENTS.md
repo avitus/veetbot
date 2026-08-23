@@ -94,7 +94,7 @@ validates the floor, and no trailer means lane A.
   12 through 15 — notifications and device identity, subagents and delegation,
   inbound surfaces and pairing, operational hardening — are authorized in that
   order (ADR-0061), and Milestone 16 memory evaluation and lifecycle in
-  parallel (ADR-0068); model routing and the plan's roadmap items are not.
+  parallel (ADR-0069); model routing and the plan's roadmap items are not.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

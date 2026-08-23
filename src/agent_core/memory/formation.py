@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -14,7 +14,7 @@ from agent_core.domain.errors import (
     ToolTrustRejectedError,
     ToolValidationError,
 )
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
     BeliefRejection,
     BeliefType,
@@ -22,7 +22,9 @@ from agent_core.domain.memory import (
     ConsolidationRun,
     MemoryAuthority,
     MemoryCandidate,
+    MemoryDiagnosis,
     MemoryEdit,
+    MemoryExtractionResult,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -37,11 +39,13 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@2"
+FORMATION_POLICY_VERSION = "formation@5"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
 SESSION_IDLE_SECONDS = 30
+PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
+PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
 _SECRET = re.compile(
     r"(?:api[_-]?key|secret|password|token|authorization|credential|bearer)\s*[:=]\s*\S+",
     re.I,
@@ -69,6 +73,23 @@ _POSSESSIVE_ENTITY = re.compile(
     r"(?:\s+(?:[A-Z][A-Za-z0-9'-]*|[A-Z0-9][A-Za-z0-9'-]*)){0,3})"
 )
 _GROUNDING_TOKEN = re.compile(r"\d+(?:\.\d+)+|[a-z0-9]+(?:['-][a-z0-9]+)*")
+_STARTED_ACTIVITY = re.compile(
+    r"(?:i['\u2019]ve|i\s+have)\s+started\s+(?P<verb>[a-z]+ing)\s+"
+    r"(?:the\s+)?(?P<object>.+?)(?:\s+after\s+(?P<prior>.+))?",
+    re.I,
+)
+_PRIOR_EXPERIENCE = re.compile(
+    r"(?P<duration>.+?)\s+of\s+(?P<verb>[a-z]+ing)\s+(?:the\s+)?(?P<object>.+)",
+    re.I,
+)
+_RECURRING_SYMPTOM = re.compile(
+    r"(?:on\s+(?:the\s+)?(?P<context>.+?)\s+)?my\s+(?P<body>.+?)\s+is\s+"
+    r"(?P<frequency>often|frequently|repeatedly)\s+"
+    r"(?P<symptom>hurting|aching|tingling)\s+after\s+"
+    r"(?P<duration>.+?)(?:\s+of\s+(?P<activity>.+))?",
+    re.I,
+)
+_SYMPTOM_VERBS = {"hurting": "hurts", "aching": "aches", "tingling": "tingles"}
 
 
 def contains_memory_injection(value: str) -> bool:
@@ -198,6 +219,7 @@ class DeterministicCandidateExtractor:
         proposed: list[MemoryCandidate] = []
         retracted_subjects: set[str] = set()
         proposed_subjects: set[str] = set()
+        recent_activity_subject: str | None = None
 
         def add(
             *,
@@ -236,6 +258,64 @@ class DeterministicCandidateExtractor:
         for raw_clause in _CLAUSE_BOUNDARY.split(stripped):
             clause = re.sub(r"^and\s+", "", raw_clause.strip(), flags=re.I)
             if not clause:
+                continue
+
+            started_activity = _STARTED_ACTIVITY.fullmatch(clause)
+            if started_activity is not None:
+                verb = started_activity.group("verb").casefold()
+                activity_object = started_activity.group("object").strip(" ,.:;!?")
+                recent_activity_subject = activity_object
+                add(
+                    subject=activity_object,
+                    statement=f"User started {verb} {activity_object}.",
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    confidence=0.8,
+                )
+                prior = started_activity.group("prior")
+                prior_experience = None if prior is None else _PRIOR_EXPERIENCE.fullmatch(prior)
+                if prior_experience is not None:
+                    duration = prior_experience.group("duration").strip(" ,.:;!?")
+                    prior_verb = prior_experience.group("verb").casefold()
+                    prior_object = prior_experience.group("object").strip(" ,.:;!?")
+                    add(
+                        subject=f"{prior_object} experience",
+                        statement=(
+                            f"User has {duration} of experience {prior_verb} {prior_object}."
+                        ),
+                        belief_type=BeliefType.USER_MODEL_ATTR,
+                        confidence=0.82,
+                    )
+                continue
+
+            recurring_symptom = _RECURRING_SYMPTOM.fullmatch(clause)
+            if recurring_symptom is not None:
+                body = recurring_symptom.group("body").strip(" ,.:;!?")
+                frequency = recurring_symptom.group("frequency").casefold()
+                symptom = recurring_symptom.group("symptom").casefold()
+                duration = recurring_symptom.group("duration").strip(" ,.:;!?")
+                activity = recurring_symptom.group("activity")
+                context = recurring_symptom.group("context")
+                activity_phrase = "" if activity is None else activity.strip(" ,.:;!?")
+                if recent_activity_subject is not None and context is not None:
+                    normalized_context = context.strip(" ,.:;!?").casefold()
+                    normalized_recent = recent_activity_subject.casefold()
+                    if normalized_context in normalized_recent.split():
+                        if not activity_phrase:
+                            activity_phrase = f"using {recent_activity_subject}"
+                        elif activity_phrase.casefold() == "playing":
+                            activity_phrase = f"playing {recent_activity_subject}"
+                suffix = "" if not activity_phrase else f" of {activity_phrase}"
+                subject_suffix = "" if not activity_phrase else f" while {activity_phrase}"
+                add(
+                    subject=f"{body} pain{subject_suffix}",
+                    statement=(
+                        f"User's {body} {frequency} {_SYMPTOM_VERBS[symptom]} after "
+                        f"{duration}{suffix}."
+                    ),
+                    belief_type=BeliefType.USER_MODEL_ATTR,
+                    sensitivity=Sensitivity.SENSITIVE,
+                    confidence=0.82,
+                )
                 continue
 
             preference = re.fullmatch(r"(?:i|we)\s+(?:really\s+)?prefer\s+(.+)", clause, re.I)
@@ -774,6 +854,9 @@ class GovernedMemoryService:
             principal=self._principal,
             scope=scope,
         )
+        provider_failure = (
+            extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
+        )
         candidates = extracted[:MAX_AUTOMATIC_CANDIDATES]
         trusted_user_sources = {
             event.sequence
@@ -784,6 +867,23 @@ class GovernedMemoryService:
         }
         by_sequence = {event.sequence: event for event in events}
         after = max((event.sequence for event in events), default=watermark)
+        formation_requests = [
+            event for event in events if event.event_type == "memory.formation.requested"
+        ]
+        latest_request = formation_requests[-1] if formation_requests else None
+        current_attempt = 1
+        effective_trigger = trigger
+        if latest_request is not None and latest_request.payload.get("trigger") == "provider_retry":
+            effective_trigger = "provider_retry"
+            raw_attempt = latest_request.payload.get("attempt_number")
+            if isinstance(raw_attempt, int) and 1 <= raw_attempt <= PROVIDER_MAX_ATTEMPTS:
+                current_attempt = raw_attempt
+        should_retry = (
+            since_watermark is None
+            and provider_failure is not None
+            and provider_failure.retryable
+            and current_attempt < PROVIDER_MAX_ATTEMPTS
+        )
 
         def no_work(at_watermark: int) -> ConsolidationResult:
             return ConsolidationResult(
@@ -857,7 +957,7 @@ class GovernedMemoryService:
                             confidence=candidate.model_confidence,
                             valid_from=candidate.valid_from,
                             expires_at=candidate.expires_hint,
-                            trigger=trigger,
+                            trigger=effective_trigger,
                             record_audit=False,
                             existing_uow=uow,
                             audit_id=consolidation_id,
@@ -875,16 +975,84 @@ class GovernedMemoryService:
                             committed += 1
                             if action == "superseded":
                                 superseded += 1
-                await uow.memories.set_consolidation_watermark(session_id, self._principal, after)
+                watermark_after = watermark if should_retry else after
+                if should_retry:
+                    assert provider_failure is not None
+                    next_attempt = current_attempt + 1
+                    retry_at = self._clock.now() + timedelta(
+                        seconds=PROVIDER_RETRY_BACKOFF_SECONDS[current_attempt - 1]
+                    )
+                    await uow.events.append(
+                        NewEvent(
+                            session_id=session_id,
+                            run_id=next(
+                                (
+                                    event.run_id
+                                    for event in reversed(events)
+                                    if event.run_id is not None
+                                ),
+                                None,
+                            ),
+                            event_type="memory.formation.requested",
+                            actor_type="memory_maintenance",
+                            actor_id=self._principal.principal_id,
+                            payload={
+                                "trigger": "provider_retry",
+                                "attempt_number": next_attempt,
+                                "not_before": retry_at.isoformat(),
+                                "source_watermark_before": watermark,
+                                "source_watermark_after": after,
+                                "failure_kind": provider_failure.failure_kind,
+                            },
+                            derivation_key=(
+                                "memory.formation.provider_retry:"
+                                f"{session_id}:{after}:{next_attempt}"
+                            ),
+                        )
+                    )
+                else:
+                    await uow.memories.set_consolidation_watermark(
+                        session_id, self._principal, after
+                    )
+                    if (
+                        since_watermark is None
+                        and provider_failure is not None
+                        and provider_failure.retryable
+                        and current_attempt >= PROVIDER_MAX_ATTEMPTS
+                    ):
+                        await uow.process_events.append(
+                            ProcessEvent(
+                                id=self._ids.new_id(),
+                                event_type="memory.provider_extraction.retry_exhausted",
+                                actor_type="memory_maintenance",
+                                actor_id=self._principal.principal_id,
+                                payload={
+                                    "session_id": str(session_id),
+                                    "tenant_id": self._principal.tenant_id,
+                                    "principal_id": self._principal.principal_id,
+                                    "attempt_number": current_attempt,
+                                    "failure_kind": provider_failure.failure_kind,
+                                    "provider_code": provider_failure.provider_code,
+                                    "http_status": provider_failure.http_status,
+                                    "provider_parameter": (provider_failure.provider_parameter),
+                                    "stream_had_output": (provider_failure.stream_had_output),
+                                },
+                                derivation_key=(
+                                    "memory.provider_extraction.retry_exhausted:"
+                                    f"{session_id}:{after}:{current_attempt}"
+                                ),
+                                created_at=self._clock.now(),
+                            )
+                        )
                 audit = ConsolidationRun(
                     id=consolidation_id,
                     tenant_id=self._principal.tenant_id,
                     principal_id=self._principal.principal_id,
-                    trigger=trigger,
+                    trigger=effective_trigger,
                     scope=scope,
                     session_id=session_id,
                     watermark_before=watermark,
-                    watermark_after=after,
+                    watermark_after=watermark_after,
                     model=self._extractor.name,
                     policy_version=self._policy_version,
                     candidates_proposed=len(extracted),
@@ -899,6 +1067,71 @@ class GovernedMemoryService:
             finally:
                 await uow.maintenance.release_memory_session(self._principal, session_id)
         return ConsolidationResult(run=audit, beliefs=beliefs)
+
+    async def diagnose(self, session_id: UUID) -> MemoryDiagnosis:
+        """Return content-free formation evidence and governed beliefs for one session."""
+
+        async with self._uow_factory() as uow:
+            events = await uow.events.list_after(session_id, 0, self._principal)
+            watermark = await uow.memories.consolidation_watermark(session_id, self._principal)
+            consolidations = await uow.memories.list_consolidations(
+                self._principal,
+                session_id=session_id,
+                limit=100,
+            )
+            beliefs = await uow.memories.list_memories(
+                self._principal,
+                include_inactive=True,
+                session_id=session_id,
+                limit=200,
+            )
+            process_events = await uow.process_events.list()
+        formation_requests = [
+            event for event in events if event.event_type == "memory.formation.requested"
+        ]
+        provider_attempts = [
+            event
+            for event in process_events
+            if event.event_type
+            in {"memory.provider_extraction.completed", "memory.provider_extraction.failed"}
+            and event.payload.get("tenant_id") == self._principal.tenant_id
+            and event.payload.get("principal_id") == self._principal.principal_id
+            and event.payload.get("session_id") == str(session_id)
+        ]
+        selections = [
+            event
+            for event in process_events
+            if event.event_type == "memory.provider_extraction.selection"
+            and event.payload.get("tenant_id") == self._principal.tenant_id
+            and event.payload.get("principal_id") == self._principal.principal_id
+        ]
+        latest_request = formation_requests[-1] if formation_requests else None
+        return MemoryDiagnosis(
+            session_id=session_id,
+            watermark=watermark,
+            formation_requests=formation_requests,
+            provider_selection=selections[-1] if selections else None,
+            provider_attempts=provider_attempts,
+            consolidations=consolidations,
+            beliefs=beliefs,
+            pending_retry=(
+                latest_request is not None
+                and latest_request.sequence > watermark
+                and latest_request.payload.get("trigger") == "provider_retry"
+            ),
+        )
+
+    async def replay(self, session_id: UUID) -> ConsolidationResult:
+        """Reprocess original session evidence without manufacturing memory provenance."""
+
+        diagnosis = await self.diagnose(session_id)
+        scope = diagnosis.consolidations[-1].scope if diagnosis.consolidations else "general"
+        return await self.run(
+            trigger="operator_replay",
+            scope=scope,
+            session_id=session_id,
+            since_watermark=0,
+        )
 
     async def list_memories(
         self,

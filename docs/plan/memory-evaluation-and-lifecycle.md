@@ -11,7 +11,7 @@ requirement; this document states the mechanism. It is subordinate to
 [engineering-plan.md](engineering-plan.md) and it reuses rather than replaces
 the memory-formation, memory-retrieval, context-engine, and evaluation-harness
 designs.
-[ADR-0068](../adr/0068-milestone-16-memory-evaluation-and-lifecycle.md) records
+[ADR-0069](../adr/0069-milestone-16-memory-evaluation-and-lifecycle.md) records
 the architectural decisions and the authorization.
 
 Memory is the one subsystem whose gates all point the same way. Twenty-nine
@@ -786,33 +786,35 @@ resolved by guessing; that is the point.
 
 Re-derivation is opt-in per principal
 (memory-formation-and-consolidation.md:674), so it is a command and it demands
-an explicit confirmation:
+an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
+--session <id> --confirm` reprocesses one session's original evidence through
+the governed formation service — and this milestone verifies it as the
+re-derivation surface rather than adding a second one:
 
 ```text
-agent memory rederive --session <id> --confirm
-agent memory rederive --all-sessions --confirm
+agent memory replay --session <id> --confirm
 ```
 
-Without `--confirm` the command exits 2 and explains itself. With it, each
-named session is re-consolidated from watermark zero under the current policy,
+Without `--confirm` the command exits 2 and explains itself. With it, the named
+session is re-consolidated from its original prefix under the current policy,
 which replays the outstanding rejections before commit, so nothing the user has
 rejected returns — the durable-correction gate is what proves that, and this
-command is the path that would violate it if it could. `--all-sessions`
-enumerates sessions from the consolidation history and from the source sessions
-of every belief including inactive ones. Each session's consolidation record is
-printed. A version-aware bypass of the same-source shortcut, so that an
-upgraded policy re-examines events it has already seen, is designed here and
-built when a policy upgrade needs it.
+command is the path that would violate it if it could. The replay's
+consolidation record is printed. A version-aware bypass of the same-source
+shortcut, so that an upgraded policy re-examines events it has already seen, is
+designed here and built when a policy upgrade needs it.
 
 ## Policy versions
 
-Three versions move, each exactly once, in the change that alters the semantics
-it names:
+ADR-0068 (retryable formation and governed replay) moved deterministic formation
+to `formation@5` and provider-assisted formation to `formation@6` before this
+milestone began; the moves below start from those values. Three versions move,
+each exactly once, in the change that alters the semantics it names:
 
 ```text
-formation@2 -> formation@5   deterministic formation, when established facts
+formation@5 -> formation@7   deterministic formation, when established facts
                              enter the candidate set
-formation@4 -> formation@6   provider-assisted formation, same change
+formation@6 -> formation@8   provider-assisted formation, same change
 retrieval@1 -> retrieval@2   ranking, when time decay and the near-duplicate
                              penalty land
 ```
@@ -822,7 +824,7 @@ filename and contents are matched against the version. Under the automatic
 selection mode the composition falls back to the deterministic extractor and
 records a content-free selection audit saying why; under the required mode
 startup refuses. The milestone therefore republishes provider evidence at
-`formation@6` before it closes, deletes the superseded artifact, and updates
+`formation@8` before it closes, deletes the superseded artifact, and updates
 the release-evidence notes and the formation specification's references to it.
 Tests that pin the version literals move to the constants.
 
@@ -872,11 +874,12 @@ Metrics carry no belief statement, no secret, and no local dataset path.
    hook. **M16.**
 10. The recall delta and the correction lines, including the head-position
     watermark and the minimum-position query. **M16.**
-11. Established facts into formation at `AFFIRMED`, at `formation@5` and
-    `formation@6`. **M16.**
+11. Established facts into formation at `AFFIRMED`, at `formation@7` and
+    `formation@8`. **M16.**
 12. Conflict detection, flagged commitment, and conflict rendering. **M16.**
-13. The re-derivation command. **M16.**
-14. Republish the provider evidence at `formation@6`, re-record the final
+13. Re-derivation verified on the governed `agent memory replay --confirm`
+    surface. **M16.**
+14. Republish the provider evidence at `formation@8`, re-record the final
     baseline, and run the full suite, the PostgreSQL lanes, hosted CI, and the
     required review loop on one final head. **M16.**
 

@@ -2512,10 +2512,24 @@ class PostgresMaintenanceRepository:
             ),
             else_=None,
         )
+        latest_formation = (
+            select(
+                EventRow.session_id.label("session_id"),
+                func.max(EventRow.sequence).label("sequence"),
+            )
+            .where(EventRow.event_type == "memory.formation.requested")
+            .group_by(EventRow.session_id)
+            .subquery()
+        )
         rows = (
             await self._session.scalars(
                 select(SessionRow.id)
-                .join(EventRow, EventRow.session_id == SessionRow.id)
+                .join(latest_formation, latest_formation.c.session_id == SessionRow.id)
+                .join(
+                    EventRow,
+                    (EventRow.session_id == latest_formation.c.session_id)
+                    & (EventRow.sequence == latest_formation.c.sequence),
+                )
                 .outerjoin(
                     ConsolidationWatermarkRow,
                     (ConsolidationWatermarkRow.session_id == SessionRow.id)
@@ -2526,11 +2540,9 @@ class PostgresMaintenanceRepository:
                     SessionRow.tenant_id == principal.tenant_id,
                     SessionRow.principal_id == principal.principal_id,
                     SessionRow.updated_at <= idle_before,
-                    EventRow.event_type == "memory.formation.requested",
+                    latest_formation.c.sequence > watermark,
                     formation_not_before <= ready_at,
                 )
-                .group_by(SessionRow.id, ConsolidationWatermarkRow.sequence)
-                .having(func.max(EventRow.sequence) > watermark)
                 .order_by(SessionRow.updated_at, SessionRow.id)
                 .limit(limit)
             )

@@ -11,12 +11,18 @@ no third-party dependencies. On first launch, enter an HTTPS API base URL and a
 static bearer token. The base URL is stored as a preference; the token is stored
 only in Keychain.
 
-The settings surface groups Connection, Appearance, and Data & Privacy in a
+The settings surface groups Connection, Website Access, Appearance, and Data & Privacy in a
 scrolling layout with connection actions pinned below it. On macOS, configured
 clients use a separate settings window that resizes in both dimensions and
 remembers its frame. The main and settings windows persist their sizes and
 positions independently. Device-local text-size and font-style controls apply
 immediately throughout the client; system text sizing remains the default.
+
+Website Access creates and lists dedicated browser profiles. The app opens the
+server-provided isolated login ceremony, where the user enters website
+credentials directly; usernames, passwords, passkeys, MFA values, cookies, and
+browser storage never pass through this client or chat. Selecting a ready
+profile binds only its opaque UUID to newly created conversations.
 
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its

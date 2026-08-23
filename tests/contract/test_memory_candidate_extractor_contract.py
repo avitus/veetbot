@@ -60,7 +60,7 @@ class _StructuredRouter:
 def _evidence() -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@4",
+        formation_policy_version="formation@6",
         model_policy="fake",
         provider="fake",
         model="scripted",

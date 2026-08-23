@@ -23,7 +23,7 @@ MAP_ROW = re.compile(
 )
 # The highest milestone the corpus authorizes; Milestones 12 through 15 were
 # authorized on 2026-08-20 (ADR-0061) and Milestone 16 on 2026-08-22
-# (ADR-0068). The census reports a zero row for each authorized milestone whose
+# (ADR-0069). The census reports a zero row for each authorized milestone whose
 # specification has not yet declared gates.
 MAX_MILESTONE = 16
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}

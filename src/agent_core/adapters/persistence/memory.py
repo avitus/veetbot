@@ -1326,11 +1326,10 @@ class InMemoryMaintenanceRepository:
                     continue
                 watermark = await self._memories.consolidation_watermark(session.id, principal)
                 events = await self._events.list_after(session.id, watermark, principal)
-                if any(
-                    event.event_type == "memory.formation.requested"
-                    and _memory_formation_ready(event, ready_at)
-                    for event in events
-                ):
+                formation_requests = [
+                    event for event in events if event.event_type == "memory.formation.requested"
+                ]
+                if formation_requests and _memory_formation_ready(formation_requests[-1], ready_at):
                     pending.append(session.id)
             if len(page) < 256:
                 break

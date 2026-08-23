@@ -6642,7 +6642,7 @@ order.
 
 **Reversal cost:** cheap; it is sequencing.
 
-## Milestone 16 memory evaluation and lifecycle (ADR-0068)
+## Milestone 16 memory evaluation and lifecycle (ADR-0069)
 
 ### The yardstick lands before anything it measures moves
 

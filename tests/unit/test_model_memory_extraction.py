@@ -320,7 +320,7 @@ async def test_routed_composition_does_not_activate_rich_extraction_without_evid
     assert [(item.subject, item.statement) for item in result.beliefs] == [
         ("daughter", "User has at least one daughter.")
     ]
-    assert result.run.policy_version == "formation@2"
+    assert result.run.policy_version == "formation@5"
     assert provider.requests == []
     assert audits == []
     assert len(selections) == 1

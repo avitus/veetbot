@@ -2,6 +2,7 @@ import SwiftUI
 
 enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     case connection
+    case websiteAccess
     case appearance
     case dataAndPrivacy
 
@@ -13,10 +14,13 @@ public struct ConnectionSettingsView: View {
     let embedded: Bool
     private let closeAction: (() -> Void)?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appearance: AppearancePreferences
     @State private var baseURL = ""
     @State private var token = ""
     @State private var isSaving = false
+    @State private var websiteOrigin = ""
+    @State private var websiteLoginURL = ""
 
     public init(
         model: ChatViewModel,
@@ -53,6 +57,9 @@ public struct ConnectionSettingsView: View {
         #endif
         .onAppear {
             if baseURL.isEmpty { baseURL = model.baseURL?.absoluteString ?? "" }
+            if model.isConfigured {
+                Task { await model.refreshBrowserProfiles() }
+            }
         }
     }
 
@@ -123,6 +130,91 @@ public struct ConnectionSettingsView: View {
                         .background(Color.red.opacity(0.08))
                         .clipShape(RoundedRectangle(cornerRadius: 9))
                     }
+                }
+            }
+
+        case .websiteAccess:
+            SettingsCard(
+                title: "Website Access",
+                summary: "Create a dedicated login profile for sites Veetbot may use.",
+                systemImage: "globe.badge.chevron.backward",
+                tint: AppTheme.orange
+            ) {
+                if model.isConfigured {
+                    VStack(alignment: .leading, spacing: 16) {
+                        settingsField(
+                            title: "Website origin",
+                            help: "Use one exact HTTPS origin, such as https://example.com."
+                        ) {
+                            TextField("https://example.com", text: $websiteOrigin)
+                                .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                            .textContentType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                                #endif
+                        }
+                        settingsField(
+                            title: "Login page",
+                            help:
+                                "Veetbot opens this page in an isolated browser. Enter your username, password, passkey, or MFA there—not in chat or these settings."
+                        ) {
+                            TextField("https://example.com/login", text: $websiteLoginURL)
+                                .textFieldStyle(.roundedBorder)
+                                #if os(iOS)
+                            .textContentType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .keyboardType(.URL)
+                                #endif
+                        }
+                        Button {
+                            addWebsiteAccess()
+                        } label: {
+                            Label("Open secure login", systemImage: "person.badge.key.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppTheme.turquoise)
+                        .disabled(
+                            model.isManagingWebsiteAccess
+                                || websiteOrigin.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
+                                || websiteLoginURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
+                        )
+
+                        if let authentication = model.browserAuthentication {
+                            Divider()
+                            HStack(spacing: 10) {
+                                Label(
+                                    authentication.status.displayName,
+                                    systemImage: authentication.status.systemImage
+                                )
+                                .appFont(.caption, weight: .semibold)
+                                Spacer()
+                                if !authentication.status.isTerminal {
+                                    Button("Check login status") {
+                                        Task { await model.refreshBrowserAuthentication() }
+                                    }
+                                    .disabled(model.isManagingWebsiteAccess)
+                                }
+                            }
+                        }
+
+                        Divider()
+                        if model.browserProfiles.isEmpty {
+                            Text("No website logins have been added yet.")
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                        } else {
+                            ForEach(model.browserProfiles) { profile in
+                                websiteProfileRow(profile)
+                            }
+                        }
+                    }
+                } else {
+                    Text("Connect this app to Veetbot before adding a website login.")
+                        .appFont(.body)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -227,6 +319,41 @@ public struct ConnectionSettingsView: View {
         }
     }
 
+    private func websiteProfileRow(_ profile: BrowserProfileView) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(profile.allowedOrigins.joined(separator: ", "))
+                    .appFont(.body, weight: .semibold)
+                Text(profile.status.displayName)
+                    .appFont(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer(minLength: 8)
+            if profile.status == .ready {
+                if model.selectedBrowserProfileID == profile.id {
+                    Label("Used for new chats", systemImage: "checkmark.circle.fill")
+                        .appFont(.caption, weight: .semibold)
+                        .foregroundColor(AppTheme.turquoise)
+                } else {
+                    Button("Use") {
+                        Task { await model.selectBrowserProfile(profile.id) }
+                    }
+                    .disabled(model.isManagingWebsiteAccess)
+                }
+            }
+            Button(role: .destructive) {
+                Task { await model.removeBrowserProfile(profile.id) }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .disabled(model.isManagingWebsiteAccess)
+        }
+        .padding(12)
+        .background(Color.primary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+    }
+
     private var actionBar: some View {
         HStack(spacing: 12) {
             if !embedded {
@@ -282,6 +409,51 @@ public struct ConnectionSettingsView: View {
                 token = ""
                 if !embedded { close() }
             }
+        }
+    }
+
+    private func addWebsiteAccess() {
+        Task {
+            if let launchURL = await model.createWebsiteAccess(
+                origin: websiteOrigin,
+                loginURL: websiteLoginURL
+            ) {
+                openURL(launchURL)
+                websiteOrigin = ""
+                websiteLoginURL = ""
+            }
+        }
+    }
+}
+
+private extension BrowserProfileStatus {
+    var displayName: String {
+        switch self {
+        case .provisioning: return "Provisioning"
+        case .authenticationRequired: return "Login required"
+        case .ready: return "Ready"
+        case .needsUser: return "Needs your attention"
+        case .revoked: return "Revoked"
+        }
+    }
+}
+
+private extension BrowserAuthenticationStatus {
+    var displayName: String {
+        switch self {
+        case .authenticationRequired: return "Waiting for login"
+        case .needsUser: return "The login needs your attention"
+        case .ready: return "Login saved"
+        case .expired: return "Login window expired"
+        case .cancelled: return "Login cancelled"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .ready: return "checkmark.shield.fill"
+        case .expired, .cancelled: return "xmark.circle"
+        case .authenticationRequired, .needsUser: return "person.crop.circle.badge.clock"
         }
     }
 }
