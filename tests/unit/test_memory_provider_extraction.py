@@ -32,16 +32,22 @@ from agent_core.domain.memory import (
     Sensitivity,
 )
 from agent_core.domain.messages import (
+    AssistantMessage,
     FakeModelScript,
     ModelAttempt,
     ModelEvent,
+    ModelFailedEvent,
     ModelPermanentError,
     ModelPricing,
     ModelRequest,
+    ModelTransientError,
+    ModelTurn,
     ModelUsage,
     ResolvedModel,
     ScriptedTurn,
+    StopReason,
     TextDeltaEvent,
+    TextPart,
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
@@ -111,6 +117,38 @@ class _PartialStreamFailureProvider:
             sequence=2,
             item_index=0,
             text="}",
+        )
+
+    async def close(self) -> None:
+        return None
+
+
+class _PartialTurnFailureProvider:
+    name = "partial-turn-failure"
+
+    async def stream(
+        self,
+        request: ModelRequest,
+        resolved: ResolvedModel,
+        attempt: ModelAttempt,
+    ) -> AsyncIterator[ModelEvent]:
+        del request
+        yield ModelFailedEvent(
+            attempt_id=attempt.attempt_id,
+            run_id=attempt.run_id,
+            step_number=attempt.step_number,
+            sequence=0,
+            error=ModelTransientError(
+                provider=self.name,
+                model=resolved.model,
+                attempt_id=attempt.attempt_id,
+                message="partial stream failed",
+            ),
+            partial_turn=ModelTurn(
+                assistant_messages=[AssistantMessage(content=[TextPart(text="{")], item_index=0)],
+                usage=ModelUsage(),
+                stop_reason=StopReason.INCOMPLETE,
+            ),
         )
 
     async def close(self) -> None:
@@ -1511,6 +1549,45 @@ async def test_provider_partial_stream_failure_records_output(
     assert isinstance(result, MemoryExtractionResult)
     assert result.provider_failure is not None
     assert result.provider_failure.failure_kind == expected_failure_kind
+    assert result.provider_failure.stream_had_output is True
+    async with factory() as uow:
+        failures = await uow.process_events.list("memory.provider_extraction.failed")
+    assert len(failures) == 1
+    assert failures[0].payload["stream_had_output"] is True
+
+
+async def test_provider_terminal_failure_partial_turn_records_output() -> None:
+    clock, factory, _service, _retriever = await formation_stack()
+    await user_event(factory, "The astronomy club was my daughter's idea.")
+    extractor = ProviderAssistedCandidateExtractor(
+        provider=_PartialTurnFailureProvider(),
+        resolved_model=ResolvedModel(
+            provider="fake",
+            model="scripted",
+            policy_name="fake",
+            resolved_at=NOW,
+        ),
+        uow_factory=factory,
+        clock=clock,
+        ids=SequenceIdFactory(UUID(int=value) for value in range(8_400, 8_500)),
+        principal=principal(),
+        agent_id=AGENT_ID,
+        agent_version="1.0.0",
+        policy_profile="default",
+        policy_version="default@test",
+        evidence=_evidence(),
+        fallback=DeterministicCandidateExtractor(),
+    )
+
+    result = await extractor.extract(
+        await session_events(factory),
+        principal=principal(),
+        scope="project-a",
+    )
+
+    assert isinstance(result, MemoryExtractionResult)
+    assert result.provider_failure is not None
+    assert result.provider_failure.failure_kind == "transient"
     assert result.provider_failure.stream_had_output is True
     async with factory() as uow:
         failures = await uow.process_events.list("memory.provider_extraction.failed")

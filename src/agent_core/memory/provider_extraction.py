@@ -914,7 +914,14 @@ class ProviderAssistedCandidateExtractor:
         async def tracked_stream() -> AsyncIterator[ModelEvent]:
             nonlocal stream_had_output
             async for event in self._provider.stream(request, self._resolved_model, attempt):
-                if not isinstance(event, (ModelCompletedEvent, ModelFailedEvent)):
+                if isinstance(event, ModelFailedEvent):
+                    if event.partial_turn is not None:
+                        stream_had_output = stream_had_output or bool(
+                            event.partial_turn.assistant_messages
+                            or event.partial_turn.tool_calls
+                            or event.partial_turn.provider_reasoning_items
+                        )
+                elif not isinstance(event, ModelCompletedEvent):
                     stream_had_output = True
                 yield event
 
