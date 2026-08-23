@@ -7,6 +7,33 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-23 — Provider memory evidence republished at `formation@8`
+
+- Republished the bundled provider-memory activation artifact at
+  provider-assisted `formation@8` from one live run of the 25-case corpus, and
+  deleted the superseded `formation@4` artifact. The new artifact covers the
+  exact tuple OpenAI `gpt-5.6-sol`, model policy `balanced`, policy profile
+  `default`, so `auto` again activates provider assistance for that tuple and
+  falls back safely for every other one. The provider arm fully supported
+  seventeen of twenty-one positive cases against the deterministic arm's nine,
+  supported twenty labeled candidates against twelve, and both arms fabricated
+  nothing and regressed no policy.
+- Re-recorded the deterministic benchmark baseline as the milestone's closing
+  act. The whole diff is the build reference and the recording timestamp: the
+  aggregate metrics and all sixty-six probe rows are unchanged, so no metric
+  moved.
+- Ran the live benchmark arm once. It measured a lift of forty-five against a
+  derived minimum of eleven, recoverable correctness of forty-five in
+  forty-eight, abstention correctness of twelve in twelve, no protected leak, no
+  policy regression, and USD 1.111295 of the USD 4.00 pre-admission ceiling —
+  but two of its hundred and thirty-two probe runs failed after zero model
+  calls, so it failed its incomplete-runs condition and, as designed, published
+  nothing. `gate.memory.bench_evidence_publish` is satisfied by the unit-level
+  publication proof and is unaffected; the live artifact is milestone evidence.
+- Recorded Milestone 16's verification evidence in project state, which stays
+  `authorized` pending hosted CI on the final head and the CodeRabbit review
+  loop on the `dev` to `main` pull request.
+
 ## 2026-08-22 — Milestone 12 completed: notifications and device identity
 
 - Added the principal-scoped device registry, durable content-free notification

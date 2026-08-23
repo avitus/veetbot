@@ -170,6 +170,122 @@ milestones:
       - semantic arm and pgvector, external memory provider, persona surface
       - temporal entity graph, session history and artifacts as sources
       - belief merge and global consolidation, HTTP memory surface
+    evidence:
+      - check: make check
+        outcome: passed
+        detail: >-
+          Ruff formatting over 558 files and Ruff linting pass, strict mypy
+          reports no issue in 514 source files, the static partition passes
+          1204 tests, the contract partition passes 350, the release, manual
+          rollback, and nginx deployment-script tests pass, and the strict
+          documentation build passes with 171 citations checked. The gate
+          registry reconciles 324 entries with 247 active through Milestone 12.
+      - check: nineteen Milestone 16 gate.memory.* gates
+        outcome: passed_locally
+        detail: >-
+          The nineteen registered Milestone 16 entries in evals/gates/memory.yaml
+          resolve to nineteen distinct checks — sixteen in
+          tests/gates/test_memory_m16.py, two in
+          tests/unit/test_memory_benchmark_eval.py, and one in
+          tests/unit/test_memory_benchmark_external.py — and all nineteen pass
+          when executed by node identifier. The whole
+          tests/gates/test_memory_m16.py file passes its twenty tests. The
+          harness cannot execute these nineteen through agent eval gates yet:
+          --milestone means treat every gate at or below MILESTONE as active, so
+          --milestone 16 activates the fifty-eight still-pending Milestone 13
+          through 15 gates and the registry validator correctly refuses. They
+          become executable through the harness when project.current_milestone
+          advances past them.
+      - check: cumulative gate registry
+        outcome: passed_locally
+        detail: >-
+          agent eval gates reports 247 active gates across Milestones 0 through
+          12 with 247 passing and none failing, and 77 pending across Milestones
+          13 through 16, for the 324 registry entries the milestone map
+          declares. agent eval gates --area memory reports Milestone 9 with
+          fourteen passing, Milestone 10 with fifteen passing, and Milestone 16
+          with nineteen pending. Both invocations exit zero. The verified gate
+          ceiling stays at Milestone 12.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          make test-integration passes all 130 selected tests against
+          PostgreSQL 16 on the dedicated development database, with 1566
+          deselected.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          pytest -m "not live" passes all 1694 tests with 2 deselected.
+      - check: Alembic head round trip
+        outcome: passed_locally
+        detail: >-
+          alembic upgrade head brings the development database to revision
+          d4b1e7a90c62, which equals EXPECTED_REVISION in
+          src/agent_core/adapters/persistence/revision.py, and alembic check
+          detects no new upgrade operations, so the ORM metadata and the
+          migration graph agree.
+      - check: provider-memory evidence republished at formation@8
+        outcome: passed
+        detail: >-
+          One live run of agent eval memory-formation at build
+          3b3c972b3003cdca6881d857b931401999f49545 passed the typed activation
+          gate and atomically published
+          src/agent_core/memory/release_evidence/openai-balanced-gpt-5.6-sol-default-formation8.json
+          for the exact tuple provider openai, model gpt-5.6-sol, model policy
+          balanced, policy profile default, compiled policy version
+          default@8905b6f85895+hb03f69cf, extractor provider-assisted-v2, and
+          formation policy formation@8. It read the 25-case corpus at digest
+          7bc0339328e23d9d9a02e031a909e82533555dfe4110e82c087c80a66bacde48 with
+          21 positive cases and a floor of 17 fully supported ones. The provider
+          arm fully supported 17 cases against the deterministic arm's 9, and
+          supported 20 labeled candidates against the deterministic arm's 12, so
+          the lift condition held. Both arms fabricated nothing and neither
+          recorded a policy failure, so the symmetric no-fabrication and
+          no-policy-regression conditions held. One case fell back
+          deterministically on a transient normalized provider stream failure
+          and the gate still passed. Wall time was 90 seconds. Spend is bounded
+          by the pre-admission ceiling of USD 1.25, which is the 25 cases times
+          the extractor's fixed USD 0.05 per-call budget; the command publishes
+          no aggregate spend field, so the exact figure is not recorded. The
+          superseded formation@4 artifact was deleted in the same change.
+      - check: live memory-benchmark arm
+        outcome: failed_gate
+        detail: >-
+          One live run of agent eval memory-benchmark --no-deterministic-only at
+          build 3b3c972b3003cdca6881d857b931401999f49545 failed its
+          incomplete-runs condition with 2 incomplete runs and therefore
+          published no artifact, which is the designed behavior: a failing run
+          prints diagnostics and writes nothing. Every other published pass
+          condition was met with margin. Lift was 45 against a derived minimum
+          of 11, from 57 correct with-memory answers against 12 without memory
+          over 54 answerable probes. Recoverable correctness was 45 of 48
+          against a minimum of 39. Abstention correctness was 12 of 12 against a
+          minimum of 10. Protected leaks in answers were 0. With-memory policy
+          failures were 0 and did not exceed the without-memory arm's 0. The
+          ceiling was never hit and the arm was never stopped. Total spend was
+          USD 1.111295 of the USD 4.00 pre-admission ceiling. Latency was 3169
+          ms at p50 and 6399 ms at p95 and wall time was 7 minutes 22 seconds
+          over 66 probes in two arms. The two incomplete runs were both
+          without-memory arms that failed after zero model calls at zero cost in
+          about five seconds, the signature of a transient transport failure
+          rather than a quality result. This artifact is milestone evidence and
+          not a CI input: gate.memory.bench_evidence_publish is satisfied by the
+          unit-level publication proof, which passes. Republishing costs another
+          live invocation and is an owner decision.
+      - check: benchmark baseline exactness
+        outcome: passed_locally
+        detail: >-
+          gate.memory.bench_baseline_current passed at the candidate head before
+          the re-record, proving the checked-in baseline already equaled a fresh
+          deterministic run. The baseline was then removed and re-recorded once
+          as the milestone's closing act at build
+          3b3c972b3003cdca6881d857b931401999f49545. The whole diff is the build
+          reference and the recording timestamp: the aggregate metrics block and
+          all 66 probe rows are identical, so no metric moved. The gate passes
+          again on the re-recorded file.
+    remaining:
+      - hosted CI on the final head
+      - the CodeRabbit review loop on the dev to main pull request
 
 # Evidence for completed milestones 0 through 12 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -217,5 +333,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-22T23:36:52Z
-last_reviewed_commit: fdeca05
+last_updated: 2026-08-23T08:47:50Z
+last_reviewed_commit: 3b3c972
