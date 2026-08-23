@@ -30,6 +30,7 @@ from agent_core.domain.messages import (
     ResolvedModel,
     ScriptedTurn,
 )
+from agent_core.memory.formation import FORMATION_POLICY_VERSION
 from agent_core.memory.model_extraction import (
     MemoryExtractionAudit,
     ModelAssistedCandidateExtractor,
@@ -320,7 +321,7 @@ async def test_routed_composition_does_not_activate_rich_extraction_without_evid
     assert [(item.subject, item.statement) for item in result.beliefs] == [
         ("daughter", "User has at least one daughter.")
     ]
-    assert result.run.policy_version == "formation@5"
+    assert result.run.policy_version == FORMATION_POLICY_VERSION
     assert provider.requests == []
     assert audits == []
     assert len(selections) == 1

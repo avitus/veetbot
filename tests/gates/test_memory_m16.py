@@ -15,9 +15,11 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.config import Settings
+from agent_core.domain.context import WorkingState
 from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
+    MemoryAuthority,
     MemoryStatus,
     RecallMoment,
     RecallProfile,
@@ -26,8 +28,10 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import (
     FakeModelScript,
+    ScriptedToolCall,
     ScriptedTurn,
     TextPart,
+    ToolResultItem,
     UserMessage,
 )
 from agent_core.domain.policies import TrustLevel
@@ -52,7 +56,12 @@ from agent_core.evals.memory_benchmark_driver import (
     run_deterministic_benchmark,
     run_deterministic_scenario,
 )
-from agent_core.memory.formation import SESSION_IDLE_SECONDS, DeterministicCandidateExtractor
+from agent_core.memory.formation import (
+    FORMATION_POLICY_VERSION,
+    MAX_INFERRED_CONFIDENCE,
+    SESSION_IDLE_SECONDS,
+    DeterministicCandidateExtractor,
+)
 from agent_core.memory.profiles import (
     FormationProfile,
     MemoryProfiles,
@@ -1035,3 +1044,114 @@ async def test_snapshot_correction_lines_never_yield_and_prefix_is_stable(
         assert len(squeezed_blocks) == 1
         assert line in squeezed_blocks[0]
         assert "<memory" not in squeezed_blocks[0]
+
+
+# Session events are allocated in order from one: the session's creation, the
+# tool result seeded before the run, then the run's own user message. The test
+# asserts both, so a change in that order fails loudly instead of silently
+# re-pointing the scripted provenance.
+_TOOL_EVENT_SEQUENCE = 2
+_USER_EVENT_SEQUENCE = 3
+
+
+async def test_established_facts_enter_formation_as_affirmed_candidates(tmp_path: Path) -> None:
+    """A fact the run established from a user event forms; a tool-sourced one does not.
+
+    One run writes two established facts through the control tool: one whose
+    provenance is the user's own message and one whose provenance is a tool
+    result already in the session. After the idle boundary consolidates the
+    session, exactly the first is a belief — affirmed, provisional, capped at
+    the inferred confidence, and carrying the fact's provenance rather than
+    the window's — while the tool-sourced fact is never proposed at all.
+    """
+
+    clock = FixedClock(_START)
+    helios = "The Helios deploy gate requires two approvals."
+    ares = "The Ares cluster belongs to the platform team."
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="context.update_working_state",
+                        call_id="establish-facts",
+                        arguments={
+                            "add_facts": [
+                                {
+                                    "statement": helios,
+                                    "source_event_ids": [_USER_EVENT_SEQUENCE],
+                                },
+                                {
+                                    "statement": ares,
+                                    "source_event_ids": [_TOOL_EVENT_SEQUENCE],
+                                },
+                            ]
+                        },
+                    )
+                ]
+            ),
+            ScriptedTurn(text="Noted."),
+        ],
+        on_exhausted="repeat_last",
+    )
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=script,
+        clock=clock,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        async with composition.uow_factory() as uow:
+            tool_event = await uow.events.append(
+                NewEvent(
+                    session_id=session_id,
+                    run_id=None,
+                    event_type="tool.call.completed",
+                    actor_type="tool",
+                    payload={
+                        "name": "web.fetch",
+                        "call_id": "seeded-tool-call",
+                        "reason_code": "tool.succeeded",
+                        "result_item": ToolResultItem(
+                            call_id="seeded-tool-call",
+                            content=[TextPart(text=ares)],
+                            trust=TrustLevel.EXTERNAL_UNTRUSTED,
+                        ).model_dump(mode="json"),
+                    },
+                )
+            )
+        assert tool_event.sequence == _TOOL_EVENT_SEQUENCE
+        run = await composition.runs.wait_terminal(
+            await composition.runs.submit(helios, session_id)
+        )
+        assert run.status is RunStatus.COMPLETED
+
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+        user_event = next(event for event in events if event.event_type == "user.message.created")
+        assert user_event.sequence == _USER_EVENT_SEQUENCE
+        state_event = next(
+            event for event in events if event.event_type == "context.working_state.updated"
+        )
+        state = WorkingState.model_validate(state_event.payload["working_state"])
+        assert [fact.statement for fact in state.established_facts] == [helios, ares]
+        assert await composition.memory.list_memories() == []
+
+        clock.advance(timedelta(seconds=SESSION_IDLE_SECONDS + 1))
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+
+        beliefs = await composition.memory.list_memories()
+        audits = await composition.memory.list_consolidations(session_id=session_id)
+
+    assert [(belief.subject, belief.statement) for belief in beliefs] == [("Helios", helios)]
+    formed = beliefs[0]
+    assert formed.authority is MemoryAuthority.AFFIRMED
+    assert formed.status is MemoryStatus.PROVISIONAL
+    assert formed.confidence <= MAX_INFERRED_CONFIDENCE
+    assert formed.belief_type is BeliefType.FACT
+    assert formed.source_event_ids == [_USER_EVENT_SEQUENCE]
+    assert [
+        (audit.candidates_proposed, audit.committed, audit.rejected, audit.policy_version)
+        for audit in audits
+    ] == [(1, 1, 0, FORMATION_POLICY_VERSION)]

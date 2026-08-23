@@ -36,6 +36,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.memory.formation import DeterministicCandidateExtractor, GovernedMemoryService
 from agent_core.memory.provider_extraction import (
+    PROVIDER_FORMATION_POLICY_VERSION,
     ProviderAssistedCandidateExtractor,
     provider_extraction_evidence_matches,
 )
@@ -88,7 +89,7 @@ class _AdvancingCandidateExtractor:
 def _provider_evidence(build_ref: str) -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@6",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         model_policy="fake",
         provider="fake",
         model="scripted",
@@ -308,7 +309,7 @@ def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:
     )
     evidence = ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@6",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         model_policy=resolved.policy_name,
         provider=resolved.provider,
         model=resolved.model,
@@ -487,7 +488,7 @@ async def test_transient_provider_failure_retries_the_same_prefix_after_backoff(
         SequenceIdFactory(UUID(int=value) for value in range(9_700, 9_900)),
         principal(),
         extractor=extractor,
-        policy_version="formation@6",
+        policy_version=PROVIDER_FORMATION_POLICY_VERSION,
     )
 
     first = await service.run(
@@ -577,7 +578,7 @@ async def test_retryable_provider_failure_is_bounded_and_audits_exhaustion() -> 
         SequenceIdFactory(UUID(int=value) for value in range(10_100, 10_300)),
         principal(),
         extractor=extractor,
-        policy_version="formation@6",
+        policy_version=PROVIDER_FORMATION_POLICY_VERSION,
     )
 
     results = []

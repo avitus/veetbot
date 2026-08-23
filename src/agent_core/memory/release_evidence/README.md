@@ -5,9 +5,14 @@ by release engineering. The runtime loads only `*.json` files and still requires
 an exact extractor, formation-policy, model-policy, provider, model, policy
 profile, and compiled-policy-version match. This directory intentionally contains
 only artifacts that passed the live provider lift, positive-coverage, symmetric
-no-fabrication, and policy-regression gates. The OpenAI balanced/default
-`formation@4` artifact was produced from the 24-case corpus at build
-`7de9a98f550e60130f7f7131d78ca537e720685b`. It remains as historical evaluation
-evidence, but it does not match the current `formation@6` policy and therefore
-cannot activate provider assistance. A reviewed current-policy artifact must pass
-the same exact startup tuple validation as operator-supplied evidence.
+no-fabrication, and policy-regression gates. The current policies are
+deterministic `formation@7` and provider-assisted `formation@8`. The OpenAI
+balanced/default `formation@4` artifact was produced from the 24-case corpus at
+build `7de9a98f550e60130f7f7131d78ca537e720685b`. It remains as historical
+evaluation evidence, but it does not match the current `formation@8` policy and
+therefore cannot activate provider assistance: under the automatic selection
+mode the composition falls back to the deterministic extractor and records a
+content-free selection audit saying why, and under the required mode startup
+refuses. That fallback stands until reviewed `formation@8` evidence is
+published. A reviewed current-policy artifact must pass the same exact startup
+tuple validation as operator-supplied evidence.

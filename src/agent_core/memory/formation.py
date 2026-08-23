@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from contextlib import suppress
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from agent_core.domain.agents import Principal
+from agent_core.domain.context import WorkingState
 from agent_core.domain.errors import (
     ConflictError,
     NotFoundError,
@@ -49,7 +53,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
 
-FORMATION_POLICY_VERSION = "formation@5"
+FORMATION_POLICY_VERSION = "formation@7"
 MAX_AUTOMATIC_CANDIDATES = 12
 MAX_EXTRACTOR_PROPOSALS = 256
 MAX_INFERRED_CONFIDENCE = 0.55
@@ -58,6 +62,10 @@ SESSION_IDLE_SECONDS = 30
 TRACE_EXPIRY_SWEEP_LIMIT = 500
 PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
 PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
+WORKING_STATE_EVENT = "context.working_state.updated"
+
+logger = logging.getLogger(__name__)
+
 # The citation form the renderer emits, read back exactly as it is written:
 # eight lower-case hex digits of the belief identifier (retrieval.py:576).
 _CITED_BELIEF = re.compile(r"\[m:([0-9a-f]{8})\]")
@@ -105,6 +113,68 @@ _RECURRING_SYMPTOM = re.compile(
     re.I,
 )
 _SYMPTOM_VERBS = {"hurting": "hurts", "aching": "aches", "tingling": "tingles"}
+# Subject derivation for an established fact. The trim set is the punctuation
+# that can sit around a word; the terminator set is the punctuation that ends
+# an entity span; the openers are the words a sentence capitalizes without
+# naming anything.
+_SUBJECT_TRIM = " \t\"'\u2018\u2019\u201c\u201d()[]{}.,:;!?"
+_SUBJECT_TERMINATORS = ".,:;!?\"'\u2019)]}"
+_SUBJECT_LIMIT = 512
+_SENTENCE_OPENERS = frozenset(
+    {
+        "a",
+        "after",
+        "all",
+        "an",
+        "and",
+        "any",
+        "as",
+        "at",
+        "before",
+        "both",
+        "but",
+        "by",
+        "during",
+        "each",
+        "every",
+        "for",
+        "he",
+        "her",
+        "here",
+        "his",
+        "i",
+        "if",
+        "in",
+        "it",
+        "its",
+        "my",
+        "no",
+        "not",
+        "of",
+        "on",
+        "one",
+        "our",
+        "she",
+        "some",
+        "that",
+        "the",
+        "their",
+        "them",
+        "these",
+        "they",
+        "this",
+        "those",
+        "to",
+        "us",
+        "user",
+        "we",
+        "when",
+        "while",
+        "with",
+        "you",
+        "your",
+    }
+)
 
 
 def contains_memory_injection(value: str) -> bool:
@@ -185,6 +255,39 @@ def _preference_subject(value: str) -> str:
     elif topic.endswith("s") and not topic.endswith("ss") and len(topic) > 3:
         topic = topic[:-1]
     return f"{topic} preference"
+
+
+def _fact_subject(statement: str) -> str:
+    """Name the subject of one established fact, from the statement alone.
+
+    The subject is the first capitalized entity span in the statement. A word
+    that only opens the sentence is capitalized by grammar rather than by
+    being a name, so the closed set below is skipped in that position and
+    nowhere else. A statement with no entity span falls back to its first
+    three words, which keeps the derivation total and dependent on nothing but
+    the text, so the same fact always reaches the same belief.
+    """
+
+    tokens = statement.split()
+    for index, token in enumerate(tokens):
+        bare = token.strip(_SUBJECT_TRIM)
+        if not bare[:1].isupper():
+            continue
+        if index == 0 and bare.casefold() in _SENTENCE_OPENERS:
+            continue
+        span = [bare]
+        cursor = index
+        while (
+            cursor + 1 < len(tokens)
+            and tokens[cursor].strip(_SUBJECT_TERMINATORS) == tokens[cursor]
+        ):
+            following = tokens[cursor + 1].strip(_SUBJECT_TRIM)
+            if not following[:1].isupper():
+                break
+            span.append(following)
+            cursor += 1
+        return " ".join(span)[:_SUBJECT_LIMIT]
+    return " ".join(token.strip(_SUBJECT_TRIM) for token in tokens[:3]).strip()[:_SUBJECT_LIMIT]
 
 
 class DeterministicCandidateExtractor:
@@ -899,7 +1002,6 @@ class GovernedMemoryService:
         provider_failure = (
             extracted.provider_failure if isinstance(extracted, MemoryExtractionResult) else None
         )
-        candidates = extracted[:MAX_AUTOMATIC_CANDIDATES]
         trusted_user_sources = {
             event.sequence
             for event in events
@@ -907,6 +1009,15 @@ class GovernedMemoryService:
             and event.actor_type == "principal"
             and event.actor_id == self._principal.principal_id
         }
+        # Working state is formation's second input. Its facts are the agent's
+        # own conclusions, so they enter ahead of the extractor's guesses and
+        # may displace them; the displaced proposals are counted, not dropped.
+        proposals: list[tuple[MemoryCandidate, MemoryAuthority]] = [
+            (candidate, MemoryAuthority.AFFIRMED)
+            for candidate in self._established_fact_candidates(events, scope, trusted_user_sources)
+        ]
+        proposals.extend((candidate, MemoryAuthority.INFERRED) for candidate in extracted)
+        candidates = proposals[:MAX_AUTOMATIC_CANDIDATES]
         by_sequence = {event.sequence: event for event in events}
         after = max((event.sequence for event in events), default=watermark)
         formation_requests = [
@@ -966,11 +1077,11 @@ class GovernedMemoryService:
                     return no_work(current_watermark)
                 consolidation_id = self._ids.new_id()
                 beliefs: list[MemoryRecord] = []
-                rejected = len(extracted) - len(candidates)
+                rejected = len(proposals) - len(candidates)
                 committed = 0
                 reinforced = 0
                 superseded = 0
-                for candidate in [] if should_retry else candidates:
+                for candidate, authority in [] if should_retry else candidates:
                     if (
                         candidate.proposed_scope != scope
                         or not set(candidate.source_event_ids) <= trusted_user_sources
@@ -998,7 +1109,7 @@ class GovernedMemoryService:
                             source_event_ids=candidate.source_event_ids,
                             origin_trust=TrustLevel.USER,
                             explicit=False,
-                            authority=MemoryAuthority.INFERRED,
+                            authority=authority,
                             polarity=candidate.polarity,
                             confidence=candidate.model_confidence,
                             valid_from=candidate.valid_from,
@@ -1101,7 +1212,7 @@ class GovernedMemoryService:
                     watermark_after=watermark_after,
                     model=self._extractor.name,
                     policy_version=self._policy_version,
-                    candidates_proposed=len(extracted),
+                    candidates_proposed=len(proposals),
                     committed=committed,
                     reinforced=reinforced,
                     superseded=superseded,
@@ -1113,6 +1224,60 @@ class GovernedMemoryService:
             finally:
                 await uow.maintenance.release_memory_session(self._principal, session_id)
         return ConsolidationResult(run=audit, beliefs=beliefs)
+
+    def _established_fact_candidates(
+        self,
+        events: list[EventEnvelope],
+        scope: str,
+        trusted_user_sources: set[int],
+    ) -> list[MemoryCandidate]:
+        """Propose the working-state facts this window established from user events.
+
+        Only the last working-state update in the window is read: it is the
+        state the session ends holding, and the earlier ones are its drafts.
+        The manager stamps every fact `EXTERNAL_UNTRUSTED` because a run never
+        upgrades its own trust, so trust is derived here instead — a fact
+        qualifies exactly when every event it cites is an owning-principal user
+        message inside this window.
+        """
+
+        if not self._profile.established_facts_enabled:
+            return []
+        state_event = next(
+            (event for event in reversed(events) if event.event_type == WORKING_STATE_EVENT),
+            None,
+        )
+        if state_event is None:
+            return []
+        try:
+            state = WorkingState.model_validate(state_event.payload.get("working_state"))
+        except ValidationError:
+            logger.warning(
+                "memory_working_state_payload_invalid",
+                extra={"event_sequence": state_event.sequence},
+            )
+            return []
+        candidates: list[MemoryCandidate] = []
+        for fact in state.established_facts:
+            if not set(fact.source_event_ids) <= trusted_user_sources:
+                continue
+            subject = _fact_subject(fact.statement)
+            if not subject:
+                continue
+            candidates.append(
+                MemoryCandidate(
+                    belief_type=BeliefType.FACT,
+                    subject=subject,
+                    statement=fact.statement,
+                    polarity=Polarity.ASSERT,
+                    source_event_ids=list(fact.source_event_ids),
+                    model_confidence=MAX_INFERRED_CONFIDENCE,
+                    proposed_scope=scope,
+                    proposed_portability=portability_ceiling(BeliefType.FACT),
+                    sensitivity_guess=Sensitivity.INTERNAL,
+                )
+            )
+        return candidates
 
     async def diagnose(self, session_id: UUID) -> MemoryDiagnosis:
         """Return content-free formation evidence and governed beliefs for one session."""

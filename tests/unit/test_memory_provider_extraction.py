@@ -43,6 +43,7 @@ from agent_core.domain.messages import (
 )
 from agent_core.memory.formation import DeterministicCandidateExtractor
 from agent_core.memory.provider_extraction import (
+    PROVIDER_FORMATION_POLICY_VERSION,
     MemoryClaimKind,
     ProviderAssistedCandidateExtractor,
     _merge_candidates,
@@ -80,7 +81,7 @@ class _BlockingProvider:
 def _evidence() -> ProviderExtractionEvaluationEvidence:
     return ProviderExtractionEvaluationEvidence(
         extractor_version="provider-assisted-v2",
-        formation_policy_version="formation@6",
+        formation_policy_version=PROVIDER_FORMATION_POLICY_VERSION,
         model_policy="fake",
         provider="fake",
         model="scripted",
@@ -1503,7 +1504,7 @@ async def test_evaluated_provider_extractor_is_activated_by_composition(
         ("daughter", "User has at least one daughter.")
     ]
     assert result.run.model.startswith("provider-assisted-v2:fake:scripted")
-    assert result.run.policy_version == "formation@6"
+    assert result.run.policy_version == PROVIDER_FORMATION_POLICY_VERSION
 
 
 async def test_provider_extractor_has_a_non_activating_evaluation_mode() -> None:

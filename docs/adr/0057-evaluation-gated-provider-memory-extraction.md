@@ -11,6 +11,12 @@
 > provider-failure lifecycle are deterministic `formation@5` and
 > provider-assisted `formation@6`. The `formation@4` evidence and version in this
 > record are historical and do not activate the repaired tuple.
+>
+> **Updated by ADR-0069:** admitting working-state established facts as
+> `AFFIRMED` candidates moves the active policies again, to deterministic
+> `formation@7` and provider-assisted `formation@8`. Until reviewed
+> `formation@8` evidence is published, `auto` falls back to the deterministic
+> extractor and `required` refuses startup.
 
 ## Context
 

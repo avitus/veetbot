@@ -17,6 +17,7 @@ import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
+from agent_core.domain.context import Fact, WorkingState
 from agent_core.domain.errors import ConflictError, ToolValidationError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
@@ -31,6 +32,7 @@ from agent_core.domain.memory import (
     RejectionKind,
 )
 from agent_core.domain.messages import TextPart
+from agent_core.domain.policies import TrustLevel
 from agent_core.memory.formation import (
     MAX_INFERRED_CONFIDENCE,
     DeterministicCandidateExtractor,
@@ -1081,3 +1083,200 @@ async def test_record_usage_credits_nothing_for_an_ambiguous_short_identifier() 
     assert citation.payload["cited"] == [str(distinct.id)]
     assert citation.payload["uncited"] == []
     assert citation.payload["ambiguous"] == 1
+
+
+def _fact(statement: str, sources: list[int]) -> Fact:
+    """One working-state fact as the manager stamps it: never self-trusted."""
+
+    return Fact(
+        statement=statement,
+        source_event_ids=sources,
+        trust_level=TrustLevel.EXTERNAL_UNTRUSTED,
+        established_at=NOW,
+    )
+
+
+async def _working_state_event(
+    factory: MemoryUnitOfWorkFactory,
+    facts: list[Fact] | None = None,
+    *,
+    state: object | None = None,
+) -> int:
+    """Append the working-state update a run's control tool would have written."""
+
+    payload = (
+        state
+        if state is not None
+        else WorkingState(established_facts=list(facts or ())).model_dump(mode="json")
+    )
+    async with factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="context.working_state.updated",
+                actor_type="runtime",
+                payload={"working_state": payload, "source": "control_tool"},
+            )
+        )
+    return event.sequence
+
+
+async def test_established_facts_with_trusted_sources_become_affirmed_provisional_candidates() -> (
+    None
+):
+    """A fact the run established from a user event forms at affirmed authority.
+
+    The statement is not first person, so the deterministic extractor proposes
+    nothing and the only belief in the result is the one the working state
+    contributed: provisional, capped at the inferred confidence, carrying the
+    fact's own provenance rather than the whole window's.
+    """
+
+    _clock, factory, service, _retriever = await formation_stack()
+    source = await user_event(factory, "The Helios deploy gate requires two approvals.")
+    await _working_state_event(
+        factory,
+        [_fact("The Helios deploy gate requires two approvals.", [source])],
+    )
+
+    result = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+
+    assert [(belief.subject, belief.statement) for belief in result.beliefs] == [
+        ("Helios", "The Helios deploy gate requires two approvals.")
+    ]
+    formed = result.beliefs[0]
+    assert formed.authority is MemoryAuthority.AFFIRMED
+    assert formed.status is MemoryStatus.PROVISIONAL
+    assert formed.confidence == MAX_INFERRED_CONFIDENCE
+    assert formed.belief_type is BeliefType.FACT
+    assert formed.portability is portability_ceiling(BeliefType.FACT)
+    assert formed.source_event_ids == [source]
+    assert formed.scope == "general"
+    assert (result.run.candidates_proposed, result.run.committed, result.run.rejected) == (1, 1, 0)
+
+
+async def test_established_facts_with_untrusted_or_foreign_sources_are_rejected() -> None:
+    """Trust is derived at selection, so only owning-principal user events qualify.
+
+    Three facts name a model turn, another principal's message, and a trusted
+    event mixed with the model turn. Every one fails the subset test and is
+    never proposed, while the fourth fact — sourced from the owning
+    principal's own message — proves the pass was running the whole time.
+    """
+
+    _clock, factory, service, _retriever = await formation_stack()
+    trusted = await user_event(factory, "The Helios deploy gate requires two approvals.")
+    async with factory() as uow:
+        model_turn = await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="assistant.message.completed",
+                actor_type="model",
+                payload={"content": "The Ares cluster is owned by the platform team."},
+            )
+        )
+        foreign = await uow.events.append(
+            NewEvent(
+                session_id=SESSION_ID,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id="another-principal",
+                payload={"content": "The Nyx budget is fifty thousand dollars."},
+            )
+        )
+    await _working_state_event(
+        factory,
+        [
+            _fact("The Ares cluster is owned by the platform team.", [model_turn.sequence]),
+            _fact("The Nyx budget is fifty thousand dollars.", [foreign.sequence]),
+            _fact("The Hydra queue is drained nightly.", [trusted, model_turn.sequence]),
+            _fact("The Helios deploy gate requires two approvals.", [trusted]),
+        ],
+    )
+
+    result = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+
+    assert [belief.subject for belief in result.beliefs] == ["Helios"]
+    assert (result.run.candidates_proposed, result.run.committed, result.run.rejected) == (1, 1, 0)
+
+
+async def test_established_facts_count_toward_the_twelve_candidate_ceiling() -> None:
+    """Facts are prepended, so they may displace extractor proposals.
+
+    Twelve owned devices and two established facts propose fourteen
+    candidates for twelve commit slots. The two facts take the first two, the
+    last two extractor proposals are displaced, and the displaced pair is
+    counted as rejected rather than silently dropped.
+    """
+
+    _clock, factory, service, _retriever = await formation_stack()
+    owned = " and ".join(f"a Device-{index}" for index in range(1, 13))
+    await user_event(factory, f"I have {owned}.")
+    source = await user_event(
+        factory,
+        "The Helios deploy gate requires two approvals. Ares rollbacks need a signed manifest.",
+    )
+    await _working_state_event(
+        factory,
+        [
+            _fact("The Helios deploy gate requires two approvals.", [source]),
+            _fact("Ares rollbacks need a signed manifest.", [source]),
+        ],
+    )
+
+    result = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+
+    assert (result.run.candidates_proposed, result.run.committed, result.run.rejected) == (
+        14,
+        12,
+        2,
+    )
+    assert [belief.subject for belief in result.beliefs[:2]] == ["Helios", "Ares"]
+    assert [belief.authority for belief in result.beliefs[:2]] == [
+        MemoryAuthority.AFFIRMED,
+        MemoryAuthority.AFFIRMED,
+    ]
+    assert [belief.subject for belief in result.beliefs[2:]] == [
+        f"Device-{index}" for index in range(1, 11)
+    ]
+    assert all(belief.authority is MemoryAuthority.INFERRED for belief in result.beliefs[2:])
+
+
+async def test_malformed_working_state_event_is_skipped() -> None:
+    """A working-state payload that will not validate costs the run nothing."""
+
+    _clock, factory, service, _retriever = await formation_stack()
+    await user_event(factory, "I have an Apple Watch.")
+    await _working_state_event(factory, state={"established_facts": [{"statement": "no sources"}]})
+
+    result = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+
+    assert [belief.subject for belief in result.beliefs] == ["Apple Watch"]
+    assert result.beliefs[0].authority is MemoryAuthority.INFERRED
+    assert (result.run.candidates_proposed, result.run.committed, result.run.rejected) == (1, 1, 0)
+
+
+async def test_established_facts_are_ignored_when_the_profile_disables_them() -> None:
+    """The pass is behind `formation.established_facts_enabled`."""
+
+    clock, factory, _service, _retriever = await formation_stack()
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(7_000, 7_200)),
+        principal(),
+        formation_profile=FormationProfile(established_facts_enabled=False),
+    )
+    source = await user_event(factory, "The Helios deploy gate requires two approvals.")
+    await _working_state_event(
+        factory,
+        [_fact("The Helios deploy gate requires two approvals.", [source])],
+    )
+
+    result = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+
+    assert result.beliefs == []
+    assert (result.run.candidates_proposed, result.run.committed, result.run.rejected) == (0, 0, 0)
