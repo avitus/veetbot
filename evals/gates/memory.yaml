@@ -292,4 +292,4 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**Re-derivation is opt-in and replays rejections.** The command refuses without an explicit confirmation, and with it re-consolidates from watermark zero without resurrecting a rejected belief."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_replay_is_opt_in_and_replays_rejections

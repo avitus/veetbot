@@ -165,7 +165,7 @@ milestones:
       - opt-in loaders for three public datasets, never vendored
       - memory profiles as configuration, trace expiry, lexical parity
       - decay sweep, usage feedback, recall delta, correction lines
-      - established facts at affirmed authority, surfaced conflicts, rederive
+      - established facts at affirmed authority, surfaced conflicts, opt-in re-derivation
     deferred_scope:
       - semantic arm and pgvector, external memory provider, persona surface
       - temporal entity graph, session history and artifacts as sources

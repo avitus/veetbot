@@ -1049,10 +1049,10 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     authority with a later source or instant supersedes, equal authority with no
     ordering conflicts, and polarity alone never conflicts. Registered as
     `gate.memory.authority_recency`, property. **M16.**
-19. **Re-derivation is opt-in and replays rejections.** The command refuses
-    without an explicit confirmation, and with it re-consolidates from watermark
-    zero without resurrecting a rejected belief. Registered as
-    `gate.memory.rederive_opt_in`, case. **M16.**
+19. **Re-derivation is opt-in and replays rejections.** `agent memory replay
+    --session --confirm` refuses without an explicit confirmation, and with it
+    re-consolidates from watermark zero without resurrecting a rejected belief.
+    Registered as `gate.memory.rederive_opt_in`, case. **M16.**
 
 ## Open questions
 
