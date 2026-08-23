@@ -16,6 +16,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent_core.config import ConfigurationError
+from agent_core.domain.memory import BeliefType
 
 MEMORY_PROFILE_DOCUMENT = "memory/profiles.yaml"
 
@@ -41,6 +42,22 @@ class DecayTauDays(_ProfileModel):
     relationship: int = Field(default=365, ge=1)
     user_model_attr: int = Field(default=180, ge=1)
     procedure_pointer: int = Field(default=90, ge=1)
+
+    def for_belief_type(self, belief_type: BeliefType) -> int:
+        """The time constant this belief type decays on.
+
+        Ranking and the decay sweep read the same table through one lookup, so
+        the age at which a belief stops counting as reinforced is the age at
+        which the sweep starts taking its confidence away.
+        """
+
+        return {
+            BeliefType.FACT: self.fact,
+            BeliefType.PREFERENCE: self.preference,
+            BeliefType.RELATIONSHIP: self.relationship,
+            BeliefType.USER_MODEL_ATTR: self.user_model_attr,
+            BeliefType.PROCEDURE_POINTER: self.procedure_pointer,
+        }[belief_type]
 
 
 class UsageDeltas(_ProfileModel):

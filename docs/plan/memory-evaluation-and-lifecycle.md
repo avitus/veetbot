@@ -20,7 +20,7 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:748), and formation precision and
+scenarios (memory-retrieval-and-ranking.md:751), and formation precision and
 recall of consequential facts (memory-formation-and-consolidation.md:658).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
@@ -28,10 +28,10 @@ therefore been argued from reading the diff.
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
 (memory-formation-and-consolidation.md:263), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:790),
+utility without ever raising confidence (memory-retrieval-and-ranking.md:793),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:785), and re-derivation
+resolved at read time (memory-retrieval-and-ranking.md:788), and re-derivation
 that is opt-in per principal (memory-formation-and-consolidation.md:685) are
 all written down, and none of them runs.
 
@@ -92,6 +92,7 @@ evals/capability/memory-benchmark.v1.json     scenarios, sessions,
             |
             +--> compare_to_baseline --> memory-benchmark.baseline.json
             |                            drift | regressions | improvements
+            |                            shifts (attribution partition)
             v
   run_live_benchmark   RUN_LIVE_MODEL_TESTS=1, ceiling USD 4.00
             |          with-memory arm and without-memory arm, same probes
@@ -427,13 +428,16 @@ drift          the corpus digest, the benchmark version, a policy version, the
                expected beliefs, needed total) differs. The baseline is not
                comparable; it is invalid, not merely worse.
 regressions    a higher-is-better count fell — supported beliefs, needed
-               formed, needed recalled, the attribution counts, completed
-               probe runs — or a lower-is-better count rose — fabricated,
-               stale live, noise, dropped for budget, blocked, currency
-               violations, abstention leaks, false transfers, run policy
-               failures, distinct prefixes — or any per-probe row's
-               needed_recalled fell.
+               formed, needed recalled, completed probe runs — or a
+               lower-is-better count rose — fabricated, stale live, noise,
+               dropped for budget, blocked, currency violations, abstention
+               leaks, false transfers, run policy failures, distinct
+               prefixes — or any per-probe row's needed_recalled fell.
 improvements   the mirror image, reported and never required.
+shifts         an attribution count moved. The three partition needed
+               recalled by the moment that found the belief, so a move says
+               where recall happened rather than how much of it did; it is
+               reported and is neither a regression nor an improvement.
 ```
 
 Two gates read that comparison and they are deliberately different. "No
@@ -607,7 +611,11 @@ consolidation and the idle sweep; `scheduled_enabled` and
 `scheduled_interval_seconds` drive the decay sweep's cadence;
 `durable_item_share` reserves `ceil(share * max_items)` snapshot slots for
 preference, user-model, and `user`-scope beliefs, which is the reservation the
-retrieval specification already describes.
+retrieval specification already describes. The reservation is a floor and not
+also a ceiling: it holds slots against a burst of project beliefs, and a
+durable belief above the share is still seated while the snapshot has room, so
+"unused priming slots are not backfilled" bounds the priming set rather than
+the durable one.
 
 ## Trace retention, lexical parity, episode paging, and session scope
 
@@ -680,6 +688,17 @@ written through the existing reinforcement path so provenance and position
 ordering are unchanged. Explicit user statements are `ACTIVE` at high
 confidence and are never eligible.
 
+`MemoryStore` gains `list_idle(principal, reinforced_before, limit)` — live
+beliefs last reinforced at or before an instant, least recently reinforced
+first — and the sweep reads its window through it, cut at the shortest time
+constant any belief type carries and bounded by `decay.max_per_sweep`. The
+ordering is the point: decay gives every belief it touches a fresh store
+position, so a window ordered newest-first would refill with rows the sweep had
+just written while beliefs idle for years sank below the bound and were never
+swept. PostgreSQL serves it from `ix_memories_principal_idle`, since the
+existing `ix_memories_principal_live_position` orders by store position and can
+only filter the principal.
+
 Ranking gains the time term the decay design implies. The reinforcement
 contribution becomes
 
@@ -720,7 +739,7 @@ appears and were not already cited. A cited belief's `utility` rises by
 moves to now; a returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:790): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:793): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.

@@ -383,8 +383,11 @@ Filling the budget is not the objective.
   must not quietly resolve them at read time.
 - **Per-subject cap.** At most *n* beliefs per subject, so one heavily-discussed entity
   cannot consume the budget.
-- **Redundancy trim.** Drop near-duplicates by statement similarity, keeping the
-  higher-scored one and merging their provenance in the trace.
+- **Redundancy trim.** Drop an exact restatement, keeping the higher-scored one and
+  merging their provenance in the trace. Milestone 16 narrows the trim to that exact
+  collapse and demotes the merely similar with the near-duplicate penalty instead, so a
+  genuine second fact about one subject is not deleted for resembling the first
+  ([memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)).
 
 ### 7. Safety pass
 

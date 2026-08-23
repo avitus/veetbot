@@ -30,10 +30,12 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.memory.formation import (
+    MAX_INFERRED_CONFIDENCE,
     DeterministicCandidateExtractor,
     GovernedMemoryService,
     portability_ceiling,
 )
+from agent_core.memory.profiles import DecayProfile, FormationProfile
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
 from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal, session
 
@@ -65,6 +67,7 @@ async def _form(
     portability: Portability | None = None,
     explicit: bool = True,
     authority: MemoryAuthority = MemoryAuthority.USER,
+    confidence: float | None = None,
 ) -> MemoryRecord:
     sequence = await user_event(factory, statement)
     return await service.remember(
@@ -78,6 +81,7 @@ async def _form(
         source_event_ids=[sequence],
         explicit=explicit,
         authority=authority,
+        confidence=confidence,
     )
 
 
@@ -489,3 +493,153 @@ async def test_service_names_the_candidate_extractor_it_was_configured_with() ->
 
     assert service.extractor_name == DeterministicCandidateExtractor.name
     assert configured.extractor_name == "provider-assisted-test-v1"
+
+
+async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor() -> None:
+    """An idle provisional belief loses a step; one below the floor retires.
+
+    Both outcomes are written through the reinforcement path, so each takes a
+    fresh store position and announces itself as an event.
+    """
+
+    clock, factory, service, _retriever = await formation_stack()
+    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    weak = await _form(
+        factory,
+        service,
+        "The staging cluster is us-east-2.",
+        subject="staging cluster",
+        explicit=False,
+        confidence=0.2,
+    )
+    assert idle.status is MemoryStatus.PROVISIONAL
+    assert weak.confidence == pytest.approx(0.2)
+
+    clock.advance(timedelta(days=31))
+    result = await service.decay()
+
+    assert (result.decayed, result.retired) == (1, 1)
+    beliefs = {belief.id: belief for belief in await service.list_memories(include_inactive=True)}
+    decayed = beliefs[idle.id]
+    retired = beliefs[weak.id]
+    assert decayed.confidence == pytest.approx(0.5)
+    assert decayed.status is MemoryStatus.PROVISIONAL
+    assert decayed.valid_to is None
+    assert decayed.store_position > idle.store_position
+    assert decayed.updated_at == clock.now()
+    assert retired.confidence == pytest.approx(0.15)
+    assert retired.status is MemoryStatus.RETIRED
+    assert retired.valid_to == clock.now()
+    assert sorted(
+        event for event in await _memory_event_types(factory) if event != "memory.formed"
+    ) == ["memory.decayed", "memory.retired"]
+
+
+async def test_decay_sweep_skips_active_user_stated_and_recently_reinforced() -> None:
+    """Explicit user belief and a freshly corroborated one are both untouched.
+
+    The first is active at high confidence, which the sweep never selects; the
+    second is low enough to select but was reinforced inside its time constant,
+    which is what reinforcement resetting decay means.
+    """
+
+    clock, factory, service, _retriever = await formation_stack()
+    stated = await _form(factory, service, "Deploys are gated on CI.")
+    reinforced = await _form(
+        factory,
+        service,
+        "Retries are capped at three.",
+        subject="retry policy",
+        explicit=False,
+        confidence=0.3,
+    )
+    clock.advance(timedelta(days=31))
+    sequence = await user_event(factory, "Retries are capped at three.")
+    corroborated = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="Retries are capped at three.",
+        subject="retry policy",
+        scope="project-a",
+        source_event_ids=[sequence],
+        explicit=False,
+    )
+    assert corroborated.id == reinforced.id
+    assert corroborated.confidence < MAX_INFERRED_CONFIDENCE
+    clock.advance(timedelta(days=2))
+
+    result = await service.decay()
+
+    assert (result.decayed, result.retired) == (0, 0)
+    beliefs = {belief.id: belief for belief in await service.list_memories()}
+    assert beliefs[stated.id].confidence == pytest.approx(0.9)
+    assert beliefs[stated.id].status is MemoryStatus.ACTIVE
+    assert beliefs[reinforced.id] == corroborated
+
+
+async def test_decay_sweep_is_idempotent_within_interval() -> None:
+    """One belief loses one step per sweep interval, however often it runs."""
+
+    clock, factory, service, _retriever = await formation_stack()
+    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+    clock.advance(timedelta(days=31))
+
+    first = await service.decay()
+    once = (await service.list_memories())[0]
+    again = await service.decay()
+    twice = (await service.list_memories())[0]
+
+    assert (first.decayed, first.retired) == (1, 0)
+    assert (again.decayed, again.retired) == (0, 0)
+    assert twice == once
+    assert once.confidence == pytest.approx(0.5)
+    assert once.id == idle.id
+
+    # The guard is a window, not a stop: the next interval decays it again.
+    clock.advance(timedelta(days=2))
+    later = await service.decay()
+
+    assert (later.decayed, later.retired) == (1, 0)
+    assert (await service.list_memories())[0].confidence == pytest.approx(0.45)
+
+
+async def test_decay_sweep_reaches_the_oldest_idle_belief_past_its_window() -> None:
+    """A store larger than one sweep's ceiling still decays its oldest belief.
+
+    The window holds `max_per_sweep` beliefs, and a sweep that filled it with
+    the most recently written ones would never reach a long-idle belief: decay
+    hands every belief it touches a fresh store position, so the newest rows
+    are exactly the ones the sweep has already dealt with. One belief older
+    than the ceiling's worth of newer ones proves the window is ordered by
+    idleness instead.
+    """
+
+    clock, factory, _service, _retriever = await formation_stack()
+    ceiling = 3
+    service = GovernedMemoryService(
+        factory,
+        clock,
+        SequenceIdFactory(UUID(int=value) for value in range(7_000, 8_000)),
+        principal(),
+        formation_profile=FormationProfile(decay=DecayProfile(max_per_sweep=ceiling)),
+    )
+    idle = await _form(factory, service, "Deploys are gated on CI.", explicit=False)
+
+    clock.advance(timedelta(days=31))
+    newer = [
+        await _form(
+            factory,
+            service,
+            f"Region {index} is eu-west-{index}.",
+            subject=f"region {index}",
+            explicit=False,
+        )
+        for index in range(ceiling)
+    ]
+
+    result = await service.decay()
+
+    beliefs = {belief.id: belief for belief in await service.list_memories()}
+    assert (result.decayed, result.retired) == (1, 0)
+    assert beliefs[idle.id].confidence == pytest.approx(0.5)
+    assert [beliefs[belief.id] for belief in newer] == newer

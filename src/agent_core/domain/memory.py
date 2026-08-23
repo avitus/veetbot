@@ -360,6 +360,20 @@ class ConsolidationResult(BaseModel):
     beliefs: list[MemoryRecord] = Field(default_factory=list)
 
 
+class DecayResult(BaseModel):
+    """What one decay sweep changed, counted in disjoint outcomes.
+
+    `decayed` counts beliefs that lost a step of confidence and stayed live;
+    `retired` counts the ones the step carried below the floor, which are
+    closed rather than lowered. A belief is never in both.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    decayed: int = Field(default=0, ge=0)
+    retired: int = Field(default=0, ge=0)
+
+
 class MemoryDiagnosis(BaseModel):
     """Principal-scoped evidence explaining formation state for one session."""
 

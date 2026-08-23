@@ -621,3 +621,79 @@ async def test_postgres_trace_round_trip_user_view_and_conflict_detection(
         with pytest.raises(ConflictError):
             async with composition.uow_factory() as uow:
                 await uow.traces.record(drifted)
+
+
+async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
+    tmp_path: Path,
+) -> None:
+    """The decay window is the least recently reinforced live beliefs.
+
+    The shared database carries rows from other cases, so the ordering is
+    asserted over whatever the window returns and membership over this case's
+    own beliefs: written newest-first, only the two past the cutoff come back,
+    oldest first, and neither the freshly reinforced nor the retired one does.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memidle{uuid4().hex[:10]}"
+        now = composition.clock.now()
+
+        async def _seed(subject: str, idle_days: int, status: MemoryStatus) -> MemoryRecord:
+            reinforced_at = now - timedelta(days=idle_days)
+            async with composition.uow_factory() as uow:
+                record = MemoryRecord.model_validate(
+                    {
+                        "id": uuid4(),
+                        "tenant_id": composition.principal.tenant_id,
+                        "principal_id": composition.principal.principal_id,
+                        "scope": "integration",
+                        "subject": f"{subject}-{marker}",
+                        "statement": f"{subject} statement {marker}",
+                        "source_session_id": session_id,
+                        "source_event_ids": [1],
+                        "confidence": 0.5,
+                        "sensitivity": Sensitivity.INTERNAL,
+                        "valid_from": now - timedelta(days=idle_days + 1),
+                        "status": status,
+                        "valid_to": None if status is MemoryStatus.PROVISIONAL else now,
+                        "belief_type": BeliefType.FACT,
+                        "polarity": Polarity.ASSERT,
+                        "portability": Portability.CONTEXTUAL,
+                        "origin_scopes": ["integration"],
+                        "last_reinforced_at": reinforced_at,
+                        "formation_run_id": uuid4(),
+                        "consolidation_policy_version": "formation@1",
+                        "authority": MemoryAuthority.INFERRED,
+                        "store_position": await uow.memories.next_position(),
+                        "created_at": reinforced_at,
+                        "updated_at": reinforced_at,
+                    }
+                )
+                return await uow.memories.upsert_belief(record)
+
+        fresh = await _seed("fresh", 1, MemoryStatus.PROVISIONAL)
+        newer_idle = await _seed("newer-idle", 100, MemoryStatus.PROVISIONAL)
+        oldest_idle = await _seed("oldest-idle", 400, MemoryStatus.PROVISIONAL)
+        retired = await _seed("retired", 500, MemoryStatus.RETIRED)
+
+        async with composition.uow_factory() as uow:
+            window = await uow.memories.list_idle(
+                composition.principal,
+                reinforced_before=now - timedelta(days=50),
+                limit=500,
+            )
+            bounded = await uow.memories.list_idle(
+                composition.principal,
+                reinforced_before=now - timedelta(days=50),
+                limit=1,
+            )
+
+        stamps = [(record.last_reinforced_at, str(record.id)) for record in window]
+        mine = [record.id for record in window if marker in record.subject]
+        assert stamps == sorted(stamps)
+        assert mine == [oldest_idle.id, newer_idle.id]
+        assert fresh.id not in {record.id for record in window}
+        assert retired.id not in {record.id for record in window}
+        assert len(bounded) == 1
+        assert bounded[0].id == window[0].id

@@ -13,6 +13,7 @@ from agent_core.domain.memory import (
     BeliefType,
     ConsolidationRun,
     MemoryEdit,
+    MemoryRecord,
     MemoryStatus,
     RejectionKind,
     Sensitivity,
@@ -357,3 +358,47 @@ async def test_query_matches_whole_words_the_way_full_text_search_does() -> None
     # Query text that reduces to no lexeme matches nothing, as an empty
     # `plainto_tsquery` does, rather than matching everything.
     assert await store.query(recall_query(text="...")) == []
+
+
+async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() -> None:
+    """The decay sweep's window is ordered by idleness, not by write position.
+
+    A store larger than one sweep's ceiling must still offer the belief that
+    has gone unreinforced the longest, or a bounded sweep never reaches it.
+    """
+
+    store = _store()
+
+    def idle(belief_id: int, days: int, position: int) -> MemoryRecord:
+        return memory(belief_id=belief_id, statement=f"Belief {belief_id}").model_copy(
+            update={
+                "subject": f"subject-{belief_id}",
+                "last_reinforced_at": NOW - timedelta(days=days),
+                "store_position": position,
+            }
+        )
+
+    # Written newest-first, so write position cannot stand in for idleness.
+    oldest = idle(521, 400, 4)
+    middle = idle(522, 200, 3)
+    recent_enough = idle(523, 100, 2)
+    fresh = idle(524, 1, 1)
+    retired = idle(525, 500, 5).model_copy(update={"status": MemoryStatus.RETIRED, "valid_to": NOW})
+    other = idle(526, 450, 6).model_copy(update={"principal_id": "someone-else"})
+    for record in (fresh, recent_enough, middle, oldest, retired, other):
+        await store.upsert_belief(record)
+
+    cutoff = NOW - timedelta(days=50)
+    window = await store.list_idle(principal(), reinforced_before=cutoff, limit=10)
+    bounded = await store.list_idle(principal(), reinforced_before=cutoff, limit=2)
+    cut = await store.list_idle(principal(), reinforced_before=NOW - timedelta(days=300), limit=10)
+    foreign = await store.list_idle(
+        principal().model_copy(update={"tenant_id": "tenant-b"}),
+        reinforced_before=NOW,
+        limit=10,
+    )
+
+    assert [record.id for record in window] == [oldest.id, middle.id, recent_enough.id]
+    assert [record.id for record in bounded] == [oldest.id, middle.id]
+    assert [record.id for record in cut] == [oldest.id]
+    assert foreign == []

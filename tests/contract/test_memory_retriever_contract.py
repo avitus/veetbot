@@ -3,6 +3,7 @@
 import hashlib
 from uuid import UUID
 
+from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION
 from tests.contract.memory_fixtures import formation_stack, memory, recall_query
 from tests.contract.support import PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
@@ -28,7 +29,7 @@ async def test_recall_records_a_trace_bound_to_the_rendered_bytes() -> None:
     assert trace.rendered == result.rendered
     assert trace.rendered_sha256 == hashlib.sha256(result.rendered.encode()).hexdigest()
     assert trace.returned == [item.belief_id for item in result.items]
-    assert trace.retrieval_policy_version == "retrieval@1"
+    assert trace.retrieval_policy_version == RETRIEVAL_POLICY_VERSION
 
 
 async def test_recall_for_another_identity_fails_closed_and_traces_the_caller() -> None:

@@ -85,10 +85,15 @@ _HIGHER_IS_BETTER = (
     "supported_beliefs",
     "needed_formed",
     "needed_recalled",
+    "probe_runs_completed",
+)
+# The attribution counts partition `needed_recalled` by the moment that found
+# the belief. A belief moving from one bucket to another says where recall
+# happened, not how much of it did, so a move is reported and never judged.
+_ATTRIBUTION_PARTITION = (
     "recalled_snapshot_only",
     "recalled_in_turn_only",
     "recalled_both",
-    "probe_runs_completed",
 )
 _LOWER_IS_BETTER = (
     "fabricated_beliefs",
@@ -655,6 +660,7 @@ class BaselineComparison(BaseModel):
     drift: list[str] = Field(default_factory=list)
     regressions: list[str] = Field(default_factory=list)
     improvements: list[str] = Field(default_factory=list)
+    shifts: list[str] = Field(default_factory=list)
 
 
 def load_corpus(repository_root: Path) -> tuple[MemoryBenchmarkCorpus, str]:
@@ -1164,11 +1170,13 @@ def compare_to_baseline(
     measured something else.  A regression is a higher-is-better count that
     fell, a lower-is-better count that rose, or a probe that recalls fewer of
     the labels it needs; an improvement is each of those moving the other way.
+    A shift is a move inside the attribution partition, which is neither.
     """
 
     drift: list[str] = []
     regressions: list[str] = []
     improvements: list[str] = []
+    shifts: list[str] = []
     for field in _DRIFT_IDENTITY:
         recorded, observed = getattr(baseline, field), getattr(result, field)
         if recorded != observed:
@@ -1189,6 +1197,10 @@ def compare_to_baseline(
             regressions.append(_entry(field, "regressed", recorded, observed))
         elif observed < recorded:
             improvements.append(_entry(field, "improved", recorded, observed))
+    for field in _ATTRIBUTION_PARTITION:
+        recorded, observed = getattr(baseline.metrics, field), getattr(result.metrics, field)
+        if recorded != observed:
+            shifts.append(_entry(field, "shifted", recorded, observed))
     observed_rows = {(row.scenario_id, row.probe_id): row for row in baseline_probe_rows(result)}
     for row in baseline.probes:
         current = observed_rows.get((row.scenario_id, row.probe_id))
@@ -1203,7 +1215,9 @@ def compare_to_baseline(
             improvements.append(
                 _entry(field, "improved", row.needed_recalled, current.needed_recalled)
             )
-    return BaselineComparison(drift=drift, regressions=regressions, improvements=improvements)
+    return BaselineComparison(
+        drift=drift, regressions=regressions, improvements=improvements, shifts=shifts
+    )
 
 
 def _entry(field: str, kind: str, recorded: object, observed: object) -> str:

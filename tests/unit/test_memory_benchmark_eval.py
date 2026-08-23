@@ -1022,7 +1022,9 @@ def test_compare_to_baseline_reports_regression_drift_and_improvement() -> None:
     assert any(
         entry.startswith("needed_recalled regressed: baseline 3") for entry in regressed.regressions
     )
-    assert any(entry.startswith("recalled_both") for entry in regressed.regressions)
+    # An attribution count falling alongside recall is reported as a shift; it
+    # is a bucket of `needed_recalled`, not a metric with a good direction.
+    assert any(entry.startswith("recalled_both") for entry in regressed.shifts)
     assert any(entry.startswith("noise_total") for entry in regressed.regressions)
     assert any(
         entry.startswith("mb-bench-002/p01 needed_recalled") for entry in regressed.regressions
@@ -1870,3 +1872,27 @@ class TestBenchmarkEvidencePublicationGate:
         )
         assert calls == []
         assert not output.exists()
+
+
+def test_compare_to_baseline_sorts_an_attribution_partition_move_as_a_shift() -> None:
+    """A recalled belief changing which arm found it is neither better nor worse.
+
+    The three attribution counts partition `needed_recalled`; one rising while
+    another falls says where a belief was found, not how much was recalled.
+    """
+
+    baseline = _baseline_of(_result())
+    first, second = _scenario_results()
+    moved = second.probes[0].model_copy(update={"recalled_in_turn_only": 0, "recalled_both": 2})
+
+    comparison = compare_to_baseline(
+        _result([first, second.model_copy(update={"probes": [moved]})]), baseline
+    )
+
+    assert comparison.drift == []
+    assert comparison.regressions == []
+    assert comparison.improvements == []
+    assert sorted(entry.split()[0] for entry in comparison.shifts) == [
+        "recalled_both",
+        "recalled_in_turn_only",
+    ]

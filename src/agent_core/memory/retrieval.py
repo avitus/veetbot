@@ -7,7 +7,7 @@ import html
 import math
 import re
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.domain.agents import Principal
@@ -27,7 +27,9 @@ from agent_core.domain.memory import (
     RecallResult,
     RecallTrace,
     Sensitivity,
-    lexical_terms,
+    lexical_query_terms,
+    lexical_term_lexemes,
+    lexical_tokens,
 )
 from agent_core.domain.runs import Run
 from agent_core.memory.profiles import (
@@ -39,12 +41,16 @@ from agent_core.memory.profiles import (
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 
-RETRIEVAL_POLICY_VERSION = "retrieval@1"
+RETRIEVAL_POLICY_VERSION = "retrieval@2"
 # Episode search reads the session stream in bounded pages: never the whole
 # stream at once, and never more pages than a bounded read is worth.
 EPISODE_PAGE_MINIMUM = 256
 EPISODE_MAX_PAGES = 64
+# Two statements about one subject that share this much of their token set are
+# the same belief said twice, and the second one is demoted rather than lost.
+NEAR_DUPLICATE_SIMILARITY = 0.8
 _DURABLE_TYPES = frozenset({BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR})
+_STALE_STATUSES = frozenset({MemoryStatus.EXPIRED, MemoryStatus.RETIRED})
 _INJECTION = re.compile(
     r"(?:ignore\s+(?:all\s+)?previous|system\s+prompt|developer\s+message|"
     r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
@@ -160,16 +166,21 @@ class HybridMemoryRetriever:
         else:
             async with self._uow_factory() as uow:
                 records = await uow.memories.query(query)
+        # One instant governs the whole recall: time decay, the stale penalty,
+        # and the rendered stamp all read the query's as-of or the clock, so a
+        # historical query is scored as of the moment it asks about.
+        now = effective_query.as_of or self._clock.now()
         recalled: list[RecalledBelief] = []
         durable_ids: set[UUID] = set()
         for record in records:
-            candidate = _score(record, effective_query, profile=self._profile)
+            candidate = _score(record, effective_query, now=now, profile=self._profile)
             if candidate is None:
                 continue
             if _is_durable(record):
                 durable_ids.add(record.id)
             recalled.append(candidate)
         recalled = _rrf_fuse(recalled, k=self._profile.reciprocal_rank_fusion_k)
+        recalled = _penalize_near_duplicates(recalled, penalty=self._profile.near_duplicate_penalty)
         ranked = self._ranker.rank(recalled, effective_query)
         collapsed: list[RecalledBelief] = []
         subjects: defaultdict[str, int] = defaultdict(int)
@@ -208,7 +219,7 @@ class HybridMemoryRetriever:
             selected.append(item)
             durable_selected += int(durable)
             used_tokens += estimate
-        rendered = render_memory(selected, as_of=effective_query.as_of or self._clock.now())
+        rendered = render_memory(selected, as_of=now)
         rendered_bytes = rendered.encode("utf-8")
         trace_id = self._ids.new_id()
         trace = RecallTrace(
@@ -379,13 +390,32 @@ def _score(
     record: MemoryRecord,
     query: RecallQuery,
     *,
+    now: datetime | None = None,
     profile: RetrievalProfile = DEFAULT_RETRIEVAL_PROFILE,
 ) -> RecalledBelief | None:
-    text_terms = lexical_terms(query.text or "")
+    """Score one candidate against one query, as of `now`.
+
+    The lexical arm counts whole lexemes over the tokenizer both belief stores
+    filter with, so a term the store would not match cannot score here either.
+    Reinforcement decays with the time since the belief was last reinforced, at
+    the time constant its belief type carries: a stable preference fades far
+    more slowly than a situational fact. Without `now` no time has passed,
+    which is what a unit scoring a record against a query measures.
+
+    The stale penalty demotes expired and retired rows. The hard filter keeps
+    them out of an ordinary recall entirely, so the penalty is reachable only
+    through an as-of or include-superseded query, where history is the point
+    and the ranking still has to say which rows are no longer current.
+    """
+
+    terms = lexical_query_terms(query.text)
     subject_terms = {subject.casefold() for subject in query.subjects}
-    record_text = f"{record.subject} {record.statement}".casefold()
+    record_tokens = lexical_tokens(f"{record.subject} {record.statement}")
     lexical = (
-        sum(1 for term in text_terms if term in record_text) / len(text_terms) if text_terms else 0
+        sum(1 for lexemes in lexical_term_lexemes(terms) if lexemes and lexemes <= record_tokens)
+        / len(terms)
+        if terms
+        else 0
     )
     structured = 1.0 if record.subject.casefold() in subject_terms else 0
     arms = []
@@ -403,7 +433,11 @@ def _score(
     weights = profile.lifecycle_weights
     lifecycle = weights.active if record.status is MemoryStatus.ACTIVE else weights.provisional
     confidence = record.confidence * lifecycle
-    reinforce = min(1.0, math.log1p(record.corroboration_count) / math.log(11))
+    age_days = max(0, (now - record.last_reinforced_at).days) if now is not None else 0
+    tau_days = profile.decay_tau_days.for_belief_type(record.belief_type)
+    reinforce = min(1.0, math.log1p(record.corroboration_count) / math.log(11)) * math.exp(
+        -age_days / tau_days
+    )
     authority = {
         MemoryAuthority.USER: 1.0,
         MemoryAuthority.AFFIRMED: 0.7,
@@ -417,7 +451,10 @@ def _score(
             Portability.CONTEXTUAL: 0.55,
             Portability.LOCAL: 0.15,
         }[record.portability]
-    penalty = 0.2 if record.flagged_for_review else 0
+    stale = record.status in _STALE_STATUSES or (
+        now is not None and record.expires_at is not None and record.expires_at <= now
+    )
+    penalty = (0.2 if record.flagged_for_review else 0) + (profile.stale_penalty if stale else 0)
     score = min(
         1.0,
         0.4 * match
@@ -455,6 +492,39 @@ def _score(
         blocked=blocked,
         source_event_ids=list(record.source_event_ids),
     )
+
+
+def _penalize_near_duplicates(
+    candidates: list[RecalledBelief], *, penalty: float
+) -> list[RecalledBelief]:
+    """Demote a restatement of a belief a higher-scored candidate already made.
+
+    Applied between fusion and ranking, so the demotion is measured against
+    fused scores. The exact-statement collapse further down still drops a
+    verbatim repeat; this one keeps the second phrasing, because a genuine
+    second fact about the same subject reads as a near-duplicate of the first
+    often enough that deleting it loses real beliefs.
+    """
+
+    ordered = sorted(candidates, key=lambda item: (-item.score, str(item.belief_id)))
+    seen: defaultdict[tuple[str, BeliefType], list[frozenset[str]]] = defaultdict(list)
+    penalized: list[RecalledBelief] = []
+    for item in ordered:
+        key = (item.subject.casefold(), item.belief_type)
+        tokens = frozenset(lexical_tokens(item.statement))
+        duplicate = any(_jaccard(other, tokens) >= NEAR_DUPLICATE_SIMILARITY for other in seen[key])
+        seen[key].append(tokens)
+        penalized.append(
+            item.model_copy(update={"score": max(0.0, item.score - penalty)}) if duplicate else item
+        )
+    return penalized
+
+
+def _jaccard(left: frozenset[str], right: frozenset[str]) -> float:
+    """Token-set similarity, zero when neither statement yields a token."""
+
+    union = left | right
+    return len(left & right) / len(union) if union else 0.0
 
 
 def _rrf_fuse(candidates: list[RecalledBelief], *, k: int = 60) -> list[RecalledBelief]:

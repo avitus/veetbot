@@ -177,6 +177,25 @@ class InMemoryMemoryStore:
             records.sort(key=lambda item: (-item.store_position, str(item.id)))
             return [item.model_copy(deep=True) for item in records[:limit]]
 
+    async def list_idle(
+        self,
+        principal: Principal,
+        *,
+        reinforced_before: datetime,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        async with self._lock:
+            records = [
+                record
+                for record in self._records.values()
+                if record.tenant_id == principal.tenant_id
+                and record.principal_id == principal.principal_id
+                and record.status in _LIVE_MEMORY
+                and record.last_reinforced_at <= reinforced_before
+            ]
+            records.sort(key=lambda item: (item.last_reinforced_at, str(item.id)))
+            return [item.model_copy(deep=True) for item in records[:limit]]
+
     async def edit(
         self, belief_id: UUID, principal: Principal, edit: MemoryEdit, edited: MemoryRecord
     ) -> MemoryRecord:

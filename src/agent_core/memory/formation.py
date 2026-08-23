@@ -20,6 +20,7 @@ from agent_core.domain.memory import (
     BeliefType,
     ConsolidationResult,
     ConsolidationRun,
+    DecayResult,
     MemoryAuthority,
     MemoryCandidate,
     MemoryDiagnosis,
@@ -35,7 +36,12 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.messages import TextPart
 from agent_core.domain.policies import TrustLevel
-from agent_core.memory.profiles import DEFAULT_FORMATION_PROFILE, FormationProfile
+from agent_core.memory.profiles import (
+    DEFAULT_FORMATION_PROFILE,
+    DEFAULT_RETRIEVAL_PROFILE,
+    DecayTauDays,
+    FormationProfile,
+)
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.memory import MemoryCandidateExtractor
 from agent_core.ports.persistence import RepositoryUnitOfWork, UnitOfWorkFactory
@@ -576,6 +582,7 @@ class GovernedMemoryService:
         extractor: MemoryCandidateExtractor | None = None,
         policy_version: str = FORMATION_POLICY_VERSION,
         formation_profile: FormationProfile = DEFAULT_FORMATION_PROFILE,
+        decay_tau_days: DecayTauDays = DEFAULT_RETRIEVAL_PROFILE.decay_tau_days,
     ) -> None:
         if not policy_version:
             raise ValueError("memory formation policy version must not be empty")
@@ -588,6 +595,9 @@ class GovernedMemoryService:
         self._extractor = extractor or DeterministicCandidateExtractor()
         self._policy_version = policy_version
         self._profile = formation_profile
+        # The time constants are the ranker's table: the age at which a belief
+        # stops counting as reinforced is the age at which decay begins.
+        self._decay_tau_days = decay_tau_days
 
     @property
     def formation_profile(self) -> FormationProfile:
@@ -1324,6 +1334,78 @@ class GovernedMemoryService:
         async with self._uow_factory() as uow:
             return await uow.memories.expire(self._principal)
 
+    async def decay(self, *, now: datetime | None = None) -> DecayResult:
+        """Take a step of confidence from live beliefs nothing has used.
+
+        Eligible is provisional or below the maximum inferred confidence, idle
+        for at least its belief type's time constant, and last written more
+        than one sweep interval ago — the last of which is what stops two
+        workers, or two passes inside one window, from decaying a belief twice.
+        An explicit user statement is active at high confidence and is
+        therefore never eligible.
+
+        The window is the least recently reinforced beliefs past the shortest
+        time constant any type carries, bounded by the per-sweep ceiling.
+        Ordering it by idleness rather than by write position is what keeps the
+        sweep working in a large store: decay hands every belief it touches a
+        fresh store position, so a newest-first window would refill with rows
+        the sweep had just written while long-idle beliefs sank out of reach.
+
+        A belief the step carries below the floor is retired with its validity
+        closed at the sweep instant. Both outcomes are written through the
+        reinforcement path, so each takes a fresh store position and announces
+        itself, and the sweep is bounded by the profile's per-sweep ceiling.
+        """
+
+        instant = now or self._clock.now()
+        interval = timedelta(seconds=self._profile.scheduled_interval_seconds)
+        decay = self._profile.decay
+        decayed = 0
+        retired = 0
+        horizon = min(self._decay_tau_days.for_belief_type(kind) for kind in BeliefType)
+        async with self._uow_factory() as uow:
+            candidates = await uow.memories.list_idle(
+                self._principal,
+                reinforced_before=instant - timedelta(days=horizon),
+                limit=decay.max_per_sweep,
+            )
+            for record in candidates:
+                if not self._decays(record, instant, interval):
+                    continue
+                confidence = max(0.0, record.confidence - decay.step)
+                retiring = confidence < decay.floor_confidence
+                update: dict[str, object] = {
+                    "confidence": confidence,
+                    "store_position": await uow.memories.next_position(),
+                    "updated_at": instant,
+                }
+                if retiring:
+                    update.update({"status": MemoryStatus.RETIRED, "valid_to": instant})
+                stored = await uow.memories.reinforce(record.model_copy(update=update, deep=True))
+                await self._append_event(
+                    uow,
+                    _source_session(record),
+                    None,
+                    "memory.retired" if retiring else "memory.decayed",
+                    stored,
+                    actor_type="memory",
+                )
+                retired += int(retiring)
+                decayed += int(not retiring)
+        return DecayResult(decayed=decayed, retired=retired)
+
+    def _decays(self, record: MemoryRecord, instant: datetime, interval: timedelta) -> bool:
+        """Whether this belief is idle, uncertain, and unwritten long enough."""
+
+        if record.status is not MemoryStatus.PROVISIONAL and (
+            record.confidence >= MAX_INFERRED_CONFIDENCE
+        ):
+            return False
+        tau = timedelta(days=self._decay_tau_days.for_belief_type(record.belief_type))
+        if instant - record.last_reinforced_at < tau:
+            return False
+        return record.updated_at < instant - interval
+
     async def expire_traces(
         self, now: datetime | None = None, *, limit: int = TRACE_EXPIRY_SWEEP_LIMIT
     ) -> int:
@@ -1415,13 +1497,19 @@ class GovernedMemoryService:
         run_id: UUID | None,
         event_type: str,
         belief: MemoryRecord,
+        *,
+        actor_type: str | None = None,
     ) -> None:
+        # A belief's authority names who is speaking when the write follows a
+        # statement; a background sweep is the memory itself acting, whatever
+        # authority the belief it touches carries.
         await uow.events.append(
             NewEvent(
                 session_id=session_id,
                 run_id=run_id,
                 event_type=event_type,
-                actor_type="principal" if belief.authority is MemoryAuthority.USER else "memory",
+                actor_type=actor_type
+                or ("principal" if belief.authority is MemoryAuthority.USER else "memory"),
                 actor_id=self._principal.principal_id,
                 payload={"belief": belief.model_dump(mode="json")},
             )

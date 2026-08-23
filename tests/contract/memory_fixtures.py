@@ -36,7 +36,7 @@ from agent_core.domain.policies import TrustLevel
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.knowledge.chunking import DeterministicChunker
 from agent_core.memory.formation import GovernedMemoryService
-from agent_core.memory.retrieval import HybridMemoryRetriever
+from agent_core.memory.retrieval import RETRIEVAL_POLICY_VERSION, HybridMemoryRetriever
 from tests.contract.support import (
     NOW,
     PRINCIPAL_ID,
@@ -176,7 +176,7 @@ def trace() -> RecallTrace:
         rendered="<memory></memory>",
         rendered_sha256=hashlib.sha256(b"<memory></memory>").hexdigest(),
         candidates=0,
-        retrieval_policy_version="retrieval@1",
+        retrieval_policy_version=RETRIEVAL_POLICY_VERSION,
         created_at=NOW,
         operator_fields_expire_at=NOW + timedelta(days=30),
     )

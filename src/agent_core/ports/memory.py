@@ -59,6 +59,14 @@ class MemoryStore(Protocol):
         limit: int = 200,
     ) -> list[MemoryRecord]: ...
 
+    async def list_idle(
+        self,
+        principal: Principal,
+        *,
+        reinforced_before: datetime,
+        limit: int,
+    ) -> list[MemoryRecord]: ...
+
     async def edit(
         self, belief_id: UUID, principal: Principal, edit: MemoryEdit, edited: MemoryRecord
     ) -> MemoryRecord: ...

@@ -15,7 +15,13 @@ from agent_core.adapters.determinism import FixedClock
 from agent_core.bootstrap import build
 from agent_core.config import Settings
 from agent_core.domain.events import NewEvent
-from agent_core.domain.memory import BeliefType, RecallMoment, RecallQuery, Sensitivity
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryStatus,
+    RecallMoment,
+    RecallQuery,
+    Sensitivity,
+)
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.evals.memory_benchmark import (
     PROBE_CATEGORIES,
@@ -564,7 +570,16 @@ async def test_session_project_scope_governs_consolidation_and_in_turn_recall(
         assert {trace.query.current_scope for trace in in_turn} == {"atlas"}
 
 
-async def _stated_belief(composition: Any, session_id: UUID, statement: str, subject: str) -> None:
+async def _stated_belief(
+    composition: Any,
+    session_id: UUID,
+    statement: str,
+    subject: str,
+    *,
+    belief_type: BeliefType = BeliefType.PREFERENCE,
+    explicit: bool = True,
+    confidence: float | None = None,
+) -> Any:
     """State one belief the way a user turn would, with real provenance."""
 
     async with composition.uow_factory() as uow:
@@ -578,15 +593,17 @@ async def _stated_belief(composition: Any, session_id: UUID, statement: str, sub
                 payload={"content": statement},
             )
         )
-    await composition.memory.remember(
+    return await composition.memory.remember(
         session_id=session_id,
         run_id=None,
         statement=statement,
         subject=subject,
         scope="general",
-        belief_type=BeliefType.PREFERENCE,
+        belief_type=belief_type,
         sensitivity=Sensitivity.INTERNAL,
         source_event_ids=[event.sequence],
+        explicit=explicit,
+        confidence=confidence,
     )
 
 
@@ -658,3 +675,103 @@ async def test_trace_operator_fields_expire_on_schedule(tmp_path: Path) -> None:
         await maintenance.run_once()
         async with composition.uow_factory() as uow:
             assert await uow.traces.get(expiring.trace_id, composition.principal) == swept
+
+
+async def test_decay_sweep_lowers_unused_provisional_and_retires_below_floor(
+    tmp_path: Path,
+) -> None:
+    """Maintenance decays idle provisional beliefs and retires the spent ones.
+
+    Four beliefs sit in one session: an idle provisional fact, a provisional
+    fact one step above the floor, an explicit user statement, and a
+    provisional fact corroborated inside its time constant. Advancing the clock
+    past the fact tau and running one maintenance pass shows the sweep on its
+    timer touching exactly the first two.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        idle = await _stated_belief(
+            composition,
+            session_id,
+            "The deploy pipeline gates on CI.",
+            "deploy gating",
+            belief_type=BeliefType.FACT,
+            explicit=False,
+        )
+        spent = await _stated_belief(
+            composition,
+            session_id,
+            "The staging cluster runs in us-east-2.",
+            "staging cluster",
+            belief_type=BeliefType.FACT,
+            explicit=False,
+            confidence=0.2,
+        )
+        stated = await _stated_belief(
+            composition, session_id, "User prefers concise answers", "answer style"
+        )
+        fading = await _stated_belief(
+            composition,
+            session_id,
+            "Retries are capped at three.",
+            "retry policy",
+            belief_type=BeliefType.FACT,
+            explicit=False,
+            confidence=0.3,
+        )
+        assert composition.memory_profiles.formation.scheduled_enabled is True
+        tau_days = composition.memory_profiles.retrieval.decay_tau_days.fact
+
+        clock.advance(timedelta(days=tau_days + 1))
+        reinforced = await _stated_belief(
+            composition,
+            session_id,
+            "Retries are capped at three.",
+            "retry policy",
+            belief_type=BeliefType.FACT,
+            explicit=False,
+        )
+        assert reinforced.id == fading.id
+        clock.advance(timedelta(days=2))
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+
+        beliefs = {
+            belief.id: belief
+            for belief in await composition.memory.list_memories(include_inactive=True)
+        }
+        assert beliefs[idle.id].confidence == pytest.approx(0.5)
+        assert beliefs[idle.id].status is MemoryStatus.PROVISIONAL
+        assert beliefs[idle.id].valid_to is None
+        assert beliefs[spent.id].confidence == pytest.approx(0.15)
+        assert beliefs[spent.id].status is MemoryStatus.RETIRED
+        assert beliefs[spent.id].valid_to == clock.now()
+        assert beliefs[stated.id] == stated
+        assert beliefs[fading.id] == reinforced
+
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+        decay_events = {
+            event.event_type: event.payload["belief"]["id"]
+            for event in events
+            if event.event_type in {"memory.decayed", "memory.retired"}
+        }
+        assert decay_events == {
+            "memory.decayed": str(idle.id),
+            "memory.retired": str(spent.id),
+        }
+
+        # The sweep runs on its interval, so a second pass in the same window
+        # leaves the store exactly as the first one left it.
+        await maintenance.run_once()
+        assert {
+            belief.id: belief
+            for belief in await composition.memory.list_memories(include_inactive=True)
+        } == beliefs
