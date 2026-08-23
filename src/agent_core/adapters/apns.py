@@ -25,6 +25,7 @@ _APNS_HOSTS = {
 }
 _PROVIDER_TOKEN_REFRESH = timedelta(minutes=20)
 _UNREGISTERED_REASONS = {"Unregistered", "BadDeviceToken", "DeviceTokenNotForTopic"}
+_PROVIDER_TOKEN_RETRY_REASONS = {"ExpiredProviderToken", "InvalidProviderToken"}
 _CLIENT_TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
 
@@ -105,10 +106,10 @@ class APNsPushTransport:
         elif (
             response.status_code == 429
             or response.status_code >= 500
-            or reason == "ExpiredProviderToken"
+            or reason in _PROVIDER_TOKEN_RETRY_REASONS
         ):
             outcome = DeliveryOutcome.RETRY
-            if reason == "ExpiredProviderToken":
+            if reason in _PROVIDER_TOKEN_RETRY_REASONS:
                 self._provider_token = None
         else:
             outcome = DeliveryOutcome.REJECTED

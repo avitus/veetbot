@@ -879,14 +879,18 @@ class GovernedMemoryService:
         formation_requests = [
             event for event in events if event.event_type == "memory.formation.requested"
         ]
-        latest_request = formation_requests[-1] if formation_requests else None
+        retry_attempts = [
+            attempt
+            for event in formation_requests
+            if event.payload.get("trigger") == "provider_retry"
+            and isinstance((attempt := event.payload.get("attempt_number")), int)
+            and 1 <= attempt <= PROVIDER_MAX_ATTEMPTS
+        ]
         current_attempt = 1
         effective_trigger = trigger
-        if latest_request is not None and latest_request.payload.get("trigger") == "provider_retry":
+        if retry_attempts:
             effective_trigger = "provider_retry"
-            raw_attempt = latest_request.payload.get("attempt_number")
-            if isinstance(raw_attempt, int) and 1 <= raw_attempt <= PROVIDER_MAX_ATTEMPTS:
-                current_attempt = raw_attempt
+            current_attempt = max(retry_attempts)
         should_retry = (
             since_watermark is None
             and provider_failure is not None
@@ -1094,11 +1098,27 @@ class GovernedMemoryService:
                 session_id=session_id,
                 limit=200,
             )
-            completed_events = await uow.process_events.list("memory.provider_extraction.completed")
-            failed_events = await uow.process_events.list("memory.provider_extraction.failed")
-            selection_events = await uow.process_events.list("memory.provider_extraction.selection")
+            attempt_events = await uow.process_events.list_filtered(
+                tenant_id=self._principal.tenant_id,
+                principal_id=self._principal.principal_id,
+                session_id=session_id,
+                event_types=frozenset(
+                    {
+                        "memory.provider_extraction.completed",
+                        "memory.provider_extraction.failed",
+                    }
+                ),
+                limit=100,
+            )
+            selection_events = await uow.process_events.list_filtered(
+                tenant_id=self._principal.tenant_id,
+                principal_id=self._principal.principal_id,
+                session_id=None,
+                event_types=frozenset({"memory.provider_extraction.selection"}),
+                limit=100,
+            )
             process_events = sorted(
-                [*completed_events, *failed_events, *selection_events],
+                [*attempt_events, *selection_events],
                 key=lambda event: (event.created_at, event.id.int),
             )
         formation_requests = [
@@ -1109,16 +1129,11 @@ class GovernedMemoryService:
             for event in process_events
             if event.event_type
             in {"memory.provider_extraction.completed", "memory.provider_extraction.failed"}
-            and event.payload.get("tenant_id") == self._principal.tenant_id
-            and event.payload.get("principal_id") == self._principal.principal_id
-            and event.payload.get("session_id") == str(session_id)
         ]
         selections = [
             event
             for event in process_events
             if event.event_type == "memory.provider_extraction.selection"
-            and event.payload.get("tenant_id") == self._principal.tenant_id
-            and event.payload.get("principal_id") == self._principal.principal_id
         ]
         latest_request = formation_requests[-1] if formation_requests else None
         return MemoryDiagnosis(

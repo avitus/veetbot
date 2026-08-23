@@ -86,5 +86,8 @@ import Testing
 
         #expect(source.contains("horizontalSizeClass == .regular"))
         #expect(source.contains("usesDirectActivation: usesDirectSidebarActivation"))
+        #expect(source.contains(".navigationDestination(isPresented:"))
+        #expect(!modernList.contains("isActive:"))
+        #expect(source.contains("private var pushingList: some View {\n        navigationList"))
     }
 }

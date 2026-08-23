@@ -25,6 +25,70 @@ import Testing
     }
 
     @Test
+    func testForgetCredentialsDeletesTheLocalTokenWhenDeviceRevocationFails() async throws {
+        let installationID = "00000000-0000-0000-0000-000000000123"
+        let deviceID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000456")
+        )
+        let tokenStore = InMemoryTokenStore(token: "local-bearer")
+        let coordinator = DeviceRegistrationCoordinator(
+            identityStore: InMemoryInstallationIdentityStore(installationID: installationID)
+        )
+        let session = urlSession { request in
+            switch (request.httpMethod, request.url?.path) {
+            case ("GET", "/v1/sessions"):
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("GET", "/v1/devices"):
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[{"id":"\(deviceID.uuidString)","client_device_id":"\(installationID)","name":"Owner's iPhone","kind":"mobile","platform":"ios","app_bundle_id":"com.veetbot.apple","push_provider":"apns","push_environment":"sandbox","push_token_fingerprint":"abcdef","push_token_updated_at":"2026-08-22T00:00:00Z","push_token_invalidated_at":null,"muted_kinds":[],"status":"active","revoked_at":null,"last_seen_at":"2026-08-22T00:00:00Z","created_at":"2026-08-22T00:00:00Z","updated_at":"2026-08-22T00:00:00Z"}],"next_cursor":null}
+                        """
+                )
+            case ("POST", "/v1/devices/\(deviceID.uuidString)/revoke"):
+                return try self.response(
+                    for: request,
+                    statusCode: 503,
+                    body: #"{"error":{"code":"service_unavailable","message":"unavailable","details":{},"request_id":"revoke-failed"}}"#
+                )
+            default:
+                Issue.record(
+                    "unexpected request: \(request.httpMethod ?? "nil") \(request.url?.path ?? "nil")"
+                )
+                return try self.response(for: request, statusCode: 500, body: "")
+            }
+        }
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let model = ChatViewModel(
+            tokenStore: tokenStore,
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore(),
+            deviceRegistrationCoordinator: coordinator,
+            urlSession: session
+        )
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "local-bearer"
+            )
+        )
+        await model.forgetCredentials()
+
+        #expect(await tokenStore.readToken() == nil)
+        #expect(model.isConfigured == false)
+        #expect(model.requiresReauthentication)
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test
     func testNotificationTapRestoresTranscriptAttachesExactRunAndFocusesApproval() async throws {
         let sessionID = try #require(
             UUID(uuidString: "00000000-0000-0000-0000-000000000101")

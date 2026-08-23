@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import timedelta
 from uuid import UUID
 
@@ -17,6 +18,10 @@ from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.devices import Device, DeviceKind, DeviceStatus, PushProvider
 from agent_core.domain.notifications import (
     DeliveryOutcome,
+    NewNotification,
+    NotificationKind,
+    NotificationPayload,
+    NotificationSeverity,
     NotificationStatus,
     PushOutcome,
 )
@@ -26,8 +31,8 @@ from agent_core.ports.notifications import PushTransport
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.support import NOW, memory_uow_factory, principal, run
 from tests.contract.test_approval_repository_contract import request as approval_request
-from tests.contract.test_device_registry_contract import device
-from tests.contract.test_notification_outbox_contract import new_notification
+from tests.contract.test_device_registry_contract import DEVICE_ID, device
+from tests.contract.test_notification_outbox_contract import NOTIFICATION_ID, new_notification
 
 
 def _dispatcher(
@@ -53,13 +58,113 @@ def _dispatcher(
     )
 
 
+def _targeted_test_notification(
+    *,
+    notification_id: UUID = NOTIFICATION_ID,
+    device_id: UUID = DEVICE_ID,
+    key: str = "one",
+) -> NewNotification:
+    return new_notification(
+        notification_id=notification_id,
+        dedupe_key=f"device.test:{device_id}:{key}",
+    )
+
+
+def _broadcast_notification() -> NewNotification:
+    return NewNotification(
+        id=NOTIFICATION_ID,
+        tenant_id=principal().tenant_id,
+        principal_id=principal().principal_id,
+        kind=NotificationKind.OPS_ALERT,
+        dedupe_key="ops.tenant-a.database.1",
+        payload=NotificationPayload(
+            kind=NotificationKind.OPS_ALERT,
+            title="Production alert",
+            notification_id=NOTIFICATION_ID,
+            signal="database",
+            severity=NotificationSeverity.WARN,
+            reason_code="ops.database.unavailable",
+        ),
+        priority=5,
+        next_attempt_at=NOW,
+        created_at=NOW,
+    )
+
+
+async def test_malformed_test_dedupe_key_fails_closed_without_delivery() -> None:
+    clock, factory = await memory_uow_factory()
+    transport = FakePushTransport()
+    async with factory() as uow:
+        await uow.devices.upsert(device(), principal())
+        assert (
+            await uow.notification_outbox.enqueue(
+                new_notification(dedupe_key="device.test:not-a-uuid:key")
+            )
+            is not None
+        )
+
+    assert await _dispatcher(factory, clock, SequenceIdFactory(), transport).run_once() == 1
+
+    assert transport.calls == []
+    async with factory() as uow:
+        [notification] = await uow.notification_outbox.list(principal(), limit=10)
+    assert notification.status is NotificationStatus.DISPATCHED
+
+
+async def test_old_pending_notification_for_an_unconfigured_provider_is_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock, factory = await memory_uow_factory()
+    assert isinstance(clock, FixedClock)
+    surface = device(token=None).model_copy(
+        update={
+            "id": UUID(int=905),
+            "client_device_id": "telegram-surface",
+            "name": "Telegram surface",
+            "kind": DeviceKind.SURFACE,
+            "platform": "telegram",
+            "push_provider": PushProvider.TELEGRAM,
+            "push_token": SecretStr("paired-chat-reference"),
+        }
+    )
+    async with factory() as uow:
+        await uow.devices.upsert(surface, principal())
+        assert (
+            await uow.notification_outbox.enqueue(
+                _targeted_test_notification(
+                    device_id=UUID(int=905),
+                    key="backlog-regression",
+                )
+            )
+            is not None
+        )
+    clock.advance(timedelta(minutes=6))
+
+    with caplog.at_level(logging.WARNING):
+        assert (
+            await _dispatcher(
+                factory,
+                clock,
+                SequenceIdFactory(),
+                FakePushTransport(),
+            ).run_once()
+            == 0
+        )
+
+    assert any(
+        record.message == "notification pending backlog exceeded threshold"
+        and getattr(record, "notification_id", None) == str(new_notification().id)
+        for record in caplog.records
+    )
+
+
 async def test_two_dispatchers_deliver_one_target_once_and_record_the_attempt() -> None:
     clock, factory = await memory_uow_factory()
     ids = SequenceIdFactory()
     transport = FakePushTransport()
     async with factory() as uow:
         await uow.devices.upsert(device(), principal())
-        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+        assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
 
     results = await asyncio.gather(
         _dispatcher(factory, clock, ids, transport).run_once(),
@@ -94,12 +199,12 @@ async def test_unexpected_failure_isolated_to_one_claimed_notification() -> None
     transport = FailFirstTransport()
     async with factory() as uow:
         await uow.devices.upsert(device(), principal())
-        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+        assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
         assert (
             await uow.notification_outbox.enqueue(
-                new_notification(
+                _targeted_test_notification(
                     notification_id=UUID(int=902),
-                    dedupe_key="test:second-after-failure",
+                    key="second-after-failure",
                 )
             )
             is not None
@@ -110,7 +215,7 @@ async def test_unexpected_failure_isolated_to_one_claimed_notification() -> None
     async with factory() as uow:
         rows = await uow.notification_outbox.list(principal(), limit=10)
         assert next(
-            row for row in rows if row.dedupe_key == "test:second-after-failure"
+            row for row in rows if row.dedupe_key.endswith(":second-after-failure")
         ).status is (NotificationStatus.DISPATCHED)
 
 
@@ -140,7 +245,7 @@ async def test_transport_failure_records_prior_target_and_retries_failed_target(
             ),
             principal(),
         )
-        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+        assert await uow.notification_outbox.enqueue(_broadcast_notification()) is not None
 
     assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
     assert transport.calls == 2
@@ -178,7 +283,10 @@ async def test_claim_is_partitioned_by_pending_target_provider() -> None:
     )
     async with factory() as uow:
         await uow.devices.upsert(surface, principal())
-        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+        assert (
+            await uow.notification_outbox.enqueue(_targeted_test_notification(device_id=surface.id))
+            is not None
+        )
 
     assert await _dispatcher(factory, clock, ids, transport).run_once() == 0
     telegram = NotificationDispatcher(
@@ -204,10 +312,10 @@ async def test_retry_schedule_is_bounded_and_expired_rows_are_never_sent() -> No
     )
     async with factory() as uow:
         await uow.devices.upsert(device(), principal())
-        assert await uow.notification_outbox.enqueue(new_notification()) is not None
-        expired = new_notification(
+        assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
+        expired = _targeted_test_notification(
             notification_id=UUID(int=901),
-            dedupe_key="test:expired",
+            key="expired",
         ).model_copy(update={"expires_at": NOW})
         assert await uow.notification_outbox.enqueue(expired) is not None
     clock.advance(timedelta(seconds=1))
@@ -220,8 +328,8 @@ async def test_retry_schedule_is_bounded_and_expired_rows_are_never_sent() -> No
 
     async with factory() as uow:
         rows = await uow.notification_outbox.list(principal(), limit=10)
-        retried = next(row for row in rows if row.dedupe_key == "test:one")
-        expired_row = next(row for row in rows if row.dedupe_key == "test:expired")
+        retried = next(row for row in rows if row.dedupe_key.endswith(":one"))
+        expired_row = next(row for row in rows if row.dedupe_key.endswith(":expired"))
         assert retried.status is NotificationStatus.FAILED
         assert retried.attempts == 5
         assert expired_row.status is NotificationStatus.EXPIRED
@@ -343,7 +451,7 @@ async def test_unregistered_tokens_invalidate_once_but_transient_failures_do_not
         registered = device()
         async with factory() as uow:
             await uow.devices.upsert(registered, principal())
-            assert await uow.notification_outbox.enqueue(new_notification()) is not None
+            assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
 
         dispatcher = _dispatcher(factory, clock, ids, transport)
         assert await dispatcher.run_once() == 1
@@ -372,7 +480,7 @@ async def test_unregistered_tokens_invalidate_once_but_transient_failures_do_not
         registered = device()
         async with factory() as uow:
             await uow.devices.upsert(registered, principal())
-            assert await uow.notification_outbox.enqueue(new_notification()) is not None
+            assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
 
         assert await _dispatcher(factory, clock, ids, transport).run_once() == 1
         async with factory() as uow:
@@ -397,7 +505,7 @@ async def test_crash_after_transport_accept_replays_with_same_collapse_key() -> 
 
     async with factory() as uow:
         await uow.devices.upsert(device(), principal())
-        assert await uow.notification_outbox.enqueue(new_notification()) is not None
+        assert await uow.notification_outbox.enqueue(_targeted_test_notification()) is not None
 
     with pytest.raises(RuntimeError, match="injected crash"):
         await _dispatcher(factory, clock, ids, transport, probe=crash_once).run_once()
@@ -407,7 +515,8 @@ async def test_crash_after_transport_accept_replays_with_same_collapse_key() -> 
     assert await _dispatcher(factory, clock, ids, transport, claimant="notify-b").run_once() == 1
 
     assert len(transport.calls) == 2
-    assert transport.calls[0][1].dedupe_key == transport.calls[1][1].dedupe_key == "test:one"
+    assert transport.calls[0][1].dedupe_key == transport.calls[1][1].dedupe_key
+    assert transport.calls[0][1].dedupe_key.endswith(":one")
     async with factory() as uow:
         [notification] = await uow.notification_outbox.list(principal(), limit=10)
         assert notification.status is NotificationStatus.DISPATCHED

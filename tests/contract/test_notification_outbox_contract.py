@@ -98,6 +98,12 @@ async def assert_notification_claim_settle_and_pagination(outbox: NotificationOu
     for value in values:
         assert await outbox.enqueue(value) is not None
 
+    backlog = await outbox.list_pending_older_than(
+        NOW + timedelta(seconds=3),
+        1,
+    )
+    assert [notification.id for notification in backlog] == [values[0].id]
+
     claimed = await outbox.claim_due(
         NOW + timedelta(seconds=3),
         1,

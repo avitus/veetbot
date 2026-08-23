@@ -179,12 +179,15 @@ an empty `needed`, and the deterministic block therefore reports
 `needed_total = 0`, `needed_recalled = 0`, and `noise_total = returned_total`.
 Those numbers are **undefined without labels**, not a nought-per-cent recall and
 a hundred-per-cent noise; read `evidence_recalled / evidence_total` instead.
-HaluMem is the exception: its memory points are labels, so its `needed_*` and
-`noise_*` counts mean what they mean for the authored corpus.
+HaluMem is a partial exception: its memory points become `LabeledBelief` values
+evaluated by `score_formation`, so its formation counts retain their labeled
+meaning. Its probes still carry empty `needed` lists, so `needed_total = 0` and
+`noise_total = returned_total`; those probe-level counts are undefined just as
+they are for LongMemEval and LoCoMo.
 
 The caveats travel with the numbers, inside the document:
 
-- for a dataset that names no labels — LongMemEval and LoCoMo — the `needed_*`
+- for probes that name no labels — LongMemEval, LoCoMo, and HaluMem — the `needed_*`
   and `noise_*` counts are undefined and evidence-provenance recall is the
   recall figure;
 - there is no model judge; the published LongMemEval figures use one;
@@ -202,4 +205,3 @@ The caveats travel with the numbers, inside the document:
   to the user, and their questions name no evidence turn;
 - a scenario carries at most ninety-nine sessions and six probes, so a variant
   with more sessions per instance is refused rather than truncated.
-

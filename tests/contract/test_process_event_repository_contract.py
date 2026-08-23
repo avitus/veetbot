@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -36,6 +37,55 @@ async def assert_process_event_repository_is_append_only_and_derivation_idempote
         if stored_event.derivation_key == event.derivation_key
     ]
     assert matching_events == [event]
+
+    session_id = UUID(int=702)
+    scoped = [
+        ProcessEvent(
+            id=UUID(int=identifier),
+            event_type=event_type,
+            actor_type="contract",
+            payload={
+                "tenant_id": "tenant-a",
+                "principal_id": "principal-a",
+                "session_id": str(session_id),
+            },
+            derivation_key=f"memory.provider:{identifier}",
+            created_at=NOW + timedelta(seconds=identifier - 702),
+        )
+        for identifier, event_type in (
+            (703, "memory.provider_extraction.completed"),
+            (704, "memory.provider_extraction.failed"),
+        )
+    ]
+    for scoped_event in scoped:
+        await repository.append(scoped_event)
+    await repository.append(
+        scoped[-1].model_copy(
+            update={
+                "id": UUID(int=705),
+                "payload": {
+                    "tenant_id": "tenant-b",
+                    "principal_id": "principal-a",
+                    "session_id": str(session_id),
+                },
+                "derivation_key": "memory.provider:foreign",
+                "created_at": NOW + timedelta(seconds=3),
+            }
+        )
+    )
+    filtered = await repository.list_filtered(
+        tenant_id="tenant-a",
+        principal_id="principal-a",
+        session_id=session_id,
+        event_types=frozenset(
+            {
+                "memory.provider_extraction.completed",
+                "memory.provider_extraction.failed",
+            }
+        ),
+        limit=1,
+    )
+    assert filtered == [scoped[-1]]
     with pytest.raises(ConflictError):
         await repository.append(event.model_copy(update={"payload": {"changed": True}}))
 

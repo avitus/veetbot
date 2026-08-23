@@ -7,14 +7,22 @@ from collections.abc import Callable
 
 from agent_core.adapters.apns import APNsPushTransport
 from agent_core.adapters.persistence.notifications import (
+    InMemoryDeviceRegistrationIdempotencyRepository,
     InMemoryDeviceRegistry,
     InMemoryNotificationOutbox,
+    PostgresDeviceRegistrationIdempotencyRepository,
     PostgresDeviceRegistry,
     PostgresNotificationOutbox,
 )
 from agent_core.adapters.push import FakePushTransport
-from agent_core.ports.devices import DeviceRegistry
+from agent_core.ports.devices import (
+    DeviceRegistrationIdempotencyRepository,
+    DeviceRegistry,
+)
 from agent_core.ports.notifications import NotificationOutbox, PushTransport
+from tests.contract import (
+    test_device_registration_idempotency_repository_contract as device_idempotency_contract,
+)
 from tests.contract import test_device_registry_contract as device_contract
 from tests.contract import test_notification_outbox_contract as outbox_contract
 from tests.contract import test_push_transport_contract as push_contract
@@ -43,6 +51,17 @@ def test_notification_ports_have_executable_contracts_for_every_adapter() -> Non
                 postgres_contract.test_postgres_device_registration_is_idempotent_and_principal_scoped,
                 postgres_contract.test_postgres_live_push_token_moves_to_new_installation,
                 postgres_contract.test_postgres_device_listing_uses_stable_cursor,
+            ),
+        ),
+        (
+            DeviceRegistrationIdempotencyRepository,
+            (
+                InMemoryDeviceRegistrationIdempotencyRepository,
+                PostgresDeviceRegistrationIdempotencyRepository,
+            ),
+            (
+                device_idempotency_contract.test_in_memory_device_registration_idempotency_repository_satisfies_contract,
+                postgres_contract.test_postgres_device_registration_idempotency_satisfies_shared_contract,
             ),
         ),
         (

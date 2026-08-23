@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -510,6 +510,149 @@ def _write(path: Path, records: list[dict[str, object]]) -> Path:
     return path
 
 
+def test_dataset_records_with_only_empty_turns_are_refused_by_name(tmp_path: Path) -> None:
+    longmemeval = _write(
+        tmp_path / "empty-longmemeval.json",
+        [
+            {
+                "question_id": "empty-long",
+                "question_type": "single-session-user",
+                "question": "What was said?",
+                "answer": "Nothing",
+                "haystack_dates": ["2024/01/01 (Mon) 10:00"],
+                "haystack_sessions": [[{"role": "user", "content": "   "}]],
+            }
+        ],
+    )
+    locomo = _write(
+        tmp_path / "empty-locomo.json",
+        [
+            {
+                "sample_id": "empty-locomo",
+                "conversation": {
+                    "speaker_a": "Ana",
+                    "speaker_b": "Bo",
+                    "session_1": [{"speaker": "Ana", "dia_id": "D1", "text": "   "}],
+                    "session_1_date_time": "10:00 am on 4 May, 2024",
+                },
+                "qa": [],
+            }
+        ],
+    )
+    halumem = _write(
+        tmp_path / "empty-halumem.json",
+        [
+            {
+                "uuid": "empty-halu",
+                "sessions": [
+                    {
+                        "session_id": "empty-halu-s1",
+                        "timestamp": "2024-01-01 10:00:00",
+                        "dialogue": [{"role": "user", "content": "   "}],
+                    }
+                ],
+                "questions": [{"question": "What was said?", "answer": "Nothing"}],
+            }
+        ],
+    )
+
+    calls: tuple[tuple[Callable[[], list[BenchmarkScenario]], str], ...] = (
+        (lambda: load_longmemeval(longmemeval), "longmemeval instance empty-long"),
+        (
+            lambda: load_locomo(locomo, principal_speaker="a"),
+            "locomo conversation empty-locomo",
+        ),
+        (lambda: load_halumem(halumem), "halumem user empty-halu"),
+    )
+    for load, where in calls:
+        with pytest.raises(ValueError, match="no non-empty session") as caught:
+            load()
+        assert where in str(caught.value)
+
+
+def test_blank_non_abstention_answers_are_omitted_without_aborting_records(
+    tmp_path: Path,
+) -> None:
+    longmemeval = _write(
+        tmp_path / "blank-answer-longmemeval.json",
+        [
+            {
+                "question_id": f"long-{answer or 'blank'}",
+                "question_type": "single-session-user",
+                "question": "What did the user name?",
+                "answer": answer,
+                "haystack_dates": [
+                    "2024/01/01 (Mon) 10:00",
+                    "2024/01/02 (Tue) 10:00",
+                ],
+                "haystack_sessions": [
+                    [{"role": "user", "content": "A named thing."}],
+                    [{"role": "assistant", "content": "Acknowledged."}],
+                ],
+            }
+            for answer in ("Thing", "   ")
+        ],
+    )
+    locomo = _write(
+        tmp_path / "blank-answer-locomo.json",
+        [
+            {
+                "sample_id": "locomo-answers",
+                "conversation": {
+                    "speaker_a": "Ana",
+                    "speaker_b": "Bo",
+                    "session_1": [{"speaker": "Ana", "dia_id": "D1", "text": "A named thing."}],
+                    "session_1_date_time": "10:00 am on 4 May, 2024",
+                    "session_2": [{"speaker": "Bo", "dia_id": "D2", "text": "Acknowledged."}],
+                    "session_2_date_time": "10:00 am on 5 May, 2024",
+                },
+                "qa": [
+                    {
+                        "question": "What did Ana name?",
+                        "answer": answer,
+                        "evidence": ["D1"],
+                        "category": 4,
+                    }
+                    for answer in ("Thing", None)
+                ],
+            }
+        ],
+    )
+    halumem_answers: tuple[object, ...] = ("Thing", [])
+    halumem = _write(
+        tmp_path / "blank-answer-halumem.json",
+        [
+            {
+                "uuid": "halu-answers",
+                "sessions": [
+                    {
+                        "session_id": "halu-answers-s1",
+                        "timestamp": "2024-01-01 10:00:00",
+                        "dialogue": [{"role": "user", "content": "A named thing."}],
+                    },
+                    {
+                        "session_id": "halu-answers-s2",
+                        "timestamp": "2024-01-02 10:00:00",
+                        "dialogue": [{"role": "assistant", "content": "Acknowledged."}],
+                    },
+                ],
+                "questions": [
+                    {"question": "What did the user name?", "answer": answer}
+                    for answer in halumem_answers
+                ],
+            }
+        ],
+    )
+
+    long_scenarios = load_longmemeval(longmemeval)
+    locomo_scenarios = load_locomo(locomo, principal_speaker="a")
+    halumem_scenarios = load_halumem(halumem)
+
+    assert len(long_scenarios) == 1
+    assert [probe.answer.values for probe in locomo_scenarios[0].probes] == [["Thing"]]
+    assert [probe.answer.values for probe in halumem_scenarios[0].probes] == [["Thing"]]
+
+
 def _oversized_longmemeval() -> list[dict[str, object]]:
     return [
         {
@@ -605,6 +748,7 @@ async def test_label_free_datasets_publish_the_provenance_recall_caveat(
     label_free: tuple[tuple[ExternalDataset, Path], ...] = (
         ("longmemeval", _LONGMEMEVAL),
         ("locomo", _LOCOMO),
+        ("halumem", _HALUMEM),
     )
     for dataset, source in label_free:
         output = tmp_path / f"{dataset}-metrics.json"
@@ -626,7 +770,7 @@ async def test_label_free_datasets_publish_the_provenance_recall_caveat(
         assert LABEL_FREE_CAVEAT in result.caveats
         assert LABEL_FREE_CAVEAT in output.read_text(encoding="utf-8")
 
-    assert LABEL_FREE_CAVEAT not in DATASET_CAVEATS["halumem"]
+    assert LABEL_FREE_CAVEAT in DATASET_CAVEATS["halumem"]
 
 
 def _corpus_for_prompting() -> MemoryBenchmarkCorpus:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from hashlib import sha256
@@ -48,6 +49,57 @@ class PushEnvironment(StrEnum):
 class DeviceStatus(StrEnum):
     ACTIVE = "active"
     REVOKED = "revoked"
+
+
+@dataclass(frozen=True)
+class DeviceRoutingIssue:
+    """One shared push-routing rule violation with an API-stable reason code."""
+
+    reason_code: str
+    message: str
+
+
+def device_routing_issue(
+    *,
+    kind: DeviceKind,
+    provider: PushProvider | None,
+    token_present: bool,
+    environment: PushEnvironment | None,
+    app_bundle_id_present: bool,
+) -> DeviceRoutingIssue | None:
+    """Validate routing consistently for API input and durable device rows."""
+
+    if (provider is None) != (not token_present):
+        return DeviceRoutingIssue(
+            "device.push_routing_incomplete",
+            "push provider and token must be present together",
+        )
+    if provider is PushProvider.APNS:
+        if environment is None or not app_bundle_id_present:
+            return DeviceRoutingIssue(
+                "device.apns_configuration_incomplete",
+                "APNs registration requires environment and bundle identifier",
+            )
+    elif environment is not None:
+        return DeviceRoutingIssue(
+            "device.push_environment_without_apns",
+            "only APNs registration accepts a push environment",
+        )
+    if provider is PushProvider.TELEGRAM and kind is not DeviceKind.SURFACE:
+        return DeviceRoutingIssue(
+            "device.telegram_kind_invalid",
+            "Telegram registration requires a surface device",
+        )
+    if (
+        kind is DeviceKind.SURFACE
+        and provider is not None
+        and provider is not PushProvider.TELEGRAM
+    ):
+        return DeviceRoutingIssue(
+            "device.surface_routing_incomplete",
+            "surface registration accepts only Telegram routing",
+        )
+    return None
 
 
 class DeviceRegistration(BaseModel):
@@ -132,22 +184,15 @@ class Device(BaseModel):
 
     @model_validator(mode="after")
     def push_and_status_are_consistent(self) -> Device:
-        if (self.push_provider is None) != (self.push_token is None):
-            raise ValueError("push provider and token must be present together")
-        if self.push_provider is PushProvider.APNS:
-            if self.push_environment is None:
-                raise ValueError("APNs device requires a push environment")
-        elif self.push_environment is not None:
-            raise ValueError("only an APNs device may carry a push environment")
-
-        if self.push_provider is PushProvider.TELEGRAM and self.kind is not DeviceKind.SURFACE:
-            raise ValueError("Telegram routing belongs only to a surface device")
-        if (
-            self.kind is DeviceKind.SURFACE
-            and self.push_provider is not None
-            and self.push_provider is not PushProvider.TELEGRAM
-        ):
-            raise ValueError("surface device requires Telegram routing")
+        issue = device_routing_issue(
+            kind=self.kind,
+            provider=self.push_provider,
+            token_present=self.push_token is not None,
+            environment=self.push_environment,
+            app_bundle_id_present=self.app_bundle_id is not None,
+        )
+        if issue is not None:
+            raise ValueError(issue.message)
 
         if self.status is DeviceStatus.REVOKED:
             if self.revoked_at is None:

@@ -153,18 +153,23 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        var revokeError: Error?
         if let api {
             do {
                 _ = try await deviceRegistrationCoordinator.revoke(using: api)
             } catch {
-                present(error)
-                return
+                revokeError = error
             }
         }
         selectionRequestID = nil
         historyReconciliationID = nil
         watchTasks.cancel()
-        do { try await tokenStore.deleteToken() } catch { present(error) }
+        var tokenDeletionError: Error?
+        do {
+            try await tokenStore.deleteToken()
+        } catch {
+            tokenDeletionError = error
+        }
         api = nil
         eventStream = nil
         browserProfiles = []
@@ -174,6 +179,11 @@ public final class ChatViewModel: ObservableObject {
         await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
+        if let revokeError {
+            present(revokeError)
+        } else if let tokenDeletionError {
+            present(tokenDeletionError)
+        }
     }
 
     public func registerRemoteNotifications(

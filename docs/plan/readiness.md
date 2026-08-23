@@ -84,7 +84,7 @@ rather than smoothed.
 | 9 | Long-term memory and knowledge | Ready | 26 | Nothing |
 | 10 | Memory maturation, self-authored skills, web access, browser automation | Complete | 38 | Tenant activation remains roadmap item B1 (ADR-0061) |
 | 11 | Scheduled runs | Complete | 23 | Nothing |
-| 12 | Notifications and device identity | In progress | 20 | The Apple push key and capability are owner actions outside the corpus |
+| 12 | Notifications and device identity | Complete | 20 | The Apple push key and capability are owner actions outside the corpus |
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |

@@ -48,6 +48,7 @@ from agent_core.domain.devices import (
     DeviceRegistration,
     PushEnvironment,
     PushProvider,
+    device_routing_issue,
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
 from agent_core.domain.notifications import NotificationKind
@@ -258,32 +259,15 @@ class DeviceRegistrationRequest(BaseModel):
                 "device.muted_kind_duplicate",
                 "muted notification kinds must be unique",
             )
-        if (provider is None) != (self.push_token is None):
-            raise DeviceValidationError(
-                "device.push_routing_incomplete",
-                "push provider and token must be present together",
-            )
-        if provider is PushProvider.APNS:
-            if environment is None or self.app_bundle_id is None:
-                raise DeviceValidationError(
-                    "device.apns_configuration_incomplete",
-                    "APNs registration requires environment and bundle identifier",
-                )
-        elif environment is not None:
-            raise DeviceValidationError(
-                "device.push_environment_without_apns",
-                "only APNs registration accepts a push environment",
-            )
-        if provider is PushProvider.TELEGRAM and kind is not DeviceKind.SURFACE:
-            raise DeviceValidationError(
-                "device.telegram_kind_invalid",
-                "Telegram registration requires a surface device",
-            )
-        if kind is DeviceKind.SURFACE and provider is not PushProvider.TELEGRAM:
-            raise DeviceValidationError(
-                "device.surface_routing_incomplete",
-                "surface registration requires Telegram routing",
-            )
+        issue = device_routing_issue(
+            kind=kind,
+            provider=provider,
+            token_present=self.push_token is not None,
+            environment=environment,
+            app_bundle_id_present=self.app_bundle_id is not None,
+        )
+        if issue is not None:
+            raise DeviceValidationError(issue.reason_code, issue.message)
         return DeviceRegistration(
             client_device_id=self.client_device_id,
             name=self.name,

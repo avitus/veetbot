@@ -181,23 +181,6 @@ private struct SessionSidebar: View {
                 .accessibilityLabel("Settings")
             }
         }
-        #if !os(macOS)
-        .background {
-            NavigationLink(
-                isActive: Binding(
-                    get: { model.notificationNavigationID != nil },
-                    set: { active in
-                        if !active { model.acknowledgeNotificationNavigation() }
-                    }
-                )
-            ) {
-                ChatView(model: model)
-            } label: {
-                EmptyView()
-            }
-            .hidden()
-        }
-        #endif
     }
 
     @available(iOS 16.0, macOS 13.0, *)
@@ -206,10 +189,15 @@ private struct SessionSidebar: View {
         #if os(macOS)
         directlyActivatingList
         #else
-        if usesDirectActivation {
-            directlyActivatingList
-        } else {
-            pushingList
+        Group {
+            if usesDirectActivation {
+                directlyActivatingList
+            } else {
+                pushingList
+            }
+        }
+        .navigationDestination(isPresented: notificationNavigationBinding) {
+            ChatView(model: model)
         }
         #endif
     }
@@ -251,39 +239,26 @@ private struct SessionSidebar: View {
     }
 
     private var pushingList: some View {
-        List {
-            NavigationLink {
-                ChatDestination(model: model, entry: nil)
-            } label: {
-                newConversationLabel
-            }
-            .accessibilityIdentifier("sidebar.new-conversation")
-            .listRowBackground(AppTheme.brandGradient)
-
-            Section("History") {
-                ForEach(model.history) { entry in
-                    HStack(spacing: 8) {
-                        NavigationLink {
-                            ChatDestination(model: model, entry: entry)
-                        } label: {
-                            historyLabel(entry)
-                        }
-                        .accessibilityIdentifier("sidebar.session.\(entry.sessionID.uuidString)")
-                        .buttonStyle(.plain)
-
-                        deleteButton(for: entry)
-                    }
-                    .listRowBackground(
-                        entry.sessionID == model.selectedSessionID
-                            ? AppTheme.turquoise.opacity(0.15)
-                            : Color.clear
-                    )
-                }
-            }
-        }
+        navigationList
     }
 
     private var legacyList: some View {
+        navigationList
+        #if !os(macOS)
+        .background {
+            NavigationLink(
+                isActive: notificationNavigationBinding
+            ) {
+                ChatView(model: model)
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+        }
+        #endif
+    }
+
+    private var navigationList: some View {
         List {
             NavigationLink {
                 ChatDestination(model: model, entry: nil)
@@ -315,6 +290,17 @@ private struct SessionSidebar: View {
             }
         }
     }
+
+    #if !os(macOS)
+    private var notificationNavigationBinding: Binding<Bool> {
+        Binding(
+            get: { model.notificationNavigationID != nil },
+            set: { active in
+                if !active { model.acknowledgeNotificationNavigation() }
+            }
+        )
+    }
+    #endif
 
     private var newConversationLabel: some View {
         HStack(spacing: 10) {
