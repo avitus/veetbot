@@ -230,16 +230,20 @@ the fourth outcome above between duplicate and contradiction, so the order is
 same source, duplicate, conflict, contradiction. Incoming evidence conflicts
 when its authority ranks below the existing belief's, or when the two rank
 equally and nothing places them in time: the same session with no later source
-event, or a different session with the existing belief not older than the
-incoming instant. Polarity is never the deciding factor, so an ordinary
-retraction still supersedes what it retracts, and a resolver that is not told
-the incoming instant keeps the ordering it had before the rule existed, exactly
-as one that is not told the session keeps the sequence-only comparison. A
-conflict leaves both of its beliefs live, so the same-source shortcut is decided
-over every related belief before any of them is acted on, and re-consolidating a
-conflicted session is a no-op like any other replay. The rule and what a
+event, or a different session in which the existing belief's evidence onset,
+`valid_from`, is no older than the incoming instant — the time of the newest
+source event backing the incoming candidate, not the time it is being
+consolidated. Replaying an older session therefore conflicts with the belief
+that replaced it rather than reverting to it. Polarity is never the deciding
+factor, so an ordinary retraction still supersedes what it retracts, and a
+resolver that is not told the incoming instant keeps the ordering it had before
+the rule existed, exactly as one that is not told the session keeps the
+sequence-only comparison. A conflict leaves both of its beliefs live, so the
+same-source shortcut is decided over every related belief before any of them is
+acted on, and re-consolidating a conflicted session is a no-op like any other
+replay. The rule and what a
 conflict then commits are stated in
-[memory-evaluation-and-lifecycle.md:858-876](memory-evaluation-and-lifecycle.md:858-876).
+[memory-evaluation-and-lifecycle.md:864-889](memory-evaluation-and-lifecycle.md:864-889).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".

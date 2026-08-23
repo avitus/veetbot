@@ -21,18 +21,18 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:679).
+recall of consequential facts (memory-formation-and-consolidation.md:683).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
-(memory-formation-and-consolidation.md:280), usage that resets decay and raises
+(memory-formation-and-consolidation.md:284), usage that resets decay and raises
 utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:706) are
+that is opt-in per principal (memory-formation-and-consolidation.md:710) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -529,6 +529,12 @@ evidence validator re-checks that `retried_runs` does not exceed the runs the
 two arms could have asked and that a histogram, when present, accounts for
 every incomplete run.
 
+The per-probe rows themselves do carry each arm's answer text verbatim, and
+that is safe only because every probe in this corpus is synthetic: a published
+artifact quotes invented people and invented facts, so it discloses nothing
+about a real principal. A corpus drawn from real conversations would have to
+hash those answers rather than publish them.
+
 ## Public datasets, opt-in and never vendored
 
 Three public long-horizon benchmarks are the outside check on the corpus, and
@@ -863,6 +869,16 @@ evidence conflicts when its authority ranks below the existing belief's, under
 `USER` above `AFFIRMED` above `INFERRED`, or when the two rank equally and
 nothing orders them in time: the same session with no later source event, or a
 different session with the existing belief not older than the incoming instant.
+The incoming instant is the time of the newest source event backing the
+candidate — when the statement was made, never when it is being consolidated —
+and the existing belief's instant is its `valid_from`, when its own evidence
+arrived. `updated_at` cannot stand in for either, because usage feedback,
+decay, and conflict linkage all write it long after the evidence landed.
+Re-derivation is what makes the distinction load-bearing: a replay reads an old
+session at today's clock, so anchoring on the consolidation instant would let
+stale evidence supersede the belief that already replaced it. Replayed evidence
+no newer than the belief standing in its place conflicts with it instead, which
+leaves both statements live and flagged rather than reverting the current one.
 Two user statements with later sources or a later instant still supersede, and
 polarity alone never conflicts, so a later retraction at the same authority
 still supersedes the assertion it retracts.
@@ -881,7 +897,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:706), so it is a command and it demands
+(memory-formation-and-consolidation.md:710), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

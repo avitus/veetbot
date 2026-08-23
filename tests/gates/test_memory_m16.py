@@ -1262,6 +1262,7 @@ _AUTHORITY_ORDER: tuple[MemoryAuthority, ...] = (
     incoming_source=st.integers(min_value=1, max_value=5),
     same_session=st.booleans(),
     offset_seconds=st.integers(min_value=-2, max_value=2),
+    feedback_seconds=st.integers(min_value=0, max_value=3),
     polarity=st.sampled_from((Polarity.ASSERT, Polarity.RETRACT)),
 )
 def test_resolver_orders_authority_then_recency(
@@ -1271,15 +1272,23 @@ def test_resolver_orders_authority_then_recency(
     incoming_source: int,
     same_session: bool,
     offset_seconds: int,
+    feedback_seconds: int,
     polarity: Polarity,
 ) -> None:
-    """Authority decides first, recency second, and polarity never decides at all.
+    """Authority decides first, evidence recency second, polarity never at all.
 
     Over every authority pair, source ordering, session sameness, and instant
     ordering: weaker evidence never overwrites stronger evidence, stronger
     evidence always does, equal evidence supersedes only when something orders
     it in time, and flipping the polarity of the incoming statement changes
     nothing about the outcome.
+
+    Across sessions the instant that orders the two is the existing belief's
+    evidence onset, `valid_from`. Usage feedback, decay, and conflict linkage
+    all write `updated_at`, so it records when the record was last touched
+    rather than when its evidence arrived; the `feedback_seconds` axis drifts
+    `updated_at` past `valid_from` exactly as those do, and no outcome here may
+    depend on it.
     """
 
     resolver = DeterministicConflictResolver()
@@ -1287,7 +1296,8 @@ def test_resolver_orders_authority_then_recency(
         update={
             "authority": existing_authority,
             "source_event_ids": [existing_source],
-            "updated_at": NOW,
+            "valid_from": NOW,
+            "updated_at": NOW + timedelta(seconds=feedback_seconds),
         }
     )
     incoming_at = NOW + timedelta(seconds=offset_seconds)
@@ -1307,11 +1317,12 @@ def test_resolver_orders_authority_then_recency(
 
     relation = resolve(polarity)
     rank = {authority: index for index, authority in enumerate(_AUTHORITY_ORDER)}
-    ordered_in_time = (
-        incoming_source > existing_source if same_session else incoming_at > existing.updated_at
+    replayed_episode = same_session and incoming_source == existing_source
+    strictly_newer_evidence = (
+        incoming_source > existing_source if same_session else incoming_at > existing.valid_from
     )
 
-    if same_session and incoming_source == existing_source:
+    if replayed_episode:
         # A replay of an already-consolidated episode is neither.
         assert relation == "same_source"
     elif rank[incoming_authority] < rank[existing_authority]:
@@ -1319,11 +1330,25 @@ def test_resolver_orders_authority_then_recency(
     elif rank[incoming_authority] > rank[existing_authority]:
         assert relation == "contradiction"
     else:
-        assert relation == ("contradiction" if ordered_in_time else "conflict")
+        assert relation == ("contradiction" if strictly_newer_evidence else "conflict")
 
     # Higher authority never loses to lower, whatever the clock and sequences say.
     if rank[incoming_authority] > rank[existing_authority]:
         assert relation != "conflict"
+
+    # Currency preservation, stated on its own terms rather than as the table
+    # above read backwards: evidence that is not strictly newer never retires a
+    # belief of equal or higher standing, which is exactly the case a replay of
+    # an older session presents, and evidence that is strictly newer at or
+    # above the existing authority always does retire it.
+    if not strictly_newer_evidence and rank[incoming_authority] <= rank[existing_authority]:
+        assert relation != "contradiction"
+    if (
+        strictly_newer_evidence
+        and rank[incoming_authority] >= rank[existing_authority]
+        and not replayed_episode
+    ):
+        assert relation == "contradiction"
 
     # Polarity alone never conflicts.
     assert relation == resolve(

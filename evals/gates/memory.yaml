@@ -273,7 +273,7 @@
   milestone: 16
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
-  statement: "**Established facts enter formation as affirmed candidates.** A fact established in working state from trusted user sources becomes a committed belief at affirmed authority carrying the fact's provenance, while a fact whose sources are untrusted or foreign forms nothing."
+  statement: "**Established facts enter formation as affirmed candidates.** A fact established in working state with non-empty provenance whose every source is a trusted user event of the owning principal becomes a committed belief at affirmed authority carrying that provenance, while empty provenance, an untrusted source, or a foreign source forms nothing."
   check: tests/gates/test_memory_m16.py::test_established_facts_enter_formation_as_affirmed_candidates
 - id: gate.memory.conflict_surfaced
   milestone: 16

@@ -721,8 +721,7 @@ async def _ask_every_probe(
     a billed call still counts against the ceiling.
 
     An arm whose run terminates without an answer is asked once more, against a
-    composition built the same way but freshly, because the observed failures
-    are transport-shaped rather than answers.  The retry is admitted through
+    composition built the same way but freshly.  The retry is admitted through
     the same pre-admission check as any other run, the second failure is kept,
     and an arm that completed is never asked again.
     """

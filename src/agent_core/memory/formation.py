@@ -699,7 +699,12 @@ class DeterministicConflictResolver:
         """Say whether the incoming evidence is later than the existing belief.
 
         Inside one session the event log orders the two, so a later sequence is
-        later evidence. Across sessions only the clock can, and a caller that
+        later evidence. Across sessions only the clock can, and the two instants
+        it compares are both evidence instants: the incoming one is when the
+        statement was made, not when it is being consolidated, and the existing
+        one is `valid_from`, when the belief's own evidence arrived. `updated_at`
+        cannot stand in for it, because usage feedback, decay, and conflict
+        linkage all write it long after the evidence landed. A caller that
         cannot name an instant keeps the ordering it had before this rule
         existed rather than turning every cross-session statement into a
         conflict.
@@ -707,7 +712,7 @@ class DeterministicConflictResolver:
 
         if same_session:
             return max(source_event_ids) > max(existing.source_event_ids)
-        return at is None or existing.updated_at < at
+        return at is None or existing.valid_from < at
 
 
 def portability_ceiling(belief_type: BeliefType) -> Portability:
@@ -835,6 +840,7 @@ class GovernedMemoryService:
         expires_at: datetime | None,
         trigger: str,
         record_audit: bool,
+        evidence_at: datetime | None = None,
         existing_uow: RepositoryUnitOfWork | None = None,
         audit_id: UUID | None = None,
     ) -> tuple[MemoryRecord, str]:
@@ -893,7 +899,7 @@ class GovernedMemoryService:
                         authority=authority,
                         polarity=polarity,
                         session_id=session_id,
-                        at=self._clock.now(),
+                        at=evidence_at or self._clock.now(),
                     ),
                 )
                 for current in sorted(related, key=lambda item: item.store_position, reverse=True)
@@ -1221,6 +1227,11 @@ class GovernedMemoryService:
                     if contains_automatic_memory_hazard(source_text):
                         rejected += 1
                         continue
+                    source_events = [
+                        event
+                        for sequence in candidate.source_event_ids
+                        if (event := by_sequence.get(sequence)) is not None
+                    ]
                     source_event = by_sequence[candidate.source_event_ids[0]]
                     try:
                         belief, action = await self._remember(
@@ -1242,6 +1253,15 @@ class GovernedMemoryService:
                             expires_at=candidate.expires_hint,
                             trigger=effective_trigger,
                             record_audit=False,
+                            # A consolidation may run at any distance from the
+                            # evidence it reads - a replay re-reads a session
+                            # from watermark zero long afterwards - so recency
+                            # is judged on when the statement was made, never on
+                            # when it is being read.
+                            evidence_at=max(
+                                (event.created_at for event in source_events),
+                                default=None,
+                            ),
                             existing_uow=uow,
                             audit_id=consolidation_id,
                         )
