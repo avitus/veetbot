@@ -70,6 +70,7 @@ def test_release_evidence_root_is_a_directory_the_runtime_can_read() -> None:
 def test_every_bundled_artifact_parses_through_the_runtime_loader() -> None:
     artifacts = _bundled_artifacts(PROVIDER_EXTRACTION_RELEASE_EVIDENCE_ROOT)
 
+    assert artifacts, "the release bundle holds no artifact for the runtime to load"
     for path in artifacts:
         evidence = load_provider_extraction_evidence(path)
         assert isinstance(evidence, ProviderExtractionEvaluationEvidence)

@@ -176,10 +176,12 @@ milestones:
         detail: >-
           Ruff formatting over 559 files and Ruff linting pass, strict mypy
           reports no issue in 515 source files, the static partition passes
-          1218 tests, the contract partition passes 350, the release, manual
+          1220 tests, the contract partition passes 350, the release, manual
           rollback, and nginx deployment-script tests pass, and the strict
           documentation build passes with 171 citations checked. The gate
           registry reconciles 324 entries with 247 active through Milestone 12.
+          Measured on ce695b0 plus the task-12 review fix round, which is what
+          last_reviewed_commit names.
       - check: nineteen Milestone 16 gate.memory.* gates
         outcome: passed_locally
         detail: >-
@@ -301,19 +303,30 @@ milestones:
           records the terminal error class the runtime already carries, an arm
           that fails outside the run becomes a failed arm named by its
           exception type rather than ending the invocation, and a probe arm
-          whose run terminates without an answer is retried exactly once
+          whose run terminates before an answer is retried exactly once
           against a freshly built composition through the same pre-admission
-          ceiling check. No published pass condition changed. One live run of
+          ceiling check, unless the runtime ended it for budget exhaustion,
+          step exhaustion, context overflow, or a permanent model error, which
+          are kept on the first attempt. That narrowing came from review after
+          this run. The four first attempts it discarded cost USD 0.028620
+          between them, which is the difference between the recorded total and
+          the sum of the kept arms, so not one of them reached the per-run
+          budget cap of USD 0.05 and none can have been a budget kill. The
+          other three non-retryable reasons cannot be re-derived, because a
+          retried arm's first record is discarded; on limits of three model
+          calls and six steps per probe, and on that spend, they are
+          implausible rather than excluded. No published pass condition changed. One live run of
           agent eval memory-benchmark --no-deterministic-only at build
           192a0161d881837218c0ed125c55a121663f8eda passed every condition and
           published
           evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json.
           Incomplete runs were 0 of 132 and the failure-class histogram is
           therefore empty. Four probe arms failed their first attempt and
-          completed on the retry, so retried_runs is 4; all four were
-          without-memory arms of a p02 probe, in four different scenarios,
-          which is a narrower pattern than random transport noise and is worth
-          a look. Lift was 45 against a derived minimum of 11, from 57 correct
+          completed on the retry, so retried_runs is 4; all four were the
+          without-memory arm of the four multi_hop probes at position p02. The
+          corpus's other two multi_hop probes and all sixty non-multi_hop
+          without-memory arms completed first time, so the pattern is
+          content-correlated rather than positional. It is not diagnosed. Lift was 45 against a derived minimum of 11, from 57 correct
           with-memory answers against 12 without memory over 54 answerable
           probes. Recoverable correctness was 45 of 48 against a minimum of 39.
           Abstention correctness was 12 of 12 against a minimum of 10.
@@ -386,5 +399,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T09:50:03Z
-last_reviewed_commit: e52f383
+last_updated: 2026-08-23T10:15:00Z
+last_reviewed_commit: ce695b0 plus the task-12 review fix round

@@ -33,7 +33,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.config import Settings, load_settings
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import MemoryRecord, minimum_supported_case_count
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunFailure, RunStatus
+from agent_core.domain.runs import (
+    TERMINAL_RUN_STATUSES,
+    FailureReason,
+    RunFailure,
+    RunStatus,
+)
 from agent_core.evals.memory_benchmark import (
     BenchmarkProbe,
     BenchmarkScenario,
@@ -66,6 +71,19 @@ from agent_core.ports.determinism import Clock
 
 LIVE_COST_CEILING_USD = Decimal("4.00")
 PROBE_WALL_SECONDS = 120
+
+# Terminations the runtime decided on rather than suffered.  Re-asking a probe
+# the per-run budget already stopped would let one probe spend twice its per-run
+# ceiling, and re-asking one the steps, the context window, or a permanent model
+# error ended would only reach the same wall again.
+NON_RETRYABLE_FAILURE_REASONS: frozenset[str] = frozenset(
+    {
+        FailureReason.BUDGET_EXCEEDED.value,
+        FailureReason.MAX_STEPS_EXCEEDED.value,
+        FailureReason.CONTEXT_OVERFLOW.value,
+        FailureReason.MODEL_PERMANENT_ERROR.value,
+    }
+)
 
 LiveArm = Literal["with_memory", "without_memory"]
 _ARMS: tuple[LiveArm, ...] = ("with_memory", "without_memory")
@@ -149,14 +167,24 @@ def _terminal_failure_class(failure: RunFailure | None) -> str | None:
     return failure.error_class or None
 
 
+def _terminal_failure_reason(failure: RunFailure | None) -> str | None:
+    """Name the runtime's own code for why a run ended, and nothing else."""
+
+    if failure is None:
+        return None
+    return failure.reason.value
+
+
 class LiveProbeArmResult(BaseModel):
     """One probe asked once, in one arm, against a real model.
 
     `retried` marks the attempt that replaced a first attempt which terminated
     without an answer, and `failure_class` names why a terminated run did:
     the run record's terminal error class, or the exception type when the arm
-    failed outside the run.  Both are content-free — a class name, never a
-    message, an answer, or a belief.
+    failed outside the run.  `failure_reason` is the runtime's own code for the
+    same termination, which is what decides whether the arm may be asked again.
+    All three are content-free — a class name, an enum value, never a message,
+    an answer, or a belief.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -174,6 +202,7 @@ class LiveProbeArmResult(BaseModel):
     policy_version: str | None = None
     retrieval: ProbeRetrievalResult | None = None
     failure_class: str | None = Field(default=None, min_length=1, max_length=256)
+    failure_reason: str | None = Field(default=None, min_length=1, max_length=256)
     retried: bool = False
 
 
@@ -553,6 +582,7 @@ async def _ask(
         model=None if pin is None else pin.model,
         policy_version=composition.ruleset.policy_version,
         failure_class=_terminal_failure_class(run.failure),
+        failure_reason=_terminal_failure_reason(run.failure),
         retrieval=(
             None
             if arm != "with_memory"
@@ -659,6 +689,21 @@ async def run_live_benchmark(
     )
 
 
+def _may_be_retried(result: LiveProbeArmResult) -> bool:
+    """Whether an arm that produced no answer may be asked a second time.
+
+    A run the runtime stopped on its own limits is not a failure to re-roll: a
+    budget kill re-asked would spend the per-run ceiling twice, and steps, the
+    context window, and a permanent model error would only be reached again.
+    Those terminations are kept on the first attempt, with their class, and
+    counted incomplete.
+    """
+
+    if result.run_status is RunStatus.COMPLETED:
+        return False
+    return result.failure_reason not in NON_RETRYABLE_FAILURE_REASONS
+
+
 async def _ask_every_probe(
     settings: Settings,
     corpus: MemoryBenchmarkCorpus,
@@ -713,7 +758,7 @@ async def _ask_every_probe(
                         scenario_context=context,
                     )
                     spent += result.cost_usd
-                    if result.run_status is not RunStatus.COMPLETED:
+                    if _may_be_retried(result):
                         if spent + PROBE_RUN_COST_CEILING_USD > LIVE_COST_CEILING_USD:
                             stopped_by = "cost_ceiling"
                             break
@@ -828,16 +873,18 @@ def _aggregate_live(
 def _failure_classes(arms: Sequence[LiveProbeArmResult]) -> dict[str, int]:
     """Count the incomplete runs by the class that ended them.
 
-    An arm that terminated without recording a class is counted under its
-    terminal status, so the histogram accounts for every incomplete run rather
-    than for the diagnosable subset of them.
+    The key is the run record's terminal error class, or the exception type
+    when the arm failed outside the run.  An arm that terminated without either
+    is counted under a `run_status:` key, so a status can never be read as a
+    class name, and the histogram still accounts for every incomplete run
+    rather than for the diagnosable subset of them.
     """
 
     histogram: dict[str, int] = {}
     for arm in arms:
         if arm.run_status is RunStatus.COMPLETED:
             continue
-        name = arm.failure_class or arm.run_status.value
+        name = arm.failure_class or f"run_status:{arm.run_status.value}"
         histogram[name] = histogram.get(name, 0) + 1
     return dict(sorted(histogram.items()))
 

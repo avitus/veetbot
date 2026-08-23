@@ -1666,6 +1666,21 @@ def test_incomplete_run_diagnostics_name_every_failed_arm_content_free() -> None
     assert memory_benchmark_live.incomplete_run_diagnostics(_live_metrics()) == []
 
 
+def test_failure_classes_keep_one_namespace_for_class_names_and_statuses() -> None:
+    """A status is never mistaken for a class name in the histogram."""
+
+    named = _live_arm("with_memory").model_copy(
+        update={"run_status": RunStatus.FAILED, "failure_class": "ModelStreamError"}
+    )
+    unnamed = _live_arm("without_memory", correct=False).model_copy(
+        update={"run_status": RunStatus.CANCELLED, "failure_class": None}
+    )
+
+    histogram = memory_benchmark_live._failure_classes([named, unnamed])
+
+    assert histogram == {"ModelStreamError": 1, "run_status:CANCELLED": 1}
+
+
 class TestBenchmarkEvidencePublicationGate:
     """The two publication gates: evidence only on a pass, and the cost ceiling."""
 
@@ -1682,6 +1697,7 @@ class TestBenchmarkEvidencePublicationGate:
         status: RunStatus = RunStatus.COMPLETED,
         failures: dict[tuple[str, str, str], int] | None = None,
         failure_class: str = "ModelStreamError",
+        failure_reason: str | None = None,
         raises: bool = False,
     ) -> object:
         remaining = dict(failures or {})
@@ -1717,6 +1733,7 @@ class TestBenchmarkEvidencePublicationGate:
                     model="gpt-memory",
                     policy_version="default@profile+hline",
                     failure_class=failure_class,
+                    failure_reason=failure_reason,
                 )
             knows = arm == "with_memory" and with_memory_knows
             if probe.answer.kind == "abstain":
@@ -1766,6 +1783,7 @@ class TestBenchmarkEvidencePublicationGate:
         with_memory_knows: bool = True,
         failures: dict[tuple[str, str, str], int] | None = None,
         failure_class: str = "ModelStreamError",
+        failure_reason: str | None = None,
         raises: bool = False,
     ) -> tuple[MemoryBenchmarkCorpus, str]:
         corpus, digest = load_corpus(_REPOSITORY)
@@ -1789,6 +1807,7 @@ class TestBenchmarkEvidencePublicationGate:
                 with_memory_knows=with_memory_knows,
                 failures=failures,
                 failure_class=failure_class,
+                failure_reason=failure_reason,
                 raises=raises,
             ),
         )
@@ -1899,6 +1918,47 @@ class TestBenchmarkEvidencePublicationGate:
         ]
         assert len(retried) == 1
         assert retried[0].run_status is RunStatus.COMPLETED
+
+    async def test_a_run_the_runtime_ended_on_its_own_limits_is_not_retried(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A budget kill is the ceiling working, not a failure to re-roll.
+
+        Re-asking a probe the per-run budget already stopped would let one
+        probe spend twice its per-run ceiling, so the four terminations the
+        runtime decides on — budget, steps, context overflow, and a permanent
+        model error — are kept on the first attempt with their class.
+        """
+
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(
+            monkeypatch,
+            calls=calls,
+            failures={first: 1},
+            failure_class="BudgetExceededError",
+            failure_reason=FailureReason.BUDGET_EXCEEDED.value,
+        )
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls.count(first) == 1
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.retried_runs == 0
+        assert result.live.incomplete_runs == 1
+        assert result.live.failure_classes == {"BudgetExceededError": 1}
 
     async def test_a_second_failure_leaves_the_run_incomplete_and_named(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

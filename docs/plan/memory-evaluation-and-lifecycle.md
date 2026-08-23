@@ -507,12 +507,15 @@ if the first completed live run reports zero cost the harness aborts with
 more probes for free and calling the ceiling enforced.
 
 A run that terminated without an answer is asked once more before it counts.
-The observed failures are transport-shaped — an arm ends `FAILED` after zero or
-one model calls while the other hundred and thirty complete — so every probe
-arm whose run did not complete is retried exactly once, against a composition
-built the same way but freshly, and the retry is admitted through the same
-pre-admission ceiling check as any other run: a retry the ceiling refuses stops
-the arm instead of running outside it. An arm that completed is never asked
+Every probe arm whose run terminated before an answer for a reason other than
+budget exhaustion, step exhaustion, context overflow, or a permanent model
+error is retried exactly once, against a composition built the same way but
+freshly, and the retry is admitted through the same pre-admission ceiling check
+as any other run: a retry the ceiling refuses stops the arm instead of running
+outside it. Those four are terminations the runtime decided on rather than
+suffered — re-asking a probe the per-run budget already stopped would let one
+probe spend twice its per-run ceiling — so they are kept on the first attempt,
+with their class, and counted incomplete. An arm that completed is never asked
 again, a second failure is kept, and a first attempt that failed after a billed
 call still counts its cost. `retried_runs` counts the retries, `incomplete_runs`
 keeps its meaning — what was still incomplete after the retry — and the

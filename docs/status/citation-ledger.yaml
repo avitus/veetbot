@@ -100,7 +100,7 @@ citations:
   - cite: "docs/plan/memory-evaluation-and-lifecycle.md#docs/plan/memory-retrieval-and-ranking.md:93"
     excerpt: "### The recall delta"
     digest: "536519dd747fa19e"
-  - cite: "docs/plan/memory-formation-and-consolidation.md#docs/plan/memory-evaluation-and-lifecycle.md:855-873"
+  - cite: "docs/plan/memory-formation-and-consolidation.md#docs/plan/memory-evaluation-and-lifecycle.md:858-876"
     excerpt: "Formation's resolver has three outcomes today — same source,"
     digest: "db03d9217927b126"
   - cite: "docs/plan/model-gateway.md#docs/adr/0010-live-event-transport.md:24-25"
