@@ -11,7 +11,7 @@ budget pressure cannot yield them.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timedelta
 from uuid import UUID
 
 from agent_core.adapters.determinism import FixedClock
@@ -101,6 +101,10 @@ class _PlanStore:
 
 
 class _QueryFormer:
+    def __init__(self, *, as_of: datetime | None = None, budget_tokens: int = 500) -> None:
+        self._as_of = as_of
+        self._budget_tokens = budget_tokens
+
     def form(
         self,
         active_run: object,
@@ -117,7 +121,8 @@ class _QueryFormer:
                 current_scope=current_scope or "project-a",
                 text="concise answers",
                 subjects=["answer style"],
-                budget_tokens=500,
+                as_of=self._as_of,
+                budget_tokens=self._budget_tokens,
                 max_items=5,
                 min_score=0.1,
             )
@@ -144,12 +149,20 @@ def _belief(belief_id: UUID, statement: str) -> RecalledBelief:
 
 
 class _Retriever:
-    """A retriever that answers the base and delta queries differently."""
+    """A retriever that answers the base and delta queries differently.
 
-    def __init__(self) -> None:
+    `base_tokens` is what the base block costs against the in-turn recall
+    class, and `base_watermark` is the store head the base recall read: a head
+    no higher than the session's snapshot watermark means nothing has been
+    written since, which the builder must recognize without asking again.
+    """
+
+    def __init__(self, *, base_tokens: int = 12, base_watermark: int = 12) -> None:
         self.calls = 0
         self.queries: list[RecallQuery] = []
         self.correction_calls: list[tuple[UUID, int]] = []
+        self._base_tokens = base_tokens
+        self._base_watermark = base_watermark
 
     async def recall(
         self,
@@ -182,10 +195,10 @@ class _Retriever:
         return RecallResult(
             items=[_belief(BASE_BELIEF, "User prefers concise answers")],
             rendered="<memory>base</memory>",
-            tokens=12,
+            tokens=self._base_tokens,
             truncated=False,
             trace_id=UUID(int=975),
-            watermark=12,
+            watermark=self._base_watermark,
         )
 
     async def corrections(
@@ -212,6 +225,7 @@ def _builder(
     snapshot_id: UUID | None = SNAPSHOT_TRACE,
     watermark: int = 7,
     total_tokens: int = 32_768,
+    query_former: _QueryFormer | None = None,
 ) -> BudgetedContextBuilder:
     configured = agent()
     estimator = ConservativeTokenEstimator()
@@ -239,7 +253,7 @@ def _builder(
         FixedClock(NOW),
         _working_state(),
         retriever,
-        _QueryFormer(),
+        query_former or _QueryFormer(),
     )
 
 
@@ -348,3 +362,77 @@ async def test_a_session_without_a_snapshot_takes_one_recall_and_no_corrections(
     texts = _memory_texts(request)
     assert len(texts) == 1
     assert "<memory>base</memory>" in texts[0]
+
+
+async def test_the_delta_is_bounded_by_what_the_base_left_of_the_recall_class() -> None:
+    """Both blocks spend one budget: in-turn recall is 2,000 tokens, not 2,000 each."""
+
+    retriever = _Retriever(base_tokens=120)
+    builder = _builder(retriever)
+
+    await builder.build(run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal())
+
+    base_query, delta_query = retriever.queries
+    assert base_query.budget_tokens == 500
+    assert delta_query.budget_tokens == 500 - 120
+
+
+async def test_a_base_recall_that_fills_the_class_leaves_no_delta_but_keeps_corrections() -> None:
+    """A full base block spends the class, so the delta is not even asked for.
+
+    Corrections are unbudgeted and never yield, so they are exactly what the
+    turn must keep when the recall class is already spent.
+    """
+
+    retriever = _Retriever(base_tokens=500)
+    builder = _builder(retriever)
+
+    request = await builder.build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+
+    assert retriever.calls == 1
+    assert retriever.correction_calls == [(SNAPSHOT_TRACE, 7)]
+    texts = _memory_texts(request)
+    assert len(texts) == 2
+    assert "<memory>base</memory>" in texts[0]
+    assert _correction_line() in texts[1]
+
+
+async def test_a_store_head_at_the_watermark_takes_neither_delta_nor_corrections() -> None:
+    """Nothing written since the snapshot means nothing to say about it.
+
+    No row can sit above the store head, and every status change a correction
+    selects on takes a fresh position, so a head still at the watermark makes
+    both extra reads provably empty — and the turn skips the query, the trace,
+    the event, and the page of rows they would have cost.
+    """
+
+    retriever = _Retriever(base_watermark=7)
+    builder = _builder(retriever, watermark=7)
+
+    request = await builder.build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+
+    assert retriever.calls == 1
+    assert retriever.correction_calls == []
+    texts = _memory_texts(request)
+    assert len(texts) == 1
+    assert "<memory>base</memory>" in texts[0]
+
+
+async def test_the_delta_block_is_stamped_with_the_base_query_instant() -> None:
+    """A historical recall stamps both blocks with the instant it asks about."""
+
+    as_of = NOW - timedelta(days=3)
+    retriever = _Retriever()
+    builder = _builder(retriever, query_former=_QueryFormer(as_of=as_of))
+
+    request = await builder.build(
+        run(status=RunStatus.RUNNING), _checkpoint(), agent(), principal()
+    )
+
+    delta_block = _memory_texts(request)[1]
+    assert f'as_of="{as_of.isoformat().replace("+00:00", "Z")}"' in delta_block
+    assert NOW.isoformat().replace("+00:00", "Z") not in delta_block

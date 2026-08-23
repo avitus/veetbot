@@ -599,9 +599,12 @@ class BudgetedContextBuilder:
         taken again with no text over the store positions the session has not
         seen, which is what reaches a belief formed or corrected since the
         snapshot froze; the corrections are what override the snapshot members
-        that stopped holding. A failure in either of the two extra reads costs
-        the turn only what that read would have added: the base recall it
-        already has is still the turn's memory.
+        that stopped holding. Both further reads are skipped when the store
+        head the base recall read is still the session's watermark, since
+        nothing has been written since and neither could say anything. The
+        delta also shares the base block's budget class rather than doubling
+        it. A failure in either read costs the turn only what that read would
+        have added: the base recall it already has is still the turn's memory.
         """
 
         assert self._memory_retriever is not None
@@ -629,22 +632,42 @@ class BudgetedContextBuilder:
             )
             return _RecallBundle()
         rendered_base = base.rendered if base.items else None
-        if snapshot_id is None:
+        # One instant governs the turn's memory, the way it governs one recall:
+        # a historical query stamps both blocks with the moment it asks about.
+        instant = queries[0].as_of or self._clock.now()
+        if snapshot_id is None or base.watermark <= snapshot_watermark:
+            # No row can sit above the store head, and every status change a
+            # correction selects on takes a fresh position, so a head still at
+            # the session's watermark makes both further reads provably empty.
+            # Skipping them spares a quiet turn a query, a trace, an event, and
+            # a page of rows that could only have said nothing.
             return _RecallBundle(base=rendered_base)
+        # The two blocks share one budget class. In-turn recall is capped once
+        # in the context engine's Region B table, not once per block, so the
+        # delta is issued for what the base block left of it and is not issued
+        # at all when the base block spent the class. Corrections are outside
+        # this: they are unbudgeted, never yield, and are the trust-critical
+        # half of the pair.
+        remaining = queries[0].budget_tokens - base.tokens
         try:
-            delta = await self._memory_retriever.recall(
-                queries[0].model_copy(
-                    update={
-                        "profile": RecallProfile.CORE,
-                        "text": None,
-                        "subjects": [],
-                        "min_store_position": snapshot_watermark,
-                    }
-                ),
-                session_id=run.session_id,
-                run_id=run.id,
-                turn_id=run.id,
-                moment="in_turn",
+            delta = (
+                None
+                if remaining <= 0
+                else await self._memory_retriever.recall(
+                    queries[0].model_copy(
+                        update={
+                            "profile": RecallProfile.CORE,
+                            "text": None,
+                            "subjects": [],
+                            "min_store_position": snapshot_watermark,
+                            "budget_tokens": remaining,
+                        }
+                    ),
+                    session_id=run.session_id,
+                    run_id=run.id,
+                    turn_id=run.id,
+                    moment="in_turn",
+                )
             )
             corrections = await self._memory_retriever.corrections(
                 snapshot_id=snapshot_id,
@@ -659,10 +682,12 @@ class BudgetedContextBuilder:
         # A belief the base recall already carries is not news, however new its
         # position is: stating it twice in one turn is two voices on one fact.
         carried = {item.belief_id for item in base.items}
-        fresh = [item for item in delta.items if item.belief_id not in carried]
+        fresh = (
+            [] if delta is None else [item for item in delta.items if item.belief_id not in carried]
+        )
         return _RecallBundle(
             base=rendered_base,
-            delta=render_memory(fresh, as_of=self._clock.now()) if fresh else None,
+            delta=render_memory(fresh, as_of=instant) if fresh else None,
             corrections=tuple(corrections),
         )
 
