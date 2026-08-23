@@ -53,7 +53,9 @@ from agent_core.evals.memory_benchmark_driver import MemoryBenchmarkResult
 from agent_core.evals.memory_benchmark_live import (
     LIVE_COST_CEILING_USD,
     AnswerScore,
+    LiveArm,
     LiveProbeArmResult,
+    LiveProbeResult,
     MemoryBenchmarkEvidence,
     MemoryBenchmarkLiveMetrics,
     minimum_live_lift,
@@ -1509,6 +1511,101 @@ def test_evidence_rejects_failing_pass_conditions(
 
     with pytest.raises(ValidationError, match=match):
         MemoryBenchmarkEvidence(**fields)  # type: ignore[arg-type]
+
+
+_IDENTITY = ("openai", "gpt-memory", "default@profile+hline")
+_UNRESOLVED: tuple[str | None, str | None, str | None] = (None, None, None)
+
+
+def _live_arm(
+    arm: LiveArm,
+    identity: tuple[str | None, str | None, str | None] = _IDENTITY,
+    *,
+    correct: bool = True,
+) -> LiveProbeArmResult:
+    provider, model, policy_version = identity
+    return LiveProbeArmResult(
+        arm=arm,
+        answer="Portland",
+        score=AnswerScore(correct=correct, abstained=False, leaked_protected=False),
+        run_status=RunStatus.COMPLETED,
+        model_calls=1,
+        cost_usd=Decimal("0.01"),
+        latency_ms=100,
+        policy_failures=0,
+        provider=provider,
+        model=model,
+        policy_version=policy_version,
+        retrieval=(
+            _probe_result(needed_total=1, needed_formed=1, needed_recalled=1)
+            if arm == "with_memory"
+            else None
+        ),
+    )
+
+
+def _one_probe_row(
+    *,
+    with_memory: LiveProbeArmResult | None = None,
+    without_memory: LiveProbeArmResult | None = None,
+) -> LiveProbeResult:
+    return LiveProbeResult(
+        scenario_id="mb-bench-001",
+        probe_id="p01",
+        category="single_hop",
+        with_memory=_live_arm("with_memory") if with_memory is None else with_memory,
+        without_memory=(
+            _live_arm("without_memory", correct=False) if without_memory is None else without_memory
+        ),
+        lift=1,
+    )
+
+
+def _one_probe_evidence(row: LiveProbeResult) -> dict[str, object]:
+    return _evidence_fields(
+        minimum_lift=1,
+        minimum_recoverable_correct=1,
+        minimum_abstain_correct=0,
+        live=_live_metrics(
+            probe_count=1,
+            answerable_probe_count=1,
+            abstain_expected=0,
+            with_memory_correct=1,
+            without_memory_correct=0,
+            lift=1,
+            recoverable_probe_count=1,
+            recoverable_correct=1,
+            abstain_with_memory_correct=0,
+            probes=[row],
+        ),
+    )
+
+
+def test_evidence_requires_one_identity_across_every_probe_row() -> None:
+    evidence = MemoryBenchmarkEvidence(**_one_probe_evidence(_one_probe_row()))  # type: ignore[arg-type]
+
+    assert (evidence.provider, evidence.model, evidence.policy_version) == _IDENTITY
+
+    foreign_provider = _one_probe_row(
+        without_memory=_live_arm(
+            "without_memory",
+            ("anthropic", "gpt-memory", "default@profile+hline"),
+            correct=False,
+        )
+    )
+    foreign_policy = _one_probe_row(
+        with_memory=_live_arm("with_memory", ("openai", "gpt-memory", "eval.default@other+hline"))
+    )
+    unresolved = _one_probe_row(with_memory=_live_arm("with_memory", _UNRESOLVED))
+
+    with pytest.raises(ValidationError, match="different provider"):
+        MemoryBenchmarkEvidence(**_one_probe_evidence(foreign_provider))  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="different provider"):
+        MemoryBenchmarkEvidence(**_one_probe_evidence(foreign_policy))  # type: ignore[arg-type]
+
+    with pytest.raises(ValidationError, match="did not resolve"):
+        MemoryBenchmarkEvidence(**_one_probe_evidence(unresolved))  # type: ignore[arg-type]
 
 
 class TestBenchmarkEvidencePublicationGate:

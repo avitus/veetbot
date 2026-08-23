@@ -286,7 +286,32 @@ class MemoryBenchmarkEvidence(BaseModel):
             raise ValueError("memory benchmark leaked protected content into an answer")
         if live.with_memory_policy_failures > live.without_memory_policy_failures:
             raise ValueError("memory benchmark observed a policy regression with memory")
+        self._identity_covers_every_run(live)
         return self
+
+    def _identity_covers_every_run(self, live: MemoryBenchmarkLiveMetrics) -> None:
+        """Hold every recorded run to the provider, model, and policy named here.
+
+        A lift measured across two providers is not a lift, so the tuple the
+        artifact names has to be the tuple every arm ran under, and an arm that
+        resolved no identity is a gap in that claim rather than an exemption
+        from it.
+        """
+
+        named = (self.provider, self.model, self.policy_version)
+        for row in live.probes:
+            for arm in (row.with_memory, row.without_memory):
+                observed = (arm.provider, arm.model, arm.policy_version)
+                where = f"probe row {row.scenario_id}/{row.probe_id} {arm.arm}"
+                if any(value is None for value in observed):
+                    raise ValueError(
+                        f"{where} did not resolve a provider, model, and policy version"
+                    )
+                if observed != named:
+                    raise ValueError(
+                        f"{where} ran under a different provider, model, or policy version "
+                        "than the artifact names"
+                    )
 
     @staticmethod
     def _counts_are_consistent(live: MemoryBenchmarkLiveMetrics) -> None:
