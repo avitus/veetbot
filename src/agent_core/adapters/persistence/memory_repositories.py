@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Integer,
     Text,
+    and_,
     bindparam,
     delete,
     func,
@@ -52,6 +53,7 @@ from agent_core.domain.memory import (
     BeliefType,
     ConsolidationRun,
     MemoryAuthority,
+    MemoryBrowseQuery,
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
@@ -374,6 +376,49 @@ class PostgresMemoryStore:
                     .where(*predicates)
                     .order_by(MemoryRow.store_position.desc(), MemoryRow.id)
                     .limit(limit)
+                )
+            ).all()
+        )
+        return [_memory(row) for row in rows]
+
+    async def browse(self, query: MemoryBrowseQuery) -> list[MemoryRecord]:
+        predicates: list[Any] = [
+            MemoryRow.tenant_id == query.tenant_id,
+            MemoryRow.principal_id == query.principal_id,
+            MemoryRow.sensitivity.in_(_allowed_sensitivities(query.ceiling)),
+            MemoryRow.status.in_(tuple(status.value for status in query.statuses)),
+        ]
+        if query.belief_types:
+            predicates.append(
+                MemoryRow.belief_type.in_(tuple(item.value for item in query.belief_types))
+            )
+        if query.subject is not None:
+            predicates.append(func.lower(MemoryRow.subject) == query.subject.casefold())
+        if query.session_id is not None:
+            predicates.append(MemoryRow.source_session_id == query.session_id)
+        terms = lexical_query_terms(query.text)
+        if terms:
+            # Any-term semantics, matching `query()`: a belief matches when it
+            # overlaps one term or more.
+            vector = func.to_tsvector("simple", MemoryRow.subject + " " + MemoryRow.statement)
+            predicates.append(
+                or_(*[vector.op("@@")(func.plainto_tsquery("simple", term)) for term in terms])
+            )
+        if query.cursor is not None:
+            cursor_position, cursor_id = query.cursor
+            predicates.append(
+                or_(
+                    MemoryRow.store_position < cursor_position,
+                    and_(MemoryRow.store_position == cursor_position, MemoryRow.id > cursor_id),
+                )
+            )
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(MemoryRow)
+                    .where(*predicates)
+                    .order_by(MemoryRow.store_position.desc(), MemoryRow.id)
+                    .limit(query.limit + 1)
                 )
             ).all()
         )

@@ -23,6 +23,7 @@ from agent_core.domain.memory import (
     BeliefRejection,
     BeliefType,
     ConsolidationRun,
+    MemoryBrowseQuery,
     MemoryEdit,
     MemoryRecord,
     MemoryStatus,
@@ -191,6 +192,41 @@ class InMemoryMemoryStore:
             ]
             records.sort(key=lambda item: (-item.store_position, str(item.id)))
             return [item.model_copy(deep=True) for item in records[:limit]]
+
+    async def browse(self, query: MemoryBrowseQuery) -> list[MemoryRecord]:
+        statuses = set(query.statuses)
+        belief_types = set(query.belief_types)
+        subject = None if query.subject is None else query.subject.casefold()
+        term_lexemes = lexical_term_lexemes(lexical_query_terms(query.text))
+        async with self._lock:
+            result = []
+            for record in self._records.values():
+                if record.tenant_id != query.tenant_id or record.principal_id != query.principal_id:
+                    continue
+                if SENSITIVITY_ORDER[record.sensitivity] > SENSITIVITY_ORDER[query.ceiling]:
+                    continue
+                if record.status not in statuses:
+                    continue
+                if belief_types and record.belief_type not in belief_types:
+                    continue
+                if subject is not None and record.subject.casefold() != subject:
+                    continue
+                if query.session_id is not None and record.source_session_id != query.session_id:
+                    continue
+                if term_lexemes and not lexical_text_matches(
+                    term_lexemes, f"{record.subject} {record.statement}"
+                ):
+                    continue
+                if query.cursor is not None:
+                    cursor_position, cursor_id = query.cursor
+                    if not (
+                        record.store_position < cursor_position
+                        or (record.store_position == cursor_position and record.id > cursor_id)
+                    ):
+                        continue
+                result.append(record.model_copy(deep=True))
+            result.sort(key=lambda record: (-record.store_position, str(record.id)))
+            return result[: query.limit + 1]
 
     async def list_idle(
         self,

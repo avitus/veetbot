@@ -17,6 +17,7 @@ from agent_core.domain.memory import (
     ConsolidationRun,
     EpisodeQuery,
     MemoryAuthority,
+    MemoryBrowseQuery,
     MemoryCandidate,
     MemoryCorrection,
     MemoryEdit,
@@ -65,6 +66,8 @@ class MemoryStore(Protocol):
         session_id: UUID | None = None,
         limit: int = 200,
     ) -> list[MemoryRecord]: ...
+
+    async def browse(self, query: MemoryBrowseQuery) -> list[MemoryRecord]: ...
 
     async def list_idle(
         self,
