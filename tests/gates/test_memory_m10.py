@@ -15,7 +15,7 @@ from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.events import EventEnvelope, NewEvent
+from agent_core.domain.events import EventEnvelope, NewEvent, ProcessEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -232,6 +232,71 @@ async def test_memory_inspection_surface_is_governed_and_traceable() -> None:
     assert edited.statement == "User prefers direct answers."
     await service.delete(edited.id, trace_id=recalled.trace_id)
     assert await service.list_memories(include_inactive=True) == []
+
+
+async def test_memory_diagnosis_queries_only_required_process_event_types(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clock, factory, service, _retriever = await formation_stack()
+    async with factory() as uow:
+        process_events = uow.process_events
+    original_list = process_events.list
+    queried_filters: list[tuple[str, str, UUID | None, frozenset[str], int]] = []
+
+    async def refuse_unbounded_list(event_type: str | None = None) -> list[ProcessEvent]:
+        del event_type
+        raise AssertionError("diagnosis must not use the unbounded process-event query")
+
+    async def recording_list_filtered(
+        *,
+        tenant_id: str,
+        principal_id: str,
+        session_id: UUID | None,
+        event_types: frozenset[str],
+        limit: int,
+    ) -> list[ProcessEvent]:
+        queried_filters.append((tenant_id, principal_id, session_id, event_types, limit))
+        rows = [
+            event
+            for event_type in event_types
+            for event in await original_list(event_type)
+            if event.payload.get("tenant_id") == tenant_id
+            and event.payload.get("principal_id") == principal_id
+            and (session_id is None or event.payload.get("session_id") == str(session_id))
+        ]
+        return sorted(rows, key=lambda event: (event.created_at, event.id.int))[-limit:]
+
+    monkeypatch.setattr(process_events, "list", refuse_unbounded_list)
+    monkeypatch.setattr(
+        process_events,
+        "list_filtered",
+        recording_list_filtered,
+        raising=False,
+    )
+
+    await service.diagnose(SESSION_ID)
+
+    assert queried_filters == [
+        (
+            principal().tenant_id,
+            principal().principal_id,
+            SESSION_ID,
+            frozenset(
+                {
+                    "memory.provider_extraction.completed",
+                    "memory.provider_extraction.failed",
+                }
+            ),
+            100,
+        ),
+        (
+            principal().tenant_id,
+            principal().principal_id,
+            None,
+            frozenset({"memory.provider_extraction.selection"}),
+            100,
+        ),
+    ]
 
 
 def test_provider_activation_requires_an_exact_evaluation_tuple() -> None:
@@ -530,6 +595,20 @@ async def test_retryable_provider_failure_is_bounded_and_audits_exhaustion() -> 
             retry_at = datetime.fromisoformat(
                 cast(str, diagnosis.formation_requests[-1].payload["not_before"])
             )
+            async with factory() as uow:
+                await uow.events.append(
+                    NewEvent(
+                        session_id=SESSION_ID,
+                        run_id=None,
+                        event_type="memory.formation.requested",
+                        actor_type="runtime",
+                        payload={
+                            "trigger": "run_terminal",
+                            "not_before": retry_at.isoformat(),
+                        },
+                        derivation_key=f"later-run-terminal:{attempt}",
+                    )
+                )
             clock.advance(retry_at - clock.now())
 
     diagnosis = await service.diagnose(SESSION_ID)

@@ -327,6 +327,22 @@ class InMemoryNotificationOutbox:
                 claimed.append(updated.model_copy(deep=True))
             return claimed
 
+    async def list_pending_older_than(
+        self,
+        before: datetime,
+        limit: int,
+    ) -> list[Notification]:
+        cutoff = _aware_utc(before)
+        _positive_limit(limit, "notification backlog")
+        async with self._lock:
+            values = [
+                value
+                for value in self._notifications.values()
+                if value.status is NotificationStatus.PENDING and value.created_at < cutoff
+            ]
+            values.sort(key=lambda value: (value.created_at, value.id))
+            return [value.model_copy(deep=True) for value in values[:limit]]
+
     async def record_delivery(self, delivery: NotificationDelivery) -> None:
         async with self._lock:
             notification = self._notifications.get(delivery.notification_id)
@@ -766,6 +782,24 @@ class PostgresNotificationOutbox:
         values = [notification_to_domain(row) for row in rows]
         values.sort(key=lambda value: (value.next_attempt_at, value.created_at, value.id))
         return values
+
+    async def list_pending_older_than(
+        self,
+        before: datetime,
+        limit: int,
+    ) -> list[Notification]:
+        rows = (
+            await self._session.scalars(
+                select(NotificationOutboxRow)
+                .where(
+                    NotificationOutboxRow.status == NotificationStatus.PENDING.value,
+                    NotificationOutboxRow.created_at < _aware_utc(before),
+                )
+                .order_by(NotificationOutboxRow.created_at, NotificationOutboxRow.id)
+                .limit(_positive_limit(limit, "notification backlog"))
+            )
+        ).all()
+        return [notification_to_domain(row) for row in rows]
 
     async def record_delivery(self, delivery: NotificationDelivery) -> None:
         owner = await self._session.scalar(

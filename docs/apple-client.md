@@ -49,7 +49,8 @@ notification authorization and registers with APNs. The client mints one
 beside the bearer credential, and posts the APNs token and build-derived sandbox
 or production environment to `POST /v1/devices`. System registration runs again
 on launch and Apple invokes the same upload path whenever it rotates the token.
-Forgetting a connection revokes that server device before deleting the bearer.
+Forgetting a connection attempts to revoke that server device first, but still
+deletes the local bearer and clears the local connection if revocation fails.
 A `404` from the feature-gated device surface marks notifications unavailable
 without preventing the rest of the client from using an older server.
 

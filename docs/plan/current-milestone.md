@@ -18,7 +18,9 @@ title: Current Milestone
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
-  (ADR-0061).
+  (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an
+  independently advancing parallel workstream whose gate ceiling cannot move
+  ahead of Milestone 15 (ADR-0069).
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.

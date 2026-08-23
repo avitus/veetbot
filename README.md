@@ -343,8 +343,8 @@ RUN_LIVE_MODEL_TESTS=1 uv run agent eval memory-formation \
   --output .agent/evals/provider-memory-evidence.json
 ```
 
-The checked-in corpus currently makes 24 bounded provider calls (at most USD
-1.20 under the extractor's per-call ceiling). The command compares isolated
+The checked-in corpus currently makes 25 bounded provider calls (at most USD
+1.25 under the extractor's per-call ceiling). The command compares isolated
 provider and deterministic arms, derives the corpus hash and resolved model,
 and writes a new file only after the no-fabrication, no-policy-regression, and
 positive-lift gate passes. Provider extraction itself runs only during memory

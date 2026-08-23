@@ -113,6 +113,8 @@ public final class ChatViewModel: ObservableObject {
         do {
             let configuration = try ConnectionConfiguration(baseURLString: baseURLString)
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            let previousToken = try await tokenStore.readToken()
+            let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
             if !trimmedToken.isEmpty {
                 try await tokenStore.saveToken(trimmedToken)
             }
@@ -126,6 +128,19 @@ public final class ChatViewModel: ObservableObject {
                 browserProfiles = []
                 browserAuthentication = nil
                 await configurationStore.saveBrowserProfileID(nil)
+            } else if credentialsChanged {
+                browserProfiles = []
+                browserAuthentication = nil
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
             await configurationStore.save(configuration)
             requiresReauthentication = false
@@ -138,18 +153,23 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        var revokeError: Error?
         if let api {
             do {
                 _ = try await deviceRegistrationCoordinator.revoke(using: api)
             } catch {
-                present(error)
-                return
+                revokeError = error
             }
         }
         selectionRequestID = nil
         historyReconciliationID = nil
         watchTasks.cancel()
-        do { try await tokenStore.deleteToken() } catch { present(error) }
+        var tokenDeletionError: Error?
+        do {
+            try await tokenStore.deleteToken()
+        } catch {
+            tokenDeletionError = error
+        }
         api = nil
         eventStream = nil
         browserProfiles = []
@@ -159,6 +179,11 @@ public final class ChatViewModel: ObservableObject {
         await artifactCache.removeAll()
         isConfigured = false
         requiresReauthentication = true
+        if let revokeError {
+            present(revokeError)
+        } else if let tokenDeletionError {
+            present(tokenDeletionError)
+        }
     }
 
     public func registerRemoteNotifications(
@@ -791,6 +816,18 @@ public final class ChatViewModel: ObservableObject {
             {
                 selectedBrowserProfileID = await configurationStore.loadBrowserProfileID()
                 try await install(configuration)
+                if selectedBrowserProfileID != nil, let api {
+                    do {
+                        try await reloadBrowserProfiles(using: api)
+                    } catch {
+                        selectedBrowserProfileID = nil
+                        browserProfiles = []
+                        browserAuthentication = nil
+                        await configurationStore.saveBrowserProfileID(nil)
+                        clearInstalledConnection()
+                        throw error
+                    }
+                }
             }
         } catch {
             present(error)

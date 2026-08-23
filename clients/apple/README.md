@@ -40,6 +40,9 @@ server-provided isolated login ceremony, where the user enters website
 credentials directly; usernames, passwords, passkeys, MFA values, cookies, and
 browser storage never pass through this client or chat. Selecting a ready
 profile binds only its opaque UUID to newly created conversations.
+The saved selection is revalidated against the current principal when the
+bearer credential changes and when the app reconnects after launch; missing or
+non-ready profiles are cleared before another conversation can use them.
 
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its

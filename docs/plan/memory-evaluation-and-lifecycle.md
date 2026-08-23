@@ -20,8 +20,8 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:748), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:656).
+scenarios (memory-retrieval-and-ranking.md:743), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:649).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
@@ -31,8 +31,8 @@ Decay over unused provisional and low-confidence beliefs
 utility without ever raising confidence (memory-retrieval-and-ranking.md:790),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:785), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:683) are
+resolved at read time (memory-retrieval-and-ranking.md:780), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:676) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -754,7 +754,10 @@ The context engine maintains a structured working state whose `Fact` entries
 are the agent's own established conclusions, and formation never reads it, so
 a fact the agent established in a session is forgotten at session close.
 Formation gains a pass over the last working-state update in the window: each
-`Fact` whose source events are all trusted user sources becomes a candidate at
+`Fact` must carry a non-empty `source_event_ids` list, every referenced event
+must belong to the owning tenant and principal, and every reference must resolve
+to a trusted user event in the source session. Only a fact passing all three
+checks becomes a candidate at
 the maximum inferred confidence with a stable subject derived from its
 statement, proposed at the run's scope and at the portability ceiling for its
 type, and prepended before the candidate ceiling is applied — so an established
@@ -794,7 +797,7 @@ resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:683), so it is a command and it demands
+(memory-formation-and-consolidation.md:676), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the
@@ -970,9 +973,10 @@ Metrics carry no belief statement, no secret, and no local dataset path.
     blocks, it is never offered for yielding, and the prefix digest is
     unchanged. Registered as `gate.memory.correction_lines`, case. **M16.**
 16. **Established facts enter formation as affirmed candidates.** A fact
-    established in working state from trusted user sources becomes a committed
-    belief at affirmed authority carrying the fact's provenance, while a fact
-    whose sources are untrusted or foreign forms nothing. Registered as
+    established in working state with non-empty provenance whose every source
+    belongs to the owning principal and is a trusted user event becomes a
+    committed belief at affirmed authority carrying that provenance. Empty
+    provenance, an untrusted source, or a foreign source forms nothing. Registered as
     `gate.memory.established_facts_form`, case. **M16.**
 17. **A lower-authority contradiction is conflicted, not resolved.** An
     inference contradicting a user-stated belief commits flagged and linked in

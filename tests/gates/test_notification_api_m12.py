@@ -16,6 +16,7 @@ from pydantic import SecretStr
 
 from agent_core.adapters.push import FakePushTransport
 from agent_core.api import create_app
+from agent_core.api.app import DeviceRegistrationRequest
 from agent_core.application.notification_dispatcher import NotificationDispatcher
 from agent_core.bootstrap import Composition, build
 from agent_core.config import (
@@ -25,7 +26,7 @@ from agent_core.config import (
     SandboxMechanism,
 )
 from agent_core.domain.agents import Principal
-from agent_core.domain.devices import PushProvider
+from agent_core.domain.devices import Device, DeviceKind, PushProvider
 from agent_core.domain.notifications import (
     NOTIFICATION_TITLES,
     DeliveryOutcome,
@@ -75,6 +76,30 @@ def _registration(
         "push_environment": "sandbox",
         "muted_kinds": [],
     }
+
+
+def test_api_and_domain_accept_a_surface_without_push_routing() -> None:
+    request = DeviceRegistrationRequest(
+        client_device_id="surface-installation",
+        name="Unpaired surface",
+        kind="surface",
+        platform="telegram",
+    )
+
+    registration = request.registration()
+    durable_values = device(token=None).model_dump()
+    durable_values.update(
+        {
+            "client_device_id": registration.client_device_id,
+            "name": registration.name,
+            "kind": DeviceKind.SURFACE,
+            "platform": registration.platform,
+        }
+    )
+
+    assert registration.kind is DeviceKind.SURFACE
+    assert registration.push_provider is None
+    assert Device.model_validate(durable_values).push_provider is None
 
 
 async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> None:
@@ -156,6 +181,7 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
                 ),
             )
             assert second.status_code == 201
+            second_device_id = UUID(second.json()["id"])
             listing = await client.get("/v1/devices", params={"limit": 1})
             assert listing.status_code == 200
             assert len(listing.json()["items"]) == 1
@@ -201,7 +227,7 @@ async def test_device_routes_cover_lifecycle_audit_scopes_and_test_enqueue() -> 
 
             invalidation_notice = new_notification(
                 notification_id=UUID(int=88012),
-                dedupe_key="device-lifecycle-invalidation",
+                dedupe_key=f"device.test:{second_device_id}:device-lifecycle-invalidation",
                 created_at=composition.clock.now(),
             ).model_copy(
                 update={

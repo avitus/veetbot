@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -19,13 +19,13 @@ from agent_core.application.notification_worker import NotificationWorker
 from agent_core.bootstrap import Composition, build, build_notification_worker
 from agent_core.config import AuthMode, DeploymentMode, PushProviderKind, SandboxMechanism
 from agent_core.domain.devices import PushProvider
-from agent_core.domain.notifications import NotificationStatus
+from agent_core.domain.notifications import NewNotification, NotificationStatus
 from agent_core.policy.scopes import PLATFORM_SCOPES
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 from tests.contract.support import NOW
-from tests.contract.test_device_registry_contract import device
-from tests.contract.test_notification_outbox_contract import new_notification
+from tests.contract.test_device_registry_contract import DEVICE_ID, device
+from tests.contract.test_notification_outbox_contract import NOTIFICATION_ID, new_notification
 from tests.integration.m2_support import database_settings
 
 
@@ -52,12 +52,25 @@ def _dispatcher(
     )
 
 
+def _targeted_notification(
+    *,
+    notification_id: UUID = NOTIFICATION_ID,
+    key: str = "one",
+    created_at: datetime = NOW,
+) -> NewNotification:
+    return new_notification(
+        notification_id=notification_id,
+        dedupe_key=f"device.test:{DEVICE_ID}:{key}",
+        created_at=created_at,
+    )
+
+
 async def _seed(composition: Composition) -> None:
     owner = composition.principal
     owned_device = device().model_copy(
         update={"tenant_id": owner.tenant_id, "principal_id": owner.principal_id}
     )
-    owned_notification = new_notification().model_copy(
+    owned_notification = _targeted_notification().model_copy(
         update={"tenant_id": owner.tenant_id, "principal_id": owner.principal_id}
     )
     async with composition.uow_factory() as uow:
@@ -70,7 +83,7 @@ async def test_postgres_enqueue_wakes_only_after_transaction_commit() -> None:
     try:
         waiting = asyncio.create_task(listener.wait(5))
         async with build(settings=database_settings(), storage="postgres") as composition:
-            owned = new_notification().model_copy(
+            owned = _targeted_notification().model_copy(
                 update={
                     "tenant_id": composition.principal.tenant_id,
                     "principal_id": composition.principal.principal_id,
@@ -171,9 +184,9 @@ async def test_postgres_concurrent_dispatch_and_accepted_send_replay_are_bounded
             [delivery] = await uow.notification_outbox.list_deliveries(notification.id)
             assert delivery.attempt == 1
 
-        replay = new_notification(
+        replay = _targeted_notification(
             notification_id=UUID(int=1301),
-            dedupe_key="test:accepted-send-replay",
+            key="accepted-send-replay",
             created_at=clock.now(),
         ).model_copy(
             update={

@@ -32,6 +32,12 @@ class NotificationOutbox(Protocol):
         providers: frozenset[PushProvider],
     ) -> builtins.list[Notification]: ...
 
+    async def list_pending_older_than(
+        self,
+        before: datetime,
+        limit: int,
+    ) -> builtins.list[Notification]: ...
+
     async def record_delivery(self, delivery: NotificationDelivery) -> None: ...
 
     async def list_deliveries(

@@ -11,7 +11,7 @@
   --veetbot-line: rgba(13, 23, 42, 0.13);
   --veetbot-shadow: 0 18px 50px rgba(13, 23, 42, 0.08);
   --md-text-font: ui-rounded, "SF Pro Rounded", "Avenir Next", "Segoe UI", sans-serif;
-  --md-code-font: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --md-code-font: "SFMono-Regular", consolas, "Liberation Mono", monospace;
 }
 
 [data-md-color-scheme="default"] {
@@ -302,7 +302,7 @@ body {
 .md-typeset a:hover {
   color: var(--veetbot-orange);
   text-decoration: underline;
-  text-decoration-color: currentColor;
+  text-decoration-color: currentcolor;
 }
 
 [data-md-color-scheme="slate"] .md-typeset a:hover {
@@ -639,7 +639,7 @@ body {
 
   .md-typeset pre > code {
     white-space: pre-wrap;
-    word-break: break-word;
+    overflow-wrap: anywhere;
   }
 
   .md-sidebar,

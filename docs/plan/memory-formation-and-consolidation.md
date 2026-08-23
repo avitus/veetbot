@@ -515,9 +515,11 @@ the deterministic fallback while preserving the model-assisted design above:
    HTTP status, provider parameter, whether the stream produced output, and
    retryability. Transient and protocol failures retain the original prefix and
    append an idempotent `memory.formation.requested` retry after 60 seconds and
-   then 300 seconds. Maintenance selects only the latest formation request, so an
-   older ready flag cannot bypass the retry delay. After three total attempts the
-   watermark advances and a content-free
+   then 300 seconds. Maintenance eligibility follows the latest formation request,
+   so an older ready flag cannot bypass the retry delay, while the attempt counter
+   is restored from the greatest valid pending `provider_retry` attempt in the
+   source window so a later terminal-run request cannot reset the retry budget.
+   After three total attempts the watermark advances and a content-free
    `memory.provider_extraction.retry_exhausted` process event records the terminal
    disposition. Deterministic candidates committed on an earlier attempt remain
    idempotent same-source outcomes on every replay.
@@ -577,7 +579,7 @@ flag, is mutually exclusive with `required`, and is refused in production.
 evaluation opt-in, it runs a checked-in labeled corpus through isolated paired
 deterministic and provider-assisted arms, derives the active model tuple and
 corpus hash, and atomically writes evidence only when the schema's lift, coverage,
-fabrication, and policy conditions pass. The current corpus has twenty-one
+fabrication, and policy conditions pass. The current 25-case corpus has twenty-one
 positive examples and four protected no-memory examples; scoring uses checked-in normalized labels,
 not a second model judge. Every result reports per-case normalized beliefs,
 consolidation counts, shared fallback beliefs, provider-added beliefs, and

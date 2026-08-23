@@ -37,6 +37,7 @@ from agent_core.ports.repositories import (
 
 DispatchProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
+_PENDING_BACKLOG_ALERT_AFTER = timedelta(minutes=5)
 
 
 class DispatchProbeError(RuntimeError):
@@ -97,12 +98,26 @@ class NotificationDispatcher:
     async def run_once(self) -> int:
         now = self._clock.now()
         async with self._uow_factory() as uow:
+            backlog = await uow.notification_outbox.list_pending_older_than(
+                now - _PENDING_BACKLOG_ALERT_AFTER,
+                self._batch_size,
+            )
             claimed = await uow.notification_outbox.claim_due(
                 now,
                 self._batch_size,
                 self._claimant,
                 self._lease_seconds,
                 self._providers,
+            )
+        for notification in backlog:
+            logger.warning(
+                "notification pending backlog exceeded threshold",
+                extra={
+                    "notification_id": str(notification.id),
+                    "notification_kind": notification.kind.value,
+                    "notification_created_at": notification.created_at.isoformat(),
+                    "claimant": self._claimant,
+                },
             )
         for notification in claimed:
             try:
@@ -140,8 +155,7 @@ class NotificationDispatcher:
             )
             if notification.kind is NotificationKind.TEST:
                 target_device_id = _test_target_device_id(notification.dedupe_key)
-                if target_device_id is not None:
-                    targets = [target for target in targets if target.device_id == target_device_id]
+                targets = [target for target in targets if target.device_id == target_device_id]
             deliveries = await uow.notification_outbox.list_deliveries(notification.id)
 
         terminal_devices = {

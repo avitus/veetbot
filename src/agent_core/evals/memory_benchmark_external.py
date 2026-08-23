@@ -154,6 +154,7 @@ DATASET_CAVEATS: Mapping[ExternalDataset, tuple[str, ...]] = {
     ),
     "halumem": (
         *_SHARED_CAVEATS,
+        LABEL_FREE_CAVEAT,
         "memory points carry no subject, so every labeled belief is subjected to "
         "the user and matching is looser than the authored corpus's",
         "questions name no evidence turn, so evidence-provenance recall is not "
@@ -283,7 +284,8 @@ def load_longmemeval(
         sample=sample,
         seed=seed,
     )
-    return [_longmemeval_scenario(instances[position], position) for position in chosen]
+    scenarios = [_longmemeval_scenario(instances[position], position) for position in chosen]
+    return [scenario for scenario in scenarios if scenario is not None]
 
 
 def load_locomo(
@@ -304,10 +306,11 @@ def load_locomo(
 
     samples = _read_records(path)
     chosen = _stratified_positions([""] * len(samples), sample=sample, seed=seed)
-    return [
+    scenarios = [
         _locomo_scenario(samples[position], position, principal_speaker, seed)
         for position in chosen
     ]
+    return [scenario for scenario in scenarios if scenario is not None]
 
 
 def load_halumem(
@@ -323,7 +326,8 @@ def load_halumem(
 
     users = _read_records(path)
     chosen = _stratified_positions([""] * len(users), sample=sample, seed=seed)
-    return [_halumem_scenario(users[position], position, seed) for position in chosen]
+    scenarios = [_halumem_scenario(users[position], position, seed) for position in chosen]
+    return [scenario for scenario in scenarios if scenario is not None]
 
 
 async def run_external_benchmark(
@@ -555,7 +559,7 @@ def _now() -> datetime:
 # --------------------------------------------------------------------------- #
 
 
-def _longmemeval_scenario(instance: Mapping[str, Any], position: int) -> BenchmarkScenario:
+def _longmemeval_scenario(instance: Mapping[str, Any], position: int) -> BenchmarkScenario | None:
     question_id = _text(instance, "question_id", default=f"instance-{position + 1}")
     question_type = _text(instance, "question_type", default="")
     where = f"longmemeval instance {question_id}"
@@ -582,16 +586,22 @@ def _longmemeval_scenario(instance: Mapping[str, Any], position: int) -> Benchma
         if index < len(dataset_ids):
             identifiers[dataset_ids[index]] = session_id
 
+    if not dates:
+        raise ValueError(f"{where} has no non-empty session")
+
     answer_sessions = [str(value) for value in instance.get("answer_session_ids") or []]
     evidence = _longmemeval_evidence(answer_sessions, identifiers, turn_flags)
     category, abstains = _longmemeval_category(question_type)
     asked = _read_slash_date(_text(instance, "question_date", default=""))
+    answer = _alternatives(instance.get("answer"), abstains=abstains)
+    if answer is None:
+        return None
     probe = BenchmarkProbe(
         id="p01",
         category=category,
         question=_required_text(instance, "question", where),
         advance_seconds=0 if asked is None or not dates else _elapsed(dates[-1], asked),
-        answer=_alternatives(instance.get("answer"), abstains=abstains),
+        answer=answer,
         evidence=[] if abstains else evidence,
         source_dataset="longmemeval",
         source_category=question_type or None,
@@ -666,7 +676,7 @@ def _locomo_scenario(
     position: int,
     principal_speaker: PrincipalSpeaker,
     seed: int,
-) -> BenchmarkScenario:
+) -> BenchmarkScenario | None:
     sample_id = _text(sample, "sample_id", default=f"conversation-{position + 1}")
     where = f"locomo conversation {sample_id}"
     conversation = sample.get("conversation")
@@ -717,18 +727,24 @@ def _locomo_scenario(
             if dia_id:
                 located[dia_id] = (session_id, index, is_principal)
 
+    if not dates:
+        raise ValueError(f"{where} has no non-empty session")
+
     eligible = [
         entry
         for entry in _sequence(sample, "qa", where)
         if isinstance(entry, dict) and _locomo_is_scorable(entry, located)
     ]
-    probes = [
+    mapped_probes = [
         _locomo_probe(entry, located, index)
         for index, entry in enumerate(
             _capped(eligible, seed=seed, salt=f"locomo:{sample_id}"), start=1
         )
     ]
+    probes = [probe for probe in mapped_probes if probe is not None]
     if not probes:
+        if eligible:
+            return None
         raise ValueError(f"{where} has no question whose evidence is the principal speaker's")
     return BenchmarkScenario(
         id=_scenario_id("locomo", sample_id, position),
@@ -756,7 +772,7 @@ def _locomo_is_scorable(
 
 def _locomo_probe(
     entry: Mapping[str, Any], located: Mapping[str, tuple[str, int, bool]], index: int
-) -> BenchmarkProbe:
+) -> BenchmarkProbe | None:
     category = str(entry.get("category", ""))
     mapped = _LOCOMO_CATEGORIES.get(category, "single_hop")
     abstains = mapped == "abstention"
@@ -765,11 +781,14 @@ def _locomo_probe(
         for value in entry.get("evidence") or []
         if isinstance(value, str) and str(value) in located
     ]
+    answer = _alternatives(entry.get("answer"), abstains=abstains)
+    if answer is None:
+        return None
     return BenchmarkProbe(
         id=f"p{index:02d}",
         category=mapped,
         question=str(entry.get("question") or "").strip() or "(question missing)",
-        answer=_alternatives(entry.get("answer"), abstains=abstains),
+        answer=answer,
         evidence=[] if abstains else evidence,
         source_dataset="locomo",
         source_category=category or None,
@@ -781,7 +800,9 @@ def _locomo_probe(
 # --------------------------------------------------------------------------- #
 
 
-def _halumem_scenario(user: Mapping[str, Any], position: int, seed: int) -> BenchmarkScenario:
+def _halumem_scenario(
+    user: Mapping[str, Any], position: int, seed: int
+) -> BenchmarkScenario | None:
     user_id = _text(user, "uuid", default=_text(user, "user_id", default=f"user-{position + 1}"))
     where = f"halumem user {user_id}"
     sessions: list[BenchmarkSession] = []
@@ -813,6 +834,9 @@ def _halumem_scenario(user: Mapping[str, Any], position: int, seed: int) -> Benc
             if isinstance(point, dict)
         )
 
+    if not dates:
+        raise ValueError(f"{where} has no non-empty session")
+
     for point in user.get("memory_points") or []:
         if not isinstance(point, dict):
             continue
@@ -823,13 +847,16 @@ def _halumem_scenario(user: Mapping[str, Any], position: int, seed: int) -> Benc
 
     beliefs = _halumem_beliefs(points, sessions)
     questions = [entry for entry in user.get("questions") or [] if isinstance(entry, dict)]
-    probes = [
+    mapped_probes = [
         _halumem_probe(entry, index)
         for index, entry in enumerate(
             _capped(questions, seed=seed, salt=f"halumem:{user_id}"), start=1
         )
     ]
+    probes = [probe for probe in mapped_probes if probe is not None]
     if not probes:
+        if questions:
+            return None
         raise ValueError(f"{where} carries no question the benchmark can ask")
     return BenchmarkScenario(
         id=_scenario_id("halumem", user_id, position),
@@ -911,7 +938,7 @@ def _halumem_beliefs(
     return beliefs
 
 
-def _halumem_probe(entry: Mapping[str, Any], index: int) -> BenchmarkProbe:
+def _halumem_probe(entry: Mapping[str, Any], index: int) -> BenchmarkProbe | None:
     question_type = str(
         entry.get("question_type") or entry.get("type") or entry.get("category") or ""
     ).strip()
@@ -923,11 +950,14 @@ def _halumem_probe(entry: Mapping[str, Any], index: int) -> BenchmarkProbe:
             False,
         )
     )
+    answer = _alternatives(entry.get("answer"), abstains=abstains)
+    if answer is None:
+        return None
     return BenchmarkProbe(
         id=f"p{index:02d}",
         category=category,
         question=str(entry.get("question") or "").strip() or "(question missing)",
-        answer=_alternatives(entry.get("answer"), abstains=abstains),
+        answer=answer,
         source_dataset="halumem",
         source_category=question_type or None,
     )
@@ -1058,7 +1088,7 @@ def _scenario_id(dataset: str, identifier: str, position: int) -> str:
     return f"mb-{stem}-{position + 1:03d}"
 
 
-def _alternatives(answer: Any, *, abstains: bool) -> ProbeAnswer:
+def _alternatives(answer: Any, *, abstains: bool) -> ProbeAnswer | None:
     """Gold answers are alternatives; an abstention carries no value."""
 
     if abstains:
@@ -1066,7 +1096,7 @@ def _alternatives(answer: Any, *, abstains: bool) -> ProbeAnswer:
     values = answer if isinstance(answer, list) else [answer]
     stated = [str(value).strip() for value in values if str(value or "").strip()]
     if not stated:
-        return ProbeAnswer(kind="abstain", values=[])
+        return None
     return ProbeAnswer(kind="alternatives", values=stated)
 
 
