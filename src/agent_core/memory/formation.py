@@ -63,6 +63,13 @@ TRACE_EXPIRY_SWEEP_LIMIT = 500
 PROVIDER_RETRY_BACKOFF_SECONDS = (60, 300)
 PROVIDER_MAX_ATTEMPTS = 1 + len(PROVIDER_RETRY_BACKOFF_SECONDS)
 WORKING_STATE_EVENT = "context.working_state.updated"
+# Who is speaking, in the order resolution trusts them: what the user said
+# outranks what the agent concluded, which outranks what an extractor guessed.
+_AUTHORITY_RANK = {
+    MemoryAuthority.INFERRED: 0,
+    MemoryAuthority.AFFIRMED: 1,
+    MemoryAuthority.USER: 2,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -648,8 +655,23 @@ class DeterministicConflictResolver:
         statement: str,
         source_event_ids: list[int],
         *,
+        authority: MemoryAuthority = MemoryAuthority.USER,
+        polarity: Polarity = Polarity.ASSERT,
         session_id: UUID | None = None,
+        at: datetime | None = None,
     ) -> str:
+        """Classify incoming evidence against one existing belief.
+
+        The order is same source, duplicate, conflict, contradiction. Only the
+        last one supersedes, and it is reached only when the incoming evidence
+        outranks the existing belief or something orders the two in time.
+        Polarity is accepted so a resolver may record what kind of statement it
+        judged, and is deliberately never consulted: a retraction is a later
+        statement about the same subject, so it is ordered by the same rules as
+        any other, and treating disagreement itself as a conflict would leave
+        every ordinary correction unresolved.
+        """
+
         # Event sequences are allocated per session, so the same number means
         # the same episode only within one session. A caller that cannot name
         # the consolidating session keeps the legacy sequence-only comparison.
@@ -658,7 +680,34 @@ class DeterministicConflictResolver:
             return "same_source"
         if self._normalized(existing.statement) == self._normalized(statement):
             return "duplicate"
+        if _AUTHORITY_RANK[authority] < _AUTHORITY_RANK[existing.authority]:
+            return "conflict"
+        if _AUTHORITY_RANK[authority] == _AUTHORITY_RANK[existing.authority] and not self._ordered(
+            existing, source_event_ids, same_session=same_session, at=at
+        ):
+            return "conflict"
         return "contradiction"
+
+    @staticmethod
+    def _ordered(
+        existing: MemoryRecord,
+        source_event_ids: list[int],
+        *,
+        same_session: bool,
+        at: datetime | None,
+    ) -> bool:
+        """Say whether the incoming evidence is later than the existing belief.
+
+        Inside one session the event log orders the two, so a later sequence is
+        later evidence. Across sessions only the clock can, and a caller that
+        cannot name an instant keeps the ordering it had before this rule
+        existed rather than turning every cross-session statement into a
+        conflict.
+        """
+
+        if same_session:
+            return max(source_event_ids) > max(existing.source_event_ids)
+        return at is None or existing.updated_at < at
 
 
 def portability_ceiling(belief_type: BeliefType) -> Portability:
@@ -834,12 +883,34 @@ class GovernedMemoryService:
                 clean_subject,
                 belief_type,
             )
-            for current in sorted(related, key=lambda item: item.store_position, reverse=True):
-                relation = self._resolver.relationship(
-                    current, clean_statement, sources, session_id=session_id
+            classified = [
+                (
+                    current,
+                    self._resolver.relationship(
+                        current,
+                        clean_statement,
+                        sources,
+                        authority=authority,
+                        polarity=polarity,
+                        session_id=session_id,
+                        at=self._clock.now(),
+                    ),
                 )
-                if relation == "same_source":
-                    return current, "unchanged"
+                for current in sorted(related, key=lambda item: item.store_position, reverse=True)
+            ]
+            # A replay is a no-op whichever related belief the ordering reaches
+            # first, so it is decided over all of them before any is acted on.
+            # A conflict leaves both halves of the pair live and lifts the
+            # existing belief above the replacement it just wrote, so
+            # re-consolidating the same evidence meets the belief that was
+            # contradicted before it meets the record that evidence produced.
+            replay = next(
+                (current for current, relation in classified if relation == "same_source"),
+                None,
+            )
+            if replay is not None:
+                return replay, "unchanged"
+            for current, relation in classified:
                 if relation == "duplicate":
                     position = await uow.memories.next_position()
                     origin_scopes = list(dict.fromkeys([*current.origin_scopes, scope]))
@@ -880,6 +951,60 @@ class GovernedMemoryService:
                             )
                         )
                     return stored, "reinforced"
+                if relation == "conflict":
+                    # Nothing here is resolved by guessing. The incoming belief
+                    # is committed beside the one it contradicts, both are
+                    # linked and flagged, and the user is asked which holds.
+                    proposed = await self._new_record(
+                        uow,
+                        formation_run.id,
+                        clean_statement,
+                        clean_subject,
+                        scope,
+                        belief_type,
+                        effective_portability,
+                        sensitivity,
+                        session_id,
+                        sources,
+                        explicit,
+                        authority,
+                        polarity,
+                        confidence,
+                        valid_from,
+                        expires_at,
+                    )
+                    replacement = proposed.model_copy(
+                        update={"flagged_for_review": True, "conflicts_with": [current.id]},
+                        deep=True,
+                    )
+                    stored = await uow.memories.upsert_belief(replacement)
+                    # The belief that was already stored has changed state, so
+                    # it takes a fresh position: the next turn's recall delta
+                    # is how the user learns that it is now disputed.
+                    position = await uow.memories.next_position()
+                    linked = current.model_copy(
+                        update={
+                            "conflicts_with": list(
+                                dict.fromkeys([*current.conflicts_with, stored.id])
+                            ),
+                            "flagged_for_review": True,
+                            "store_position": position,
+                            "updated_at": self._clock.now(),
+                        },
+                        deep=True,
+                    )
+                    await uow.memories.reinforce(linked)
+                    await self._append_event(uow, session_id, run_id, "memory.formed", stored)
+                    await self._append_event(
+                        uow, session_id, run_id, "memory.needs_confirmation", stored
+                    )
+                    if record_audit:
+                        await uow.memories.record_consolidation(
+                            formation_run.model_copy(
+                                update={"committed": 1, "finished_at": self._clock.now()}
+                            )
+                        )
+                    return stored, "conflicted"
                 if relation == "contradiction":
                     replacement = await self._new_record(
                         uow,
@@ -1081,6 +1206,7 @@ class GovernedMemoryService:
                 committed = 0
                 reinforced = 0
                 superseded = 0
+                conflicted = 0
                 for candidate, authority in [] if should_retry else candidates:
                     if (
                         candidate.proposed_scope != scope
@@ -1132,6 +1258,8 @@ class GovernedMemoryService:
                             committed += 1
                             if action == "superseded":
                                 superseded += 1
+                            elif action == "conflicted":
+                                conflicted += 1
                 watermark_after = watermark if should_retry else after
                 if should_retry:
                     assert provider_failure is not None
@@ -1223,7 +1351,7 @@ class GovernedMemoryService:
                 await uow.memories.record_consolidation(audit)
             finally:
                 await uow.maintenance.release_memory_session(self._principal, session_id)
-        return ConsolidationResult(run=audit, beliefs=beliefs)
+        return ConsolidationResult(run=audit, beliefs=beliefs, conflicted=conflicted)
 
     def _established_fact_candidates(
         self,

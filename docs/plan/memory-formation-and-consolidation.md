@@ -207,6 +207,7 @@ For each surviving candidate, match against existing beliefs by subject + semant
 | New | Insert as a new belief. |
 | Duplicate / near-duplicate | **Reinforce**: increment corroboration, bump confidence, append `source_event_ids`, update `last_reinforced_at`. No new record. |
 | Refinement | Update/extend the existing belief (e.g. more specific). |
+| Conflict | **Never overwrite and never order.** Commit the new belief beside the existing one, link both directions of `conflicts_with`, flag both for review, and request confirmation. |
 | Contradiction | **Never overwrite.** Insert the new belief and link `conflicts_with` / `supersedes`; apply the conflict policy below. |
 
 **A replay is only a replay inside its own session.** The same-source shortcut
@@ -223,6 +224,22 @@ recency**: a direct user statement supersedes an inferred one; a more recent use
 statement supersedes an older user statement. The superseded belief is retained
 with `valid_to` set (bi-temporal — we keep *what was believed and when*), marked
 `superseded`. Formation is **fully autonomous**: resolution is never blocked. Ambiguous or sensitive resolutions are still committed (by authority then recency) but marked `flagged_for_review` and surfaced to the user, who can correct or delete after the fact - the safety model is after-the-fact review, not a pre-commit gate.
+
+**What neither authority nor recency orders is a conflict.** Milestone 16 adds
+the fourth outcome above between duplicate and contradiction, so the order is
+same source, duplicate, conflict, contradiction. Incoming evidence conflicts
+when its authority ranks below the existing belief's, or when the two rank
+equally and nothing places them in time: the same session with no later source
+event, or a different session with the existing belief not older than the
+incoming instant. Polarity is never the deciding factor, so an ordinary
+retraction still supersedes what it retracts, and a resolver that is not told
+the incoming instant keeps the ordering it had before the rule existed, exactly
+as one that is not told the session keeps the sequence-only comparison. A
+conflict leaves both of its beliefs live, so the same-source shortcut is decided
+over every related belief before any of them is acted on, and re-consolidating a
+conflicted session is a no-op like any other replay. The rule and what a
+conflict then commits are stated in
+[memory-evaluation-and-lifecycle.md:835-853](memory-evaluation-and-lifecycle.md:835-853).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".

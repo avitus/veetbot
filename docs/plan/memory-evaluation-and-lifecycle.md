@@ -20,19 +20,19 @@ resurrect a rejection, never cross a scope, never render above a ceiling — and
 not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
-scenarios (memory-retrieval-and-ranking.md:751), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:661).
+scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
+recall of consequential facts (memory-formation-and-consolidation.md:678).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
 The same two specifications describe a lifecycle the code does not have.
 Decay over unused provisional and low-confidence beliefs
-(memory-formation-and-consolidation.md:263), usage that resets decay and raises
-utility without ever raising confidence (memory-retrieval-and-ranking.md:793),
+(memory-formation-and-consolidation.md:280), usage that resets decay and raises
+utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
-resolved at read time (memory-retrieval-and-ranking.md:788), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:688) are
+resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
+that is opt-in per principal (memory-formation-and-consolidation.md:705) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -748,7 +748,7 @@ rises by
 moves to now; a returned-but-uncited belief's `utility` falls by
 `usage.uncited_utility_delta` to a floor of -1. Neither ever touches
 `confidence`, which restates the retrieval specification's decision
-(memory-retrieval-and-ranking.md:793): otherwise a wrong belief that ranks well
+(memory-retrieval-and-ranking.md:797): otherwise a wrong belief that ranks well
 entrenches itself by being retrieved. One `memory.cited` event per run carries
 a derivation key on the run identifier, so the re-entrant completion path
 cannot double-count.
@@ -847,15 +847,18 @@ still supersedes the assertion it retracts.
 A conflict commits the incoming belief flagged for review and linked to the
 existing one, links the existing one back, emits both the formation event and a
 `memory.needs_confirmation` event, counts as committed in the audit, and
-increments a conflicted counter on the consolidation result. Retrieval then
-lets conflict partners bypass the per-subject cap and renders the link, so the
-user sees both statements and which one the other contradicts. Nothing is
-resolved by guessing; that is the point.
+increments a conflicted counter on the consolidation result. The existing belief
+takes a fresh store position when it is linked, because being disputed is a
+state change and the next turn's recall delta is how the user learns of it.
+Retrieval then lets conflict partners bypass the per-subject cap and renders the
+link as short identifiers, `conflicts=[m:xxxxxxxx]`, so the user sees both
+statements and which one the other contradicts in the same form they cite.
+Nothing is resolved by guessing; that is the point.
 
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:688), so it is a command and it demands
+(memory-formation-and-consolidation.md:705), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

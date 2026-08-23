@@ -16,10 +16,12 @@ from agent_core.domain.memory import (
     ConsolidationResult,
     ConsolidationRun,
     EpisodeQuery,
+    MemoryAuthority,
     MemoryCandidate,
     MemoryCorrection,
     MemoryEdit,
     MemoryRecord,
+    Polarity,
     RecalledBelief,
     RecallQuery,
     RecallResult,
@@ -138,7 +140,10 @@ class ConflictResolver(Protocol):
         statement: str,
         source_event_ids: list[int],
         *,
+        authority: MemoryAuthority = MemoryAuthority.USER,
+        polarity: Polarity = Polarity.ASSERT,
         session_id: UUID | None = None,
+        at: datetime | None = None,
     ) -> str: ...
 
 

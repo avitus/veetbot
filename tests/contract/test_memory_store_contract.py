@@ -461,3 +461,30 @@ async def test_query_min_store_position_returns_only_newer_rows() -> None:
     delta = await store.query(recall_query(text="answers", min_store_position=1))
     assert [record.id for record in delta] == [newer.id]
     assert await store.query(recall_query(text="answers", min_store_position=4)) == []
+
+
+async def test_conflict_links_and_the_review_flag_survive_a_round_trip() -> None:
+    """A conflicted belief stays live, so its link has to be readable back.
+
+    Conflict partners are stored, not derived: retrieval renders the marker
+    from the row it read, and a store that dropped the link would silently turn
+    a surfaced conflict back into a hidden one.
+    """
+
+    store = _store()
+    partner = UUID(int=555)
+    await store.upsert_belief(memory())
+    linked = memory().model_copy(
+        update={
+            "conflicts_with": [partner],
+            "flagged_for_review": True,
+            "store_position": 2,
+        }
+    )
+    await store.reinforce(linked)
+
+    stored = await store.get(linked.id, principal())
+    assert stored.conflicts_with == [partner]
+    assert stored.flagged_for_review is True
+    assert stored.status is MemoryStatus.ACTIVE
+    assert await store.query(recall_query()) == [linked]
