@@ -20,7 +20,7 @@ title: Current Milestone
   subagents and delegation, inbound surfaces and pairing, operational hardening
   (ADR-0061) — plus Milestone 16 memory evaluation and lifecycle as an
   independently advancing parallel workstream whose gate ceiling cannot move
-  ahead of Milestone 15 (ADR-0069).
+  ahead of Milestone 15 (ADR-0069); it completed on 2026-08-23.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -32,9 +32,9 @@ title: Current Milestone
   authorized and specified with twenty-one, twenty-one, and sixteen registered
   gates; none has started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the
-  provider evidence at `formation@8`, and re-recorded its baseline; hosted CI
-  on the final head and the CodeRabbit review loop on the `dev` to `main` pull
-  request remain. Its live benchmark arm ran three times — the first two failed
+  provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
+  the CodeRabbit review loop finished clean on the `dev` to `main` pull
+  request (merge `571f6d9`); the verified gate ceiling stays at Milestone 12. Its live benchmark arm ran three times — the first two failed
   only the absolute incomplete-runs condition, at two of 132 probe arms each,
   after which the harness gained a content-free failure class and one retry per
   probe arm, and the third published
@@ -180,3 +180,7 @@ the checked-in benchmark baseline equals a fresh deterministic run exactly and
 the provider-assisted extraction evidence has been republished at its new
 policy version. Being a parallel workstream changes nothing about the ceiling,
 which still advances only after every earlier milestone has completed.
+
+Milestone 16 completed on those terms on 2026-08-23: every declared gate and
+the cumulative registry passed, the PostgreSQL lanes passed, and hosted CI and
+the final CodeRabbit review finished clean on the `dev` to `main` pull request.

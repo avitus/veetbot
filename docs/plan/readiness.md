@@ -15,8 +15,8 @@ documents alone and Milestones 6 through 10 were not. The historical findings
 below retain that answer because they explain why the missing specifications
 were written. The present answer is different: Milestones 0 through 12 are
 complete, and Milestone 13 subagents and delegation is the next sequential,
-fully specified milestone. Milestone 16 memory evaluation and lifecycle is
-separately authorized as a parallel workstream.
+fully specified milestone. Milestone 16 memory evaluation and lifecycle
+completed on 2026-08-23 as a separately authorized parallel workstream.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -89,7 +89,7 @@ rather than smoothed.
 | 13 | General-purpose subagents and delegation | Authorized | 21 | Nothing in the corpus; tenant activation needs the owner's failed trajectory scored against the delegating re-run |
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
-| 16 | Memory evaluation and lifecycle | Authorized | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
+| 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -1161,7 +1161,7 @@ choice between the corpus and the first red tests. What remains outside the
 corpus is the owner's bucket and scoped key, the `age` identity, the first
 escrow, and the first off-host rehearsal.
 
-## Milestone 16: memory evaluation and lifecycle, authorized and specified
+## Milestone 16: memory evaluation and lifecycle complete
 
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md) gives
 memory the one thing its twenty-nine safety gates never provided, which is a
@@ -1192,8 +1192,10 @@ committed flagged and surfaced instead of silently resolved, and re-derivation
 as an explicit operator action. Nineteen hard gates in the `memory` area;
 ADR-0069 records the decisions.
 
-The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. The owner's own copies of
+The readiness verdict is therefore **Complete**: the milestone finished on
+2026-08-23 with all twenty gates passing and hosted review clean, and no
+unnamed design choice stood between the corpus and the first red
+tests. The owner's own copies of
 the three public datasets and provider credentials for opt-in future live-arm
 reruns remain external activation inputs, not repository design gaps.
 

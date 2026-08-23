@@ -7,6 +7,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-23 — Milestone 16 complete
+
+- Milestone 16, memory evaluation and lifecycle, completed as the parallel
+  workstream: all twenty `gate.memory.*` gates pass, the checked-in benchmark
+  baseline equals a fresh deterministic run exactly, the provider evidence is
+  republished at `formation@8`, and hosted CI plus the CodeRabbit review loop
+  finished clean on the `dev` to `main` pull request. Its evidence moved from
+  project state to the verification history. The verified gate ceiling stays
+  at Milestone 12 and advances only in numerical order.
+
 ## 2026-08-23 — Live benchmark failures made diagnosable, and the arm published
 
 - Made a failed probe arm say why it failed. Every arm of the live memory
