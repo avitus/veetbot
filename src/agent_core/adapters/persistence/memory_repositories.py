@@ -201,6 +201,18 @@ class PostgresMemoryStore:
             raise RuntimeError("memory position sequence returned no value")
         return int(value)
 
+    async def head_position(self, principal: Principal) -> int:
+        # The principal's own newest write, not the sequence's last value: the
+        # sequence is cluster-wide and its counter is not transactional, so it
+        # would report positions this principal cannot see.
+        value = await self._session.scalar(
+            select(func.max(MemoryRow.store_position)).where(
+                MemoryRow.tenant_id == principal.tenant_id,
+                MemoryRow.principal_id == principal.principal_id,
+            )
+        )
+        return 0 if value is None else int(value)
+
     async def get(self, belief_id: UUID, principal: Principal) -> MemoryRecord:
         row = (
             await self._session.scalars(
@@ -225,6 +237,8 @@ class PostgresMemoryStore:
             or_(MemoryRow.expires_at.is_(None), MemoryRow.expires_at > as_of),
             MemoryRow.sensitivity.in_(_allowed_sensitivities(query.sensitivity_ceiling)),
         ]
+        if query.min_store_position:
+            predicates.append(MemoryRow.store_position > query.min_store_position)
         if not query.include_superseded and query.as_of is None:
             predicates.append(MemoryRow.status.in_(_LIVE))
         if query.belief_types:

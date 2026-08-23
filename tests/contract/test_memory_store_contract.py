@@ -402,3 +402,62 @@ async def test_list_idle_returns_the_least_recently_reinforced_live_beliefs() ->
     assert [record.id for record in bounded] == [oldest.id, middle.id]
     assert [record.id for record in cut] == [oldest.id]
     assert foreign == []
+
+
+async def test_head_position_is_zero_when_empty_and_tracks_the_newest_position() -> None:
+    """The head is the principal's newest write, live or not, and zero when empty.
+
+    The recall delta bounds itself by the store head rather than by the highest
+    position a recall happened to return, so a belief no query matched at
+    snapshot time cannot be reported as new on the next turn.
+    """
+
+    store = _store()
+    foreign = principal().model_copy(update={"principal_id": "principal-b"})
+    assert await store.head_position(principal()) == 0
+
+    first = memory()
+    await store.upsert_belief(first)
+    assert await store.head_position(principal()) == first.store_position
+
+    newest = memory(belief_id=531, statement="User prefers tabs").model_copy(
+        update={"subject": "indentation", "store_position": 7}
+    )
+    await store.upsert_belief(newest)
+    assert await store.head_position(principal()) == 7
+
+    # A retired row is still a write: the head is the store's position, not the
+    # newest live belief, or a correction would move the watermark backwards.
+    retired = memory(belief_id=532, statement="Old belief about answers").model_copy(
+        update={
+            "subject": "history",
+            "status": MemoryStatus.RETIRED,
+            "valid_to": NOW,
+            "store_position": 9,
+        }
+    )
+    await store.upsert_belief(retired)
+    assert await store.head_position(principal()) == 9
+
+    # Another principal's rows are invisible, however far the store has moved.
+    assert await store.head_position(foreign) == 0
+
+
+async def test_query_min_store_position_returns_only_newer_rows() -> None:
+    """The delta is a query bound, not a filter the caller applies afterwards."""
+
+    store = _store()
+    older = memory()
+    newer = memory(belief_id=533, statement="User prefers concise answers in review").model_copy(
+        update={"store_position": 4}
+    )
+    for record in (older, newer):
+        await store.upsert_belief(record)
+
+    assert [record.id for record in await store.query(recall_query(text="answers"))] == [
+        newer.id,
+        older.id,
+    ]
+    delta = await store.query(recall_query(text="answers", min_store_position=1))
+    assert [record.id for record in delta] == [newer.id]
+    assert await store.query(recall_query(text="answers", min_store_position=4)) == []

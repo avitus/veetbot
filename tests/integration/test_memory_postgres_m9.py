@@ -777,3 +777,58 @@ async def test_postgres_list_idle_orders_by_reinforcement_and_bounds_the_window(
         assert retired.id not in {record.id for record in window}
         assert len(bounded) == 1
         assert bounded[0].id == window[0].id
+
+
+async def test_postgres_head_position_and_minimum_position_bound_the_recall_delta(
+    tmp_path: Path,
+) -> None:
+    """The store head is per-principal, and the delta bound is a SQL predicate.
+
+    The shared database carries rows from other cases, so the head is asserted
+    against this case's own writes rather than against a literal: it moves to
+    each new position, ignores a principal that has written nothing, and the
+    minimum-position query returns exactly the rows written past it.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memhead{uuid4().hex[:10]}"
+        foreign = composition.principal.model_copy(
+            update={"principal_id": f"absent-{uuid4().hex[:8]}"}
+        )
+
+        async with composition.uow_factory() as uow:
+            before = await uow.memories.head_position(composition.principal)
+            assert await uow.memories.head_position(foreign) == 0
+
+        older = await _remember(
+            composition,
+            session_id,
+            f"User prefers concise {marker} answers",
+            subject=f"answer style {marker}",
+        )
+        async with composition.uow_factory() as uow:
+            midpoint = await uow.memories.head_position(composition.principal)
+        newer = await _remember(
+            composition,
+            session_id,
+            f"User prefers dark {marker} themes",
+            subject=f"theme {marker}",
+        )
+        async with composition.uow_factory() as uow:
+            head = await uow.memories.head_position(composition.principal)
+            everything = await uow.memories.query(_query(composition, text=marker))
+            delta = await uow.memories.query(
+                _query(composition, text=marker).model_copy(update={"min_store_position": midpoint})
+            )
+            exhausted = await uow.memories.query(
+                _query(composition, text=marker).model_copy(update={"min_store_position": head})
+            )
+            assert await uow.memories.head_position(foreign) == 0
+
+        assert older.store_position > before
+        assert midpoint == older.store_position
+        assert head == newer.store_position > midpoint
+        assert {record.id for record in everything} == {older.id, newer.id}
+        assert [record.id for record in delta] == [newer.id]
+        assert exhausted == []

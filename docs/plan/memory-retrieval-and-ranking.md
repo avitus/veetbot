@@ -99,8 +99,8 @@ eligible for in-turn injection, and a correction to a belief *inside* the snapsh
 injected as an explicit override in the user turn:
 
 ```text
-correction: [m:8f21] no longer holds as of 2026-07-24;
-            superseded by [m:9d02].
+correction: [m:8f21a0c3] no longer holds as of 2026-07-24T00:00:00Z;
+            superseded by [m:9d02b117].
 ```
 
 The prefix is never rewritten. The stable platform text tells the model that

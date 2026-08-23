@@ -12,11 +12,13 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.context import WorkingState
+from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     EpisodeQuery,
     MemoryAuthority,
+    MemoryCorrection,
     MemoryRecord,
     MemoryStatus,
     Portability,
@@ -51,6 +53,11 @@ EPISODE_MAX_PAGES = 64
 NEAR_DUPLICATE_SIMILARITY = 0.8
 _DURABLE_TYPES = frozenset({BeliefType.PREFERENCE, BeliefType.USER_MODEL_ATTR})
 _STALE_STATUSES = frozenset({MemoryStatus.EXPIRED, MemoryStatus.RETIRED})
+# The three ways a belief stops holding without being deleted, and therefore
+# the three a snapshot member can need a correction line for.
+_CORRECTED_STATUSES = frozenset(
+    {MemoryStatus.SUPERSEDED, MemoryStatus.EXPIRED, MemoryStatus.RETIRED}
+)
 _INJECTION = re.compile(
     r"(?:ignore\s+(?:all\s+)?previous|system\s+prompt|developer\s+message|"
     r"<\s*/?\s*(?:system|memory|untrusted)|override\s+(?:policy|instructions))",
@@ -163,9 +170,16 @@ class HybridMemoryRetriever:
         if not authorized:
             # Isolation is fail-closed before reaching an adapter query.
             records: list[MemoryRecord] = []
+            head = 0
         else:
             async with self._uow_factory() as uow:
                 records = await uow.memories.query(query)
+                # The watermark is the store's own head, read in the same unit
+                # of work as the query: a belief this query did not match still
+                # occupies a position, and calling the highest position the
+                # recall returned the watermark would make every belief above
+                # it look new to the next turn's delta.
+                head = await uow.memories.head_position(self._principal)
         # One instant governs the whole recall: time decay, the stale penalty,
         # and the rendered stamp all read the query's as-of or the clock, so a
         # historical query is scored as of the moment it asks about.
@@ -269,8 +283,63 @@ class HybridMemoryRetriever:
             tokens=_token_estimate(rendered),
             truncated=bool(dropped),
             trace_id=trace_id,
-            watermark=max((record.store_position for record in records), default=0),
+            watermark=head,
         )
+
+    async def corrections(
+        self,
+        *,
+        snapshot_id: UUID,
+        watermark: int,
+        as_of: datetime | None = None,
+    ) -> list[MemoryCorrection]:
+        """List the snapshot's own beliefs that stopped holding after it froze.
+
+        The snapshot is rendered inside the cached prefix and is never
+        rewritten, so a belief it captured goes on being stated until the
+        session ends. The correction is what overrides it, and only a belief
+        the snapshot actually returned can need one: a closure elsewhere in the
+        store is news the delta carries, not a correction to anything the turn
+        is being told.
+
+        Closure is read from the store position rather than from the instant,
+        because the position is the same ordering the delta is bounded by: a
+        belief superseded, expired, or retired at a position past the watermark
+        is exactly a change this session has not seen. A snapshot trace that
+        has expired or was never recorded yields nothing, which leaves the turn
+        with its base recall rather than failing it.
+        """
+
+        async with self._uow_factory() as uow:
+            try:
+                trace = await uow.traces.get(snapshot_id, self._principal)
+            except NotFoundError:
+                return []
+            returned = set(trace.returned)
+            if not returned:
+                return []
+            # Four rows per snapshot member is room for the superseding writes
+            # the members themselves produced, and the floor keeps a small
+            # snapshot from reading a uselessly narrow page.
+            records = await uow.memories.list_memories(
+                self._principal,
+                include_inactive=True,
+                limit=max(200, 4 * len(returned)),
+            )
+        instant = as_of or self._clock.now()
+        corrections = [
+            MemoryCorrection(
+                belief_id=record.id,
+                replacement_id=record.superseded_by,
+                ended_at=record.valid_to or record.updated_at,
+            )
+            for record in records
+            if record.id in returned
+            and record.status in _CORRECTED_STATUSES
+            and record.store_position > watermark
+            and (record.valid_to or record.updated_at) <= instant
+        ]
+        return sorted(corrections, key=lambda item: str(item.belief_id))
 
     async def snapshot(
         self,

@@ -410,6 +410,32 @@ class MemoryDiagnosis(BaseModel):
     pending_retry: bool = False
 
 
+class MemoryCorrection(BaseModel):
+    """One snapshot belief that stopped holding after the session froze it.
+
+    The frozen prefix goes on rendering the belief it captured, so the
+    correction is the only thing that can tell the turn the belief is closed.
+    It carries identifiers and an instant rather than statements: the
+    successor is already rendered by the delta, and repeating its text here
+    would state it twice in two voices.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    belief_id: UUID
+    replacement_id: UUID | None = None
+    ended_at: datetime
+
+    def render(self) -> str:
+        """Render the override line the context builder places in Region B."""
+
+        stamp = self.ended_at.isoformat().replace("+00:00", "Z")
+        line = f"correction: [m:{str(self.belief_id)[:8]}] no longer holds as of {stamp}"
+        if self.replacement_id is None:
+            return f"{line}."
+        return f"{line}; superseded by [m:{str(self.replacement_id)[:8]}]."
+
+
 class RecallQuery(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -425,6 +451,10 @@ class RecallQuery(BaseModel):
     budget_tokens: PositiveInt
     max_items: PositiveInt
     min_score: float = Field(ge=0, le=1)
+    # The recall delta bounds a query by the store position a session froze its
+    # snapshot at, so a belief written since is a query result rather than
+    # something the caller has to filter for afterwards.
+    min_store_position: int = Field(default=0, ge=0)
     sensitivity_ceiling: Sensitivity = Sensitivity.RESTRICTED
 
 
