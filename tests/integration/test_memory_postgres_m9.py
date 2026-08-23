@@ -87,6 +87,7 @@ def _browse_query(
     composition: Composition,
     *,
     ceiling: Sensitivity = Sensitivity.RESTRICTED,
+    statuses: tuple[MemoryStatus, ...] | None = None,
     belief_types: tuple[BeliefType, ...] = (),
     subject: str | None = None,
     session_id: UUID | None = None,
@@ -94,17 +95,20 @@ def _browse_query(
     limit: int = 50,
     cursor: tuple[int, UUID] | None = None,
 ) -> MemoryBrowseQuery:
-    return MemoryBrowseQuery(
-        tenant_id=composition.principal.tenant_id,
-        principal_id=composition.principal.principal_id,
-        ceiling=ceiling,
-        belief_types=belief_types,
-        subject=subject,
-        session_id=session_id,
-        text=text,
-        limit=limit,
-        cursor=cursor,
-    )
+    kwargs: dict[str, object] = {
+        "tenant_id": composition.principal.tenant_id,
+        "principal_id": composition.principal.principal_id,
+        "ceiling": ceiling,
+        "belief_types": belief_types,
+        "subject": subject,
+        "session_id": session_id,
+        "text": text,
+        "limit": limit,
+        "cursor": cursor,
+    }
+    if statuses is not None:
+        kwargs["statuses"] = statuses
+    return MemoryBrowseQuery.model_validate(kwargs)
 
 
 async def _remember(
@@ -463,6 +467,77 @@ async def test_postgres_browse_keyset_pagination_matches_the_documented_predicat
         walked_positions = [record.store_position for record in walked]
         assert walked_positions == sorted(walked_positions, reverse=True)
         assert len(walked_positions) == len(set(walked_positions))
+
+
+async def test_postgres_browse_enforces_principal_isolation_and_status_override(
+    tmp_path: Path,
+) -> None:
+    """PostgreSQL's browse predicate isolates principals and honors the status set.
+
+    The live default excludes a superseded row; naming the status explicitly
+    includes it, and no other tenant or principal's row is ever visible.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"membrwiso{uuid4().hex[:10]}"
+        subject = f"style-{marker}"
+        active = await _remember(
+            composition,
+            session_id,
+            f"User prefers the {marker} answer style",
+            subject=subject,
+        )
+        now = composition.clock.now()
+        superseded_id = uuid4()
+        async with composition.uow_factory() as uow:
+            superseded = MemoryRecord.model_validate(
+                {
+                    "id": superseded_id,
+                    "tenant_id": composition.principal.tenant_id,
+                    "principal_id": composition.principal.principal_id,
+                    "scope": "integration",
+                    "subject": subject,
+                    "statement": f"User used to prefer the old {marker} style",
+                    "source_session_id": session_id,
+                    "source_event_ids": [1],
+                    "confidence": 0.9,
+                    "sensitivity": Sensitivity.INTERNAL,
+                    "valid_from": now - timedelta(hours=1),
+                    "valid_to": now,
+                    "status": MemoryStatus.SUPERSEDED,
+                    "belief_type": BeliefType.PREFERENCE,
+                    "polarity": Polarity.ASSERT,
+                    "portability": Portability.CONTEXTUAL,
+                    "origin_scopes": ["integration"],
+                    "last_reinforced_at": now - timedelta(hours=1),
+                    "superseded_by": active.id,
+                    "formation_run_id": uuid4(),
+                    "consolidation_policy_version": "formation@1",
+                    "authority": MemoryAuthority.USER,
+                    "store_position": await uow.memories.next_position(),
+                    "created_at": now - timedelta(hours=1),
+                    "updated_at": now,
+                }
+            )
+            await uow.memories.upsert_belief(superseded)
+
+        foreign_query = MemoryBrowseQuery(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=f"absent-{uuid4().hex[:8]}",
+            ceiling=Sensitivity.RESTRICTED,
+            subject=subject,
+        )
+        async with composition.uow_factory() as uow:
+            default_page = await uow.memories.browse(_browse_query(composition, subject=subject))
+            with_history = await uow.memories.browse(
+                _browse_query(composition, subject=subject, statuses=(MemoryStatus.SUPERSEDED,))
+            )
+            isolated = await uow.memories.browse(foreign_query)
+
+        assert {record.id for record in default_page} == {active.id}
+        assert {record.id for record in with_history} == {superseded_id}
+        assert isolated == []
 
 
 async def test_postgres_sensitivity_ceiling_and_local_portability_predicates(
