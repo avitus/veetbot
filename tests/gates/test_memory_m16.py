@@ -12,10 +12,12 @@ from uuid import UUID
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from typer.testing import CliRunner
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.fake import FakeModelProvider
 from agent_core.bootstrap import build
+from agent_core.cli.main import app
 from agent_core.config import Settings
 from agent_core.domain.context import WorkingState
 from agent_core.domain.events import NewEvent
@@ -27,6 +29,7 @@ from agent_core.domain.memory import (
     RecallMoment,
     RecallProfile,
     RecallQuery,
+    RejectionKind,
     Sensitivity,
 )
 from agent_core.domain.messages import (
@@ -73,7 +76,7 @@ from agent_core.memory.profiles import (
     SnapshotProfiles,
 )
 from agent_core.runtime.worker import MaintenanceWorker
-from tests.contract.memory_fixtures import memory
+from tests.contract.memory_fixtures import formation_stack, memory, user_event
 from tests.contract.support import NOW, SESSION_ID
 from tests.integration.m2_support import memory_settings
 
@@ -1326,3 +1329,32 @@ def test_resolver_orders_authority_then_recency(
     assert relation == resolve(
         Polarity.ASSERT if polarity is Polarity.RETRACT else Polarity.RETRACT
     )
+
+
+async def test_replay_is_opt_in_and_replays_rejections() -> None:
+    """`agent memory replay --session --confirm` is the opt-in re-derivation
+    surface: it refuses without an explicit confirmation, and with it
+    re-consolidates the named session from watermark zero under the current
+    policy without resurrecting a belief the user has already rejected.
+    """
+
+    _clock, factory, service, _retriever = await formation_stack()
+    await user_event(factory, "I prefer concise answers")
+    formed = await service.run(trigger="session_idle", scope="general", session_id=SESSION_ID)
+    (belief,) = formed.beliefs
+    await service.reject(belief.id, RejectionKind.UNTRUE)
+
+    replayed = await service.replay(SESSION_ID)
+
+    assert replayed.run.trigger == "operator_replay"
+    assert replayed.run.policy_version == FORMATION_POLICY_VERSION
+    assert replayed.run.watermark_before == 0
+    assert replayed.beliefs == []
+    assert replayed.run.candidates_proposed == 1
+    assert replayed.run.committed == 0
+    assert replayed.run.rejected == 1
+
+    refused = CliRunner().invoke(app, ["memory", "replay", "--session", str(SESSION_ID)])
+
+    assert refused.exit_code == 2
+    assert "requires --confirm" in refused.stderr

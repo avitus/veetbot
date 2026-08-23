@@ -6747,3 +6747,8 @@ silently re-mining old episodes is exactly the surprise that rule prevents.
 **Question for you:** none.
 
 **Reversal cost:** none; it is the standing rule.
+
+**Update:** ADR-0068 built this surface as `agent memory replay --session
+<id> --confirm` rather than the differently spelled command named above;
+Milestone 16 verified it against this standing rule (registered as
+`gate.memory.rederive_opt_in`) instead of adding a second command.
