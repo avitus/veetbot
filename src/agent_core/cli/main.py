@@ -162,6 +162,10 @@ class _MemoryBenchmarkModule(Protocol):
     ) -> Any | None: ...
 
 
+class _MemoryBenchmarkLiveModule(Protocol):
+    def incomplete_run_diagnostics(self, live: Any) -> list[str]: ...
+
+
 class _MemoryBenchmarkExternalModule(Protocol):
     async def run_external_benchmark(
         self,
@@ -1155,8 +1159,28 @@ def eval_memory_benchmark(
         return
     typer.echo(result.model_dump_json())
     if not result.passed:
+        for line in _incomplete_run_diagnostics(getattr(result, "live", None)):
+            typer.echo(line, err=True)
         typer.echo(f"memory-benchmark evaluation failed: {result.failure_summary}", err=True)
         raise typer.Exit(1)
+
+
+def _incomplete_run_diagnostics(live: Any) -> list[str]:
+    """Describe every run the live arm left incomplete, content-free.
+
+    The one-line summary says how many runs ended without an answer; these say
+    which, why, and at what cost, so a failed live arm is diagnosable from the
+    command's own output rather than only from the metrics document.  A
+    deterministic run has no live arm and prints nothing extra.
+    """
+
+    if live is None:
+        return []
+    module = cast(
+        _MemoryBenchmarkLiveModule,
+        importlib.import_module("agent_core.evals.memory_benchmark_live"),
+    )
+    return module.incomplete_run_diagnostics(live)
 
 
 def _run_external_memory_benchmark(

@@ -506,6 +506,26 @@ if the first completed live run reports zero cost the harness aborts with
 "model pricing unavailable; ceiling unenforceable" rather than running sixty
 more probes for free and calling the ceiling enforced.
 
+A run that terminated without an answer is asked once more before it counts.
+The observed failures are transport-shaped — an arm ends `FAILED` after zero or
+one model calls while the other hundred and thirty complete — so every probe
+arm whose run did not complete is retried exactly once, against a composition
+built the same way but freshly, and the retry is admitted through the same
+pre-admission ceiling check as any other run: a retry the ceiling refuses stops
+the arm instead of running outside it. An arm that completed is never asked
+again, a second failure is kept, and a first attempt that failed after a billed
+call still counts its cost. `retried_runs` counts the retries, `incomplete_runs`
+keeps its meaning — what was still incomplete after the retry — and the
+publication condition `incomplete_runs == 0` is unchanged. Each incomplete run
+records its terminal status, its terminal error class (the class name the run
+record already carries, or the exception type when the arm failed outside the
+run, never a message), whether any model call was billed, and what it cost; the
+command prints one such line per incomplete run beside its one-line summary,
+and the artifact carries only the aggregate `failure_classes` histogram. The
+evidence validator re-checks that `retried_runs` does not exceed the runs the
+two arms could have asked and that a histogram, when present, accounts for
+every incomplete run.
+
 ## Public datasets, opt-in and never vendored
 
 Three public long-horizon benchmarks are the outside check on the corpus, and

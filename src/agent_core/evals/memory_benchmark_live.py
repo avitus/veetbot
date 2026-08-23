@@ -33,7 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from agent_core.config import Settings, load_settings
 from agent_core.domain.events import EventEnvelope
 from agent_core.domain.memory import MemoryRecord, minimum_supported_case_count
-from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunStatus
+from agent_core.domain.runs import TERMINAL_RUN_STATUSES, RunFailure, RunStatus
 from agent_core.evals.memory_benchmark import (
     BenchmarkProbe,
     BenchmarkScenario,
@@ -135,8 +135,29 @@ def minimum_live_lift(answerable: int) -> int:
     return (answerable + 4) // 5
 
 
+def _terminal_failure_class(failure: RunFailure | None) -> str | None:
+    """Name why a run ended, as the class name the runtime already records.
+
+    The run record carries a whole failure — a reason, a class, a message, and
+    details — and only the class name may travel here: it says whether the arm
+    hit a transport error, a budget, or the run loop, and it cannot carry a
+    belief, an answer, or anything else the run saw.
+    """
+
+    if failure is None:
+        return None
+    return failure.error_class or None
+
+
 class LiveProbeArmResult(BaseModel):
-    """One probe asked once, in one arm, against a real model."""
+    """One probe asked once, in one arm, against a real model.
+
+    `retried` marks the attempt that replaced a first attempt which terminated
+    without an answer, and `failure_class` names why a terminated run did:
+    the run record's terminal error class, or the exception type when the arm
+    failed outside the run.  Both are content-free — a class name, never a
+    message, an answer, or a belief.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -152,6 +173,8 @@ class LiveProbeArmResult(BaseModel):
     model: str | None = None
     policy_version: str | None = None
     retrieval: ProbeRetrievalResult | None = None
+    failure_class: str | None = Field(default=None, min_length=1, max_length=256)
+    retried: bool = False
 
 
 class LiveProbeResult(BaseModel):
@@ -202,11 +225,13 @@ class MemoryBenchmarkLiveMetrics(BaseModel):
     with_memory_policy_failures: int = Field(ge=0)
     without_memory_policy_failures: int = Field(ge=0)
     incomplete_runs: int = Field(ge=0)
+    retried_runs: int = Field(default=0, ge=0)
     ceiling_hits: int = Field(ge=0)
     total_cost_usd: Decimal = Field(ge=0)
     p50_latency_ms: int = Field(ge=0)
     p95_latency_ms: int = Field(ge=0)
     stopped_by: str | None = None
+    failure_classes: dict[str, int] = Field(default_factory=dict)
     per_category: dict[str, LiveCategoryMetrics] = Field(default_factory=dict)
     probes: list[LiveProbeResult] = Field(default_factory=list)
 
@@ -317,6 +342,12 @@ class MemoryBenchmarkEvidence(BaseModel):
     def _counts_are_consistent(live: MemoryBenchmarkLiveMetrics) -> None:
         if live.probe_count < 1:
             raise ValueError("memory benchmark evidence needs at least one probe")
+        if live.retried_runs > 2 * live.probe_count:
+            raise ValueError("retried runs exceed the runs the two arms could have asked")
+        if any(count < 1 for count in live.failure_classes.values()):
+            raise ValueError("a failure class counted fewer than one run")
+        if live.failure_classes and live.incomplete_runs != sum(live.failure_classes.values()):
+            raise ValueError("the failure class histogram must account for every incomplete run")
         if live.abstain_expected > live.probe_count:
             raise ValueError("abstain-expected probes exceed the probe count")
         if live.answerable_probe_count != live.probe_count - live.abstain_expected:
@@ -426,6 +457,52 @@ async def _evaluate_probe_live(
         return await _ask(composition, scenario, probe, corpus, arm=arm)
 
 
+async def _attempt_probe_arm(
+    settings: Settings,
+    corpus: MemoryBenchmarkCorpus,
+    scenario: BenchmarkScenario,
+    probe: BenchmarkProbe,
+    *,
+    arm: LiveArm,
+    model_policy: str,
+    policy_profile: str,
+    scenario_context: LiveScenarioContext,
+) -> LiveProbeArmResult:
+    """Ask one probe arm once and answer with a result even when it threw.
+
+    A failure that lands outside the run — the harness's own wall-clock wait,
+    a composition that would not build, a transport error raised past the run
+    loop — is as much an incomplete run as one the run loop recorded, and an
+    exception that ends the whole invocation makes the arm undiagnosable and
+    unretryable.  It becomes a failed arm carrying the exception's type name,
+    which is content-free, and the caller retries it like any other.
+    """
+
+    try:
+        return await _evaluate_probe_live(
+            settings,
+            corpus,
+            scenario,
+            probe,
+            arm=arm,
+            model_policy=model_policy,
+            policy_profile=policy_profile,
+            scenario_context=scenario_context,
+        )
+    except Exception as exc:
+        return LiveProbeArmResult(
+            arm=arm,
+            answer=None,
+            score=AnswerScore(correct=False, abstained=False, leaked_protected=False),
+            run_status=RunStatus.FAILED,
+            model_calls=0,
+            cost_usd=Decimal("0"),
+            latency_ms=0,
+            policy_failures=0,
+            failure_class=type(exc).__name__,
+        )
+
+
 async def _ask(
     composition: Any,
     scenario: BenchmarkScenario,
@@ -475,6 +552,7 @@ async def _ask(
         provider=None if pin is None else pin.provider,
         model=None if pin is None else pin.model,
         policy_version=composition.ruleset.policy_version,
+        failure_class=_terminal_failure_class(run.failure),
         retrieval=(
             None
             if arm != "with_memory"
@@ -594,7 +672,14 @@ async def _ask_every_probe(
     refused would report a lift the run never measured.  The spend is tracked
     separately from the rows for the same reason in reverse — money a
     discarded arm cost was still spent, and the ceiling answers to what was
-    spent rather than to what was scored.
+    spent rather than to what was scored, so a first attempt that failed after
+    a billed call still counts against the ceiling.
+
+    An arm whose run terminates without an answer is asked once more, against a
+    composition built the same way but freshly, because the observed failures
+    are transport-shaped rather than answers.  The retry is admitted through
+    the same pre-admission check as any other run, the second failure is kept,
+    and an arm that completed is never asked again.
     """
 
     rows: list[LiveProbeResult] = []
@@ -617,7 +702,7 @@ async def _ask_every_probe(
                     if spent + PROBE_RUN_COST_CEILING_USD > LIVE_COST_CEILING_USD:
                         stopped_by = "cost_ceiling"
                         break
-                    result = await _evaluate_probe_live(
+                    result = await _attempt_probe_arm(
                         settings,
                         corpus,
                         scenario,
@@ -628,6 +713,31 @@ async def _ask_every_probe(
                         scenario_context=context,
                     )
                     spent += result.cost_usd
+                    if result.run_status is not RunStatus.COMPLETED:
+                        if spent + PROBE_RUN_COST_CEILING_USD > LIVE_COST_CEILING_USD:
+                            stopped_by = "cost_ceiling"
+                            break
+                        retry_context = LiveScenarioContext(
+                            settings,
+                            scenario,
+                            model_policy=model_policy,
+                            policy_profile=policy_profile,
+                        )
+                        try:
+                            result = await _attempt_probe_arm(
+                                settings,
+                                corpus,
+                                scenario,
+                                probe,
+                                arm=arm,
+                                model_policy=model_policy,
+                                policy_profile=policy_profile,
+                                scenario_context=retry_context,
+                            )
+                        finally:
+                            await retry_context.aclose()
+                        spent += result.cost_usd
+                        result = result.model_copy(update={"retried": True})
                     if (
                         result.provider is not None
                         and result.model is not None
@@ -703,14 +813,58 @@ def _aggregate_live(
         with_memory_policy_failures=sum(row.with_memory.policy_failures for row in rows),
         without_memory_policy_failures=sum(row.without_memory.policy_failures for row in rows),
         incomplete_runs=sum(arm.run_status is not RunStatus.COMPLETED for arm in arms),
+        retried_runs=sum(arm.retried for arm in arms),
         ceiling_hits=int(ledger.stopped_by == "cost_ceiling"),
         total_cost_usd=ledger.spent,
         p50_latency_ms=_percentile(latencies, 50),
         p95_latency_ms=_percentile(latencies, 95),
         stopped_by=ledger.stopped_by,
+        failure_classes=_failure_classes(arms),
         per_category=_per_category(rows),
         probes=list(rows),
     )
+
+
+def _failure_classes(arms: Sequence[LiveProbeArmResult]) -> dict[str, int]:
+    """Count the incomplete runs by the class that ended them.
+
+    An arm that terminated without recording a class is counted under its
+    terminal status, so the histogram accounts for every incomplete run rather
+    than for the diagnosable subset of them.
+    """
+
+    histogram: dict[str, int] = {}
+    for arm in arms:
+        if arm.run_status is RunStatus.COMPLETED:
+            continue
+        name = arm.failure_class or arm.run_status.value
+        histogram[name] = histogram.get(name, 0) + 1
+    return dict(sorted(histogram.items()))
+
+
+def incomplete_run_diagnostics(metrics: MemoryBenchmarkLiveMetrics) -> list[str]:
+    """Describe every incomplete run, content-free, one line each.
+
+    A run that ends without an answer used to be a bare count, which said that
+    the arm failed but never why.  These lines name the probe, the arm, the
+    terminal status and class, whether any model call was billed, what it cost,
+    and whether it was already the retry — everything needed to tell a
+    transport blip from a budget from a bug, and nothing the run answered.
+    """
+
+    lines: list[str] = []
+    for row in metrics.probes:
+        for arm in (row.with_memory, row.without_memory):
+            if arm.run_status is RunStatus.COMPLETED:
+                continue
+            lines.append(
+                f"incomplete run {row.scenario_id}/{row.probe_id} {arm.arm}: "
+                f"status={arm.run_status.value} "
+                f"failure_class={arm.failure_class or 'unrecorded'} "
+                f"model_calls={arm.model_calls} cost_usd={arm.cost_usd} "
+                f"latency_ms={arm.latency_ms} retried={arm.retried}"
+            )
+    return lines
 
 
 def _recalled_everything_needed(row: LiveProbeResult) -> bool:
