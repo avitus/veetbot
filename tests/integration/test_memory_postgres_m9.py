@@ -151,6 +151,65 @@ async def test_postgres_supersession_serves_current_and_historical_beliefs(
         assert "memory.superseded" in {event.event_type for event in events}
 
 
+async def test_postgres_conflict_links_both_beliefs_and_leaves_the_user_statement_live(
+    tmp_path: Path,
+) -> None:
+    """A conflict is two live rows and a JSONB link, so PostgreSQL must keep both.
+
+    `conflicts_with` is the one belief column stored as JSONB, and nothing else
+    writes it. This is the only place the real adapter's round-trip of the link
+    and the review flag through `upsert_belief` and `reinforce` is observed.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memcfl{uuid4().hex[:10]}"
+        subject = f"style-{marker}"
+        stated = await _remember(
+            composition,
+            session_id,
+            f"{marker} answers should be concise",
+            subject=subject,
+        )
+        source = await _user_event(composition, session_id, f"{marker} answers should be detailed")
+        inferred = await composition.memory.remember(
+            session_id=session_id,
+            run_id=None,
+            statement=f"{marker} answers should be detailed",
+            subject=subject,
+            scope="integration",
+            belief_type=BeliefType.PREFERENCE,
+            sensitivity=Sensitivity.INTERNAL,
+            source_event_ids=[source],
+            explicit=False,
+            authority=MemoryAuthority.INFERRED,
+        )
+
+        async with composition.uow_factory() as uow:
+            stored_statement = await uow.memories.get(stated.id, composition.principal)
+            stored_inference = await uow.memories.get(inferred.id, composition.principal)
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+        recall = await composition.memory_retriever.recall(
+            _query(composition, text=f"{marker} answers"), session_id=session_id
+        )
+
+    assert stored_statement.status is MemoryStatus.ACTIVE
+    assert stored_statement.superseded_by is None
+    assert stored_statement.conflicts_with == [inferred.id]
+    assert stored_statement.flagged_for_review is True
+    assert stored_inference.status is MemoryStatus.PROVISIONAL
+    assert stored_inference.conflicts_with == [stated.id]
+    assert stored_inference.flagged_for_review is True
+    assert stored_statement.store_position > stored_inference.store_position
+
+    assert {item.belief_id for item in recall.items} == {stated.id, inferred.id}
+    assert f"conflicts=[m:{str(inferred.id)[:8]}]" in recall.rendered
+    assert f"conflicts=[m:{str(stated.id)[:8]}]" in recall.rendered
+    event_types = {event.event_type for event in events}
+    assert "memory.needs_confirmation" in event_types
+    assert "memory.superseded" not in event_types
+
+
 async def test_postgres_fts_matches_any_term_in_any_order_and_ranks_full_matches_first(
     tmp_path: Path,
 ) -> None:

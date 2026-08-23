@@ -10,6 +10,8 @@ from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.adapters.models.fake import FakeModelProvider
@@ -21,6 +23,7 @@ from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
     MemoryStatus,
+    Polarity,
     RecallMoment,
     RecallProfile,
     RecallQuery,
@@ -61,6 +64,7 @@ from agent_core.memory.formation import (
     MAX_INFERRED_CONFIDENCE,
     SESSION_IDLE_SECONDS,
     DeterministicCandidateExtractor,
+    DeterministicConflictResolver,
 )
 from agent_core.memory.profiles import (
     FormationProfile,
@@ -69,6 +73,8 @@ from agent_core.memory.profiles import (
     SnapshotProfiles,
 )
 from agent_core.runtime.worker import MaintenanceWorker
+from tests.contract.memory_fixtures import memory
+from tests.contract.support import NOW, SESSION_ID
 from tests.integration.m2_support import memory_settings
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -1155,3 +1161,168 @@ async def test_established_facts_enter_formation_as_affirmed_candidates(tmp_path
         (audit.candidates_proposed, audit.committed, audit.rejected, audit.policy_version)
         for audit in audits
     ] == [(1, 1, 0, FORMATION_POLICY_VERSION)]
+
+
+async def test_lower_authority_contradiction_is_conflicted_and_both_surface(
+    tmp_path: Path,
+) -> None:
+    """An inference contradicting a user statement is surfaced, never resolved.
+
+    The user states a preference; a later turn's utterance makes the automatic
+    extractor propose the opposite. Because an inference ranks below a user
+    statement, the proposal commits beside the belief it contradicts instead of
+    retiring it: both records stay live, each names the other, both are flagged,
+    a confirmation is requested, and the next recall returns both statements
+    with the link rendered so the user can see what disagrees with what.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        stated = await _stated_belief(
+            composition, session_id, "User prefers concise answers", "answer style"
+        )
+        assert stated.authority is MemoryAuthority.USER
+        assert stated.status is MemoryStatus.ACTIVE
+
+        clock.advance(timedelta(seconds=1))
+        run = await composition.runs.wait_terminal(
+            await composition.runs.submit("I prefer detailed answers.", session_id)
+        )
+        assert run.status is RunStatus.COMPLETED
+
+        clock.advance(timedelta(seconds=SESSION_IDLE_SECONDS + 1))
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+
+        beliefs = {
+            belief.id: belief
+            for belief in await composition.memory.list_memories(include_inactive=True)
+        }
+        inferred = next(
+            belief for belief in beliefs.values() if belief.authority is MemoryAuthority.INFERRED
+        )
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(session_id, 0, composition.principal)
+        recall = await composition.memory_retriever.recall(
+            RecallQuery(
+                tenant_id=composition.principal.tenant_id,
+                principal_id=composition.principal.principal_id,
+                current_scope="general",
+                text="answers",
+                budget_tokens=500,
+                max_items=10,
+                min_score=0.1,
+            ),
+            session_id=session_id,
+        )
+
+    # Neither belief was retired, and each one names the other.
+    assert beliefs[stated.id].status is MemoryStatus.ACTIVE
+    assert beliefs[stated.id].superseded_by is None
+    assert beliefs[stated.id].valid_to is None
+    assert beliefs[stated.id].conflicts_with == [inferred.id]
+    assert beliefs[stated.id].flagged_for_review is True
+    assert inferred.status is MemoryStatus.PROVISIONAL
+    assert inferred.statement == "User prefers detailed answers."
+    assert inferred.conflicts_with == [stated.id]
+    assert inferred.flagged_for_review is True
+
+    # The conflict asks for confirmation rather than deciding by itself.
+    memory_events = [event.event_type for event in events if event.event_type.startswith("memory.")]
+    assert "memory.needs_confirmation" in memory_events
+    assert "memory.superseded" not in memory_events
+
+    # Both statements surface together, each carrying the link.
+    assert {item.belief_id for item in recall.items} == {stated.id, inferred.id}
+    assert f"conflicts=[m:{str(inferred.id)[:8]}]" in recall.rendered
+    assert f"conflicts=[m:{str(stated.id)[:8]}]" in recall.rendered
+
+
+_AUTHORITY_ORDER: tuple[MemoryAuthority, ...] = (
+    MemoryAuthority.INFERRED,
+    MemoryAuthority.AFFIRMED,
+    MemoryAuthority.USER,
+)
+
+
+@settings(max_examples=200, deadline=None, derandomize=True)
+@given(
+    existing_authority=st.sampled_from(_AUTHORITY_ORDER),
+    incoming_authority=st.sampled_from(_AUTHORITY_ORDER),
+    existing_source=st.integers(min_value=1, max_value=5),
+    incoming_source=st.integers(min_value=1, max_value=5),
+    same_session=st.booleans(),
+    offset_seconds=st.integers(min_value=-2, max_value=2),
+    polarity=st.sampled_from((Polarity.ASSERT, Polarity.RETRACT)),
+)
+def test_resolver_orders_authority_then_recency(
+    existing_authority: MemoryAuthority,
+    incoming_authority: MemoryAuthority,
+    existing_source: int,
+    incoming_source: int,
+    same_session: bool,
+    offset_seconds: int,
+    polarity: Polarity,
+) -> None:
+    """Authority decides first, recency second, and polarity never decides at all.
+
+    Over every authority pair, source ordering, session sameness, and instant
+    ordering: weaker evidence never overwrites stronger evidence, stronger
+    evidence always does, equal evidence supersedes only when something orders
+    it in time, and flipping the polarity of the incoming statement changes
+    nothing about the outcome.
+    """
+
+    resolver = DeterministicConflictResolver()
+    existing = memory().model_copy(
+        update={
+            "authority": existing_authority,
+            "source_event_ids": [existing_source],
+            "updated_at": NOW,
+        }
+    )
+    incoming_at = NOW + timedelta(seconds=offset_seconds)
+    session_id = SESSION_ID if same_session else UUID(int=0x5E55)
+    assert existing.source_session_id == SESSION_ID
+
+    def resolve(with_polarity: Polarity) -> str:
+        return resolver.relationship(
+            existing,
+            "User prefers detailed answers",
+            [incoming_source],
+            authority=incoming_authority,
+            polarity=with_polarity,
+            session_id=session_id,
+            at=incoming_at,
+        )
+
+    relation = resolve(polarity)
+    rank = {authority: index for index, authority in enumerate(_AUTHORITY_ORDER)}
+    ordered_in_time = (
+        incoming_source > existing_source if same_session else incoming_at > existing.updated_at
+    )
+
+    if same_session and incoming_source == existing_source:
+        # A replay of an already-consolidated episode is neither.
+        assert relation == "same_source"
+    elif rank[incoming_authority] < rank[existing_authority]:
+        assert relation == "conflict"
+    elif rank[incoming_authority] > rank[existing_authority]:
+        assert relation == "contradiction"
+    else:
+        assert relation == ("contradiction" if ordered_in_time else "conflict")
+
+    # Higher authority never loses to lower, whatever the clock and sequences say.
+    if rank[incoming_authority] > rank[existing_authority]:
+        assert relation != "conflict"
+
+    # Polarity alone never conflicts.
+    assert relation == resolve(
+        Polarity.ASSERT if polarity is Polarity.RETRACT else Polarity.RETRACT
+    )

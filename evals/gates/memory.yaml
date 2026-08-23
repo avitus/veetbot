@@ -280,13 +280,13 @@
   kind: case
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**A lower-authority contradiction is conflicted, not resolved.** An inference contradicting a user-stated belief commits flagged and linked in both directions, requests confirmation, leaves the original live, and both statements surface together in recall with the link rendered."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_lower_authority_contradiction_is_conflicted_and_both_surface
 - id: gate.memory.authority_recency
   milestone: 16
   kind: property
   spec: docs/plan/memory-evaluation-and-lifecycle.md#hard-gates
   statement: "**The resolver orders authority then recency.** Over generated authority pairs and source orderings, higher authority never loses to lower, equal authority with a later source or instant supersedes, equal authority with no ordering conflicts, and polarity alone never conflicts."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_memory_m16.py::test_resolver_orders_authority_then_recency
 - id: gate.memory.rederive_opt_in
   milestone: 16
   kind: case

@@ -444,9 +444,13 @@ async def test_a_later_session_supersedes_across_colliding_source_sequences() ->
     episodes a no-op. A second session numbers its first event one as well, so
     comparing bare sequence numbers made every second session look like a
     replay and left the superseded belief live.
+
+    A colliding sequence carries no ordering, so the clock is what orders the
+    two statements: the later session speaks a second after the first one, and
+    the same instant instead would leave the two in conflict.
     """
 
-    _clock, factory, service, _retriever = await formation_stack()
+    clock, factory, service, _retriever = await formation_stack()
     first_source = await user_event(factory, "I live in Seattle.")
     formed = await service.remember(
         session_id=SESSION_ID,
@@ -458,6 +462,7 @@ async def test_a_later_session_supersedes_across_colliding_source_sequences() ->
         source_event_ids=[first_source],
     )
 
+    clock.advance(timedelta(seconds=1))
     later = await _second_session(factory)
     second_source = await _session_event(factory, later, "I live in Portland now.")
     assert second_source == first_source
@@ -491,6 +496,137 @@ async def test_a_later_session_supersedes_across_colliding_source_sequences() ->
     )
     assert replay.id == superseding.id
     assert replay.statement == "User lives in Portland."
+
+
+async def test_inferred_contradiction_of_a_user_belief_is_conflicted_flagged_and_linked_both_ways() -> (  # noqa: E501
+    None
+):
+    """An inference never overwrites what the user said; it is linked beside it.
+
+    Both records stay live, each names the other, both are flagged for review,
+    and the belief that was already stored takes a fresh store position so the
+    next turn's recall delta shows it reappearing with its new marker.
+    """
+
+    clock, factory, service, _retriever = await formation_stack()
+    stated = await user_event(factory, "Concise answers, please.")
+    belief = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers.",
+        subject="answer style",
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        source_event_ids=[stated],
+    )
+
+    clock.advance(timedelta(seconds=1))
+    inferred_source = await user_event(factory, "I prefer detailed answers.")
+    inferred = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers detailed answers.",
+        subject="answer style",
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        source_event_ids=[inferred_source],
+        explicit=False,
+        authority=MemoryAuthority.INFERRED,
+        confidence=MAX_INFERRED_CONFIDENCE,
+    )
+
+    records = {record.id: record for record in await service.list_memories(include_inactive=True)}
+    assert records[belief.id].status is MemoryStatus.ACTIVE
+    assert records[belief.id].superseded_by is None
+    assert records[belief.id].valid_to is None
+    assert records[belief.id].conflicts_with == [inferred.id]
+    assert records[belief.id].flagged_for_review is True
+    assert records[inferred.id].status is MemoryStatus.PROVISIONAL
+    assert records[inferred.id].conflicts_with == [belief.id]
+    assert records[inferred.id].flagged_for_review is True
+    # The re-flagged belief is news for the delta, so it moves above the
+    # replacement that was written first.
+    assert records[belief.id].store_position > records[inferred.id].store_position
+    assert records[belief.id].updated_at == clock.now()
+
+
+async def test_conflict_emits_needs_confirmation_and_counts_as_committed() -> None:
+    """A conflict is a commit that asks for confirmation, not a supersession."""
+
+    clock, factory, service, _retriever = await formation_stack()
+    stated = await user_event(factory, "Concise answers, please.")
+    await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User prefers concise answers.",
+        subject="answer style",
+        scope="project-a",
+        belief_type=BeliefType.PREFERENCE,
+        source_event_ids=[stated],
+    )
+
+    clock.advance(timedelta(seconds=1))
+    await user_event(factory, "I prefer detailed answers.")
+    result = await service.run(trigger="session_idle", scope="project-a", session_id=SESSION_ID)
+
+    assert result.conflicted == 1
+    assert result.run.committed == 1
+    assert result.run.superseded == 0
+    assert result.run.rejected == 0
+    assert await _memory_event_types(factory) == [
+        "memory.formed",
+        "memory.formed",
+        "memory.needs_confirmation",
+    ]
+
+
+async def test_later_user_statement_still_supersedes() -> None:
+    """Equal authority with a later source or a later instant is still ordered."""
+
+    clock, factory, service, _retriever = await formation_stack()
+    first_source = await user_event(factory, "I live in Seattle.")
+    formed = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User lives in Seattle.",
+        subject="home location",
+        scope="general",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        source_event_ids=[first_source],
+    )
+    second_source = await user_event(factory, "I live in Portland now.")
+    within_session = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User lives in Portland.",
+        subject="home location",
+        scope="general",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        source_event_ids=[second_source],
+    )
+    async with factory() as uow:
+        stored = await uow.memories.get(formed.id, principal())
+    assert stored.status is MemoryStatus.SUPERSEDED
+    assert stored.superseded_by == within_session.id
+    assert stored.conflicts_with == []
+
+    # A later session brings no later sequence, so the instant is the ordering.
+    later = await _second_session(factory)
+    clock.advance(timedelta(seconds=1))
+    third_source = await _session_event(factory, later, "I live in Boise now.")
+    across_sessions = await service.remember(
+        session_id=later,
+        run_id=None,
+        statement="User lives in Boise.",
+        subject="home location",
+        scope="general",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        source_event_ids=[third_source],
+    )
+    async with factory() as uow:
+        replaced = await uow.memories.get(within_session.id, principal())
+    assert replaced.status is MemoryStatus.SUPERSEDED
+    assert replaced.superseded_by == across_sessions.id
 
 
 async def test_service_names_the_candidate_extractor_it_was_configured_with() -> None:

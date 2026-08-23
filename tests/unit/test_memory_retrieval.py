@@ -174,11 +174,12 @@ def test_rrf_fusion_rewards_cross_arm_agreement() -> None:
 
 
 def test_render_memory_is_deterministic_and_escapes_markup() -> None:
+    partner = UUID("f1e2d3c4-0000-0000-0000-000000000888")
     item = recalled(
         statement="Uses <b>bold</b> & ampersands",
         carried=True,
         origin_scope="atlas <beta>",
-        conflict_with=[UUID(int=888)],
+        conflict_with=[partner],
     )
     first = render_memory([item], as_of=NOW)
     second = render_memory([item], as_of=NOW)
@@ -188,7 +189,10 @@ def test_render_memory_is_deterministic_and_escapes_markup() -> None:
     assert header == f'<memory as_of="{stamp}" policy="{RETRIEVAL_POLICY_VERSION}">'
     assert "&lt;b&gt;bold&lt;/b&gt; &amp; ampersands" in first
     assert "(learned in atlas &lt;beta&gt;)" in first
-    assert f"conflicts={UUID(int=888)}" in first
+    # A conflict is named the way a citation is, so the model can only ask
+    # about a partner in the same short form it reads everywhere else.
+    assert "conflicts=[m:f1e2d3c4]" in first
+    assert str(partner) not in first
     assert "<b>" not in first
     assert f"[m:{str(item.belief_id)[:8]}]" in first
     assert first.endswith("</memory>")
@@ -276,6 +280,63 @@ async def test_per_subject_cap_and_duplicate_collapse() -> None:
     result = await retriever.recall(recall_query(), session_id=SESSION_ID)
     assert len(result.items) == 3
     assert len({item.statement.casefold() for item in result.items}) == 3
+
+
+async def test_conflict_partners_bypass_the_subject_cap_and_render_short_ids() -> None:
+    """A conflict is only surfaced if both halves of it are returned.
+
+    The per-subject cap exists to stop one subject filling the block, but a
+    conflict partner it would cut is the half that makes the marker mean
+    anything. The bypass works in both directions: a selected belief that names
+    a partner pulls it in, and a partner that names a selected belief pulls
+    itself in.
+    """
+
+    _clock, factory, _service, retriever = await formation_stack()
+    stated = UUID("aaaa1111-0000-0000-0000-000000000001")
+    named_by_stated = UUID("cccc3333-0000-0000-0000-000000000003")
+    naming_stated = UUID("dddd4444-0000-0000-0000-000000000004")
+    capped = UUID("eeee5555-0000-0000-0000-000000000005")
+    records = [
+        (stated, "User prefers concise answers", 0.9, [named_by_stated, naming_stated]),
+        (UUID(int=0xB1), "User prefers concise answers when reviewing designs", 0.85, []),
+        (UUID(int=0xB2), "User prefers concise answers during incident triage", 0.8, []),
+        (capped, "User prefers concise answers about quarterly planning", 0.7, []),
+        (naming_stated, "User prefers exhaustive answers about deployment", 0.6, [stated]),
+        (named_by_stated, "User prefers diagrams over concise answers", 0.5, []),
+    ]
+    async with factory() as uow:
+        for position, (belief_id, statement, confidence, conflicts) in enumerate(records, start=1):
+            await uow.memories.upsert_belief(
+                memory(statement=statement).model_copy(
+                    update={
+                        "id": belief_id,
+                        "confidence": confidence,
+                        "conflicts_with": conflicts,
+                        "store_position": position,
+                    }
+                )
+            )
+
+    result = await retriever.recall(recall_query(), session_id=SESSION_ID)
+
+    returned = [item.belief_id for item in result.items]
+    assert set(returned) == {
+        stated,
+        UUID(int=0xB1),
+        UUID(int=0xB2),
+        naming_stated,
+        named_by_stated,
+    }
+    assert capped not in returned
+    assert (
+        "[m:aaaa1111] User prefers concise answers (user, high) conflicts=[m:cccc3333,m:dddd4444]"
+    ) in result.rendered
+    assert (
+        "[m:dddd4444] User prefers exhaustive answers about deployment (user, medium) "
+        "conflicts=[m:aaaa1111]"
+    ) in result.rendered
+    assert str(stated) not in result.rendered
 
 
 async def test_local_beliefs_from_other_projects_need_an_explicit_subject() -> None:

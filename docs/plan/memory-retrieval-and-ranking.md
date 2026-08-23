@@ -380,9 +380,13 @@ Filling the budget is not the objective.
 - **Unresolved conflicts surface as conflicts.** Where two beliefs are linked by
   `conflicts_with` with no supersession, return **both** with an explicit marker rather
   than silently picking one. Formation deliberately refused to resolve these; retrieval
-  must not quietly resolve them at read time.
+  must not quietly resolve them at read time. The marker names each partner by the same
+  short identifier the reader cites with, `conflicts=[m:xxxxxxxx]`.
 - **Per-subject cap.** At most *n* beliefs per subject, so one heavily-discussed entity
-  cannot consume the budget.
+  cannot consume the budget. A conflict partner is exempt: two beliefs in conflict share
+  a subject by construction, so the cap would cut exactly the half that makes the marker
+  mean anything. The link is read in both directions, so the partner is kept whichever
+  of the two the ranking preferred.
 - **Redundancy trim.** Drop an exact restatement, keeping the higher-scored one and
   merging their provenance in the trace. Milestone 16 narrows the trim to that exact
   collapse and demotes the merely similar with the near-duplicate penalty instead, so a

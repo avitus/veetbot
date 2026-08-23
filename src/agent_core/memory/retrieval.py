@@ -199,12 +199,23 @@ class HybridMemoryRetriever:
         collapsed: list[RecalledBelief] = []
         subjects: defaultdict[str, int] = defaultdict(int)
         seen: set[tuple[str, str, str]] = set()
+        chosen: set[UUID] = set()
+        partners: set[UUID] = set()
         for item in ranked:
             key = (item.subject.casefold(), item.belief_type.value, item.statement.casefold())
-            if key in seen or subjects[item.subject.casefold()] >= 3:
+            if key in seen:
+                continue
+            # A conflict means nothing with one half missing, and the per-subject
+            # cap would cut exactly that half: two beliefs in conflict share a
+            # subject by construction. The link is read in both directions so
+            # the partner is kept whichever of the two the ranking preferred.
+            partner = item.belief_id in partners or not chosen.isdisjoint(item.conflict_with)
+            if subjects[item.subject.casefold()] >= 3 and not partner:
                 continue
             seen.add(key)
             subjects[item.subject.casefold()] += 1
+            chosen.add(item.belief_id)
+            partners.update(item.conflict_with)
             collapsed.append(item)
         selected: list[RecalledBelief] = []
         dropped: list[UUID] = []
@@ -636,8 +647,10 @@ def render_memory(items: list[RecalledBelief], *, as_of: object) -> str:
 
 def _line(item: RecalledBelief) -> str:
     origin = f" (learned in {html.escape(item.origin_scope)})" if item.carried else ""
+    # A partner is named the way a citation is, so the only identifier the
+    # model ever sees for a belief is the eight-digit one it can cite back.
     conflict = (
-        f" conflicts={','.join(str(value) for value in sorted(item.conflict_with))}"
+        f" conflicts=[{','.join(f'm:{str(value)[:8]}' for value in sorted(item.conflict_with))}]"
         if item.conflict_with
         else ""
     )

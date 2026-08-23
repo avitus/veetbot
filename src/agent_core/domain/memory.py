@@ -354,10 +354,19 @@ class ConsolidationRun(BaseModel):
 
 
 class ConsolidationResult(BaseModel):
+    """What one consolidation produced, beyond the audit row it wrote.
+
+    `conflicted` counts the beliefs committed beside a belief they contradict
+    rather than over it. They are already inside the audit's `committed` total;
+    the separate count exists because a conflict is the outcome an operator
+    most wants to see, and the audit row is column-per-field in the store.
+    """
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     run: ConsolidationRun
     beliefs: list[MemoryRecord] = Field(default_factory=list)
+    conflicted: int = Field(default=0, ge=0)
 
 
 class DecayResult(BaseModel):
