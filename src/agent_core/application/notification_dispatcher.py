@@ -7,7 +7,6 @@ from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from datetime import datetime, timedelta
 from typing import Protocol
-from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalStatus
@@ -22,6 +21,7 @@ from agent_core.domain.notifications import (
     NotificationStatus,
     PushMessage,
     PushOutcome,
+    test_notification_target_device_id,
 )
 from agent_core.domain.runs import RunStatus
 from agent_core.ports.determinism import Clock, IdFactory
@@ -154,7 +154,7 @@ class NotificationDispatcher:
                 notification.kind,
             )
             if notification.kind is NotificationKind.TEST:
-                target_device_id = _test_target_device_id(notification.dedupe_key)
+                target_device_id = test_notification_target_device_id(notification.dedupe_key)
                 targets = [target for target in targets if target.device_id == target_device_id]
             deliveries = await uow.notification_outbox.list_deliveries(notification.id)
 
@@ -339,16 +339,3 @@ class NotificationDispatcher:
                 created_at=now,
             )
         )
-
-
-def _test_target_device_id(dedupe_key: str) -> UUID | None:
-    prefix = "device.test:"
-    if not dedupe_key.startswith(prefix):
-        return None
-    raw_device_id, separator, _idempotency_key = dedupe_key.removeprefix(prefix).partition(":")
-    if not separator:
-        return None
-    try:
-        return UUID(raw_device_id)
-    except ValueError:
-        return None

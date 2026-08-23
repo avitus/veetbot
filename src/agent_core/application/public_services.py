@@ -14,7 +14,10 @@ from typing import Literal
 from uuid import UUID
 
 from agent_core.application.authorization import require_scope
-from agent_core.application.errors import SessionMessageCursorError
+from agent_core.application.errors import (
+    SessionMessageCursorError,
+    SessionMetadataValidationError,
+)
 from agent_core.application.session_service import bootstrap_session
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.approvals import (
@@ -359,14 +362,16 @@ class PublicSessionService:
     ) -> SessionView:
         require_scope(principal, "session.write")
         if SESSION_BROWSER_PROFILE_METADATA_KEY in metadata:
-            raise ValueError("session metadata key is reserved for trusted browser binding")
+            raise SessionMetadataValidationError(
+                "session metadata key is reserved for trusted browser binding"
+            )
         bound_metadata = dict(metadata)
         if browser_profile_id is not None:
             require_scope(principal, "browser.profile.read")
             bound_metadata[SESSION_BROWSER_PROFILE_METADATA_KEY] = str(browser_profile_id)
         encoded = canonical_json(bound_metadata).encode("utf-8")
         if len(encoded) > 8 * 1024:
-            raise ValueError("session metadata exceeds 8 KiB")
+            raise SessionMetadataValidationError("session metadata exceeds 8 KiB")
         now = self._clock.now()
         async with self._uow_factory() as uow:
             agent = await self._resolve_agent(uow, agent_id)

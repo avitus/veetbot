@@ -360,7 +360,7 @@ only at `engineering-plan.md:479`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:592` named `ApprovalService` as one of
+`bootstrap-and-composition.md:596` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 

@@ -739,7 +739,11 @@ public final class ChatViewModel: ObservableObject {
             let updated = try await api.getBrowserAuthentication(browserAuthentication.id)
             self.browserAuthentication = updated
             try await reloadBrowserProfiles(using: api)
-            if updated.status == .ready {
+            if updated.status == .ready,
+                browserProfiles.contains(where: {
+                    $0.id == updated.profileID && $0.status == .ready
+                })
+            {
                 selectedBrowserProfileID = updated.profileID
                 await configurationStore.saveBrowserProfileID(updated.profileID)
             }

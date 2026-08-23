@@ -346,10 +346,14 @@ that **the environment never overrides a file**.
 
 So there is no precedence chain to reason about at a given key. Either the
 overlay supplies that key or the shipped default does, and either the value
-contains a `${VAR}` or it does not. The merged document — after overlay,
-before interpolation — is what gets hashed, so two deployments running the
-same overlay produce the same `policy_version` and two running different
-overlays produce different ones. That is the property the audit trail needs.
+contains a `${VAR}` or it does not. Policy-semantic documents are the explicit
+exception: `${VAR}` is prohibited anywhere under `policy/`. The merged policy
+document is therefore also the resolved effective policy document, and its
+canonical bytes are what `policy_version` hashes. Two deployments carrying the
+same policy overlay cannot run different effective rules under the same audit
+identifier. Non-policy interpolation, including model selection, is recorded by
+the resolved model and policy pins that govern the resulting request; it cannot
+silently alter a policy rule.
 
 The cost is real and is accepted deliberately: **changing a knob for one
 deployment requires either committing a file or adding an interpolation
@@ -468,13 +472,13 @@ property of the type rather than a rule people have to remember.
 ### `.env.example`
 
 The plan makes this file a definition-of-done item for every milestone: "New
-configuration appears in `.env.example`." That is satisfied for the environment
-layer by this file and for the 137 file-layer knobs by their
-appearance in a committed default — the requirement is that no configuration
-is undocumented, and both layers meet it. The alternative reading, that all
-137 knobs become environment variables, contradicts the `policy_version` hash
-and Section 15's "version-controlled files, not rows", so it cannot be the
-intended one.
+configuration appears in `.env.example`." The requirement stands literally for
+every operator-facing environment key; a committed default is not a substitute.
+Every newly accepted environment key must be added here in the same change,
+with a safe example and enough context to distinguish required, optional, and
+role-specific values. File-backed schema entries remain version-controlled
+configuration rather than environment overrides and are documented in their
+owning committed YAML.
 
 ```text
 # Required in every deployment.
@@ -1220,10 +1224,11 @@ the plan's text stands with an annotation rather than a replacement.
     two and restricts `RunRepository.transition` to one of them. The split
     wins, `engine.py` is retired, and `supervisor.py` joins them.
 2.  **`.env.example` versus 137 file-layer knobs.** The definition of done
-    says new configuration appears in `.env.example`. Read as "no
-    configuration is undocumented", both layers satisfy it. Read as "every
-    knob is an environment variable", it contradicts the `policy_version`
-    hash. The first reading holds.
+    stands: every newly accepted environment key appears in `.env.example`.
+    File-layer paths are not environment keys and remain enumerated and
+    documented by their owning committed defaults; moving a key into a default
+    file does not satisfy this rule if the process still accepts it from the
+    environment.
 3.  **The Milestone 1 event criterion versus Milestone 2 event storage.** An
     event *repository* is Milestone 1; append-only event *storage* is
     Milestone 2. The port is declared once and implemented twice.
@@ -1243,9 +1248,9 @@ the plan's text stands with an annotation rather than a replacement.
    sorts all 137 declared knobs into files and leaves ten fields in
    `Settings`.
 3. **The environment never overrides a file; it is interpolated into one at
-   named points.** A blanket override would let a deployment change an
-   effective policy rule without changing the `policy_version` hash the rule
-   is recorded under, which makes the audit trail lie.
+   named non-policy points.** Policy-semantic documents reject interpolation,
+   so a deployment cannot change an effective policy rule without changing the
+   `policy_version` hash the rule is recorded under.
 4. **Configuration YAML lives beside the package that owns it**, following
    the one precedent the plan set with `policy/hardline.yaml`, and an
    operator overlay directory merges over it file-by-file so the merged
