@@ -1,6 +1,7 @@
 """Faithful recall-trace storage contract."""
 
 import hashlib
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -9,7 +10,7 @@ from agent_core.adapters.memory.in_memory import InMemoryTraceStore
 from agent_core.domain.errors import ConflictError
 from agent_core.domain.memory import RecallMoment, Sensitivity, TracedPassage
 from tests.contract.memory_fixtures import recalled, trace
-from tests.contract.support import RUN_ID, principal
+from tests.contract.support import NOW, RUN_ID, principal
 
 
 async def test_trace_store_round_trips_the_same_record() -> None:
@@ -127,3 +128,66 @@ async def test_user_view_is_bounded_by_the_recall_time_ceiling_too() -> None:
     view = await store.user_view(RUN_ID, "private", "restricted")
 
     assert [belief.belief_id for belief in view.beliefs] == [internal.belief_id]
+
+
+async def test_expire_operator_fields_nulls_only_expired_operator_tier() -> None:
+    """The operator tier is swept on its own clock; the user tier survives it.
+
+    Two traces are past their operator expiry and one is not, so the sweep is
+    observed to be bounded by its limit, ordered oldest-expiry-first, blind to
+    the unexpired trace, and idempotent once every expired trace is clean.
+    """
+
+    store = InMemoryTraceStore()
+    kept = recalled(belief_id=641, statement="Kept preference")
+    operator_tier = {
+        "arm_latencies_ms": {"structured": 3, "lexical": 5},
+        "candidates": 7,
+        "beliefs": [kept],
+        "returned": [kept.belief_id],
+        "cited": [kept.belief_id],
+        "dropped_for_budget": [UUID(int=642)],
+    }
+    oldest = trace().model_copy(
+        update={**operator_tier, "operator_fields_expire_at": NOW - timedelta(days=2)}
+    )
+    older = trace().model_copy(
+        update={
+            **operator_tier,
+            "id": UUID(int=643),
+            "operator_fields_expire_at": NOW - timedelta(days=1),
+        }
+    )
+    unexpired = trace().model_copy(
+        update={
+            **operator_tier,
+            "id": UUID(int=644),
+            "operator_fields_expire_at": NOW + timedelta(days=1),
+        }
+    )
+    for value in (older, unexpired, oldest):
+        await store.record(value)
+
+    assert await store.expire_operator_fields(NOW, 1) == 1
+    assert (await store.get(older.id, principal())).candidates == 7
+    swept = await store.get(oldest.id, principal())
+    assert swept.arm_latencies_ms == {}
+    assert swept.candidates == 0
+    assert swept.dropped_for_budget == []
+    assert swept.dropped_for_budget_count == 1
+    assert swept.beliefs == [kept]
+    assert swept.returned == [kept.belief_id]
+    assert swept.cited == [kept.belief_id]
+    assert swept.rendered == oldest.rendered
+    assert swept.rendered_sha256 == oldest.rendered_sha256
+
+    assert await store.expire_operator_fields(NOW, 10) == 1
+    assert (await store.get(older.id, principal())).arm_latencies_ms == {}
+    assert await store.get(unexpired.id, principal()) == unexpired
+    assert await store.expire_operator_fields(NOW, 10) == 0
+
+    # The user-safe projection still reports how many beliefs were considered
+    # and not shown: from the surviving count once the identifiers are gone,
+    # and from the identifiers while the trace still carries them.
+    view = await store.user_view(RUN_ID, "private", "restricted")
+    assert view.considered_not_shown == 3

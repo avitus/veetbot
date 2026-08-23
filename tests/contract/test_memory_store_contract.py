@@ -272,9 +272,45 @@ async def test_query_applies_ceiling_type_and_bitemporal_filters() -> None:
     )
     await store.upsert_belief(superseded)
     assert superseded.id not in {record.id for record in await store.query(recall_query())}
-    historical = await store.query(recall_query(as_of=NOW - timedelta(days=1, hours=12)))
+    # Lexical recall is any-term, so a historical query for a belief that
+    # shares no term with the default text names its subject instead.
+    historical = await store.query(
+        recall_query(as_of=NOW - timedelta(days=1, hours=12), text=None, subjects=["notes"])
+    )
     assert [record.id for record in historical] == [superseded.id]
     # Bi-temporal validity outranks include_superseded: a belief whose validity
     # ended is not live even when the caller asks to see superseded records.
     included = await store.query(recall_query(include_superseded=True))
     assert superseded.id not in {record.id for record in included}
+
+
+async def test_query_excludes_zero_overlap_text_and_caps_candidates_newest_first() -> None:
+    """Lexical recall is any-term, newest-first, and bounded before ranking.
+
+    The store answers with candidates, not with a ranking, so a record sharing
+    no term with the query is left out unless its subject was named, and the
+    candidate set is capped at `max(max_items * 8, 64)` newest records.
+    """
+
+    store = _store()
+    overlapping = [
+        memory(
+            belief_id=1_000 + position, statement=f"User prefers concise answers {position}"
+        ).model_copy(update={"subject": f"answer style {position}", "store_position": position})
+        for position in range(1, 71)
+    ]
+    unrelated = memory(belief_id=1_900, statement="Deployment runs on Fridays").model_copy(
+        update={"subject": "release cadence", "store_position": 71}
+    )
+    for record in (*overlapping, unrelated):
+        await store.upsert_belief(record)
+
+    capped = await store.query(recall_query(text="concise answers", max_items=1))
+    assert [record.store_position for record in capped] == list(range(70, 6, -1))
+    assert unrelated.id not in {record.id for record in capped}
+
+    named = await store.query(
+        recall_query(text="concise answers", subjects=["release cadence"], max_items=1)
+    )
+    assert named[0].id == unrelated.id
+    assert len(named) == 64

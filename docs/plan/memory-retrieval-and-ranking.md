@@ -513,6 +513,7 @@ class RecallTrace(BaseModel):
     returned: list[UUID]
     cited: list[UUID]                  # ids the model cited -> "used"
     dropped_for_budget: list[UUID]     # operator tier
+    dropped_for_budget_count: int      # survives the operator expiry
     blocked: list[UUID]
     carried_in: list[UUID]             # promotion candidates
     retrieval_policy_version: str
@@ -556,6 +557,7 @@ class QueryFormer(Protocol):
         run: Run,
         working_state: WorkingState,
         message: str | None,
+        current_scope: str | None = None,  # the turn's session project
     ) -> list[RecallQuery]: ...
 
 class Ranker(Protocol):
@@ -574,6 +576,9 @@ class TraceStore(Protocol):
     async def record(self, trace: RecallTrace) -> None: ...
     async def for_turn(self, turn_id: UUID) -> list[RecallTrace]: ...
     async def get(self, trace_id: UUID, principal: Principal) -> RecallTrace: ...
+    async def expire_operator_fields(         # bounded retention sweep
+        self, now: datetime, limit: int
+    ) -> int: ...
     async def user_view(
         self,
         turn_id: UUID,

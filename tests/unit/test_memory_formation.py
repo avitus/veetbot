@@ -11,13 +11,14 @@ from __future__ import annotations
 
 import hashlib
 from datetime import timedelta
+from uuid import UUID
 
 import pytest
 
 from agent_core.adapters.determinism import SequenceIdFactory
 from agent_core.adapters.persistence.unit_of_work import MemoryUnitOfWorkFactory
 from agent_core.domain.errors import ConflictError, ToolValidationError
-from agent_core.domain.events import EventEnvelope
+from agent_core.domain.events import EventEnvelope, NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
@@ -34,7 +35,7 @@ from agent_core.memory.formation import (
     portability_ceiling,
 )
 from tests.contract.memory_fixtures import formation_stack, session_events, user_event
-from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
+from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal, session
 
 
 def _envelope(event_type: str, payload: dict[str, object], sequence: int = 1) -> EventEnvelope:
@@ -396,6 +397,86 @@ async def test_formation_events_carry_the_belief_payload() -> None:
     assert isinstance(payload_belief, dict)
     assert payload_belief["id"] == str(belief.id)
     assert formed[0].actor_type == "principal"
+
+
+async def _second_session(factory: MemoryUnitOfWorkFactory) -> UUID:
+    """Open a second session, whose event sequence starts at one again."""
+
+    later = session().model_copy(update={"id": UUID(int=0x5E55)})
+    async with factory() as uow:
+        await uow.sessions.create(later)
+    return later.id
+
+
+async def _session_event(factory: MemoryUnitOfWorkFactory, session_id: UUID, text: str) -> int:
+    async with factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=PRINCIPAL_ID,
+                payload={"content": text},
+            )
+        )
+    return event.sequence
+
+
+async def test_a_later_session_supersedes_across_colliding_source_sequences() -> None:
+    """Event sequences are per session, so equal numbers are not one source.
+
+    The same-source shortcut exists to make a replay of already-consolidated
+    episodes a no-op. A second session numbers its first event one as well, so
+    comparing bare sequence numbers made every second session look like a
+    replay and left the superseded belief live.
+    """
+
+    _clock, factory, service, _retriever = await formation_stack()
+    first_source = await user_event(factory, "I live in Seattle.")
+    formed = await service.remember(
+        session_id=SESSION_ID,
+        run_id=None,
+        statement="User lives in Seattle.",
+        subject="home location",
+        scope="general",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        source_event_ids=[first_source],
+    )
+
+    later = await _second_session(factory)
+    second_source = await _session_event(factory, later, "I live in Portland now.")
+    assert second_source == first_source
+
+    superseding = await service.remember(
+        session_id=later,
+        run_id=None,
+        statement="User lives in Portland.",
+        subject="home location",
+        scope="general",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        source_event_ids=[second_source],
+    )
+
+    assert superseding.id != formed.id
+    assert superseding.statement == "User lives in Portland."
+    async with factory() as uow:
+        stored = await uow.memories.get(formed.id, principal())
+    assert stored.status is MemoryStatus.SUPERSEDED
+    assert stored.superseded_by == superseding.id
+
+    # Replaying the later session's own episode is still a no-op.
+    replay = await service.remember(
+        session_id=later,
+        run_id=None,
+        statement="User lives in Portland (restated).",
+        subject="home location",
+        scope="general",
+        belief_type=BeliefType.USER_MODEL_ATTR,
+        source_event_ids=[second_source],
+    )
+    assert replay.id == superseding.id
+    assert replay.statement == "User lives in Portland."
 
 
 async def test_service_names_the_candidate_extractor_it_was_configured_with() -> None:

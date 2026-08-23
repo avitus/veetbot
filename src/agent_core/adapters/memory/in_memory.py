@@ -31,6 +31,7 @@ from agent_core.domain.memory import (
     Sensitivity,
     TracedBelief,
     TracedPassage,
+    lexical_query_terms,
 )
 from agent_core.domain.trajectory import ArtifactRef
 from agent_core.ports.determinism import Clock
@@ -65,6 +66,8 @@ class InMemoryMemoryStore:
 
     async def query(self, query: RecallQuery) -> list[MemoryRecord]:
         as_of = query.as_of or self._clock.now()
+        terms = lexical_query_terms(query.text)
+        subjects = {subject.casefold() for subject in query.subjects}
         async with self._lock:
             result = []
             for record in self._records.values():
@@ -92,12 +95,16 @@ class InMemoryMemoryStore:
                 if (
                     record.portability.value == "local"
                     and record.scope != query.current_scope
-                    and record.subject.casefold()
-                    not in {subject.casefold() for subject in query.subjects}
+                    and record.subject.casefold() not in subjects
                 ):
                     continue
+                if terms and record.subject.casefold() not in subjects:
+                    text = f"{record.subject} {record.statement}".casefold()
+                    if not any(term in text for term in terms):
+                        continue
                 result.append(record.model_copy(deep=True))
-            return result
+            result.sort(key=lambda record: (-record.store_position, str(record.id)))
+            return result[: max(query.max_items * 8, 64)]
 
     async def related(
         self,
@@ -308,6 +315,31 @@ class InMemoryTraceStore:
                 raise NotFoundError("recall trace not found")
             return trace.model_copy(deep=True)
 
+    async def expire_operator_fields(self, now: datetime, limit: int) -> int:
+        if limit < 0:
+            raise ValueError("recall-trace expiry limit must be nonnegative")
+        async with self._lock:
+            expired = sorted(
+                (
+                    trace
+                    for trace in self._traces.values()
+                    if trace.operator_fields_expire_at <= now and trace.has_operator_fields
+                ),
+                key=lambda trace: (trace.operator_fields_expire_at, str(trace.id)),
+            )[:limit]
+            for trace in expired:
+                self._traces[trace.id] = trace.model_copy(
+                    update={
+                        "arm_latencies_ms": {},
+                        "candidates": 0,
+                        "dropped_for_budget": [],
+                        "dropped_for_budget_count": (
+                            trace.dropped_for_budget_count + len(trace.dropped_for_budget)
+                        ),
+                    }
+                )
+            return len(expired)
+
     async def user_view(
         self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str
     ) -> RecallTraceView:
@@ -326,7 +358,7 @@ class InMemoryTraceStore:
             effective = min(
                 SENSITIVITY_ORDER[trace.sensitivity_ceiling], SENSITIVITY_ORDER[ceiling]
             )
-            considered += len(trace.dropped_for_budget)
+            considered += trace.considered_not_shown
             withheld += len(trace.blocked)
             for item in trace.beliefs:
                 if SENSITIVITY_ORDER[item.sensitivity] > effective or item.blocked:

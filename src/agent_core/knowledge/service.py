@@ -35,6 +35,7 @@ from agent_core.knowledge.chunking import (
     normalize_text,
     token_estimate,
 )
+from agent_core.memory.profiles import DEFAULT_TRACE_PROFILE, TraceProfile
 from agent_core.ports.artifacts import ArtifactStore
 from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
@@ -57,6 +58,7 @@ class KnowledgeService:
         *,
         extractor: PlainTextExtractor | None = None,
         chunker: DeterministicChunker | None = None,
+        trace_retention: TraceProfile = DEFAULT_TRACE_PROFILE,
     ) -> None:
         self._uow_factory = uow_factory
         self._artifacts = artifacts
@@ -65,6 +67,13 @@ class KnowledgeService:
         self._principal = principal
         self._extractor = extractor or PlainTextExtractor()
         self._chunker = chunker or DeterministicChunker()
+        self._trace_retention = trace_retention
+
+    @property
+    def trace_retention(self) -> TraceProfile:
+        """Expose the trace-retention profile the composition wired in."""
+
+        return self._trace_retention
 
     async def ingest(
         self, request: KnowledgeIngestRequest, *, origin_trust: TrustLevel
@@ -221,7 +230,9 @@ class KnowledgeService:
             ],
             retrieval_policy_version=KNOWLEDGE_POLICY_VERSION,
             created_at=self._clock.now(),
-            operator_fields_expire_at=self._clock.now() + timedelta(days=30),
+            operator_fields_expire_at=(
+                self._clock.now() + timedelta(days=self._trace_retention.operator_retention_days)
+            ),
         )
         async with self._uow_factory() as uow:
             await uow.traces.record(trace)

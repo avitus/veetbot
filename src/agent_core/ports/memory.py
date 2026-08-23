@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -120,7 +121,12 @@ class Salience(Protocol):
 
 class ConflictResolver(Protocol):
     def relationship(
-        self, existing: MemoryRecord, statement: str, source_event_ids: list[int]
+        self,
+        existing: MemoryRecord,
+        statement: str,
+        source_event_ids: list[int],
+        *,
+        session_id: UUID | None = None,
     ) -> str: ...
 
 
@@ -143,6 +149,8 @@ class QueryFormer(Protocol):
         run: Run,
         working_state: WorkingState,
         message: str | None,
+        *,
+        current_scope: str | None = None,
     ) -> list[RecallQuery]: ...
 
 
@@ -166,5 +174,7 @@ class TraceStore(Protocol):
     async def user_view(
         self, turn_id: UUID, viewing_surface_id: str, viewing_ceiling: str
     ) -> RecallTraceView: ...
+
+    async def expire_operator_fields(self, now: datetime, limit: int) -> int: ...
 
     async def mark_document_deleted(self, tenant_id: str, document_id: UUID) -> None: ...

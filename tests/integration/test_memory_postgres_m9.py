@@ -150,9 +150,16 @@ async def test_postgres_supersession_serves_current_and_historical_beliefs(
         assert "memory.superseded" in {event.event_type for event in events}
 
 
-async def test_postgres_fts_matches_terms_in_any_order_and_requires_all(
+async def test_postgres_fts_matches_any_term_in_any_order_and_ranks_full_matches_first(
     tmp_path: Path,
 ) -> None:
+    """PostgreSQL answers a text query with the same any-term set as memory.
+
+    Lexical recall is a ranking arm rather than a hard filter, so a belief
+    sharing one term is a candidate the ranker demotes, a belief sharing none
+    is absent, and naming a subject reaches a belief no term reaches.
+    """
+
     async with build(settings=_settings(tmp_path), storage="postgres") as composition:
         session_id = await composition.sessions.create()
         marker = f"memfts{uuid4().hex[:10]}"
@@ -163,19 +170,26 @@ async def test_postgres_fts_matches_terms_in_any_order_and_requires_all(
             subject=f"dash-{marker}",
             belief_type=BeliefType.FACT,
         )
+        partial = await _remember(
+            composition,
+            session_id,
+            f"Runbooks call the {marker} palette burgundy",
+            subject=f"runbook-{marker}",
+            belief_type=BeliefType.FACT,
+        )
 
         reordered = await composition.memory_retriever.recall(
             _query(composition, text=f"{marker} theme emerald"), session_id=session_id
         )
-        assert [item.belief_id for item in reordered.items] == [belief.id]
+        assert [item.belief_id for item in reordered.items] == [belief.id, partial.id]
 
-        missing_term = await composition.memory_retriever.recall(
-            _query(composition, text=f"{marker} nonexistentterm"), session_id=session_id
+        zero_overlap = await composition.memory_retriever.recall(
+            _query(composition, text=f"absent{marker} missing{marker}"), session_id=session_id
         )
-        assert missing_term.items == []
+        assert zero_overlap.items == []
 
         structured = await composition.memory_retriever.recall(
-            _query(composition, text="no lexical overlap", subjects=[f"DASH-{marker}"]),
+            _query(composition, text=f"absent{marker}", subjects=[f"DASH-{marker}"]),
             session_id=session_id,
         )
         assert [item.belief_id for item in structured.items] == [belief.id]
@@ -219,8 +233,10 @@ async def test_postgres_sensitivity_ceiling_and_local_portability_predicates(
         )
         assert [item.belief_id for item in at_ceiling.items] == [restricted.id]
 
+        # Terms the local belief alone carries: any-term recall would return
+        # it on this text if project-local portability did not hold it back.
         cross_project_text = await composition.memory_retriever.recall(
-            _query(composition, text=f"{marker} staging endpoint"), session_id=session_id
+            _query(composition, text="staging endpoint"), session_id=session_id
         )
         assert cross_project_text.items == []
 
@@ -433,6 +449,60 @@ async def test_postgres_changed_rejection_links_belief_and_replacement(
             _query(composition, text=f"{marker} deploy day"), session_id=session_id
         )
         assert [item.belief_id for item in recalled.items] == [replacement.id]
+
+
+async def test_postgres_expires_operator_trace_fields_and_keeps_the_user_view(
+    tmp_path: Path,
+) -> None:
+    """The JSONB rewrite nulls the operator tier and preserves the user tier."""
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"memexp{uuid4().hex[:10]}"
+        first = await _remember(
+            composition,
+            session_id,
+            f"The {marker} standup is at nine",
+            subject=f"standup-{marker}",
+        )
+        await _remember(
+            composition,
+            session_id,
+            f"The {marker} retro is on Friday",
+            subject=f"retro-{marker}",
+        )
+        turn_id = uuid4()
+        # Both beliefs carry the marker and only the first carries "standup",
+        # so the ranking is a fact of the query rather than of identifier order.
+        result = await composition.memory_retriever.recall(
+            _query(composition, text=f"{marker} standup").model_copy(update={"max_items": 1}),
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        assert [item.belief_id for item in result.items] == [first.id]
+
+        async with composition.uow_factory() as uow:
+            recorded = await uow.traces.get(result.trace_id, composition.principal)
+        assert len(recorded.dropped_for_budget) == 1
+
+        expiry = recorded.operator_fields_expire_at + timedelta(seconds=1)
+        async with composition.uow_factory() as uow:
+            assert await uow.traces.expire_operator_fields(expiry, 10) == 1
+        async with composition.uow_factory() as uow:
+            swept = await uow.traces.get(result.trace_id, composition.principal)
+            view = await uow.traces.user_view(
+                turn_id, viewing_surface_id="private", viewing_ceiling="restricted"
+            )
+            assert await uow.traces.expire_operator_fields(expiry, 10) == 0
+        assert swept.arm_latencies_ms == {}
+        assert swept.candidates == 0
+        assert swept.dropped_for_budget == []
+        assert swept.dropped_for_budget_count == 1
+        assert swept.returned == recorded.returned
+        assert swept.beliefs == recorded.beliefs
+        assert swept.rendered == recorded.rendered
+        assert [belief.belief_id for belief in view.beliefs] == [first.id]
+        assert view.considered_not_shown == 1
 
 
 async def test_postgres_trace_round_trip_user_view_and_conflict_detection(

@@ -133,6 +133,37 @@ def minimum_supported_case_count(positive_case_count: int) -> int:
     return (positive_case_count * 4 + 4) // 5
 
 
+MINIMUM_LEXICAL_TERM_LENGTH = 3
+_TERM_PUNCTUATION = ".,:;!?()[]{}\"'"
+
+
+def lexical_terms(text: str) -> set[str]:
+    """Split text into the terms lexical recall matches on."""
+
+    return {
+        stripped
+        for part in text.casefold().split()
+        if len(stripped := part.strip(_TERM_PUNCTUATION)) >= MINIMUM_LEXICAL_TERM_LENGTH
+    }
+
+
+def lexical_query_terms(text: str | None) -> list[str]:
+    """Order the query's lexical terms so both belief stores match the same set.
+
+    Every store answers a text query with any-term semantics: a record matches
+    when it overlaps one term or more. Text too short to yield a term is still
+    a query, so it is matched whole rather than matching everything.
+    """
+
+    if text is None:
+        return []
+    terms = sorted(lexical_terms(text))
+    if terms:
+        return terms
+    collapsed = " ".join(text.casefold().split())
+    return [collapsed] if collapsed else []
+
+
 class ProviderExtractionEvaluationEvidence(BaseModel):
     """Version-bound evidence required before provider extraction can activate."""
 
@@ -369,6 +400,9 @@ class RecallTrace(BaseModel):
     returned: list[UUID] = Field(default_factory=list)
     cited: list[UUID] = Field(default_factory=list)
     dropped_for_budget: list[UUID] = Field(default_factory=list)
+    # The operator sweep nulls the identifiers above and leaves this count, so
+    # the user-safe projection can still say how many beliefs were considered.
+    dropped_for_budget_count: int = Field(default=0, ge=0)
     blocked: list[UUID] = Field(default_factory=list)
     carried_in: list[UUID] = Field(default_factory=list)
     beliefs: list[RecalledBelief] = Field(default_factory=list)
@@ -376,6 +410,18 @@ class RecallTrace(BaseModel):
     retrieval_policy_version: str
     created_at: datetime
     operator_fields_expire_at: datetime
+
+    @property
+    def has_operator_fields(self) -> bool:
+        """Whether the operator tier still holds anything an expiry would null."""
+
+        return bool(self.arm_latencies_ms or self.candidates or self.dropped_for_budget)
+
+    @property
+    def considered_not_shown(self) -> int:
+        """Beliefs dropped for budget: by identifier, or by count once expired."""
+
+        return len(self.dropped_for_budget) or self.dropped_for_budget_count
 
 
 class TracedBelief(BaseModel):

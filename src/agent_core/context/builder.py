@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from agent_core.context.estimator import canonical_json_bytes
@@ -208,6 +209,7 @@ class BudgetedContextBuilder:
         working_state: WorkingStateManager,
         memory_retriever: MemoryRetriever | None = None,
         query_former: QueryFormer | None = None,
+        session_scope: Callable[[UUID], Awaitable[str]] | None = None,
     ) -> None:
         self._planner = planner
         self._estimator = estimator
@@ -215,6 +217,7 @@ class BudgetedContextBuilder:
         self._working_state = working_state
         self._memory_retriever = memory_retriever
         self._query_former = query_former
+        self._session_scope = session_scope
         self._recall_tasks: OrderedDict[
             tuple[UUID, int, str], asyncio.Task[RecallResult | None]
         ] = OrderedDict()
@@ -540,7 +543,12 @@ class BudgetedContextBuilder:
         assert self._memory_retriever is not None
         assert self._query_former is not None
         try:
-            queries = self._query_former.form(run, state, message)
+            # Recall is scoped to the session's project: a belief learned in
+            # another one is carried in and demoted, never silently local.
+            scope = (
+                None if self._session_scope is None else await self._session_scope(run.session_id)
+            )
+            queries = self._query_former.form(run, state, message, current_scope=scope)
             if not queries:
                 return None
             return await self._memory_retriever.recall(

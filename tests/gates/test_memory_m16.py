@@ -6,13 +6,16 @@ from collections import Counter
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
+from uuid import UUID
 
 import pytest
 
 from agent_core.adapters.determinism import FixedClock
 from agent_core.bootstrap import build
 from agent_core.config import Settings
+from agent_core.domain.events import NewEvent
+from agent_core.domain.memory import BeliefType, RecallMoment, RecallQuery, Sensitivity
 from agent_core.domain.messages import FakeModelScript, ScriptedTurn
 from agent_core.evals.memory_benchmark import (
     PROBE_CATEGORIES,
@@ -428,7 +431,10 @@ async def test_memory_profiles_are_loaded_and_mirror_shipped_defaults(tmp_path: 
     config_dir = tmp_path / "config"
     overlay = config_dir / "memory" / "profiles.yaml"
     overlay.parent.mkdir(parents=True)
-    overlay.write_text("retrieval:\n  reciprocal_rank_fusion_k: 7\n", encoding="utf-8")
+    overlay.write_text(
+        "retrieval:\n  reciprocal_rank_fusion_k: 7\ntraces:\n  operator_retention_days: 7\n",
+        encoding="utf-8",
+    )
     overlaid_settings = replace(shipped_settings, config_dir=config_dir)
 
     async with build(
@@ -439,6 +445,9 @@ async def test_memory_profiles_are_loaded_and_mirror_shipped_defaults(tmp_path: 
     ) as composition:
         assert composition.memory_profiles.retrieval.reciprocal_rank_fusion_k == 7
         assert composition.memory_retriever.retrieval_profile.reciprocal_rank_fusion_k == 7
+        # One retention number governs every path that writes a recall trace.
+        assert composition.memory_profiles.traces.operator_retention_days == 7
+        assert composition.knowledge.trace_retention.operator_retention_days == 7
         assert composition.memory_profiles.formation == FormationProfile()
         assert composition.memory_profiles.snapshots == SnapshotProfiles()
 
@@ -495,3 +504,157 @@ async def test_session_boundary_switch_governs_both_consolidation_paths(
         await maintenance.run_once()
         after_sweep = {belief.subject for belief in await composition.memory.list_memories()}
         assert after_sweep == ({"Apple Watch", "BMW X3"} if enabled else set())
+
+
+async def test_session_project_scope_governs_consolidation_and_in_turn_recall(
+    tmp_path: Path,
+) -> None:
+    """Both consolidation paths and the in-turn query read the session's project.
+
+    One session is consolidated by closing it and one by the idle sweep, so
+    neither path can borrow the other's scope, and a third session's turn shows
+    the in-turn recall query carrying the project rather than `general`.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="Noted.")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        closed = await composition.services.sessions.create(
+            composition.principal, "general", {"project_scope": "atlas"}
+        )
+        idle = await composition.services.sessions.create(
+            composition.principal, "general", {"project_scope": "borealis"}
+        )
+        await composition.runs.wait_terminal(
+            await composition.runs.submit("I have an Apple Watch.", closed.id)
+        )
+        await composition.runs.wait_terminal(
+            await composition.runs.submit("I have a BMW X3.", idle.id)
+        )
+
+        await composition.services.sessions.close(composition.principal, closed.id)
+        clock.advance(timedelta(seconds=SESSION_IDLE_SECONDS))
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+
+        scopes = {
+            belief.subject: belief.scope for belief in await composition.memory.list_memories()
+        }
+        assert scopes == {"Apple Watch": "atlas", "BMW X3": "borealis"}
+
+        probe = await composition.services.sessions.create(
+            composition.principal, "general", {"project_scope": "atlas"}
+        )
+        await composition.runs.wait_terminal(
+            await composition.runs.submit("Which watch do I have?", probe.id)
+        )
+        async with composition.uow_factory() as uow:
+            events = await uow.events.list_after(probe.id, 0, composition.principal)
+            traces = [
+                await uow.traces.get(UUID(str(event.payload["trace_id"])), composition.principal)
+                for event in events
+                if event.event_type == "memory.recalled"
+            ]
+        in_turn = [trace for trace in traces if trace.moment is RecallMoment.IN_TURN]
+        assert in_turn
+        assert {trace.query.current_scope for trace in in_turn} == {"atlas"}
+
+
+async def _stated_belief(composition: Any, session_id: UUID, statement: str, subject: str) -> None:
+    """State one belief the way a user turn would, with real provenance."""
+
+    async with composition.uow_factory() as uow:
+        event = await uow.events.append(
+            NewEvent(
+                session_id=session_id,
+                run_id=None,
+                event_type="user.message.created",
+                actor_type="principal",
+                actor_id=composition.principal.principal_id,
+                payload={"content": statement},
+            )
+        )
+    await composition.memory.remember(
+        session_id=session_id,
+        run_id=None,
+        statement=statement,
+        subject=subject,
+        scope="general",
+        belief_type=BeliefType.PREFERENCE,
+        sensitivity=Sensitivity.INTERNAL,
+        source_event_ids=[event.sequence],
+    )
+
+
+async def test_trace_operator_fields_expire_on_schedule(tmp_path: Path) -> None:
+    """The operator tier of a recall trace expires; the user tier does not.
+
+    Two beliefs compete for one item of budget, so the trace carries a dropped
+    identifier the sweep must turn into a count. One recall is left to age past
+    the profile's retention and one is taken after it, so a single maintenance
+    pass is observed sweeping the expired trace and leaving the fresh one whole.
+    """
+
+    clock = FixedClock(_START)
+    async with build(
+        settings=replace(memory_settings(), artifact_root=tmp_path / "artifacts"),
+        storage="memory",
+        script=FakeModelScript(turns=[ScriptedTurn(text="ack")], on_exhausted="repeat_last"),
+        clock=clock,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        await _stated_belief(
+            composition, session_id, "User prefers concise answers", "answer style"
+        )
+        await _stated_belief(composition, session_id, "User prefers dark themes", "theme")
+        query = RecallQuery(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=composition.principal.principal_id,
+            current_scope="general",
+            text="prefers",
+            budget_tokens=500,
+            max_items=1,
+            min_score=0.1,
+        )
+        expiring_turn = UUID(int=0xE1)
+        fresh_turn = UUID(int=0xE2)
+        expiring = await composition.memory_retriever.recall(
+            query, session_id=session_id, turn_id=expiring_turn
+        )
+
+        retention = composition.memory_profiles.traces.operator_retention_days
+        clock.advance(timedelta(days=retention, seconds=1))
+        fresh = await composition.memory_retriever.recall(
+            query, session_id=session_id, turn_id=fresh_turn
+        )
+        maintenance = cast(MaintenanceWorker, composition.maintenance_factory())
+        await maintenance.run_once()
+
+        async with composition.uow_factory() as uow:
+            swept = await uow.traces.get(expiring.trace_id, composition.principal)
+            untouched = await uow.traces.get(fresh.trace_id, composition.principal)
+            view = await uow.traces.user_view(expiring_turn, "private", "restricted")
+        returned = [item.belief_id for item in expiring.items]
+        assert swept.arm_latencies_ms == {}
+        assert swept.candidates == 0
+        assert swept.dropped_for_budget == []
+        assert swept.dropped_for_budget_count == 1
+        assert [item.belief_id for item in swept.beliefs] == returned
+        assert swept.returned == returned
+        assert swept.rendered == expiring.rendered
+        assert untouched.arm_latencies_ms != {}
+        assert untouched.candidates == 2
+        assert len(untouched.dropped_for_budget) == 1
+        assert [belief.statement for belief in view.beliefs] == [
+            item.statement for item in expiring.items
+        ]
+        assert view.considered_not_shown == 1
+
+        # A second pass has nothing left to null on the trace it already swept.
+        await maintenance.run_once()
+        async with composition.uow_factory() as uow:
+            assert await uow.traces.get(expiring.trace_id, composition.principal) == swept
