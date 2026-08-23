@@ -7,6 +7,68 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-23 — Live benchmark failures made diagnosable, and the arm published
+
+- Made a failed probe arm say why it failed. Every arm of the live memory
+  benchmark now records the terminal error class the runtime already carries —
+  or the exception type when the arm failed outside the run — beside the
+  terminal status, model calls, and cost it already recorded, and the command
+  prints one content-free line per incomplete run beside its unchanged one-line
+  summary. A failure landing outside the run no longer ends the whole
+  invocation; it becomes a failed arm named by its exception type.
+- Gave each probe arm one retry. An arm whose run terminates without an answer
+  is asked once more against a freshly built composition, admitted through the
+  same pre-admission cost check as any other run; an arm that completed is
+  never asked again, a second failure is kept, and a first attempt that failed
+  after a billed call still counts its cost. The artifact gains `retried_runs`
+  and an aggregate `failure_classes` histogram. No published pass condition
+  changed: `incomplete_runs == 0` still means what it meant.
+- **The live benchmark arm published its artifact.** After two failed attempts,
+  the third run passed every condition: lift forty-five against a derived
+  minimum of eleven, recoverable correctness forty-five of forty-eight against
+  thirty-nine, abstention twelve of twelve against ten, no protected leak, no
+  policy regression, no ceiling hit, USD 1.144445 of a USD 4.00 ceiling, and
+  zero incomplete runs of a hundred and thirty-two. Four arms failed their
+  first attempt and completed on the retry — all four the without-memory arm of
+  the four `multi_hop` probes at position `p02`, while the other two `multi_hop`
+  probes and all sixty non-`multi_hop` without-memory arms completed first
+  time. The pattern is content-correlated rather than positional, and it is not
+  diagnosed.
+
+## 2026-08-23 — Provider memory evidence republished at `formation@8`
+
+- Republished the bundled provider-memory activation artifact at
+  provider-assisted `formation@8` from one live run of the 25-case corpus, and
+  deleted the superseded `formation@4` artifact. The new artifact covers the
+  exact tuple OpenAI `gpt-5.6-sol`, model policy `balanced`, policy profile
+  `default`, so `auto` again activates provider assistance for that tuple and
+  falls back safely for every other one. The provider arm fully supported
+  seventeen of twenty-one positive cases against the deterministic arm's nine,
+  supported twenty labeled candidates against twelve, and both arms fabricated
+  nothing and regressed no policy.
+- Re-recorded the deterministic benchmark baseline as the milestone's closing
+  act. The whole diff is the build reference and the recording timestamp: the
+  aggregate metrics and all sixty-six probe rows are unchanged, so no metric
+  moved.
+- Ran the live benchmark arm twice, and neither run published an artifact. Both
+  measured what the arm exists to measure and passed every substantive
+  condition with margin — lift forty-five then forty-four against a derived
+  minimum of eleven, recoverable correctness forty-five then forty-four in
+  forty-eight, abstention correctness twelve in twelve, no protected leak, no
+  policy regression, USD 1.111295 then USD 1.128405 against a per-invocation
+  ceiling of USD 4.00 — and both failed the absolute incomplete-runs condition
+  with two failed runs in a hundred and thirty-two. The failures landed on
+  different probes and different arms each time, so the incompleteness is a
+  reproducible rate of about one and a half per cent rather than one transport
+  blip, and the arm records no terminal error class to name its cause.
+  `gate.memory.bench_evidence_publish` is satisfied by the unit-level
+  publication proof and is unaffected; the live artifact is milestone evidence.
+  The entry above records the harness change that answered this and the third
+  run that published.
+- Recorded Milestone 16's verification evidence in project state, which stays
+  `authorized` pending hosted CI on the final head and the CodeRabbit review
+  loop on the `dev` to `main` pull request.
+
 ## 2026-08-22 — Milestone 12 completed: notifications and device identity
 
 - Added the principal-scoped device registry, durable content-free notification

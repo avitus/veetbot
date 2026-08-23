@@ -328,11 +328,12 @@ artifact is committed.
 Provider-assisted memory formation uses safe automatic selection by default.
 `AGENT_MEMORY_PROVIDER_EXTRACTION_MODE=auto` activates matching operator or
 release-bundled evidence and otherwise records the reason and stays on
-deterministic `formation@7`. The bundled `formation@4` artifact is historical
-and does not match current provider-assisted `formation@8`. `off` does not even resolve a formation model;
-`required` refuses startup without an exact extractor, model, profile, and
-compiled-policy-version match. An operator artifact can be supplied with
-`AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
+deterministic `formation@7`. The bundled artifact is reviewed provider-assisted
+`formation@8` evidence for the balanced OpenAI `gpt-5.6-sol` and default-profile
+tuple, so that tuple activates and every other one falls back. `off` does not
+even resolve a formation model; `required` refuses startup without an exact
+extractor, model, profile, and compiled-policy-version match. An operator
+artifact can be supplied with `AGENT_MEMORY_PROVIDER_EXTRACTION_EVIDENCE`.
 
 Release engineers can generate that artifact instead of authoring JSON:
 

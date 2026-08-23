@@ -6,13 +6,24 @@ an exact extractor, formation-policy, model-policy, provider, model, policy
 profile, and compiled-policy-version match. This directory intentionally contains
 only artifacts that passed the live provider lift, positive-coverage, symmetric
 no-fabrication, and policy-regression gates. The current policies are
-deterministic `formation@7` and provider-assisted `formation@8`. The OpenAI
-balanced/default `formation@4` artifact was produced from the 24-case corpus at
-build `7de9a98f550e60130f7f7131d78ca537e720685b`. It remains as historical
-evaluation evidence, but it does not match the current `formation@8` policy and
-therefore cannot activate provider assistance: under the automatic selection
-mode the composition falls back to the deterministic extractor and records a
-content-free selection audit saying why, and under the required mode startup
-refuses. That fallback stands until reviewed `formation@8` evidence is
-published. A reviewed current-policy artifact must pass the same exact startup
-tuple validation as operator-supplied evidence.
+deterministic `formation@7` and provider-assisted `formation@8`.
+
+The one bundled artifact,
+`openai-balanced-gpt-5.6-sol-default-formation8.json`, is provider-assisted
+`formation@8` evidence for the `balanced` model policy, the `default` policy
+profile, and the OpenAI `gpt-5.6-sol` model. It was produced from the checked-in
+25-case corpus at build `3b3c972b3003cdca6881d857b931401999f49545` and it
+activates provider assistance for exactly that tuple, under the same startup
+validation an operator-supplied artifact passes: the extractor version, the
+formation-policy version, the model policy, the provider, the model, the policy
+profile, and the compiled policy version must all match the running
+composition. Any other tuple — a different model policy, profile, provider,
+model, or a recompiled policy — does not match, and under the automatic
+selection mode the composition falls back to the deterministic extractor and
+records a content-free selection audit saying why, while under the required
+mode startup refuses.
+
+The superseded `formation@4` artifact was deleted when this one was published.
+Bumping the provider formation policy invalidates the bundled evidence, so the
+milestone that bumps it republishes here and removes what it replaced; two
+artifacts for one tuple would leave the activated policy version ambiguous.

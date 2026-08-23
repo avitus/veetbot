@@ -239,7 +239,7 @@ conflict leaves both of its beliefs live, so the same-source shortcut is decided
 over every related belief before any of them is acted on, and re-consolidating a
 conflicted session is a no-op like any other replay. The rule and what a
 conflict then commits are stated in
-[memory-evaluation-and-lifecycle.md:835-853](memory-evaluation-and-lifecycle.md:835-853).
+[memory-evaluation-and-lifecycle.md:858-876](memory-evaluation-and-lifecycle.md:858-876).
 
 Bi-temporal validity is what lets "Andy works at Acme" become false without being
 deleted, and lets the agent answer "what did I believe last month".
@@ -549,10 +549,11 @@ Those tests are not production activation evidence. Accepted ADR-0057 supersedes
 the earlier routed-policy selection rule. Normal composition does not select a
 provider extractor until a version-bound artifact for the exact runtime tuple
 passes startup validation. The balanced OpenAI `gpt-5.6-sol` and default-policy
-tuple has historical passing `formation@4` evidence from the checked-in 24-case
-corpus. The semantic deterministic expansion and retry lifecycle invalidate that
-artifact for the current policies, so `auto` selects deterministic `formation@7`
-until reviewed `formation@8` evidence is published.
+tuple has reviewed passing `formation@8` evidence from the checked-in 25-case
+corpus, so `auto` activates provider assistance for exactly that tuple and stays
+on deterministic `formation@7` for every other one. The superseded `formation@4`
+artifact was deleted when its replacement was published, because two artifacts
+for one tuple would leave the activated policy version ambiguous.
 
 ### Evaluation-gated provider assistance (`formation@8`)
 

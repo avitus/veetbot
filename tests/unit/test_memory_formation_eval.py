@@ -133,9 +133,10 @@ def test_provider_evaluation_guidance_tracks_current_corpus_cost() -> None:
     design = (repository_root / "docs/plan/memory-formation-and-consolidation.md").read_text(
         encoding="utf-8"
     )
-    assert "current 25-case corpus" in design
+    assert f"current {expected_calls}-case corpus" in design
     assert re.search(
-        r"historical passing `formation@4` evidence from the checked-in 24-case\s+corpus",
+        rf"reviewed\s+passing\s+`{re.escape(PROVIDER_FORMATION_POLICY_VERSION)}`\s+evidence\s+"
+        rf"from\s+the\s+checked-in\s+{expected_calls}-case\s+corpus",
         design,
     )
 

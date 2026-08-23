@@ -107,6 +107,13 @@ A model whose catalog price is zero would make that arithmetic vacuous, so the
 first completed run reporting a cost of zero aborts the arm with "model pricing
 unavailable; ceiling unenforceable".
 
+A probe arm whose run ends without an answer is retried exactly once against a
+freshly built composition, admitted through that same pre-admission check, and
+a second failure is kept: the command prints the terminal status, error class,
+model calls, and cost of every incomplete run beside its one-line summary, the
+artifact carries `retried_runs` and a `failure_classes` histogram, and the
+condition that no run may be left incomplete is unchanged.
+
 The published artifact asserts, and re-checks in its own validator at parse
 time, that: the lift over the without-memory arm reached twenty per cent of the
 answerable probes; the with-memory arm answered at least eighty per cent of the

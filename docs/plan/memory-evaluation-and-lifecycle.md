@@ -21,7 +21,7 @@ not one of them says how well it works. The two memory specifications name the
 measurements that would settle that question, consequential recall@k, noise
 ratio, transfer precision and lift, and end-to-end lift over multi-session
 scenarios (memory-retrieval-and-ranking.md:755), and formation precision and
-recall of consequential facts (memory-formation-and-consolidation.md:678).
+recall of consequential facts (memory-formation-and-consolidation.md:679).
 Nothing computes any of them. Every change to formation or ranking has
 therefore been argued from reading the diff.
 
@@ -32,7 +32,7 @@ utility without ever raising confidence (memory-retrieval-and-ranking.md:797),
 the recall delta and its correction lines over a frozen snapshot
 (memory-retrieval-and-ranking.md:93), conflicts surfaced rather than silently
 resolved at read time (memory-retrieval-and-ranking.md:792), and re-derivation
-that is opt-in per principal (memory-formation-and-consolidation.md:705) are
+that is opt-in per principal (memory-formation-and-consolidation.md:706) are
 all written down, and none of them runs.
 
 Milestone 16 closes both halves, in that order: the yardstick first and the
@@ -506,6 +506,29 @@ if the first completed live run reports zero cost the harness aborts with
 "model pricing unavailable; ceiling unenforceable" rather than running sixty
 more probes for free and calling the ceiling enforced.
 
+A run that terminated without an answer is asked once more before it counts.
+Every probe arm whose run terminated before an answer for a reason other than
+budget exhaustion, step exhaustion, context overflow, or a permanent model
+error is retried exactly once, against a composition built the same way but
+freshly, and the retry is admitted through the same pre-admission ceiling check
+as any other run: a retry the ceiling refuses stops the arm instead of running
+outside it. Those four are terminations the runtime decided on rather than
+suffered — re-asking a probe the per-run budget already stopped would let one
+probe spend twice its per-run ceiling — so they are kept on the first attempt,
+with their class, and counted incomplete. An arm that completed is never asked
+again, a second failure is kept, and a first attempt that failed after a billed
+call still counts its cost. `retried_runs` counts the retries, `incomplete_runs`
+keeps its meaning — what was still incomplete after the retry — and the
+publication condition `incomplete_runs == 0` is unchanged. Each incomplete run
+records its terminal status, its terminal error class (the class name the run
+record already carries, or the exception type when the arm failed outside the
+run, never a message), whether any model call was billed, and what it cost; the
+command prints one such line per incomplete run beside its one-line summary,
+and the artifact carries only the aggregate `failure_classes` histogram. The
+evidence validator re-checks that `retried_runs` does not exceed the runs the
+two arms could have asked and that a histogram, when present, accounts for
+every incomplete run.
+
 ## Public datasets, opt-in and never vendored
 
 Three public long-horizon benchmarks are the outside check on the corpus, and
@@ -858,7 +881,7 @@ Nothing is resolved by guessing; that is the point.
 ## Re-derivation is an operator action
 
 Re-derivation is opt-in per principal
-(memory-formation-and-consolidation.md:705), so it is a command and it demands
+(memory-formation-and-consolidation.md:706), so it is a command and it demands
 an explicit confirmation. ADR-0068 supplied that command — `agent memory replay
 --session <id> --confirm` reprocesses one session's original evidence through
 the governed formation service — and this milestone verifies it as the

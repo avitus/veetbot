@@ -1,4 +1,5 @@
 import sys
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,7 +7,14 @@ import pytest
 from typer.testing import CliRunner
 
 from agent_core.cli.main import app
+from agent_core.domain.runs import RunStatus
 from agent_core.evals.gates import GateStatus
+from agent_core.evals.memory_benchmark_live import (
+    AnswerScore,
+    LiveProbeArmResult,
+    LiveProbeResult,
+    MemoryBenchmarkLiveMetrics,
+)
 
 
 def test_eval_gates_passes_milestone_and_area_through_cli(
@@ -328,6 +336,7 @@ def _benchmark_module(
     passed: bool = True,
     failure_summary: str | None = None,
     skipped: bool = False,
+    live: object | None = None,
 ) -> SimpleNamespace:
     document = f'{{"passed":{str(passed).lower()}}}'
 
@@ -353,9 +362,16 @@ def _benchmark_module(
         )
         if skipped:
             return None
+        if live is None:
+            return SimpleNamespace(
+                passed=passed,
+                failure_summary=failure_summary,
+                model_dump_json=lambda **_kwargs: document,
+            )
         return SimpleNamespace(
             passed=passed,
             failure_summary=failure_summary,
+            live=live,
             model_dump_json=lambda **_kwargs: document,
         )
 
@@ -608,3 +624,90 @@ def test_eval_memory_benchmark_returns_failure_for_a_regression(
     assert result.exit_code == 1
     assert '"passed":false' in result.stdout
     assert "needed_recalled regressed" in result.stderr
+
+
+def _one_incomplete_run() -> MemoryBenchmarkLiveMetrics:
+    """A failing live arm carrying one run that ended without an answer."""
+
+    failed = LiveProbeArmResult(
+        arm="without_memory",
+        answer=None,
+        score=AnswerScore(correct=False, abstained=False, leaked_protected=False),
+        run_status=RunStatus.FAILED,
+        model_calls=1,
+        cost_usd=Decimal("0.01071"),
+        latency_ms=4872,
+        policy_failures=0,
+        failure_class="ModelStreamError",
+        retried=True,
+    )
+    answered = LiveProbeArmResult(
+        arm="with_memory",
+        answer="Portland",
+        score=AnswerScore(correct=True, abstained=False, leaked_protected=False),
+        run_status=RunStatus.COMPLETED,
+        model_calls=1,
+        cost_usd=Decimal("0.01"),
+        latency_ms=900,
+        policy_failures=0,
+    )
+    return MemoryBenchmarkLiveMetrics(
+        probe_count=1,
+        answerable_probe_count=1,
+        abstain_expected=0,
+        with_memory_correct=1,
+        without_memory_correct=0,
+        lift=1,
+        recoverable_probe_count=0,
+        recoverable_correct=0,
+        abstain_with_memory_correct=0,
+        protected_leaks_in_answers=0,
+        with_memory_policy_failures=0,
+        without_memory_policy_failures=0,
+        incomplete_runs=1,
+        retried_runs=1,
+        ceiling_hits=0,
+        total_cost_usd=Decimal("0.02071"),
+        p50_latency_ms=900,
+        p95_latency_ms=4872,
+        failure_classes={"ModelStreamError": 1},
+        probes=[
+            LiveProbeResult(
+                scenario_id="mb-cli-001",
+                probe_id="p01",
+                category="single_hop",
+                with_memory=answered,
+                without_memory=failed,
+                lift=1,
+            )
+        ],
+    )
+
+
+def test_eval_memory_benchmark_prints_every_incomplete_run_before_the_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setitem(
+        sys.modules,
+        "agent_core.evals.memory_benchmark_driver",
+        _benchmark_module(
+            [],
+            passed=False,
+            failure_summary="incomplete runs 1",
+            live=_one_incomplete_run(),
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "agent_core.evals.capability", _build_ref_module())
+
+    result = CliRunner().invoke(app, ["eval", "memory-benchmark", "--build-ref", "abc123"])
+
+    assert result.exit_code == 1
+    lines = result.stderr.splitlines()
+    assert lines[-1] == "memory-benchmark evaluation failed: incomplete runs 1"
+    detail = [line for line in lines if line.startswith("incomplete run ")]
+    assert len(detail) == 1
+    assert "mb-cli-001/p01 without_memory" in detail[0]
+    assert "status=FAILED" in detail[0]
+    assert "failure_class=ModelStreamError" in detail[0]
+    assert "model_calls=1" in detail[0]
+    assert "retried=True" in detail[0]

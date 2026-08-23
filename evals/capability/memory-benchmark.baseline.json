@@ -6,8 +6,8 @@
   "provider_formation_policy_version": "formation@8",
   "retrieval_policy_version": "retrieval@2",
   "extractor_name": "deterministic-formation-v2",
-  "build_ref": "6050b9218cd9bcb6ebb6d803b90a988fbc7e0d06",
-  "recorded_at": "2026-08-23T07:11:06.482699Z",
+  "build_ref": "3b3c972b3003cdca6881d857b931401999f49545",
+  "recorded_at": "2026-08-23T08:39:14.269277Z",
   "metrics": {
     "scenario_count": 16,
     "probe_count": 66,

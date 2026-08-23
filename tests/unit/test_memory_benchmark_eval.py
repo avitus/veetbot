@@ -19,7 +19,7 @@ from agent_core.domain.memory import (
     RecallMoment,
     RecallTrace,
 )
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import FailureReason, RunFailure, RunStatus
 from agent_core.evals import memory_benchmark_driver, memory_benchmark_live
 from agent_core.evals.memory_benchmark import (
     BASELINE_PATH,
@@ -1487,6 +1487,13 @@ def test_evidence_accepts_a_run_that_met_every_pass_condition() -> None:
         ),
         pytest.param({}, {"protected_leaks_in_answers": 1}, "protected", id="protected-leak"),
         pytest.param({}, {"incomplete_runs": 1}, "incomplete", id="incomplete-run"),
+        pytest.param(
+            {},
+            {"failure_classes": {"ModelStreamError": 1}},
+            "failure class",
+            id="histogram-disagrees-with-incomplete-runs",
+        ),
+        pytest.param({}, {"retried_runs": 41}, "retried", id="retried-over-total-runs"),
         pytest.param({}, {"lift": 9}, "lift", id="inconsistent-lift"),
         pytest.param(
             {}, {"answerable_probe_count": 14}, "answerable", id="inconsistent-answerable"
@@ -1610,6 +1617,70 @@ def test_evidence_requires_one_identity_across_every_probe_row() -> None:
         MemoryBenchmarkEvidence(**_one_probe_evidence(unresolved))  # type: ignore[arg-type]
 
 
+def test_terminal_failure_class_names_the_class_and_never_the_message() -> None:
+    """A failed run is diagnosable by class name alone, with no content in it."""
+
+    assert memory_benchmark_live._terminal_failure_class(None) is None
+
+    failure = RunFailure(
+        reason=FailureReason.INTERNAL_ERROR,
+        error_class="ModelStreamError",
+        message="the principal lives at 5 Elm Street",
+        occurred_at=_START,
+    )
+
+    assert memory_benchmark_live._terminal_failure_class(failure) == "ModelStreamError"
+
+
+def test_incomplete_run_diagnostics_name_every_failed_arm_content_free() -> None:
+    """Every incomplete run prints what it was, why it ended, and what it cost."""
+
+    failed = _live_arm("without_memory", correct=False).model_copy(
+        update={
+            "run_status": RunStatus.FAILED,
+            "answer": "the principal lives at 5 Elm Street",
+            "failure_class": "ModelStreamError",
+            "model_calls": 1,
+            "cost_usd": Decimal("0.01071"),
+            "retried": True,
+        }
+    )
+    metrics = _live_metrics(
+        incomplete_runs=1,
+        retried_runs=1,
+        failure_classes={"ModelStreamError": 1},
+        probes=[_one_probe_row(without_memory=failed)],
+    )
+
+    lines = memory_benchmark_live.incomplete_run_diagnostics(metrics)
+
+    assert len(lines) == 1
+    assert "mb-bench-001/p01" in lines[0]
+    assert "without_memory" in lines[0]
+    assert "FAILED" in lines[0]
+    assert "ModelStreamError" in lines[0]
+    assert "model_calls=1" in lines[0]
+    assert "0.01071" in lines[0]
+    assert "retried=True" in lines[0]
+    assert "Elm Street" not in lines[0]
+    assert memory_benchmark_live.incomplete_run_diagnostics(_live_metrics()) == []
+
+
+def test_failure_classes_keep_one_namespace_for_class_names_and_statuses() -> None:
+    """A status is never mistaken for a class name in the histogram."""
+
+    named = _live_arm("with_memory").model_copy(
+        update={"run_status": RunStatus.FAILED, "failure_class": "ModelStreamError"}
+    )
+    unnamed = _live_arm("without_memory", correct=False).model_copy(
+        update={"run_status": RunStatus.CANCELLED, "failure_class": None}
+    )
+
+    histogram = memory_benchmark_live._failure_classes([named, unnamed])
+
+    assert histogram == {"ModelStreamError": 1, "run_status:CANCELLED": 1}
+
+
 class TestBenchmarkEvidencePublicationGate:
     """The two publication gates: evidence only on a pass, and the cost ceiling."""
 
@@ -1619,12 +1690,18 @@ class TestBenchmarkEvidencePublicationGate:
 
     @staticmethod
     def _arm_evaluator(
-        calls: list[tuple[str, str]],
+        calls: list[tuple[str, str, str]],
         *,
         cost: Decimal = Decimal("0.01"),
         with_memory_knows: bool = True,
         status: RunStatus = RunStatus.COMPLETED,
+        failures: dict[tuple[str, str, str], int] | None = None,
+        failure_class: str = "ModelStreamError",
+        failure_reason: str | None = None,
+        raises: bool = False,
     ) -> object:
+        remaining = dict(failures or {})
+
         async def evaluate(
             _settings: object,
             corpus: MemoryBenchmarkCorpus,
@@ -1638,7 +1715,26 @@ class TestBenchmarkEvidencePublicationGate:
         ) -> LiveProbeArmResult:
             assert (model_policy, policy_profile) == ("balanced", "default")
             assert scenario_context is not None
-            calls.append((probe.id, arm))
+            calls.append((scenario.id, probe.id, arm))
+            if remaining.get((scenario.id, probe.id, arm), 0) > 0:
+                remaining[(scenario.id, probe.id, arm)] -= 1
+                if raises:
+                    raise TimeoutError("scripted transport failure")
+                return LiveProbeArmResult(
+                    arm=arm,  # type: ignore[arg-type]
+                    answer=None,
+                    score=AnswerScore(correct=False, abstained=False, leaked_protected=False),
+                    run_status=RunStatus.FAILED,
+                    model_calls=0,
+                    cost_usd=cost,
+                    latency_ms=10,
+                    policy_failures=0,
+                    provider="openai",
+                    model="gpt-memory",
+                    policy_version="default@profile+hline",
+                    failure_class=failure_class,
+                    failure_reason=failure_reason,
+                )
             knows = arm == "with_memory" and with_memory_knows
             if probe.answer.kind == "abstain":
                 answer = corpus.abstain_phrase
@@ -1682,9 +1778,13 @@ class TestBenchmarkEvidencePublicationGate:
         self,
         monkeypatch: pytest.MonkeyPatch,
         *,
-        calls: list[tuple[str, str]],
+        calls: list[tuple[str, str, str]],
         cost: Decimal = Decimal("0.01"),
         with_memory_knows: bool = True,
+        failures: dict[tuple[str, str, str], int] | None = None,
+        failure_class: str = "ModelStreamError",
+        failure_reason: str | None = None,
+        raises: bool = False,
     ) -> tuple[MemoryBenchmarkCorpus, str]:
         corpus, digest = load_corpus(_REPOSITORY)
         monkeypatch.setenv("RUN_LIVE_MODEL_TESTS", "1")
@@ -1701,14 +1801,22 @@ class TestBenchmarkEvidencePublicationGate:
         monkeypatch.setattr(
             memory_benchmark_live,
             "_evaluate_probe_live",
-            self._arm_evaluator(calls, cost=cost, with_memory_knows=with_memory_knows),
+            self._arm_evaluator(
+                calls,
+                cost=cost,
+                with_memory_knows=with_memory_knows,
+                failures=failures,
+                failure_class=failure_class,
+                failure_reason=failure_reason,
+                raises=raises,
+            ),
         )
         return corpus, digest
 
     async def test_pass_publishes_exact_tuple(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str]] = []
         corpus, digest = self._wire(monkeypatch, calls=calls)
         probes = [probe for scenario in corpus.scenarios for probe in scenario.probes]
         abstain_expected = sum(probe.answer.kind == "abstain" for probe in probes)
@@ -1775,10 +1883,179 @@ class TestBenchmarkEvidencePublicationGate:
 
         assert len(calls) == 2 * len(probes)
 
+    async def test_a_failed_probe_arm_is_retried_once_and_then_publishes(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(monkeypatch, calls=calls, failures={first: 1})
+        probes = [probe for scenario in corpus.scenarios for probe in scenario.probes]
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is True
+        assert result.evidence is not None
+        assert calls.count(first) == 2
+        assert len(calls) == 2 * len(probes) + 1
+        evidence = MemoryBenchmarkEvidence.model_validate_json(output.read_text(encoding="utf-8"))
+        assert evidence.live.incomplete_runs == 0
+        assert evidence.live.retried_runs == 1
+        assert evidence.live.total_cost_usd == Decimal("0.01") * (2 * len(probes) + 1)
+        retried = [
+            arm
+            for row in evidence.live.probes
+            for arm in (row.with_memory, row.without_memory)
+            if arm.retried
+        ]
+        assert len(retried) == 1
+        assert retried[0].run_status is RunStatus.COMPLETED
+
+    async def test_a_run_the_runtime_ended_on_its_own_limits_is_not_retried(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A budget kill is the ceiling working, not a failure to re-roll.
+
+        Re-asking a probe the per-run budget already stopped would let one
+        probe spend twice its per-run ceiling, so the four terminations the
+        runtime decides on — budget, steps, context overflow, and a permanent
+        model error — are kept on the first attempt with their class.
+        """
+
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(
+            monkeypatch,
+            calls=calls,
+            failures={first: 1},
+            failure_class="BudgetExceededError",
+            failure_reason=FailureReason.BUDGET_EXCEEDED.value,
+        )
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls.count(first) == 1
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.retried_runs == 0
+        assert result.live.incomplete_runs == 1
+        assert result.live.failure_classes == {"BudgetExceededError": 1}
+
+    async def test_a_second_failure_leaves_the_run_incomplete_and_named(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(monkeypatch, calls=calls, failures={first: 2})
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls.count(first) == 2
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.incomplete_runs == 1
+        assert result.live.retried_runs == 1
+        assert result.live.failure_classes == {"ModelStreamError": 1}
+        assert result.failure_summary is not None
+        assert "incomplete runs 1" in result.failure_summary
+
+    async def test_an_arm_that_throws_is_a_failed_arm_named_by_its_exception(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "without_memory")
+        self._wire(monkeypatch, calls=calls, failures={first: 2}, raises=True)
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.incomplete_runs == 1
+        assert result.live.retried_runs == 1
+        assert result.live.failure_classes == {"TimeoutError": 1}
+        thrown = [
+            arm
+            for row in result.live.probes
+            for arm in (row.with_memory, row.without_memory)
+            if arm.failure_class is not None
+        ]
+        assert len(thrown) == 1
+        assert (thrown[0].model_calls, thrown[0].cost_usd) == (0, Decimal("0"))
+        assert thrown[0].answer is None
+
+    async def test_a_retry_that_would_cross_the_ceiling_is_not_admitted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        calls: list[tuple[str, str, str]] = []
+        corpus, _digest = load_corpus(_REPOSITORY)
+        first = (corpus.scenarios[0].id, corpus.scenarios[0].probes[0].id, "with_memory")
+        self._wire(monkeypatch, calls=calls, cost=Decimal("3.96"), failures={first: 1})
+        output = tmp_path / "memory-benchmark-evidence.json"
+
+        result = await memory_benchmark_live.run_live_benchmark(
+            _REPOSITORY,
+            model_policy="balanced",
+            policy_profile="default",
+            build_ref="0123456789ab",
+            output=output,
+        )
+
+        assert result is not None
+        assert result.passed is False
+        assert result.evidence is None
+        assert not output.exists()
+        assert calls == [first]
+        assert isinstance(result.live, MemoryBenchmarkLiveMetrics)
+        assert result.live.stopped_by == "cost_ceiling"
+        assert result.live.ceiling_hits == 1
+        assert result.live.total_cost_usd == Decimal("3.96")
+        assert result.failure_summary is not None
+        assert "cost_ceiling" in result.failure_summary
+
     async def test_failure_returns_diagnostics_and_leaves_no_artifact(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str]] = []
         self._wire(monkeypatch, calls=calls, with_memory_knows=False)
         output = tmp_path / "memory-benchmark-evidence.json"
 
@@ -1803,7 +2080,7 @@ class TestBenchmarkEvidencePublicationGate:
     async def test_cost_ceiling_stops_before_exceeding(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str]] = []
         self._wire(monkeypatch, calls=calls, cost=Decimal("0.50"))
         output = tmp_path / "memory-benchmark-evidence.json"
 
@@ -1832,7 +2109,7 @@ class TestBenchmarkEvidencePublicationGate:
     async def test_zero_cost_model_aborts_with_unenforceable_ceiling(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str]] = []
         self._wire(monkeypatch, calls=calls, cost=Decimal("0"))
         output = tmp_path / "memory-benchmark-evidence.json"
 
@@ -1855,7 +2132,7 @@ class TestBenchmarkEvidencePublicationGate:
     async def test_opt_in_gate_returns_none_without_env(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        calls: list[tuple[str, str]] = []
+        calls: list[tuple[str, str, str]] = []
         self._wire(monkeypatch, calls=calls)
         monkeypatch.delenv("RUN_LIVE_MODEL_TESTS", raising=False)
         output = tmp_path / "memory-benchmark-evidence.json"

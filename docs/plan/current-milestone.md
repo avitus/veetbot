@@ -30,20 +30,32 @@ title: Current Milestone
   delivered directly to `dev`; code review is reserved for the final merge into
   `main`. Milestones 13 through 15 remain
   authorized and specified with twenty-one, twenty-one, and sixteen registered
-  gates; none has started.
+  gates; none has started. Milestone 16, the parallel memory-evaluation
+  workstream, has implemented all nineteen of its gates, republished the
+  provider evidence at `formation@8`, and re-recorded its baseline; hosted CI
+  on the final head and the CodeRabbit review loop on the `dev` to `main` pull
+  request remain. Its live benchmark arm ran three times — the first two failed
+  only the absolute incomplete-runs condition, at two of 132 probe arms each,
+  after which the harness gained a content-free failure class and one retry per
+  probe arm, and the third published
+  `evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json`
+  with four retried runs and a lift of forty-five — which is milestone evidence
+  rather than one of the two completion conditions below.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
 tenant activation remains blocked until the evaluation threshold in the
 [skills design](skills.md#rollout-evidence) passes, and that activation is
 roadmap item B1 rather than a Milestone 10 completion condition (ADR-0061).
-The provider-assisted memory extractor's historical `formation@4` evidence
-passed on the intended production model and ADR-0057 is accepted. ADR-0068's
-semantic deterministic repair and retry lifecycle advanced the active policies to
-deterministic `formation@5` and provider-assisted `formation@6`, and Milestone
-16's admission of working-state established facts advances them again to
-`formation@7` and `formation@8` (ADR-0069); `auto` now falls
-back safely until the current tuple is reevaluated. Tenant activation remains
+The provider-assisted memory extractor's evidence is accepted under ADR-0057.
+ADR-0068's semantic deterministic repair and retry lifecycle advanced the active
+policies to deterministic `formation@5` and provider-assisted `formation@6`, and
+Milestone 16's admission of working-state established facts advances them again
+to `formation@7` and `formation@8` (ADR-0069). Milestone 16 republished the
+provider evidence at `formation@8` on the intended production model and deleted
+the superseded `formation@4` artifact, so `auto` again activates provider
+assistance for the balanced OpenAI `gpt-5.6-sol` and default-profile tuple and
+falls back safely for every other one. Tenant activation remains
 separate from Milestone completion under ADR-0061. The machine-readable [project
 state](../status/project-state.yaml) records progress and evidence.
 
