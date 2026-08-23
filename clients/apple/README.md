@@ -27,6 +27,10 @@ approval or question. The client does not persist a notification inbox. Before a
 physical-device push can work, the application identifier must have the push
 capability enabled and its provisioning profiles regenerated in the Apple
 Developer portal; the tracked project cannot perform those owner actions.
+The generated application property list declares
+`ITSAppUsesNonExemptEncryption=NO`: the client uses platform-provided HTTPS and
+Keychain protection and implements no non-exempt encryption. Reassess that
+declaration before adding a custom or third-party cryptographic implementation.
 
 The settings surface groups Connection, Website Access, Appearance, and Data &
 Privacy in a scrolling layout with connection actions pinned below it. On macOS,
