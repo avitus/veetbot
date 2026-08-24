@@ -312,6 +312,46 @@ milestones:
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
+    evidence:
+      - check: thirteen Milestone 18 gate.email.* gates
+        outcome: passed_locally
+        detail: >-
+          All thirteen registered Milestone 18 entries in
+          evals/gates/email.yaml resolve to thirteen distinct checks, twelve
+          in tests/gates/test_email_m18.py plus the shared contract,
+          composition, credential, and ceremony suites they drive, and all
+          pass when executed by node identifier. Gate 4 spawns the three
+          real gmail_mcp stdio servers, discovers their rosters over the
+          real SDK transport, and asserts the mapped specifications carry
+          the declared classification tuples; gate 13 runs the monitoring
+          recipe end to end from a materialized schedule through a
+          content-free approval notification to a reported outcome. The
+          harness cannot execute these through agent eval gates yet for the
+          reason Milestones 16 and 17 recorded; they become executable when
+          project.current_milestone advances past the pending Milestone 13
+          through 15 gates.
+      - check: local verification
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting and linting pass, strict mypy reports no issue in
+          534 source files, the static partition passes 1291 tests, the
+          contract partition passes 395, the strict documentation build
+          passes with the 348-entry registry reconciled, and the release and
+          manual-rollback deployment-script tests pass. Two environment
+          gaps on the authoring machine, both pre-existing: the nginx
+          deployment test requires GNU tar, and the PostgreSQL integration
+          lane requires a running database that Docker cannot supply here —
+          the milestone adds no migration and no new table, so the untested
+          delta is the existing mcp_servers repository storing three more
+          rows.
+      - check: hosted CI, the review loop, and the owner smoke
+        outcome: not_started
+        detail: >-
+          Hosted CI has not run on this milestone's branches, the CodeRabbit
+          review loop has run only on the governance pull request, and the
+          owner's real-mailbox smoke — the GCP OAuth client, the bootstrap
+          consent ceremony, a triage schedule, an approval delivered to the
+          phone, and one approved send — awaits the owner.
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
