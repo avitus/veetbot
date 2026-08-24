@@ -253,16 +253,27 @@ milestones:
         detail: >-
           pytest -m "not live" passes all 1764 tests with 2 deselected,
           against the development database.
-      - check: Apple client, hosted CI, and review loop
+      - check: Apple package and simulator lanes
+        outcome: passed_locally
+        detail: >-
+          Build-sequence steps 6 and 7 are complete on the m17/pr2-client
+          branch: the Apple client's MemoryView model and
+          listMemories/getMemory client methods (step 6), and MemoryViewModel,
+          MemoryBrowserView, MemoryDetailView, the sidebar entry point, and
+          their native Swift Testing coverage (step 7). make test-apple passes
+          its full Swift Testing suite over the VeetbotCore package, and make
+          test-apple-ui passes ConversationNavigationUITests on both an
+          iPhone and an iPad simulator, which also builds the Veetbot app
+          target and so validates the corresponding Xcode project entries. No
+          Python gate observes Swift (ADR-0049 decision 9), so none of the ten
+          gates above is satisfied by client code, and none of them is
+          blocked by its absence either.
+      - check: hosted CI and the dev-to-main review loop
         outcome: not_started
         detail: >-
-          Build-sequence steps 6 through 8 — the Apple client models, the
-          browser view model and views, the user-interface fixture, the
-          hosted Apple package and simulator lanes, hosted CI, and the
-          CodeRabbit review loop on one final head — are still outstanding.
-          No Python gate observes Swift (ADR-0049 decision 9), so none of the
-          ten gates above is satisfied by client code, and none of them is
-          blocked by its absence either.
+          Build-sequence step 8's remaining half is still outstanding: hosted
+          CI has not run on this milestone's branches, and the CodeRabbit
+          review loop has not run on one final head from `dev` to `main`.
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

@@ -7,14 +7,21 @@ public enum ArtifactContentResponse: Sendable {
 
 public enum VeetbotAPIClientError: Error, LocalizedError, Sendable {
     case serverUpgradeRequired
+    case memoryBrowsingUnavailable
 
     public var errorDescription: String? {
         switch self {
         case .serverUpgradeRequired:
             return "This server is running an older Veetbot API that does not support synchronized conversation history or Delete Everywhere. Update the server and try again."
+        case .memoryBrowsingUnavailable:
+            return "This server does not support memory browsing yet."
         }
     }
 }
+
+// The native client's declared viewing ceiling: full parity, not a lower
+// default, the owner's recorded ADR-0070 decision 5 trade-off.
+public let memoryBrowsingCeiling: MemorySensitivityKind = .restricted
 
 public struct VeetbotAPIClient: Sendable {
     public let transport: HTTPTransport
@@ -345,6 +352,51 @@ public struct VeetbotAPIClient: Sendable {
             )
         )
     }
+
+    public func listMemories(
+        ceiling: MemorySensitivityKind,
+        limit: Int = 50,
+        cursor: String? = nil,
+        statuses: [MemoryStatusKind]? = nil,
+        beliefTypes: [MemoryBeliefTypeKind]? = nil,
+        subject: String? = nil,
+        sessionID: UUID? = nil,
+        text: String? = nil
+    ) async throws -> Page<MemoryView> {
+        var query = [
+            URLQueryItem(name: "ceiling", value: ceiling.rawValue),
+            URLQueryItem(name: "limit", value: String(min(max(limit, 1), 200))),
+        ]
+        if let cursor { query.append(URLQueryItem(name: "cursor", value: cursor)) }
+        for status in statuses ?? [] {
+            query.append(URLQueryItem(name: "status", value: status.rawValue))
+        }
+        for beliefType in beliefTypes ?? [] {
+            query.append(URLQueryItem(name: "belief_type", value: beliefType.rawValue))
+        }
+        if let subject { query.append(URLQueryItem(name: "subject", value: subject)) }
+        if let sessionID {
+            query.append(URLQueryItem(name: "session_id", value: sessionID.uuidString))
+        }
+        if let text { query.append(URLQueryItem(name: "text", value: text)) }
+        do {
+            return try await transport.send(
+                TransportRequest(method: .get, path: "/v1/memories", queryItems: query)
+            )
+        } catch {
+            throw memoryBrowsingCompatibilityError(from: error) ?? error
+        }
+    }
+
+    public func getMemory(_ id: UUID, ceiling: MemorySensitivityKind) async throws -> MemoryView {
+        try await transport.send(
+            TransportRequest(
+                method: .get,
+                path: "/v1/memories/\(id.uuidString)",
+                queryItems: [URLQueryItem(name: "ceiling", value: ceiling.rawValue)]
+            )
+        )
+    }
 }
 
 private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
@@ -355,6 +407,14 @@ private func historyCompatibilityError(from error: Error) -> VeetbotAPIClientErr
             && apiError.message == "The HTTP request is not supported.")
     {
         return .serverUpgradeRequired
+    }
+    return nil
+}
+
+private func memoryBrowsingCompatibilityError(from error: Error) -> VeetbotAPIClientError? {
+    guard case HTTPTransportError.api(let apiError) = error else { return nil }
+    if apiError.statusCode == 404 || apiError.statusCode == 405 {
+        return .memoryBrowsingUnavailable
     }
     return nil
 }

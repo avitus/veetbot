@@ -296,9 +296,11 @@ state of its own, in the shape
 the device surface.
 
 - **Entry point.** A sidebar toolbar item presents the memory browser as a
-  sheet on compact layouts and a detail column on regular ones. It is a peer of
-  the conversation list rather than a mode inside a conversation, because a
-  belief outlives the session that formed it.
+  sheet on both compact and regular layouts in round one — the plan the owner
+  approved for this milestone. A detail-column presentation on regular layouts
+  remains a candidate future refinement, not a round-one commitment. The
+  browser is a peer of the conversation list rather than a mode inside a
+  conversation, because a belief outlives the session that formed it.
 - **Models.** `MemoryView` is mirrored as a `Codable` value in the client's
   wire models beside `SessionView` and `Notification`, with `Page<MemoryView>`
   reusing the existing page envelope. Unknown fields decode without failing, so
@@ -316,15 +318,22 @@ the device surface.
   detects a server that needs upgrading, and presents as *this server does not
   support memory browsing yet* rather than as an error. An older server keeps
   working with the browser entry point absent.
-- **Rendering.** A row shows subject, statement, type, and authority; a belief
-  that is flagged for review or that carries `conflicts_with` links renders
-  that state, because the whole point of Milestone 16 committing conflicts
-  flagged rather than resolving them silently was that somebody would
-  eventually see them.
-- **Accessibility identifiers.** The browser entry point, the search field, the
-  filter controls, the list, and a row carry stable accessibility identifiers,
-  so the user-interface fixture can drive the surface without a screenshot
-  comparison.
+- **Rendering.** A row shows the statement as its primary text, subject and
+  belief type as secondary text, a text-labeled sensitivity badge, and a
+  status tag when the belief's status is not `active`; a belief that is
+  flagged for review or that carries `conflicts_with` links renders that state
+  inline, because the whole point of Milestone 16 committing conflicts flagged
+  rather than resolving them silently was that somebody would eventually see
+  them. Authority, alongside the belief's remaining classification, provenance,
+  and lifecycle fields, appears in the detail view a row opens onto.
+- **Accessibility identifiers.** The sidebar entry point (`sidebar.memory`),
+  the browser's root container (`memory.browser`), a row (`memory.row.<uuid>`),
+  and the detail view (`memory.detail`) carry stable accessibility
+  identifiers. The search field carries none: `.searchable` hoists it into the
+  navigation bar chrome, which is not a descendant of any view the client
+  could tag, so the user-interface fixture reaches it the way it reaches any
+  search bar, through `app.searchFields`, rather than through an identifier.
+  The filter controls carry accessibility labels rather than identifiers.
 - **Verification.** Native tests are this surface's verification, on the hosted
   Apple package and simulator lanes. No Python gate observes Swift, per ADR-0049
   decision 9, and none of the ten gates below is satisfied by client code.

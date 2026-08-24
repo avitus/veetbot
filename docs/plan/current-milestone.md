@@ -49,7 +49,12 @@ title: Current Milestone
   with four retried runs and a lift of forty-five — which is milestone evidence
   rather than one of the two completion conditions below. Milestone 17, the
   second parallel workstream, is authorized and specified with ten registered
-  gates and has not started.
+  gates; its server-side routes, store methods, and gate suite are implemented
+  and passing locally, and its Apple client — the models, client methods,
+  browser view model and views, and sidebar entry point, with native Swift
+  Testing coverage — passes the local Apple package and simulator lanes;
+  hosted CI and the CodeRabbit review loop on the `dev` to `main` pull request
+  remain outstanding.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
