@@ -83,6 +83,8 @@ def _belief(
     sensitivity: Sensitivity = Sensitivity.INTERNAL,
     status: MemoryStatus = MemoryStatus.ACTIVE,
 ) -> MemoryRecord:
+    """Build a deterministic belief record for memory API boundary tests."""
+
     return MemoryRecord(
         id=UUID(int=belief_id),
         tenant_id=tenant_id,
@@ -123,6 +125,8 @@ def _crafted_cursor(position: int, identifier: UUID) -> str:
 
 @asynccontextmanager
 async def _client(composition: Composition, *, principal: Principal | None = None) -> Any:
+    """Yield an in-process HTTP client for the supplied composition."""
+
     app = create_app(
         composition.services,
         composition.settings,
@@ -138,6 +142,8 @@ async def _client(composition: Composition, *, principal: Principal | None = Non
 async def test_memory_routes_cover_listing_detail_scopes_and_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Cover list, detail, scope, ceiling, projection, and route-limit boundaries."""
+
     principal = Principal(
         tenant_id=TENANT,
         principal_id=PRINCIPAL_ID,
@@ -290,6 +296,8 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling(
 
 
 async def test_memory_http_surface_is_absent_by_default() -> None:
+    """Keep the memory routes absent while their scope remains recognized."""
+
     # Hard gate 7's other half: the scope stays recognized even with the
     # route surface off, so configuration validation never rejects it.
     assert "memory.read" in PLATFORM_SCOPES
@@ -306,6 +314,8 @@ async def test_memory_http_surface_is_absent_by_default() -> None:
 
 
 async def test_memory_list_rejects_a_cursor_position_beyond_bigint_range() -> None:
+    """Reject cursor positions that cannot fit the PostgreSQL BIGINT column."""
+
     # store_position is a PostgreSQL BIGINT column; a crafted cursor that
     # decodes to a position outside int64 range must never reach the keyset
     # predicate. Left unvalidated, asyncpg raises DataError constructing the
@@ -352,6 +362,8 @@ async def test_memory_list_rejects_a_cursor_position_beyond_bigint_range() -> No
 async def test_memory_list_non_cursor_value_error_is_not_mislabeled_as_a_bad_cursor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Let non-cursor data conversion failures surface as internal errors."""
+
     # A `ValueError` can also come from converting a stored row into a
     # `MemoryRecord` (an unrecognized enum value, an unparseable UUID) — a
     # data-corruption failure with nothing to do with the cursor. Only the
@@ -373,6 +385,8 @@ async def test_memory_list_non_cursor_value_error_is_not_mislabeled_as_a_bad_cur
     ) as composition:
 
         async def broken_list(*args: object, **kwargs: object) -> None:
+            """Simulate a non-cursor conversion failure from the read service."""
+
             del args, kwargs
             raise ValueError("boom")
 
@@ -385,6 +399,8 @@ async def test_memory_list_non_cursor_value_error_is_not_mislabeled_as_a_bad_cur
 
 
 async def test_memory_list_pages_every_belief_exactly_once() -> None:
+    """Walk every belief once in newest-first keyset order."""
+
     principal = Principal(
         tenant_id=TENANT,
         principal_id=PRINCIPAL_ID,

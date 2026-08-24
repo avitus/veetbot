@@ -111,6 +111,8 @@ def _principal(
     principal_id: str = PRINCIPAL_ID,
     scopes: set[str] | None = None,
 ) -> Principal:
+    """Build the principal used by the Milestone 17 gate fixtures."""
+
     return Principal(
         tenant_id=tenant_id,
         principal_id=principal_id,
@@ -120,6 +122,8 @@ def _principal(
 
 
 def _enabled_settings() -> Settings:
+    """Return memory-backed settings with the read API enabled."""
+
     return replace(memory_settings(), memory_api_enabled=True)
 
 
@@ -136,6 +140,8 @@ def _belief(
     belief_type: BeliefType = BeliefType.PREFERENCE,
     session_id: UUID = SESSION_A,
 ) -> MemoryRecord:
+    """Build a deterministic belief record for the hard-gate corpus."""
+
     closed = status in {MemoryStatus.SUPERSEDED, MemoryStatus.EXPIRED, MemoryStatus.RETIRED}
     return MemoryRecord(
         id=UUID(int=belief_id),
@@ -173,6 +179,8 @@ async def _client(
     principal: Principal | None = None,
     app_settings: Settings | None = None,
 ) -> Any:
+    """Yield an in-process client with optional identity and settings overrides."""
+
     app = create_app(
         composition.services,
         app_settings or composition.settings,
@@ -186,12 +194,16 @@ async def _client(
 
 
 async def _seed(composition: Composition, records: list[MemoryRecord]) -> None:
+    """Persist the supplied records through the composition's unit of work."""
+
     async with composition.uow_factory() as uow:
         for record in records:
             await uow.memories.upsert_belief(record)
 
 
 def _ids(body: dict[str, Any]) -> list[str]:
+    """Extract item identifiers from a serialized page."""
+
     return [item["id"] for item in body["items"]]
 
 
@@ -283,6 +295,8 @@ def test_nothing_above_the_ceiling_is_returned_or_distinguishable(
     """
 
     async def exercise_ceiling() -> None:
+        """Exercise one generated sensitivity corpus and request ceiling."""
+
         async with build(
             settings=_enabled_settings(),
             storage="memory",
@@ -581,6 +595,8 @@ async def test_every_filter_selects_the_documented_set() -> None:
         await _seed(composition, corpus)
 
         async def listed(**params: Any) -> set[UUID]:
+            """Return the identifiers selected by one filter combination."""
+
             response = await client.get(
                 "/v1/memories", params={"ceiling": "restricted", "limit": 200, **params}
             )
@@ -768,10 +784,14 @@ _POSTGRES_ADAPTER = (
 
 
 def _module(path: Path) -> ast.Module:
+    """Parse a Python module used by the structural parity gate."""
+
     return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
 
 
 def _function_names(tree: ast.Module) -> set[str]:
+    """Collect every function name declared in a parsed module."""
+
     return {
         node.name
         for node in ast.walk(tree)
@@ -780,6 +800,8 @@ def _function_names(tree: ast.Module) -> set[str]:
 
 
 def _browse_method(path: Path) -> ast.AsyncFunctionDef:
+    """Find the async browse implementation in an adapter module."""
+
     for node in ast.walk(_module(path)):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "browse":
             return node
@@ -787,6 +809,8 @@ def _browse_method(path: Path) -> ast.AsyncFunctionDef:
 
 
 def _referenced_names(node: ast.AST) -> set[str]:
+    """Collect simple and attribute names referenced under an AST node."""
+
     names: set[str] = set()
     for child in ast.walk(node):
         if isinstance(child, ast.Name):
@@ -1025,6 +1049,8 @@ async def test_every_error_is_a_member_of_the_closed_vocabulary() -> None:
         observed: set[tuple[int, str]] = set()
 
         def record(response: httpx.Response, where: object) -> None:
+            """Validate and remember one closed-vocabulary error response."""
+
             assert response.status_code >= 400, (where, response.text)
             error = response.json()["error"]
             code = error["code"]
