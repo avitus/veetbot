@@ -104,8 +104,12 @@ already promises: an operator-declared read-only MCP classification. Decision
    the refresh exchange against Google inside its own process, checking expiry
    at use, and the platform never learns the credential is OAuth. The server
    dials exactly two fixed HTTPS endpoints — the Gmail API host and the token
-   endpoint, both package constants — and follows no redirect, so credential
-   material cannot be walked to a third host; a contract test asserts both. Initial
+   endpoint, both package constants — over authenticated TLS with CA-chain
+   validation and hostname verification, and follows no redirect, so
+   credential material cannot be walked to a third host or served to an
+   impersonator; nothing in the package may weaken the TLS default, and
+   contract tests assert the endpoints, the refusal, and the absence of any
+   verification override. Initial
    consent is a one-time operator ceremony, `python -m gmail_mcp bootstrap`,
    which runs the installed-app loopback flow and writes owner-readable
    credential files that enter the broker through file-backed settings

@@ -111,9 +111,10 @@ an inherited environment, never an event or a log.
 The resolved value is a JSON document: `client_id`, `client_secret`,
 `refresh_token`, and the granted Google scope. The server exchanges the
 refresh token for access tokens against Google's fixed HTTPS token endpoint
-inside its own process — a package constant, with redirects never followed,
-the same transport rule the Gmail calls obey — checking expiry at use rather
-than on a timer. Access tokens, the
+inside its own process — a package constant, over authenticated TLS with
+CA-chain validation and hostname verification, with redirects never
+followed, the same transport rules the Gmail calls obey — checking expiry at
+use rather than on a timer. Access tokens, the
 refresh token, and Google's error bodies never cross the stdio pipe; the
 platform never learns the credential is OAuth. A refresh token Google refuses
 surfaces as the adapter's ordinary `tool.server_unauthorized`, terminal at
@@ -207,10 +208,14 @@ cadence floor is daily until roadmap B5; Gmail push stays out with B3 and B4.
 ## Bounds and failures
 
 The server dials exactly two fixed HTTPS endpoints — the Gmail API host and
-Google's token endpoint — both constants in the package, never arguments. It
+Google's token endpoint — both constants in the package, never arguments,
+over authenticated TLS: certificate-chain validation against the system CA
+bundle and hostname verification stay enabled, and nothing in the package
+may pass a verification override. It
 follows no redirect: a 3xx answer is a permanent rejection, never a second
-request, so a credentialed call cannot be walked to another host. A contract
-test asserts both properties.
+request, so a credentialed call cannot be walked to another host. Contract
+tests assert the fixed endpoints, the refused redirect, and the absence of
+any verification override.
 
 Gmail API responses are decoded under a hard byte bound; thread bodies are
 truncated to the server's declared output budget before crossing the pipe, so
