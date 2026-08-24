@@ -11,6 +11,7 @@ import base64
 import binascii
 import json
 import re
+from email.message import EmailMessage
 from html.parser import HTMLParser
 from typing import Protocol
 
@@ -28,6 +29,7 @@ from gmail_mcp.errors import (
 MESSAGE_BODY_CHARACTER_BUDGET = 20_000
 RESPONSE_BYTE_CEILING = 2 * 1024 * 1024
 MAXIMUM_SEARCH_RESULTS = 25
+MAXIMUM_BATCH_THREADS = 25
 
 _BLOCK_TAGS = frozenset({"p", "div", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6"})
 
@@ -152,6 +154,18 @@ def _label_ids(message: dict[str, object]) -> list[str]:
     if isinstance(labels, list):
         return [str(label) for label in labels]
     return []
+
+
+def _raw_message(to: str, cc: str | None, bcc: str | None, subject: str, body: str) -> str:
+    message = EmailMessage()
+    message["To"] = to
+    if cc:
+        message["Cc"] = cc
+    if bcc:
+        message["Bcc"] = bcc
+    message["Subject"] = subject
+    message.set_content(body)
+    return base64.urlsafe_b64encode(bytes(message)).decode().rstrip("=")
 
 
 class GmailClient:
@@ -295,6 +309,80 @@ class GmailClient:
                 }
             )
         return {"thread_id": str(thread.get("id", thread_id)), "messages": messages}
+
+    async def create_draft(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        cc: str | None = None,
+        bcc: str | None = None,
+        thread_id: str | None = None,
+    ) -> dict[str, object]:
+        message: dict[str, object] = {"raw": _raw_message(to, cc, bcc, subject, body)}
+        if thread_id is not None:
+            message["threadId"] = thread_id
+        created = await self._request_json(
+            "POST", "/gmail/v1/users/me/drafts", json_body={"message": message}
+        )
+        draft_id = created.get("id")
+        if not isinstance(draft_id, str) or not draft_id:
+            raise GmailServerError(INVALID_OUTPUT)
+        return {"draft_id": draft_id}
+
+    async def modify_labels(
+        self,
+        thread_ids: list[str],
+        add_label_ids: list[str] | None = None,
+        remove_label_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        add = add_label_ids or []
+        remove = remove_label_ids or []
+        if not thread_ids or len(thread_ids) > MAXIMUM_BATCH_THREADS:
+            raise GmailServerError(REJECTED)
+        if not add and not remove:
+            raise GmailServerError(REJECTED)
+        for thread_id in thread_ids:
+            await self._request_json(
+                "POST",
+                f"/gmail/v1/users/me/threads/{thread_id}/modify",
+                json_body={"addLabelIds": add, "removeLabelIds": remove},
+            )
+        return {"modified_thread_ids": list(thread_ids)}
+
+    async def trash_thread(self, thread_id: str) -> dict[str, object]:
+        await self._request_json("POST", f"/gmail/v1/users/me/threads/{thread_id}/trash")
+        return {"thread_id": thread_id, "trashed": True}
+
+    async def untrash_thread(self, thread_id: str) -> dict[str, object]:
+        await self._request_json("POST", f"/gmail/v1/users/me/threads/{thread_id}/untrash")
+        return {"thread_id": thread_id, "trashed": False}
+
+    async def send_message(
+        self,
+        to: str,
+        subject: str,
+        body: str,
+        cc: str | None = None,
+        bcc: str | None = None,
+        thread_id: str | None = None,
+    ) -> dict[str, object]:
+        request: dict[str, object] = {"raw": _raw_message(to, cc, bcc, subject, body)}
+        if thread_id is not None:
+            request["threadId"] = thread_id
+        sent = await self._request_json(
+            "POST", "/gmail/v1/users/me/messages/send", json_body=request
+        )
+        message_id = sent.get("id")
+        if not isinstance(message_id, str) or not message_id:
+            raise GmailServerError(INVALID_OUTPUT)
+        sent_thread = sent.get("threadId")
+        return {
+            "message_id": message_id,
+            "thread_id": thread_id
+            if thread_id is not None
+            else (sent_thread if isinstance(sent_thread, str) else None),
+        }
 
     async def list_labels(self) -> dict[str, object]:
         listing = await self._request_json("GET", "/gmail/v1/users/me/labels")

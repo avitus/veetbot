@@ -10,13 +10,13 @@
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Contract parity** — all three server modes pass the complete shared contract suite against the fake Gmail API and normalize to the same domain shapes."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_all_modes_pass_the_shared_contract_suite
 - id: gate.email.roster_confinement
   milestone: 18
   kind: structural
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Roster confinement** — each mode advertises exactly its declared roster, and no mode exposes permanent deletion."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_roster_confinement_and_no_permanent_deletion
 - id: gate.email.classification
   milestone: 18
   kind: case

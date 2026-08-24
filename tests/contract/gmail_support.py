@@ -10,6 +10,7 @@ strings so leakage assertions can prove no upstream text crosses the pipe.
 from __future__ import annotations
 
 import base64
+import json
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs
 
@@ -103,6 +104,8 @@ class FakeGmail:
     )
     forced: list[httpx.Response] = field(default_factory=list)
     requests: list[httpx.Request] = field(default_factory=list)
+    drafts: dict[str, dict[str, object]] = field(default_factory=dict)
+    sent: list[dict[str, object]] = field(default_factory=list)
 
     def seed_thread(self, thread_id: str, messages: list[FakeMessage]) -> None:
         self.threads[thread_id] = messages
@@ -130,11 +133,65 @@ class FakeGmail:
             return httpx.Response(200, json={"labels": self.labels})
         if request.method == "GET" and path == "/gmail/v1/users/me/threads":
             return self._list_threads(query)
+        if request.method == "POST" and path == "/gmail/v1/users/me/drafts":
+            return self._create_draft(request)
+        if request.method == "POST" and path == "/gmail/v1/users/me/messages/send":
+            return self._send_message(request)
+        if request.method == "POST" and path.endswith(("/modify", "/trash", "/untrash")):
+            _, thread_id, action = path.rsplit("/", 2)
+            return self._thread_action(thread_id, action, request)
         if request.method == "GET" and path.startswith("/gmail/v1/users/me/threads/"):
             return self._get_thread(path.rsplit("/", 1)[1], query)
         return httpx.Response(
             404, json={"error": {"message": f"{UPSTREAM_ERROR_MARKER} no route {path}"}}
         )
+
+    @staticmethod
+    def _decode_raw(raw: str) -> str:
+        padded = raw + "=" * (-len(raw) % 4)
+        return base64.urlsafe_b64decode(padded).decode(errors="replace")
+
+    def _create_draft(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read().decode())
+        message = body.get("message", {})
+        draft_id = f"draft-{len(self.drafts) + 1}"
+        self.drafts[draft_id] = {
+            "mime": self._decode_raw(str(message.get("raw", ""))),
+            "thread_id": message.get("threadId"),
+        }
+        return httpx.Response(200, json={"id": draft_id, "message": {"id": f"message-{draft_id}"}})
+
+    def _send_message(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.read().decode())
+        thread_id = body.get("threadId")
+        message_id = f"message-sent-{len(self.sent) + 1}"
+        self.sent.append(
+            {"mime": self._decode_raw(str(body.get("raw", ""))), "thread_id": thread_id}
+        )
+        return httpx.Response(
+            200,
+            json={"id": message_id, "threadId": thread_id or f"thread-{message_id}"},
+        )
+
+    def _thread_action(self, thread_id: str, action: str, request: httpx.Request) -> httpx.Response:
+        messages = self.threads.get(thread_id)
+        if messages is None:
+            return httpx.Response(
+                404, json={"error": {"message": f"{UPSTREAM_ERROR_MARKER} unknown {thread_id}"}}
+            )
+        if action == "modify":
+            body = json.loads(request.read().decode())
+            add = [str(label) for label in body.get("addLabelIds", [])]
+            remove = {str(label) for label in body.get("removeLabelIds", [])}
+        elif action == "trash":
+            add, remove = ["TRASH"], {"INBOX"}
+        else:
+            add, remove = ["INBOX"], {"TRASH"}
+        for message in messages:
+            labels = [label for label in message.label_ids if label not in remove]
+            labels.extend(label for label in add if label not in labels)
+            message.label_ids = tuple(labels)
+        return httpx.Response(200, json={"id": thread_id})
 
     def _matches(self, messages: list[FakeMessage], q: str) -> bool:
         haystack = " ".join(message.searchable_text() for message in messages)

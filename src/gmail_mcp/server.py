@@ -17,6 +17,8 @@ from gmail_mcp.gmail import GmailClient
 
 MODES: dict[str, tuple[str, ...]] = {
     "read": ("get_thread", "list_labels", "search_threads"),
+    "write": ("create_draft", "modify_labels", "trash_thread", "untrash_thread"),
+    "send": ("send_message",),
 }
 
 
@@ -45,8 +47,66 @@ def _read_handlers(gmail: GmailClient) -> dict[str, Callable[..., Any]]:
     }
 
 
+def _write_handlers(gmail: GmailClient) -> dict[str, Callable[..., Any]]:
+    async def create_draft(
+        to: str,
+        subject: str,
+        body: str,
+        cc: str | None = None,
+        bcc: str | None = None,
+        thread_id: str | None = None,
+    ) -> dict[str, object]:
+        """Create a draft, optionally attached to an existing thread."""
+
+        return await gmail.create_draft(to, subject, body, cc, bcc, thread_id)
+
+    async def modify_labels(
+        thread_ids: list[str],
+        add_label_ids: list[str] | None = None,
+        remove_label_ids: list[str] | None = None,
+    ) -> dict[str, object]:
+        """Batch label changes over at most twenty-five threads."""
+
+        return await gmail.modify_labels(thread_ids, add_label_ids, remove_label_ids)
+
+    async def trash_thread(thread_id: str) -> dict[str, object]:
+        """Move one thread to Gmail's reversible thirty-day trash."""
+
+        return await gmail.trash_thread(thread_id)
+
+    async def untrash_thread(thread_id: str) -> dict[str, object]:
+        """Restore one thread from the trash."""
+
+        return await gmail.untrash_thread(thread_id)
+
+    return {
+        "create_draft": create_draft,
+        "modify_labels": modify_labels,
+        "trash_thread": trash_thread,
+        "untrash_thread": untrash_thread,
+    }
+
+
+def _send_handlers(gmail: GmailClient) -> dict[str, Callable[..., Any]]:
+    async def send_message(
+        to: str,
+        subject: str,
+        body: str,
+        cc: str | None = None,
+        bcc: str | None = None,
+        thread_id: str | None = None,
+    ) -> dict[str, object]:
+        """Send one plain-text message by value, threading when replying."""
+
+        return await gmail.send_message(to, subject, body, cc, bcc, thread_id)
+
+    return {"send_message": send_message}
+
+
 _HANDLER_FACTORIES: dict[str, Callable[[GmailClient], dict[str, Callable[..., Any]]]] = {
     "read": _read_handlers,
+    "write": _write_handlers,
+    "send": _send_handlers,
 }
 
 

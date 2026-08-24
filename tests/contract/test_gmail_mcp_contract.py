@@ -25,14 +25,21 @@ from tests.contract.gmail_support import (
 )
 
 READ_ROSTER = {"search_threads", "get_thread", "list_labels"}
+WRITE_ROSTER = {"create_draft", "modify_labels", "trash_thread", "untrash_thread"}
+SEND_ROSTER = {"send_message"}
+ROSTERS = {"read": READ_ROSTER, "write": WRITE_ROSTER, "send": SEND_ROSTER}
 
 
-def read_server(fake: FakeGmail) -> Any:
+def server_for(fake: FakeGmail, mode: str) -> Any:
     client = GmailClient(
         http=httpx.AsyncClient(transport=fake.transport, base_url="https://gmail.googleapis.com"),
         token_source=StaticTokenSource(ACCESS_TOKEN),
     )
-    return build_server("read", client)
+    return build_server(mode, client)
+
+
+def read_server(fake: FakeGmail) -> Any:
+    return server_for(fake, "read")
 
 
 async def call(server: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -210,3 +217,145 @@ async def test_the_access_token_never_appears_in_results_or_errors() -> None:
     with pytest.raises(ToolError) as failure:
         await server.call_tool("list_labels", {})
     assert ACCESS_TOKEN not in str(failure.value)
+
+
+@pytest.mark.parametrize("mode", sorted(ROSTERS))
+async def test_every_mode_advertises_exactly_its_roster(mode: str) -> None:
+    server = server_for(seeded_fake(), mode)
+    tools = await server.list_tools()
+    assert {tool.name for tool in tools} == ROSTERS[mode]
+    assert MODES[mode] == tuple(sorted(ROSTERS[mode]))
+
+
+async def test_no_mode_exposes_permanent_deletion() -> None:
+    for mode in sorted(ROSTERS):
+        server = server_for(seeded_fake(), mode)
+        for tool in await server.list_tools():
+            assert "delete" not in tool.name
+    assert not [name for name in dir(GmailClient) if "delete" in name]
+
+
+async def test_create_draft_stores_a_draft_by_value() -> None:
+    fake = seeded_fake()
+    server = server_for(fake, "write")
+    payload = await call(
+        server,
+        "create_draft",
+        {"to": "ada@example.org", "subject": "Re: Lunch", "body": "Sounds good."},
+    )
+    assert payload["draft_id"]
+    (draft,) = fake.drafts.values()
+    assert "To: ada@example.org" in str(draft["mime"])
+    assert "Sounds good." in str(draft["mime"])
+
+
+async def test_create_draft_threads_as_a_reply() -> None:
+    fake = seeded_fake()
+    server = server_for(fake, "write")
+    await call(
+        server,
+        "create_draft",
+        {
+            "to": "ada@example.org",
+            "subject": "Re: Lunch",
+            "body": "Sounds good.",
+            "thread_id": "thread-lunch",
+        },
+    )
+    (draft,) = fake.drafts.values()
+    assert draft["thread_id"] == "thread-lunch"
+
+
+async def test_modify_labels_batches_over_threads() -> None:
+    fake = seeded_fake()
+    server = server_for(fake, "write")
+    payload = await call(
+        server,
+        "modify_labels",
+        {
+            "thread_ids": ["thread-lunch", "thread-receipt"],
+            "add_label_ids": ["Label_7"],
+            "remove_label_ids": ["INBOX"],
+        },
+    )
+    assert payload == {"modified_thread_ids": ["thread-lunch", "thread-receipt"]}
+    for messages in (fake.threads["thread-lunch"], fake.threads["thread-receipt"]):
+        for message in messages:
+            assert "INBOX" not in message.label_ids
+    assert "Label_7" in fake.threads["thread-receipt"][0].label_ids
+
+
+async def test_modify_labels_requires_a_change_and_caps_the_batch() -> None:
+    server = server_for(seeded_fake(), "write")
+    with pytest.raises(ToolError) as no_change:
+        await server.call_tool("modify_labels", {"thread_ids": ["thread-lunch"]})
+    assert "gmail.rejected" in str(no_change.value)
+
+    with pytest.raises(ToolError) as oversized:
+        await server.call_tool(
+            "modify_labels",
+            {"thread_ids": [f"thread-{n}" for n in range(26)], "add_label_ids": ["Label_7"]},
+        )
+    assert "gmail.rejected" in str(oversized.value)
+
+
+async def test_trash_and_untrash_round_trip() -> None:
+    fake = seeded_fake()
+    server = server_for(fake, "write")
+    await call(server, "trash_thread", {"thread_id": "thread-receipt"})
+    assert "TRASH" in fake.threads["thread-receipt"][0].label_ids
+    await call(server, "untrash_thread", {"thread_id": "thread-receipt"})
+    assert "TRASH" not in fake.threads["thread-receipt"][0].label_ids
+
+
+async def test_send_message_sends_by_value() -> None:
+    fake = seeded_fake()
+    server = server_for(fake, "send")
+    payload = await call(
+        server,
+        "send_message",
+        {"to": "ada@example.org", "subject": "Confirmed", "body": "See you at noon."},
+    )
+    assert payload["message_id"]
+    (sent,) = fake.sent
+    assert "To: ada@example.org" in str(sent["mime"])
+    assert "Subject: Confirmed" in str(sent["mime"])
+    assert "See you at noon." in str(sent["mime"])
+    assert sent["thread_id"] is None
+
+
+async def test_send_message_threads_as_a_reply() -> None:
+    fake = seeded_fake()
+    server = server_for(fake, "send")
+    payload = await call(
+        server,
+        "send_message",
+        {
+            "to": "ada@example.org",
+            "subject": "Re: Lunch on Thursday?",
+            "body": "Running five minutes late.",
+            "thread_id": "thread-lunch",
+        },
+    )
+    assert payload["thread_id"] == "thread-lunch"
+    (sent,) = fake.sent
+    assert sent["thread_id"] == "thread-lunch"
+
+
+@pytest.mark.parametrize(
+    ("mode", "tool", "arguments"),
+    [
+        ("write", "trash_thread", {"thread_id": "thread-lunch"}),
+        ("send", "send_message", {"to": "a@example.org", "subject": "s", "body": "b"}),
+    ],
+)
+async def test_write_and_send_failures_are_stable_too(
+    mode: str, tool: str, arguments: dict[str, Any]
+) -> None:
+    fake = seeded_fake()
+    fake.force(httpx.Response(401, json={"error": {"message": f"{UPSTREAM_ERROR_MARKER} 401"}}))
+    server = server_for(fake, mode)
+    with pytest.raises(ToolError) as failure:
+        await server.call_tool(tool, arguments)
+    assert "gmail.credential_rejected" in str(failure.value)
+    assert UPSTREAM_ERROR_MARKER not in str(failure.value)
