@@ -204,6 +204,7 @@ from agent_core.application.notification_worker import NotificationWorker
 from agent_core.application.public_services import (
     PublicApprovalService,
     PublicArtifactService,
+    PublicMemoryService,
     PublicRunService,
     PublicSessionService,
 )
@@ -223,6 +224,9 @@ from agent_core.application.services import (
 )
 from agent_core.application.services import (
     DeviceService as PublicDeviceServiceContract,
+)
+from agent_core.application.services import (
+    MemoryReadService as PublicMemoryReadServiceContract,
 )
 from agent_core.application.services import (
     NotificationService as PublicNotificationServiceContract,
@@ -404,6 +408,7 @@ class ApplicationServices:
     schedules: PublicScheduleServiceContract
     devices: PublicDeviceServiceContract
     notifications: PublicNotificationServiceContract
+    memory: PublicMemoryReadServiceContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -2019,6 +2024,7 @@ async def _compose(
             schedules=schedule_service,
             devices=device_service,
             notifications=notification_inbox,
+            memory=PublicMemoryService(uow_factory=uow_factory),
         )
         request_ids = UUID7RequestIdFactory(clock, RandomIdFactory())
 

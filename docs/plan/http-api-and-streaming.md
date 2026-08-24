@@ -341,6 +341,7 @@ browser.profile.read   browser.profile.write
 browser.grant.read     browser.grant.write
 schedule.read     schedule.write     schedule.cancel
 device.read       device.write       notification.read
+memory.read
 ```
 
 `approval.resolve` is the one the corpus already names; the rest follow

@@ -1,0 +1,242 @@
+"""Milestone 17 memory read API boundary coverage (PR 1, task 4).
+
+Sibling-surface boundary tests for `/v1/memories` — the service, the two
+routes, the config flag, and the `memory.read` scope. The formal ten hard
+gates (`gate.memory.read_api_*`) belong to a later task's
+`tests/gates/test_memory_read_api_m17.py`; this file stays at the
+happy-path / validation / authorization / failure level the sibling
+schedule and notification API boundary tests (`test_schedule_api_m11.py`,
+`test_notification_api_m12.py`) hold themselves to.
+"""
+
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID
+
+import httpx
+from fastapi.routing import APIRoute
+
+from agent_core.api import create_app
+from agent_core.bootstrap import Composition, build
+from agent_core.domain.agents import Principal
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryAuthority,
+    MemoryRecord,
+    MemoryStatus,
+    Polarity,
+    Portability,
+    Sensitivity,
+)
+from agent_core.policy.scopes import PLATFORM_SCOPES
+from tests.integration.m2_support import memory_settings
+
+NOW = datetime(2026, 8, 20, 16, tzinfo=UTC)
+TENANT = "local"
+PRINCIPAL_ID = "local-user"
+
+# The spec's exact 23-field exposure list (memory-read-api-and-browser.md).
+MEMORY_VIEW_FIELDS = {
+    "id",
+    "subject",
+    "statement",
+    "belief_type",
+    "status",
+    "polarity",
+    "scope",
+    "portability",
+    "authority",
+    "sensitivity",
+    "confidence",
+    "corroboration_count",
+    "flagged_for_review",
+    "conflicts_with",
+    "superseded_by",
+    "source_session_id",
+    "source_event_ids",
+    "valid_from",
+    "valid_to",
+    "expires_at",
+    "last_reinforced_at",
+    "created_at",
+    "updated_at",
+}
+
+
+def _belief(
+    *,
+    belief_id: int,
+    position: int,
+    tenant_id: str = TENANT,
+    principal_id: str = PRINCIPAL_ID,
+    sensitivity: Sensitivity = Sensitivity.INTERNAL,
+    status: MemoryStatus = MemoryStatus.ACTIVE,
+) -> MemoryRecord:
+    return MemoryRecord(
+        id=UUID(int=belief_id),
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        scope="project-a",
+        subject=f"subject-{belief_id}",
+        statement=f"statement {belief_id}",
+        source_session_id=UUID(int=900),
+        source_event_ids=[1],
+        confidence=0.9,
+        sensitivity=sensitivity,
+        valid_from=NOW,
+        status=status,
+        belief_type=BeliefType.PREFERENCE,
+        polarity=Polarity.ASSERT,
+        portability=Portability.PORTABLE,
+        origin_scopes=["project-a"],
+        corroboration_count=1,
+        last_reinforced_at=NOW,
+        formation_run_id=UUID(int=belief_id + 10_000),
+        consolidation_policy_version="formation@1",
+        authority=MemoryAuthority.USER,
+        store_position=position,
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+
+@asynccontextmanager
+async def _client(composition: Composition, *, principal: Principal | None = None) -> Any:
+    app = create_app(
+        composition.services,
+        composition.settings,
+        principal or composition.principal,
+        composition.new_request_id,
+        composition.readiness_probe,
+    )
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://agent.test") as client:
+        yield client
+
+
+async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
+    principal = Principal(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        roles={"user"},
+        scopes=set(PLATFORM_SCOPES) | {"memory.read"},
+    )
+    settings = replace(memory_settings(), memory_api_enabled=True)
+    async with build(
+        settings=settings,
+        storage="memory",
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        visible = _belief(belief_id=1, position=1, sensitivity=Sensitivity.INTERNAL)
+        restricted = _belief(belief_id=2, position=2, sensitivity=Sensitivity.RESTRICTED)
+        async with composition.uow_factory() as uow:
+            await uow.memories.upsert_belief(visible)
+            await uow.memories.upsert_belief(restricted)
+
+        async with _client(composition) as client:
+            missing_ceiling = await client.get("/v1/memories")
+            assert missing_ceiling.status_code == 400
+
+            unknown_ceiling = await client.get("/v1/memories", params={"ceiling": "top-secret"})
+            assert unknown_ceiling.status_code == 400
+
+            listing = await client.get("/v1/memories", params={"ceiling": "internal"})
+            assert listing.status_code == 200, listing.text
+            body = listing.json()
+            assert [item["id"] for item in body["items"]] == [str(visible.id)]
+            assert set(body["items"][0]) == MEMORY_VIEW_FIELDS
+
+            malformed_cursor = await client.get(
+                "/v1/memories",
+                params={"ceiling": "internal", "cursor": "not-a-real-cursor"},
+            )
+            assert malformed_cursor.status_code == 400
+
+            oversized = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "limit": 300}
+            )
+            assert oversized.status_code == 200, oversized.text
+            assert len(oversized.json()["items"]) <= 200
+
+            detail = await client.get(f"/v1/memories/{visible.id}", params={"ceiling": "internal"})
+            assert detail.status_code == 200, detail.text
+            assert set(detail.json()) == MEMORY_VIEW_FIELDS
+            assert detail.json()["id"] == str(visible.id)
+
+            above_ceiling = await client.get(
+                f"/v1/memories/{restricted.id}", params={"ceiling": "internal"}
+            )
+            missing = await client.get(
+                f"/v1/memories/{UUID(int=999)}", params={"ceiling": "restricted"}
+            )
+            assert above_ceiling.status_code == missing.status_code == 404
+            assert (
+                above_ceiling.json()["error"]["code"]
+                == missing.json()["error"]["code"]
+                == "not_found"
+            )
+
+        reader = principal.model_copy(update={"scopes": set()}, deep=True)
+        async with _client(composition, principal=reader) as unauthorized:
+            denied = await unauthorized.get("/v1/memories", params={"ceiling": "restricted"})
+            assert denied.status_code == 403
+
+        foreign = principal.model_copy(
+            update={"tenant_id": "other", "principal_id": "other-user"}, deep=True
+        )
+        async with _client(composition, principal=foreign) as stranger:
+            hidden = await stranger.get(
+                f"/v1/memories/{visible.id}", params={"ceiling": "restricted"}
+            )
+            assert hidden.status_code == 404
+
+        app = create_app(
+            composition.services,
+            composition.settings,
+            composition.principal,
+            composition.new_request_id,
+            composition.readiness_probe,
+        )
+        all_routes = [
+            nested
+            for route in app.routes
+            for nested in (
+                route.original_router.routes if hasattr(route, "original_router") else (route,)
+            )
+        ]
+        memory_routes = [
+            route
+            for route in all_routes
+            if isinstance(route, APIRoute) and route.path.startswith("/v1/memories")
+        ]
+        assert len(memory_routes) == 2
+        assert {
+            (method, (route.openapi_extra or {})["required_scope"])
+            for route in memory_routes
+            for method in (route.methods or set())
+        } == {("GET", "memory.read")}
+
+
+async def test_memory_http_surface_is_absent_by_default() -> None:
+    # Hard gate 7's other half: the scope stays recognized even with the
+    # route surface off, so configuration validation never rejects it.
+    assert "memory.read" in PLATFORM_SCOPES
+    async with build(settings=memory_settings(), storage="memory") as composition:
+        app = create_app(
+            composition.services,
+            composition.settings,
+            composition.principal,
+            composition.new_request_id,
+            composition.readiness_probe,
+        )
+        assert not [
+            route
+            for route in app.routes
+            if isinstance(route, APIRoute) and route.path.startswith("/v1/memories")
+        ]
+        assert "/v1/memories" not in app.openapi()["paths"]

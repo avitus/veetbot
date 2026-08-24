@@ -17,6 +17,7 @@ from agent_core.domain.browser import (
     BrowserProfileView,
 )
 from agent_core.domain.devices import DeviceRegistration
+from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.schedules import (
     ScheduleDefinition,
     ScheduleOccurrence,
@@ -31,6 +32,7 @@ from agent_core.domain.views import (
     ContentBlock,
     DeviceRegistrationResult,
     DeviceView,
+    MemoryView,
     NotificationInboxItem,
     Page,
     RunView,
@@ -280,3 +282,23 @@ class NotificationService(Protocol):
     async def list(
         self, principal: Principal, limit: int, cursor: str | None
     ) -> Page[NotificationInboxItem]: ...
+
+
+class MemoryReadService(Protocol):
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        statuses: builtins.list[MemoryStatus] | None,
+        belief_types: builtins.list[BeliefType] | None,
+        subject: str | None,
+        session_id: UUID | None,
+        text: str | None,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[MemoryView]: ...
+
+    async def get(
+        self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
+    ) -> MemoryView: ...

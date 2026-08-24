@@ -31,6 +31,7 @@ from agent_core.application.services import (
     BrowserGrantService,
     BrowserProfileService,
     DeviceService,
+    MemoryReadService,
     NotificationService,
     RunService,
     ScheduleService,
@@ -54,6 +55,7 @@ from agent_core.domain.devices import (
     device_routing_issue,
 )
 from agent_core.domain.errors import AgentCoreError, DeviceValidationError
+from agent_core.domain.memory import BeliefType, MemoryStatus, Sensitivity
 from agent_core.domain.notifications import NotificationKind
 from agent_core.domain.schedules import (
     ScheduleDefinition,
@@ -67,6 +69,7 @@ from agent_core.domain.views import (
     ArtifactView,
     ContentBlock,
     DeviceView,
+    MemoryView,
     NotificationInboxItem,
     Page,
     RunView,
@@ -141,6 +144,9 @@ class ApplicationServices(Protocol):
 
     @property
     def notifications(self) -> NotificationService: ...
+
+    @property
+    def memory(self) -> MemoryReadService: ...
 
 
 class CreateSessionRequest(BaseModel):
@@ -1161,6 +1167,55 @@ def create_app(
 
     if settings.notification_api_enabled:
         app.include_router(notification_router)
+
+    memory_router = APIRouter()
+
+    @memory_router.get(
+        "/v1/memories",
+        openapi_extra={"required_scope": "memory.read"},
+    )
+    async def list_memories(
+        authenticated: Annotated[Principal, secured("memory.read")],
+        ceiling: Sensitivity,
+        limit: Annotated[int, Query(ge=1)] = 50,
+        cursor: str | None = None,
+        status: Annotated[list[MemoryStatus] | None, Query()] = None,
+        belief_type: Annotated[list[BeliefType] | None, Query()] = None,
+        subject: str | None = None,
+        session_id: UUID | None = None,
+        text: str | None = None,
+    ) -> Page[MemoryView]:
+        # Pagination rule 3 clamps an oversized limit rather than rejecting
+        # it; the domain query bounds `limit` at 200, so the clamp happens
+        # here, before that value is ever used to construct it.
+        try:
+            return await services.memory.list(
+                authenticated,
+                ceiling=ceiling,
+                statuses=status,
+                belief_types=belief_type,
+                subject=subject,
+                session_id=session_id,
+                text=text,
+                limit=min(limit, 200),
+                cursor=cursor,
+            )
+        except ValueError as exc:
+            raise MalformedRequestError("memory cursor is malformed") from exc
+
+    @memory_router.get(
+        "/v1/memories/{memory_id}",
+        openapi_extra={"required_scope": "memory.read"},
+    )
+    async def get_memory(
+        memory_id: UUID,
+        authenticated: Annotated[Principal, secured("memory.read")],
+        ceiling: Sensitivity,
+    ) -> MemoryView:
+        return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
+
+    if settings.memory_api_enabled:
+        app.include_router(memory_router)
 
     @app.get("/health/live", openapi_extra={"required_scope": None})
     async def health_live(response: Response) -> dict[str, str]:

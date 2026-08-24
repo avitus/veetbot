@@ -92,6 +92,7 @@ class Settings:
     schedule_worker_enabled: bool = False
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
+    memory_api_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
     apns_key_id: str | None = None
@@ -908,6 +909,7 @@ def _load_settings(
     schedule_worker_enabled = _parse_flag(values, "AGENT_SCHEDULE_WORKER_ENABLED")
     notification_api_enabled = _parse_flag(values, "AGENT_NOTIFICATION_API_ENABLED")
     notification_dispatch_enabled = _parse_flag(values, "AGENT_NOTIFICATION_DISPATCH_ENABLED")
+    memory_api_enabled = _parse_flag(values, "AGENT_MEMORY_API_ENABLED")
     push_provider = _parse_enum(
         PushProviderKind,
         values.get("PUSH_PROVIDER", PushProviderKind.DISABLED.value).strip(),
@@ -1021,6 +1023,7 @@ def _load_settings(
         schedule_worker_enabled=schedule_worker_enabled,
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
+        memory_api_enabled=memory_api_enabled,
         push_provider=push_provider,
         apns_key_file=apns_key_file,
         apns_key_id=apns_key_id,
