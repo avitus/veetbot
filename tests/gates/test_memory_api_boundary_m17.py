@@ -153,9 +153,18 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
         async with _client(composition) as client:
             missing_ceiling = await client.get("/v1/memories")
             assert missing_ceiling.status_code == 400
+            missing_ceiling_error = missing_ceiling.json()["error"]
+            assert missing_ceiling_error["code"] == "malformed_request"
+            # Hard gate 1: the error names the offending parameter. `details`
+            # stays the closed-vocabulary `{}` (http-api-and-streaming.md
+            # rule 3); the parameter name lives in `message` instead (rule 2
+            # makes `message` a log surface, not a typed contract).
+            assert "ceiling" in missing_ceiling_error["message"]
+            assert missing_ceiling_error["details"] == {}
 
             unknown_ceiling = await client.get("/v1/memories", params={"ceiling": "top-secret"})
             assert unknown_ceiling.status_code == 400
+            assert "ceiling" in unknown_ceiling.json()["error"]["message"]
 
             listing = await client.get("/v1/memories", params={"ceiling": "internal"})
             assert listing.status_code == 200, listing.text

@@ -400,12 +400,24 @@ def create_app(
 
     @app.exception_handler(RequestValidationError)
     async def request_validation(request: Request, exc: RequestValidationError) -> JSONResponse:
-        del exc
+        # `message` is a log surface, not a contract (rule 2): it may name
+        # where a request went wrong, but never a value the client sent or
+        # did not send. Build locations from `loc` alone — never `msg`,
+        # `input`, or `ctx`, any of which can embed a submitted value.
+        # `details` stays `{}`; populating it is a closed-vocabulary,
+        # version-bump decision this handler does not make (rule 3).
+        locations: list[str] = []
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error["loc"])
+            if location and location not in locations:
+                locations.append(location)
+        base = "The request body or parameters are malformed"
+        message = f"{base}: {', '.join(locations)}." if locations else f"{base}."
         return _error_response(
             request,
             code="malformed_request",
             status=API_ERROR_STATUS["malformed_request"],
-            message="The request body or parameters are malformed.",
+            message=message,
         )
 
     @app.exception_handler(MalformedRequestError)
