@@ -456,6 +456,25 @@ def architecture_errors(root: Path) -> list[str]:
             errors.append(
                 f"pyproject.toml includes forbidden dependency-injection package {denied}"
             )
+
+    # The gmail_mcp package is a separate program beside the platform; the
+    # two may meet only over the MCP protocol, never the import graph.
+    for _module, (path, _, imports) in modules.items():
+        for imported in imports:
+            if imported == "gmail_mcp" or imported.startswith("gmail_mcp."):
+                errors.append(
+                    f"{path.relative_to(root)}: "
+                    f"agent_core imports the gmail_mcp server package ({imported})"
+                )
+    for path in sorted((root / "src" / "gmail_mcp").rglob("*.py")):
+        module = _module_name(root, path)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for imported in _imports(module, path, tree):
+            if imported == "agent_core" or imported.startswith("agent_core."):
+                errors.append(
+                    f"{path.relative_to(root)}: "
+                    f"gmail_mcp imports the agent_core platform package ({imported})"
+                )
     return sorted(set(errors))
 
 

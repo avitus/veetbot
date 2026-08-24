@@ -56,7 +56,7 @@ docs = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agent_core"]
+packages = ["src/agent_core", "src/gmail_mcp"]
 
 [tool.ruff]
 line-length = 100

@@ -4,7 +4,7 @@
   kind: structural
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Package isolation** — `gmail_mcp` imports nothing from `agent_core` and `agent_core` imports nothing from `gmail_mcp`, walked in both directions by the architecture check."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_gmail_mcp_two_way_isolation
 - id: gate.email.contract_parity
   milestone: 18
   kind: case

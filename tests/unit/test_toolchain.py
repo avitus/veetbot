@@ -832,7 +832,10 @@ def test_project_metadata_and_test_layout_match_the_toolchain_spec() -> None:
     assert project["project"]["requires-python"] == ">=3.12"
     assert project["project"]["scripts"]["agent"] == "agent_core.cli.main:app"
     assert set(project["dependency-groups"]) == {"dev", "test", "docs"}
-    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == ["src/agent_core"]
+    assert project["tool"]["hatch"]["build"]["targets"]["wheel"]["packages"] == [
+        "src/agent_core",
+        "src/gmail_mcp",
+    ]
     assert project["tool"]["pytest"]["ini_options"]["addopts"] == (
         "--strict-markers --strict-config"
     )
