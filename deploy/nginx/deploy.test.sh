@@ -37,8 +37,11 @@ require_tool() {
   local path="$1"
   local version_marker="$2"
   local name="$3"
-  if [[ ! -x "$path" ]] \
-    || ! "$path" --version 2>/dev/null | grep -Fq "$version_marker"; then
+  local version_output=""
+  if [[ -x "$path" ]]; then
+    version_output="$("$path" --version 2>/dev/null || true)"
+  fi
+  if [[ ! -x "$path" ]] || ! grep -Fq "$version_marker" <<<"$version_output"; then
     printf 'nginx deployment tests require %s; see docs/deployment.md\n' "$name" >&2
     exit 1
   fi
