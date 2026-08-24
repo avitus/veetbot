@@ -1053,15 +1053,27 @@ async def test_the_trace_is_separate(tmp_path: Path) -> None:
         rendered = "".join(
             str(event.payload) for event in parent_events if event.event_type != "run.completed"
         )
+        # The bounded summary is the parent's to keep; the child's seed
+        # envelope and its own event stream never enter the parent's log.
         assert "delegation_brief" not in rendered
-        assert "the sum was computed" not in rendered
+        assert "Work only toward the objective" not in rendered
         [completed_tool_event] = [
             event
             for event in parent_events
             if event.event_type == "tool.call.completed"
             and event.payload.get("name") == "delegate.run"
         ]
-        assert set(completed_tool_event.payload) == {"name", "call_id", "delegation_id"}
+        assert set(completed_tool_event.payload) == {
+            "name",
+            "call_id",
+            "reason_code",
+            "result_item",
+            "delegation_id",
+        }
+        result_item = completed_tool_event.payload["result_item"]
+        assert result_item["trust"] == "external_untrusted"
+        [summary_part] = result_item["content"]
+        assert summary_part["text"] == "Four; the sum was computed."
 
 
 async def test_artifacts_come_back_as_references(tmp_path: Path) -> None:
@@ -1222,3 +1234,109 @@ async def test_delegation_changes_the_outcome() -> None:
     assert before.run.failure is not None
     assert after.run.status is RunStatus.COMPLETED
     assert after.run.final_message == "FINDING_CONFIRMED"
+
+
+async def test_a_child_approval_resolves_and_the_delegation_still_joins(
+    tmp_path: Path,
+) -> None:
+    """A child parked on approval resumes after resolution and the parent completes."""
+
+    from agent_core.domain.approvals import ApprovalResolutionType
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    _delegate_call(
+                        "Request an approved external write.",
+                        allowed_tools=["demo.external_write"],
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="demo.external_write",
+                        arguments={"destination": "demo", "content": "approved-write"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="The write was approved.", stop_reason=StopReason.END_TURN),
+            ScriptedTurn(
+                text="The child finished after approval.",
+                stop_reason=StopReason.END_TURN,
+            ),
+        ]
+    )
+    async with build(settings=_delegation_settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("delegate an approval-gated write and wait")
+        parent = await app.runs.get(run_id)
+        assert parent.status is RunStatus.WAITING_FOR_APPROVAL
+        async with app.uow_factory() as uow:
+            [delegation] = await uow.delegations.get_for_parent_run(run_id)
+        child_run_id = delegation.children[0].child_run_id
+        assert child_run_id is not None
+        [pending] = await app.approvals.list_pending(run_id=child_run_id)
+
+        await app.approvals.resolve(pending.id, ApprovalResolutionType.APPROVE_ONCE)
+
+        parent = await app.runs.get(run_id)
+        assert parent.status is RunStatus.COMPLETED
+        assert parent.final_message == "The child finished after approval."
+        child = await app.runs.get(child_run_id)
+        assert child.status is RunStatus.COMPLETED
+        assert child.final_message == "The write was approved."
+        async with app.uow_factory() as uow:
+            [delegation] = await uow.delegations.get_for_parent_run(run_id)
+            assert delegation.status is DelegationStatus.JOINED
+            child_invocations = await uow.invocations.list_for_run(child_run_id, app.principal)
+            [write_invocation] = [
+                record for record in child_invocations if record.tool_name == "demo.external_write"
+            ]
+            assert write_invocation.status is ToolInvocationStatus.SUCCEEDED
+
+
+async def test_two_sequential_delegations_complete_in_one_parent_run(
+    tmp_path: Path,
+) -> None:
+    """A parent can delegate, resume, and delegate again within the same run."""
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[_delegate_call("Add two and two.")],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Four.", stop_reason=StopReason.END_TURN),
+            ScriptedTurn(
+                tool_calls=[_delegate_call("Add three and three.")],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="Six.", stop_reason=StopReason.END_TURN),
+            ScriptedTurn(text="Four then six.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(settings=_delegation_settings(tmp_path), script=script) as app:
+        run_id = await app.runs.submit("delegate twice in sequence")
+        parent = await app.runs.get(run_id)
+
+        assert parent.status is RunStatus.COMPLETED
+        assert parent.final_message == "Four then six."
+        async with app.uow_factory() as uow:
+            delegations = await uow.delegations.get_for_parent_run(run_id)
+            assert len(delegations) == 2
+            assert all(delegation.status is DelegationStatus.JOINED for delegation in delegations)
+            summaries = [
+                outcome.summary
+                for delegation in delegations
+                if delegation.result is not None
+                for outcome in delegation.result.children
+            ]
+            assert summaries == ["Four.", "Six."]
+            assert await uow.delegations.live_children_for_parent(run_id) == 0
+        events = await _events(app, parent.session_id)
+        waits = [event for event in events if event.event_type == "run.waiting_for_approval"]
+        assert len(waits) == 2
+        assert {wait.payload["suspension"]["kind"] for wait in waits} == {"child_run"}

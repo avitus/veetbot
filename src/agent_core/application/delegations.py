@@ -816,6 +816,8 @@ class DelegationJoin:
                 payload={
                     "name": invocation.tool_name,
                     "call_id": invocation.call_id,
+                    "reason_code": outcome.reason_code,
+                    "result_item": result_item.model_dump(mode="json"),
                     "delegation_id": str(joined.id),
                 },
             )
