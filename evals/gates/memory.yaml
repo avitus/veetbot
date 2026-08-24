@@ -315,7 +315,7 @@
   milestone: 17
   kind: case
   spec: docs/plan/memory-read-api-and-browser.md#hard-gates
-  statement: "**A principal sees only its own beliefs.** A list request returns nothing belonging to another principal or another tenant, and a detail request for such a belief is `not_found` with status 404 rather than `forbidden`."
+  statement: "**A principal sees only its own beliefs.** A list request returns nothing belonging to another principal or another tenant, and a detail request for such a belief is `not_found` with status 404 rather than `authorization_error`."
   check: tests/gates/test_memory_read_api_m17.py::test_a_principal_sees_only_its_own_beliefs
 - id: gate.memory.read_api_pagination
   milestone: 17
@@ -357,5 +357,5 @@
   milestone: 17
   kind: case
   spec: docs/plan/memory-read-api-and-browser.md#hard-gates
-  statement: "**Every error is a member of the closed vocabulary.** Across missing and malformed parameters, absent and insufficient credentials, unknown identifiers, and above-ceiling reads, every response either succeeds or carries one of `validation_error`, `unauthenticated`, `forbidden`, or `not_found` with its documented status."
+  statement: "**Every error is a member of the closed vocabulary.** Across missing and malformed parameters, absent and insufficient credentials, unknown identifiers, and above-ceiling reads, every response either succeeds or carries one of `malformed_request`, `authentication_error`, `authorization_error`, or `not_found` with its documented status."
   check: tests/gates/test_memory_read_api_m17.py::test_every_error_is_a_member_of_the_closed_vocabulary

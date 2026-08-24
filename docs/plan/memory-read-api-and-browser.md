@@ -163,18 +163,19 @@ The closed error-code vocabulary is unchanged
 members and add no code of their own.
 
 ```text
-400  validation_error  missing or unknown ceiling, unknown status or
-                       belief type, malformed or undecodable cursor,
-                       limit that is not a positive integer
-401  unauthenticated   no credential, or a credential that does not resolve
-403  forbidden         a principal without memory.read
-404  not_found         a belief above the ceiling, in another principal's
-                       store, or absent
+400  malformed_request     missing or unknown ceiling, unknown status or
+                           belief type, malformed or undecodable cursor,
+                           limit that is not a positive integer
+401  authentication_error  no credential, or a credential that does not
+                           resolve
+403  authorization_error   a principal without memory.read
+404  not_found             a belief above the ceiling, in another
+                           principal's store, or absent
 ```
 
 A `limit` above 200 is clamped rather than rejected, which is the pagination
 rule the API already applies everywhere; only a `limit` that is not a positive
-integer is a validation error.
+integer is refused, as `malformed_request`.
 
 ### Pagination
 
@@ -394,8 +395,9 @@ enumeration ship together or the corpus disagrees with the code.
    Registered as `gate.memory.read_api_ceiling_filter`, property. **M17.**
 3. **A principal sees only its own beliefs.** A list request returns nothing
    belonging to another principal or another tenant, and a detail request for
-   such a belief is `not_found` with status 404 rather than `forbidden`.
-   Registered as `gate.memory.read_api_principal_isolation`, case. **M17.**
+   such a belief is `not_found` with status 404 rather than
+   `authorization_error`. Registered as
+   `gate.memory.read_api_principal_isolation`, case. **M17.**
 4. **Keyset paging neither skips nor repeats.** Walking every page while
    beliefs are written and retired between requests yields each live belief at
    most once and every belief that existed throughout exactly once; a malformed
@@ -431,9 +433,9 @@ enumeration ship together or the corpus disagrees with the code.
 10. **Every error is a member of the closed vocabulary.** Across missing and
     malformed parameters, absent and insufficient credentials, unknown
     identifiers, and above-ceiling reads, every response either succeeds or
-    carries one of `validation_error`, `unauthenticated`, `forbidden`, or
-    `not_found` with its documented status. Registered as
-    `gate.memory.read_api_error_vocabulary`, case. **M17.**
+    carries one of `malformed_request`, `authentication_error`,
+    `authorization_error`, or `not_found` with its documented status.
+    Registered as `gate.memory.read_api_error_vocabulary`, case. **M17.**
 
 ## Tracked metrics
 

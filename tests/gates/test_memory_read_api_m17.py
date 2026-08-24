@@ -361,9 +361,9 @@ def test_nothing_above_the_ceiling_is_returned_or_distinguishable(
 async def test_a_principal_sees_only_its_own_beliefs() -> None:
     """Another principal's and another tenant's beliefs are invisible, and 404 not 403.
 
-    `forbidden` on a foreign identifier would confirm the belief exists; the
-    cross-tenant not-found rule extends to the neighbouring principal for the
-    same reason.
+    `authorization_error` on a foreign identifier would confirm the belief
+    exists; the cross-tenant not-found rule extends to the neighbouring
+    principal for the same reason.
     """
 
     async with build(
@@ -937,12 +937,12 @@ async def _projection_over_the_wire() -> None:
 async def test_every_error_is_a_member_of_the_closed_vocabulary() -> None:
     """Every failure of these routes carries a closed-vocabulary code and status.
 
-    The design's error table names the four conditions by their taxonomy
-    class — validation, unauthenticated, forbidden, not found. The wire codes
-    are the closed vocabulary's own
-    (http-api-and-streaming.md:111): `malformed_request`,
-    `authentication_error`, `authorization_error`, and `not_found`. These
-    routes raise exactly those four and add no code of their own.
+    The design's error table names the four members of the closed vocabulary
+    (http-api-and-streaming.md:111) these routes may raise:
+    `malformed_request`, `authentication_error`, `authorization_error`, and
+    `not_found`. They add no code of their own, so the observed set of
+    (status, code) pairs is asserted to be exactly those four rather than
+    merely contained in the vocabulary.
     """
 
     missing_id = UUID(int=0xD15C)
