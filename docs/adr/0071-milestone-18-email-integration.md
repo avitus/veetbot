@@ -17,7 +17,7 @@ replies on approval, organize the mailbox, and check it on a schedule. The
 roadmap rule requires two things before an item enters the plan: the owner's
 authorization and a specification with gates to declare. This ADR is the
 authorization, and [email-integration.md](../plan/email-integration.md) is the
-specification, with thirteen.
+specification, with thirteen gates to declare.
 
 The entry condition also answers the mechanism question, and it answers it
 well. The MCP adapter Milestone 8 built treats every server as an untrusted
@@ -45,10 +45,12 @@ already promises: an operator-declared read-only MCP classification. Decision
    16 and 17 proceed alongside them, and its gates may become green
    independently. The verified gate ceiling still advances only in numerical
    order, so nothing here moves the ceiling past 15. Unlike the two memory
-   workstreams this milestone does touch two shared files — the policy
-   engine's condition function and the configuration surface — and the overlap
-   is named here rather than discovered in review: both changes are additive
-   arms that no authorized milestone's diff also touches.
+   workstreams this milestone does touch three shared files — the policy
+   engine's condition function, the configuration surface, and the MCP
+   adapter's failure mapping, where decision 10 generalizes an outcome the
+   adapter already produces on one path — and the overlap is named here rather
+   than discovered in review: all three changes are additive arms on existing
+   rules that no authorized milestone's diff also touches.
 2. **Email arrives as first-party MCP servers, not as builtin tools.** B11's
    entry condition names the mechanism and the design honors it: the platform
    gains no `email.*` builtin, no provider port, and no Gmail type in
@@ -82,13 +84,17 @@ already promises: an operator-declared read-only MCP classification. Decision
    model-authored or server-claimed — the operator declares it at
    configuration time, stdio command lines are operator-configured only, and a
    tenant-supplied HTTP endpoint was validated against the egress allowlist
-   when the configuration row was written. The arm authorizes no worker
-   egress: an `mcp` target executes with networking disabled, the platform's
-   HTTP transport to a remote server follows no redirect, and the destination
-   that ultimately serves a read is governed on its own path — the
-   operator-configured command line, or the egress-allowlisted endpoint — so
-   no model-authored argument can select where a read goes. The change is one
-   additive arm in
+   when the configuration row was written. The arm widens no destination
+   policy: it adds no host to the egress allowlist, and the destination that
+   ultimately serves a read is governed on its own path — the
+   operator-configured command line for a stdio child, or the
+   egress-allowlisted endpoint reached over the platform's own no-redirect
+   HTTP transport — so no model-authored argument can select where a read
+   goes. What the arm does not do is confine a stdio child's egress, because
+   nothing on the platform side can: a stdio server is a child of the worker
+   and inherits its network position, and the specification states that and
+   its consequences under *The stdio network boundary* rather than implying a
+   restriction that does not exist. The change is one additive arm in
    one function, amended in [policy-and-approvals.md](../plan/policy-and-approvals.md)
    in the same change, and it repairs the existing denial of the adapter's own
    read-only `read_resource` tool rather than relaxing anything: every
@@ -139,6 +145,26 @@ already promises: an operator-declared read-only MCP classification. Decision
    email notification transport stay B3 and B4 — different roadmap items
    this ADR does not touch. Calendar, B11's other half, enters only with its
    own specification.
+10. **A dispatched non-idempotent MCP call that fails resolves `UNCERTAIN`,
+    not a retryable failure.** `gmail_write` and `gmail_send` are
+    `NON_IDEMPOTENT`, and Gmail can commit a request before the client reads
+    the answer, so a rate limit, a 5xx, or a lost response after dispatch is
+    ambiguous rather than failed and retrying it duplicates a label change or
+    a message. The corpus already holds the machinery and already reaches this
+    conclusion twice: ADR-0021's watermark makes the ambiguity a fact rather
+    than an inference, the adapter produces exactly this outcome for a
+    mid-session 401 arriving after the watermark, and browser automation
+    settled it the same way for a mutation that may have reached the site. The
+    decision is to generalize that rule rather than special-case a mailbox —
+    the adapter's mapping is keyed on the declared idempotency class, so every
+    non-idempotent MCP server gets it — and to claim no provider idempotency,
+    because nothing in the specified transport carries a key. Reconciliation
+    is therefore explicit and manual: a write is reconciled by reading the
+    threads back through `gmail_read`, and a send cannot be reconciled inside
+    the milestone at all, because the send server's roster is one tool and its
+    Google scope carries no read, so it goes to human review. The change can
+    only turn a `failed` into an `uncertain`, which is the safe direction, and
+    it costs the false positive ADR-0040 already accepted.
 
 ## Consequences
 
@@ -151,6 +177,19 @@ already promises: an operator-declared read-only MCP classification. Decision
   holding set grows by one operator-vouched target shape, and the platform's
   own `read_resource` tool becomes usable under the default ruleset for
   read-only-classified servers.
+- Every non-idempotent MCP server, not only the two this milestone adds,
+  inherits decision 10's outcome: a failure after dispatch becomes
+  `UNCERTAIN` and a human review rather than a `failed` the model may propose
+  again. That is a behavior change outside the milestone's own surface, it is
+  the direction ADR-0021 and ADR-0040 already chose, and its cost is reviews
+  for calls that never left the process.
+- A stdio child's egress is not restricted by anything the platform enforces.
+  The milestone accepts that and answers it by building the server itself,
+  gating its endpoint constants and its refused redirect, and naming the
+  host-level enforcement it does not require as a deployment precondition
+  rather than a platform feature. A third-party stdio server would have the
+  same reach with none of the gates, which is decision 2 read from the
+  security end.
 - Approval fatigue is accepted for round one: every label change, draft, and
   send requires a human decision. The batch `modify_labels` tool is the
   mitigation; the relief valve is B8 and stays closed.

@@ -1284,10 +1284,21 @@ calendar, Gmail push, interval recurrence, the email Surface, and the email
 notification transport stay on the roadmap where B11, B5, B3, and B4 hold
 them.
 
+Two things the specification states rather than glosses. A stdio server is a
+child of the worker and inherits its network position, so no platform
+mechanism confines `gmail_mcp` to Google: the confinement is the package's own
+endpoint constants, refused redirects, and gates, and host-level egress
+enforcement is named as a deployment precondition the milestone does not
+require. And because the two write servers are `NON_IDEMPOTENT` and Gmail can
+commit before answering, a failure after dispatch resolves `UNCERTAIN` rather
+than a retryable failure, generalizing the rule the adapter already applies to
+a post-watermark 401.
+
 The readiness verdict is **Authorized**: the specification, the ADR, the
-registry entries, and the census row land together, and the one shared-file
-overlap this milestone carries — the policy condition and the configuration
-surface — is named in the ADR rather than discovered in review.
+registry entries, and the census row land together, and the three shared-file
+overlaps this milestone carries — the policy condition, the configuration
+surface, and the MCP adapter's non-idempotent failure mapping — are named in
+the ADR rather than discovered in review.
 
 ## The three plan sections no specification expanded
 
