@@ -3385,6 +3385,63 @@ predicates to the trace store's per-turn read; consolidation or formation audit
 routes; or knowledge documents. Writes over HTTP remain excluded exactly as
 ADR-0069 left them.
 
+### Milestone 18: First-class email integration
+
+The owner authorized this milestone on 2026-08-24 (ADR-0071) as a parallel
+workstream alongside Milestones 13 through 15 and Milestone 17, meeting
+roadmap item B11's entry condition for its email half: owner intent, with
+email arriving as MCP servers. Section 2.6 excluded email from the initial
+version and built the interfaces for its later addition; this milestone is
+that addition, carried entirely by the Milestone 8 MCP adapter, the
+Milestone 4 approval lifecycle, the Milestone 11 scheduler, and the
+Milestone 12 notification outbox. The detailed design is
+[email-integration.md](email-integration.md) and ADR-0071; the design
+declares this milestone's thirteen gates.
+
+Implement:
+
+- Three first-party stdio MCP servers in one package, `src/gmail_mcp/`,
+  beside `agent_core` and import-isolated from it in both directions:
+  `gmail_read` at `NETWORK_READ`/`LOW`/`READ_ONLY`, `gmail_write` at
+  `EXTERNAL_WRITE`/`MEDIUM`/`NON_IDEMPOTENT`, and `gmail_send` at
+  `EXTERNAL_MESSAGE`/`HIGH`/`NON_IDEMPOTENT`, eight tools in all, with no
+  permanent-deletion tool on any roster.
+- Broker-held credentials, one `env`-scheme reference per server resolving
+  to a JSON document with the client id, client secret, and refresh token;
+  the server runs the refresh exchange internally and no token material or
+  upstream text crosses the stdio pipe.
+- A one-time operator consent ceremony, `python -m gmail_mcp bootstrap`,
+  writing owner-only credential files that enter the broker through
+  file-backed settings references.
+- An MCP arm on the deterministic `host_on_allowlist` condition: it holds
+  for an `mcp` target when the executing tool's specification declares
+  `NETWORK_READ` and `READ_ONLY`, landed in the same change as the
+  policy-and-approvals amendment that states it.
+- Default-off composition behind `AGENT_EMAIL_ENABLED`: unset, no server
+  row, no registered or advertised `mcp.gmail_*` tool, no scope grant.
+- A documented monitoring recipe over existing daily and weekly schedules
+  and the existing approval and schedule-outcome notifications.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- All eight tools pass one shared contract suite in all three modes against
+  a fake Gmail API, and no mode exposes permanent deletion.
+- Under the default ruleset a read-server call is allowed while every
+  write-server and send-server call requires approval, and a send proposed
+  after reading untrusted mail cannot be plain-allowed.
+- The credential reaches each server only as the one declared variable in a
+  constructed environment, and no token material or upstream text appears
+  in `argv`, tool results, events, or logs.
+- With the flag unset the servers, tools, and scope grants are absent.
+- A daily triage schedule produces reads without approvals, writes with
+  them, and content-free notifications.
+
+The milestone does not include calendar; permanent deletion; attachments;
+Gmail push; interval or cron recurrence (B5); the email inbound Surface (B3)
+or the email notification transport (B4); a second provider or account; or
+any auto-approval or standing-grant mechanism (B8).
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3405,7 +3462,7 @@ owner's current ranking, not a schedule.
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
-| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers |
+| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 
 ## 22. Security baseline

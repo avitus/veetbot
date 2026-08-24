@@ -74,6 +74,7 @@ validates the floor, and no trailer means lane A.
 | Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
 | Memory evaluation, the benchmark, and lifecycle maintenance | `memory-evaluation-and-lifecycle.md` |
 | The memory read API and the native memory browser | `memory-read-api-and-browser.md` |
+| The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
@@ -92,9 +93,9 @@ validates the floor, and no trailer means lane A.
 - Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
   12 through 15 — notifications and device identity, subagents and delegation,
   inbound surfaces and pairing, operational hardening — are authorized in that
-  order (ADR-0061), with Milestone 16 memory evaluation and lifecycle (ADR-0069)
-  and Milestone 17 the memory read API and native browser (ADR-0070) authorized
-  in parallel; model routing and the plan's roadmap items are not.
+  order (ADR-0061), with Milestone 16 memory evaluation (ADR-0069), 17 the
+  memory read API and browser (ADR-0070), and 18 email integration (ADR-0071)
+  in parallel; model routing and the plan's remaining roadmap items are not.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.

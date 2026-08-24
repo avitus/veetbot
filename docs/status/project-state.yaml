@@ -31,6 +31,7 @@ project:
     - 15
     - 16
     - 17
+    - 18
 
 milestones:
   "0":
@@ -291,6 +292,26 @@ milestones:
           Build-sequence step 8's remaining half is still outstanding: hosted
           CI has not run on this milestone's branches, and the CodeRabbit
           review loop has not run on one final head from `dev` to `main`.
+  "18":
+    title: First-class email integration
+    status: authorized
+    authorized_on: 2026-08-24
+    design: docs/plan/email-integration.md
+    adr: docs/adr/0071-milestone-18-email-integration.md
+    gates_registered: 13
+    authorized_scope:
+      - three first-party stdio Gmail MCP servers split by side effect
+      - read and triage, drafts and batch labels, approval-gated send
+      - trash only, never permanent deletion
+      - broker-held env-scheme credentials and the bootstrap consent ceremony
+      - the read-only MCP arm of the host_on_allowlist condition
+      - default-off composition behind AGENT_EMAIL_ENABLED
+      - a monitoring recipe over existing schedules and notifications
+    deferred_scope:
+      - calendar, attachments, Gmail push, a second provider or account
+      - interval and cron recurrence (B5)
+      - the email inbound Surface (B3) and email notification transport (B4)
+      - auto-approval profiles and standing grants (B8)
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -337,14 +358,18 @@ readiness:
     stays at Milestone 12. On 2026-08-23 the owner authorized Milestone 17,
     the memory read API and the native memory browser, as a second parallel
     workstream (ADR-0070), specified by memory-read-api-and-browser.md with
-    ten registered gates. Model routing remains
+    ten registered gates. On 2026-08-24 the owner authorized Milestone 18,
+    first-class email integration, as a third parallel workstream (ADR-0071),
+    meeting roadmap item B11's entry condition for its email half; it is
+    specified by email-integration.md with thirteen registered gates in a
+    new email area. Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-24T00:58:16Z
+last_updated: 2026-08-24T07:32:16Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

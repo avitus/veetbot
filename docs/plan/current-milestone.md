@@ -19,6 +19,10 @@ title: Current Milestone
   [memory-read-api-and-browser.md](memory-read-api-and-browser.md) with ten
   gates and is a second parallel workstream rather than a successor: it shares
   no file with Milestones 13 through 15 and may proceed alongside them.
+  Milestone 18 — first-class email integration — is specified by
+  [email-integration.md](email-integration.md) with thirteen gates and is a
+  third parallel workstream on the same terms, its two shared-file touches
+  named in ADR-0071.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -28,6 +32,8 @@ title: Current Milestone
   the memory read API and the native memory browser, was authorized on
   2026-08-23 as a second such workstream (ADR-0070), on the same terms: its
   gates may go green independently and move the verified ceiling no further.
+  Milestone 18, first-class email integration, was authorized on 2026-08-24
+  as a third (ADR-0071), on the same terms again.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -54,7 +60,9 @@ title: Current Milestone
   browser view model and views, and sidebar entry point, with native Swift
   Testing coverage — passes the local Apple package and simulator lanes;
   hosted CI and the CodeRabbit review loop on the `dev` to `main` pull request
-  remain outstanding.
+  remain outstanding. Milestone 18, the third parallel workstream, is
+  authorized and specified with thirteen registered gates; it has not
+  started.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -100,7 +108,10 @@ entries in the existing area, and it never showed a zero row because its
 authorization and its specification arrived together. Milestone 17's
 [memory-read-api-and-browser.md](memory-read-api-and-browser.md) and ADR-0070
 landed on the same day as that milestone's authorization, adding ten more
-`gate.memory.*` entries to the same area.
+`gate.memory.*` entries to the same area. Milestone 18's
+[email-integration.md](email-integration.md) and ADR-0071 landed the same
+way on 2026-08-24, adding thirteen `gate.email.*` entries in a new area of
+their own.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -145,6 +156,7 @@ substitute.
 - [Milestone 15 — operational hardening](engineering-plan.md#milestone-15-operational-hardening)
 - [Milestone 16 — memory evaluation and lifecycle](engineering-plan.md#milestone-16-memory-evaluation-and-lifecycle)
 - [Milestone 17 — memory read API and browser](engineering-plan.md#milestone-17-memory-read-api-and-browser)
+- [Milestone 18 — first-class email integration](engineering-plan.md#milestone-18-first-class-email-integration)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -181,6 +193,9 @@ moves it. Milestone 17's contract is its ten `gate.memory.*` entries —
 `read_api_view_projection`, and `read_api_error_vocabulary` — plus the plan's
 acceptance criteria and the
 [memory-read-api-and-browser design](memory-read-api-and-browser.md).
+Milestone 18's contract is its thirteen `gate.email.*` entries plus the
+plan's acceptance criteria and the
+[email-integration design](email-integration.md).
 
 ## Completion rule
 
@@ -217,3 +232,10 @@ the native Apple package and simulator lanes pass, because the browser is half
 of what the milestone delivers and no Python gate observes Swift. Being a
 parallel workstream changes nothing about the ceiling, which still advances
 only after every earlier milestone has completed.
+
+Milestone 18 completes on the same terms, with its own additional condition:
+the owner's real-mailbox smoke — bootstrap consent, a scheduled triage run,
+an approval delivered to the phone, and one approved send — is recorded as
+evidence, because the mailbox is an external system no gate's fake can vouch
+for. Being a parallel workstream changes nothing about the ceiling, which
+still advances only after every earlier milestone has completed.

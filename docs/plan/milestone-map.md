@@ -166,7 +166,7 @@ gate.<area>.<slug>
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
       knowledge, web, browser, schedule, device, notify, delegate,
-      surface, ops
+      surface, ops, email
 slug  lowercase, underscore-separated, unique within its area
 ```
 
@@ -256,6 +256,15 @@ jobs add no milestone gate; the subject is the operational lifecycle — backup,
 restore, watch, harden, roll back — and it is one spec owning one area, as
 `sandbox` was.
 
+`email` is the twenty-third, declared by
+[email-integration.md](email-integration.md) at Milestone 18. It is not
+folded into `tool` even though every one of its tools crosses the MCP
+adapter the tool system owns, because its gates are statements about the
+Gmail servers, their rosters, their credential ceremony, and their policy
+posture rather than about the adapter that carries them — the same argument
+that kept `web` and `browser` out of `tool`. One spec owns all thirteen, as
+`sandbox` and `ops` were owned.
+
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
 does not admit — a slug is underscore-separated and holds no dots, so
@@ -314,9 +323,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 23 subject specifications declare 329 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 338
-declarations, 335 registry entries once the 3 aliases are subtracted.
+The 24 subject specifications declare 342 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 351
+declarations, 348 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1204,6 +1213,41 @@ declared methods and scopes, the adapters against one contract suite, and a
 serialized model against its exposure list. The remaining six are boundary
 cases over the two routes.
 
+### Email integration, thirteen gates
+
+Thirteen gates, all new, in the new `email` area and all at Milestone 18.
+Five are statements about the servers themselves — the package boundary, the
+shared contract, the rosters, the declared classifications, and the failure
+taxonomy — five are statements about credentials and configuration — the
+constructed environment, token confinement, the default-off flag, scope
+confinement, and the bootstrap ceremony — and three are statements about
+policy and composition in use: the read-allows-write-approves split, the
+untrusted-origin send, and the monitoring recipe.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.email.package_isolation                    structural   18
+2   gate.email.contract_parity                      case         18
+3   gate.email.roster_confinement                   structural   18
+4   gate.email.classification                       case         18
+5   gate.email.read_allow_write_approve             case         18
+6   gate.email.untrusted_origin                     case         18
+7   gate.email.credential_confinement               property     18
+8   gate.email.token_confinement                    case         18
+9   gate.email.default_off                          case         18
+10  gate.email.scope_confinement                    case         18
+11  gate.email.bootstrap_consent                    case         18
+12  gate.email.failure_taxonomy                     case         18
+13  gate.email.monitoring_recipe                    case         18
+```
+
+Gate 7 is a property because the credential claim is over generated server
+configurations rather than one arrangement; gates 1 and 3 are structural
+because they inspect the import graph and the advertised rosters rather than
+a behavior. The remaining ten are boundary cases over the three servers, the
+policy engine, the composition root, and the bootstrap command.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1287,6 +1331,11 @@ milestone  new gates  cumulative  the earliest of them
                                   filter, principal isolation, keyset
                                   paging, the read-only router, the
                                   exposure list
+18                13         348  the package boundary, the server
+                                  contract, honest classification,
+                                  credential and token confinement,
+                                  the bootstrap ceremony, the
+                                  monitoring recipe
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1307,22 +1356,23 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and thirty-five gates are green before
+2.  **Forty-one of three hundred and forty-eight gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and thirty-five, which is every
-registry entry, at Milestone 17. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and forty-eight, which is every
+registry entry, at Milestone 18. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
 Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
-`gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, and Milestone
+`gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, Milestone
 16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
-those specs already shared. Every authorized milestone now has a specification
+those specs already shared, and Milestone 18's thirteen are `gate.email.*` in
+an area of their own. Every authorized milestone now has a specification
 that declares its gates; the roadmap's items add none until the owner
 authorizes one and a specification lands for it. Routing remains deferred and
 adds none.
