@@ -174,6 +174,10 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
             body = listing.json()
             assert [item["id"] for item in body["items"]] == [str(visible.id)]
             assert set(body["items"][0]) == MEMORY_VIEW_FIELDS
+            # A belief body is principal-scoped and sensitivity-bearing, so no
+            # shared or on-disk cache may keep it. The artifact content route
+            # carries the same header for the same reason.
+            assert listing.headers["cache-control"] == "private, no-store"
 
             malformed_cursor = await client.get(
                 "/v1/memories",
@@ -191,6 +195,7 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
             assert detail.status_code == 200, detail.text
             assert set(detail.json()) == MEMORY_VIEW_FIELDS
             assert detail.json()["id"] == str(visible.id)
+            assert detail.headers["cache-control"] == "private, no-store"
 
             above_ceiling = await client.get(
                 f"/v1/memories/{restricted.id}", params={"ceiling": "internal"}

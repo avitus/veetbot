@@ -1231,7 +1231,7 @@ yet.
 | key | source | why it earns a key |
 | --- | --- | --- |
 | `provider_api` | the profile | one adapter fronts three APIs, and a row that does not say which is a row that cannot be compared |
-| `response_id` | the response body | `engineering-plan.md:1284` requires the OpenAI adapter to capture it |
+| `response_id` | the response body | `engineering-plan.md:1281` requires the OpenAI adapter to capture it |
 | `request_id` | a response header | the only identifier a vendor support ticket can be opened against |
 | `resolved_model` | the response body | an alias resolves to a dated model, and reproducibility needs the dated one |
 | `previous_response_id` | the request | which continuation this attempt resumed, which is the first thing to check when a reasoning chain breaks |
@@ -1331,8 +1331,8 @@ evaluate.
 
 ## Retries, and who owns them
 
-`engineering-plan.md:1280` puts retries in the adapter.
-`engineering-plan.md:1607` says "Keep retry decisions in application code, not
+`engineering-plan.md:1284` puts retries in the adapter.
+`engineering-plan.md:1611` says "Keep retry decisions in application code, not
 in provider adapters alone." The word "alone" is doing the work, and the split
 it implies is the right one.
 

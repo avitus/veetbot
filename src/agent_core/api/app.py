@@ -83,6 +83,8 @@ from agent_core.domain.views import (
 logger = logging.getLogger(__name__)
 IDEMPOTENCY_KEY_MAX_LENGTH = 255
 APPROVAL_REASON_MAX_LENGTH = 4096
+# What a principal-scoped body carrying user content tells caches to do with it.
+PRIVATE_NO_STORE = "private, no-store"
 
 
 class MalformedRequestError(ValueError):
@@ -725,7 +727,7 @@ def create_app(
         content = await services.artifacts.open_content(authenticated, artifact_id)
         artifact = content.artifact
         private_cache_headers = {
-            "Cache-Control": "private, no-store",
+            "Cache-Control": PRIVATE_NO_STORE,
             "ETag": f'"{artifact.sha256}"',
         }
         if _matches_etag(if_none_match, artifact.sha256):
@@ -1187,6 +1189,7 @@ def create_app(
         openapi_extra={"required_scope": "memory.read"},
     )
     async def list_memories(
+        response: Response,
         authenticated: Annotated[Principal, secured("memory.read")],
         ceiling: Sensitivity,
         limit: Annotated[int, Query(ge=1)] = 50,
@@ -1197,6 +1200,10 @@ def create_app(
         session_id: UUID | None = None,
         text: str | None = None,
     ) -> Page[MemoryView]:
+        # A belief body is principal-scoped and sensitivity-bearing, so no
+        # shared or on-disk cache may keep it; the artifact content route
+        # carries the same header for the same reason.
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
         # Pagination rule 3 clamps an oversized limit rather than rejecting
         # it; the domain query bounds `limit` at 200, so the clamp happens
         # here, before that value is ever used to construct it.
@@ -1221,9 +1228,11 @@ def create_app(
     )
     async def get_memory(
         memory_id: UUID,
+        response: Response,
         authenticated: Annotated[Principal, secured("memory.read")],
         ceiling: Sensitivity,
     ) -> MemoryView:
+        response.headers["Cache-Control"] = PRIVATE_NO_STORE
         return await services.memory.get(authenticated, memory_id, ceiling=ceiling)
 
     if settings.memory_api_enabled:

@@ -89,7 +89,11 @@ mounted only when `AGENT_MEMORY_API_ENABLED` is set. They use the same
 authentication middleware, principal-first application signatures, request-id
 header, error envelope, and cross-principal not-found rule as every route in
 [http-api-and-streaming.md](http-api-and-streaming.md); that document carries a
-stub subsection pointing here, and this document owns the schemas.
+stub subsection pointing here, and this document owns the schemas. Both success
+responses carry `Cache-Control: private, no-store`, because a belief body is
+principal-scoped and sensitivity-bearing and no shared or on-disk cache may
+retain it — the rule the artifact content route already applies to the other
+route that returns user content.
 
 ```text
 GET /v1/memories                 memory.read   Page[MemoryView]

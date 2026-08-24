@@ -37,7 +37,6 @@ public struct ConnectionSettingsView: View {
     @State private var isSaving = false
     @State private var websiteOrigin = ""
     @State private var websiteLoginURL = ""
-    @State private var authenticationLaunchURL: URL?
 
     public init(
         model: ChatViewModel,
@@ -202,7 +201,7 @@ public struct ConnectionSettingsView: View {
                                 || (model.browserAuthentication.map { $0.status != .ready } ?? false)
                         )
 
-                        if let authenticationLaunchURL {
+                        if let authenticationLaunchURL = model.websiteAuthenticationLaunchURL {
                             VStack(alignment: .leading, spacing: 10) {
                                 Label("Secure login ready", systemImage: "lock.shield.fill")
                                     .appFont(.headline)
@@ -244,7 +243,6 @@ public struct ConnectionSettingsView: View {
                                 }
                                 if authentication.status != .ready {
                                     Button("Start over") {
-                                        authenticationLaunchURL = nil
                                         Task { await model.cancelWebsiteAccessSetup() }
                                     }
                                     .disabled(model.isManagingWebsiteAccess)
@@ -479,19 +477,17 @@ public struct ConnectionSettingsView: View {
 
     private func addWebsiteAccess() {
         Task {
-            if let launchURL = await model.createWebsiteAccess(
+            await model.createWebsiteAccess(
                 origin: websiteOrigin,
                 loginURL: websiteLoginURL
-            ) {
-                authenticationLaunchURL = launchURL
-            }
+            )
         }
     }
 
     private func openWebsiteAuthentication(_ launchURL: URL) {
         openURL(launchURL) { accepted in
-            authenticationLaunchURL = nil
             if accepted {
+                model.websiteAuthenticationLaunchOpened()
                 websiteOrigin = ""
                 websiteLoginURL = ""
             } else {
