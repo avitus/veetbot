@@ -51,6 +51,20 @@ private func resolveMissingSessions(
     }
 }
 
+/// Guards a keyset paginator against a server that returns the cursor it was
+/// given, which would otherwise spin the client in a fetch loop forever.
+/// Shared by every view model that walks a `Page` by cursor.
+func nextPageCursor(
+    _ cursor: String?,
+    seen: inout Set<String>
+) throws -> String? {
+    guard let cursor else { return nil }
+    guard seen.insert(cursor).inserted else {
+        throw HTTPTransportError.invalidResponse
+    }
+    return cursor
+}
+
 @MainActor
 public final class ChatViewModel: ObservableObject {
     @Published public private(set) var history: [SessionHistoryEntry] = []
@@ -344,7 +358,7 @@ public final class ChatViewModel: ObservableObject {
             )
             guard selectionRequestID == requestID else { return [] }
             messages.append(contentsOf: page.items)
-            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+            cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
         } while cursor != nil
         return messages
     }
@@ -418,7 +432,7 @@ public final class ChatViewModel: ObservableObject {
                     return
                 }
             }
-            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+            cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
         } while cursor != nil
 
         let missingResolutions = try await resolveMissingSessions(
@@ -467,17 +481,6 @@ public final class ChatViewModel: ObservableObject {
         for sessionID in removedHistorySessionIDs {
             try? await historyStore.delete(sessionID: sessionID)
         }
-    }
-
-    static func nextPageCursor(
-        _ cursor: String?,
-        seen: inout Set<String>
-    ) throws -> String? {
-        guard let cursor else { return nil }
-        guard seen.insert(cursor).inserted else {
-            throw HTTPTransportError.invalidResponse
-        }
-        return cursor
     }
 
     @discardableResult
@@ -645,7 +648,7 @@ public final class ChatViewModel: ObservableObject {
                     loadedApprovalIDs.insert(approval.id)
                     runState.mergeApproval(approval)
                 }
-                cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+                cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             } while cursor != nil
         } catch {
             present(error)
@@ -889,7 +892,7 @@ public final class ChatViewModel: ObservableObject {
         repeat {
             let page = try await api.listBrowserProfiles(cursor: cursor)
             profiles.append(contentsOf: page.items)
-            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seen)
+            cursor = try nextPageCursor(page.nextCursor, seen: &seen)
         } while cursor != nil
         browserProfiles = profiles
         if let selectedBrowserProfileID,

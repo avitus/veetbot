@@ -140,6 +140,8 @@ private struct SessionSidebar: View {
     @State private var deletionCandidate: SessionHistoryEntry?
     @State private var newConversationDestination =
         SessionSidebarDestination.freshConversation()
+    @StateObject private var memoryViewModel = MemoryViewModel()
+    @State private var showingMemoryBrowser = false
 
     var body: some View {
         Group {
@@ -180,6 +182,19 @@ private struct SessionSidebar: View {
                 }
                 .accessibilityLabel("Settings")
             }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    showingMemoryBrowser = true
+                } label: {
+                    Image(systemName: "brain.head.profile")
+                        .foregroundColor(AppTheme.turquoise)
+                }
+                .accessibilityLabel("Memory")
+                .accessibilityIdentifier("sidebar.memory")
+            }
+        }
+        .sheet(isPresented: $showingMemoryBrowser) {
+            MemoryBrowserView(model: memoryViewModel)
         }
     }
 

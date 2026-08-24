@@ -191,13 +191,13 @@ import Testing
 
         for page in 1 ... 101 {
             let cursor = "cursor-\(page)"
-            #expect(try ChatViewModel.nextPageCursor(cursor, seen: &seen) == cursor)
+            #expect(try nextPageCursor(cursor, seen: &seen) == cursor)
         }
         #expect(seen.count == 101)
         #expect(throws: HTTPTransportError.self) {
-            try ChatViewModel.nextPageCursor("cursor-101", seen: &seen)
+            try nextPageCursor("cursor-101", seen: &seen)
         }
-        #expect(try ChatViewModel.nextPageCursor(nil, seen: &seen) == nil)
+        #expect(try nextPageCursor(nil, seen: &seen) == nil)
     }
 
     @Test
