@@ -188,6 +188,18 @@ def test_the_upstream_endpoints_are_fixed_https_constants() -> None:
     assert TOKEN_ENDPOINT == "https://oauth2.googleapis.com/token"
 
 
+def test_nothing_in_the_package_weakens_tls_verification() -> None:
+    """httpx validates the CA chain and hostname by default; the package must
+    never pass a `verify` override, so the authenticated-TLS default stands
+    for both credentialed transports."""
+
+    import pathlib
+
+    package = pathlib.Path(__file__).resolve().parents[2] / "src" / "gmail_mcp"
+    for path in sorted(package.rglob("*.py")):
+        assert "verify" not in path.read_text(encoding="utf-8"), path
+
+
 async def test_the_access_token_never_appears_in_results_or_errors() -> None:
     fake = seeded_fake()
     server = read_server(fake)
