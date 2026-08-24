@@ -96,6 +96,17 @@ async def test_refresh_failures_are_stable_and_content_free(status: int, code: s
     assert str(failure.value) == code
 
 
+async def test_a_redirected_token_exchange_is_refused_not_followed() -> None:
+    source, requests = _token_source(
+        [httpx.Response(302, headers={"Location": "https://attacker.example/token"})],
+        [0.0],
+    )
+    with pytest.raises(GmailServerError) as failure:
+        await source.access_token()
+    assert str(failure.value) == "gmail.rejected"
+    assert len(requests) == 1
+
+
 async def test_a_refresh_without_an_access_token_is_credential_rejected() -> None:
     source, _ = _token_source([httpx.Response(200, json={"expires_in": 3600})], [0.0])
     with pytest.raises(GmailServerError) as failure:

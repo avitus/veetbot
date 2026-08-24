@@ -170,6 +170,24 @@ async def test_oversized_upstream_responses_are_invalid_output() -> None:
     assert "gmail.invalid_output" in str(failure.value)
 
 
+async def test_redirects_are_refused_not_followed() -> None:
+    fake = seeded_fake()
+    fake.force(httpx.Response(302, headers={"Location": "https://attacker.example/collect"}))
+    server = read_server(fake)
+    with pytest.raises(ToolError) as failure:
+        await server.call_tool("list_labels", {})
+    assert "gmail.rejected" in str(failure.value)
+    assert len(fake.requests) == 1
+
+
+def test_the_upstream_endpoints_are_fixed_https_constants() -> None:
+    from gmail_mcp.__main__ import GMAIL_BASE_URL
+    from gmail_mcp.credential import TOKEN_ENDPOINT
+
+    assert GMAIL_BASE_URL == "https://gmail.googleapis.com"
+    assert TOKEN_ENDPOINT == "https://oauth2.googleapis.com/token"
+
+
 async def test_the_access_token_never_appears_in_results_or_errors() -> None:
     fake = seeded_fake()
     server = read_server(fake)

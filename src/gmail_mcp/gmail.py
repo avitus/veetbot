@@ -180,6 +180,10 @@ class GmailClient:
             )
         except httpx.HTTPError:
             raise GmailServerError(UNAVAILABLE) from None
+        if 300 <= response.status_code < 400:
+            # A redirect is refused, never followed: a credentialed call
+            # must not be walked to another host.
+            raise GmailServerError(REJECTED)
         if response.status_code == 401:
             raise GmailServerError(CREDENTIAL_REJECTED)
         if response.status_code == 429:

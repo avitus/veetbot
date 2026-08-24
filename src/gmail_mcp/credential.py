@@ -19,6 +19,7 @@ import httpx
 from gmail_mcp.errors import (
     CREDENTIAL_REJECTED,
     RATE_LIMITED,
+    REJECTED,
     UNAVAILABLE,
     GmailServerError,
 )
@@ -85,6 +86,10 @@ class RefreshingTokenSource:
             )
         except httpx.HTTPError:
             raise GmailServerError(UNAVAILABLE) from None
+        if 300 <= response.status_code < 400:
+            # A redirect is refused, never followed: the client secret and
+            # refresh token go to the fixed token endpoint or nowhere.
+            raise GmailServerError(REJECTED)
         if response.status_code in {400, 401, 403}:
             raise GmailServerError(CREDENTIAL_REJECTED)
         if response.status_code == 429:
