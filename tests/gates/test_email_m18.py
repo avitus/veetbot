@@ -309,6 +309,270 @@ async def test_failure_taxonomy_is_stable_and_bounded() -> None:
             await client.discover()
 
 
+async def test_a_daily_triage_schedule_reads_freely_and_writes_behind_approval() -> None:
+    """Gate 13: the recipe composes from existing milestones alone.
+
+    A schedule materializes an ordinary run; the run's read-server call
+    executes without an approval; its first write parks an approval whose
+    notification row is content-free — no mail subject, sender, or body
+    fragment rides it — and after the owner approves, the run completes and
+    the schedule's outcome is reported through the same outbox.
+    """
+
+    from datetime import UTC, datetime
+    from decimal import Decimal
+
+    from agent_core.adapters.credentials import MappingCredentialResolver
+    from agent_core.adapters.identity import StaticSchedulePrincipalDirectory
+    from agent_core.adapters.mcp.scripted import ScriptedMCPClientFactory
+    from agent_core.adapters.schedule_admission import AllowScheduleAdmissionController
+    from agent_core.bootstrap import build
+    from agent_core.config import load_settings
+    from agent_core.domain.agents import AgentSpec
+    from agent_core.domain.agents import Principal as RunPrincipal
+    from agent_core.domain.approvals import ApprovalResolutionType
+    from agent_core.domain.mcp import (
+        MCPCallResult,
+        MCPDiscovery,
+        MCPRemoteTool,
+        ScriptedMCPResponse,
+        ScriptedMCPServer,
+    )
+    from agent_core.domain.messages import (
+        FakeModelScript,
+        ScriptedToolCall,
+        ScriptedTurn,
+        StopReason,
+    )
+    from agent_core.domain.notifications import NotificationKind
+    from agent_core.domain.policies import PolicyProfileRecord
+    from agent_core.domain.runs import RunLimits, RunStatus
+    from agent_core.domain.schedules import (
+        OccurrenceDisposition,
+        OnceCadence,
+        Schedule,
+        ScheduleRevision,
+        ScheduleState,
+    )
+    from agent_core.mcp.email import email_server_configs
+    from agent_core.policy.scopes import PLATFORM_SCOPES
+    from agent_core.runtime.checkpoints import DurableCheckpointSeeder
+    from agent_core.scheduling.materializer import ScheduleMaterializer
+    from tests.unit.test_config import base_environment
+
+    now = datetime(2026, 8, 24, 9, tzinfo=UTC)
+    schedule_id = UUID("00000000-0000-0000-0000-000000001801")
+    agent_id = UUID("00000000-0000-0000-0000-000000001802")
+    mail_subject = "MAIL-SUBJECT Lunch on Thursday"
+    mail_sender = "MAIL-SENDER ada@example.org"
+
+    def remote(name: str) -> MCPRemoteTool:
+        return MCPRemoteTool(
+            name=name,
+            description=f"Scripted {name}.",
+            input_schema={"type": "object", "additionalProperties": True},
+        )
+
+    scripted = {
+        "gmail_read": ScriptedMCPServer(
+            name="gmail_read",
+            discovery=MCPDiscovery(
+                tools=(remote("search_threads"), remote("get_thread"), remote("list_labels"))
+            ),
+            responses=(
+                ScriptedMCPResponse(
+                    name="search_threads",
+                    result=MCPCallResult(content=(f"{mail_subject} from {mail_sender}",)),
+                ),
+            ),
+        ),
+        "gmail_write": ScriptedMCPServer(
+            name="gmail_write",
+            discovery=MCPDiscovery(
+                tools=(
+                    remote("create_draft"),
+                    remote("modify_labels"),
+                    remote("trash_thread"),
+                    remote("untrash_thread"),
+                )
+            ),
+            responses=(
+                ScriptedMCPResponse(
+                    name="modify_labels",
+                    result=MCPCallResult(content=('{"modified_thread_ids":["thread-1"]}',)),
+                ),
+            ),
+        ),
+    }
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="mcp.gmail_read.search_threads",
+                        arguments={"query": "newer_than:1d"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="mcp.gmail_write.modify_labels",
+                        arguments={"thread_ids": ["thread-1"], "add_label_ids": ["Label_7"]},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="triage complete", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    principal = RunPrincipal(
+        tenant_id="local",
+        principal_id="local-user",
+        roles={"user"},
+        scopes=set(PLATFORM_SCOPES) | {"mcp.gmail_read.use", "mcp.gmail_write.use"},
+    )
+    settings = load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "AGENT_NOTIFICATION_API_ENABLED": "1",
+            "AGENT_NOTIFICATION_DISPATCH_ENABLED": "1",
+        }
+    )
+    email_rows = tuple(
+        config
+        for config in email_server_configs("local")
+        if config.server_id in {"gmail_read", "gmail_write"}
+    )
+
+    async with build(
+        settings=settings,
+        script=script,
+        fixed_clock_at=now,
+        sequential_ids=True,
+        principal=principal,
+        mcp_servers=email_rows,
+        mcp_client_factory=ScriptedMCPClientFactory(scripted),
+        credential_resolver=MappingCredentialResolver(
+            {
+                "gmail_read": "synthetic-read-credential-document",
+                "gmail_write": "synthetic-write-credential-document",
+            }
+        ),
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.agents.put(
+                AgentSpec(
+                    id=agent_id,
+                    version="1.0.0",
+                    name="Mail triage",
+                    instructions="Triage the mailbox.",
+                    model_policy="fake-balanced",
+                    enabled_tools=[
+                        "mcp.gmail_read.search_threads",
+                        "mcp.gmail_write.modify_labels",
+                    ],
+                    policy_profile="default",
+                    limits=RunLimits(),
+                )
+            )
+            await uow.policy_profiles.record(
+                PolicyProfileRecord(
+                    policy_version="default@v1",
+                    profile_name="default",
+                    profile_sha256="a" * 64,
+                    hardline_sha256="b" * 64,
+                    rule_count=1,
+                    loaded_at=now,
+                    loaded_by="test",
+                )
+            )
+            await uow.schedules.create(
+                Schedule(
+                    id=schedule_id,
+                    tenant_id="local",
+                    principal_id="local-user",
+                    state=ScheduleState.ACTIVE,
+                    current_revision=1,
+                    next_fire_at=now,
+                    created_at=now,
+                    updated_at=now,
+                ),
+                ScheduleRevision(
+                    schedule_id=schedule_id,
+                    revision=1,
+                    title="Daily mail triage",
+                    instruction=(
+                        "Search the inbox for messages newer than one day, summarize "
+                        "what matters, and propose labels for the rest."
+                    ),
+                    agent_id=agent_id,
+                    agent_version="1.0.0",
+                    policy_profile="default",
+                    requested_scopes=frozenset({"mcp.gmail_read.use", "mcp.gmail_write.use"}),
+                    limits=RunLimits(
+                        max_steps=8,
+                        max_model_calls=8,
+                        max_tool_calls=8,
+                        max_cost=Decimal("1"),
+                    ),
+                    run_timeout_seconds=300,
+                    cadence=OnceCadence(at=now),
+                    timezone=None,
+                    misfire_grace_seconds=60,
+                    max_consecutive_failures=3,
+                    created_by_principal_id="local-user",
+                    created_at=now,
+                ),
+            )
+        materializer = ScheduleMaterializer(
+            uow_factory=composition.uow_factory,
+            principals=StaticSchedulePrincipalDirectory(principal, enabled=True),
+            admission=AllowScheduleAdmissionController(),
+            clock=composition.clock,
+            ids=composition.ids,
+            seed_checkpoint=DurableCheckpointSeeder(composition.clock),
+        )
+        occurrence = await materializer.materialize(schedule_id)
+        assert occurrence is not None
+        assert occurrence.disposition is OccurrenceDisposition.MATERIALIZED
+        assert occurrence.run_id is not None
+
+        await composition.executor.execute(occurrence.run_id)
+
+        pending = await composition.approvals.list_pending()
+        assert len(pending) == 1
+        assert pending[0].tool_name == "mcp.gmail_write.modify_labels"
+
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(occurrence.run_id, principal)
+            rows = await uow.notification_outbox.list(principal, limit=20)
+        read_calls = [item for item in invocations if item.tool_name.startswith("mcp.gmail_read.")]
+        assert read_calls
+        assert all(item.status.value == "SUCCEEDED" for item in read_calls)
+        approval_rows = [row for row in rows if row.kind is NotificationKind.APPROVAL_REQUESTED]
+        assert approval_rows
+        for row in approval_rows:
+            serialized = row.model_dump_json()
+            assert mail_subject not in serialized
+            assert mail_sender not in serialized
+            assert "Lunch" not in serialized
+
+        await composition.approvals.resolve(pending[0].id, ApprovalResolutionType.APPROVE_ONCE)
+        async with composition.uow_factory() as uow:
+            run = await uow.runs.get(occurrence.run_id, principal)
+            rows = await uow.notification_outbox.list(principal, limit=20)
+        assert run.status is RunStatus.COMPLETED
+        outcome_rows = [row for row in rows if row.kind is NotificationKind.SCHEDULE_RUN_FINISHED]
+        assert outcome_rows
+        for row in outcome_rows:
+            serialized = row.model_dump_json()
+            assert mail_subject not in serialized
+            assert "Lunch" not in serialized
+
+
 def test_each_server_requires_exactly_its_own_scope() -> None:
     """Gate 10: one scope per server, and platform scopes are rejected."""
 

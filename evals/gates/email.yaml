@@ -76,4 +76,4 @@
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Monitoring recipe** — a daily triage schedule materializes a run whose reads pass without approval, whose first write parks an approval whose notification is content-free, and whose outcome is reported."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_a_daily_triage_schedule_reads_freely_and_writes_behind_approval
