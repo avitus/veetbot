@@ -419,6 +419,7 @@ async def test_authentication_surface_binds_fragment_capability_before_interacti
         capability = parse_qs(launch.fragment)["capability"][0]
 
         surface = await http.get(launch.path)
+        script = await http.get("/authentication-surface.js")
         unauthorized = await http.post(
             launch.path + "/events",
             headers={"Content-Type": "application/json", "Content-Length": "999999"},
@@ -441,6 +442,15 @@ async def test_authentication_surface_binds_fragment_capability_before_interacti
     assert surface.headers["cache-control"] == "no-store"
     assert "default-src 'none'" in surface.headers["content-security-policy"]
     assert capability not in surface.text
+    assert "How to sign in" in surface.text
+    assert "Click the website field in the remote browser" in surface.text
+    assert "Return to Veetbot" in surface.text
+    assert "Start over" in surface.text
+    assert 'autocomplete="off"' in surface.text
+    assert script.status_code == 200
+    assert "if(!capability)" in script.text
+    assert "This secure login link is incomplete or has expired" in script.text
+    assert "controls.forEach(control=>control.disabled=true)" in script.text
     assert unauthorized.status_code == 401
     assert frame.content == b"synthetic-png-frame"
     assert frame.headers["content-type"] == "image/png"

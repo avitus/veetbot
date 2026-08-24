@@ -9,6 +9,22 @@ enum ConnectionSettingsSection: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+struct ClientBuildIdentity: Equatable {
+    let version: String
+    let build: String
+
+    init(infoDictionary: [String: Any]?) {
+        version = infoDictionary?["CFBundleShortVersionString"] as? String ?? "Development"
+        build = infoDictionary?["CFBundleVersion"] as? String ?? "local"
+    }
+
+    static var current: ClientBuildIdentity {
+        ClientBuildIdentity(infoDictionary: Bundle.main.infoDictionary)
+    }
+
+    var displayName: String { "Version \(version) (\(build))" }
+}
+
 public struct ConnectionSettingsView: View {
     @ObservedObject var model: ChatViewModel
     let embedded: Bool
@@ -148,6 +164,7 @@ public struct ConnectionSettingsView: View {
                         ) {
                             TextField("https://example.com", text: $websiteOrigin)
                                 .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("website-access.origin")
                                 #if os(iOS)
                             .textContentType(.URL)
                             .textInputAutocapitalization(.never)
@@ -161,6 +178,7 @@ public struct ConnectionSettingsView: View {
                         ) {
                             TextField("https://example.com/login", text: $websiteLoginURL)
                                 .textFieldStyle(.roundedBorder)
+                                .accessibilityIdentifier("website-access.login-url")
                                 #if os(iOS)
                             .textContentType(.URL)
                             .textInputAutocapitalization(.never)
@@ -170,7 +188,7 @@ public struct ConnectionSettingsView: View {
                         Button {
                             addWebsiteAccess()
                         } label: {
-                            Label("Open secure login", systemImage: "person.badge.key.fill")
+                            Label("Create secure login", systemImage: "person.badge.key.fill")
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(AppTheme.turquoise)
@@ -180,7 +198,33 @@ public struct ConnectionSettingsView: View {
                                 .isEmpty
                                 || websiteLoginURL.trimmingCharacters(in: .whitespacesAndNewlines)
                                 .isEmpty
+                                || (model.browserAuthentication.map { $0.status != .ready } ?? false)
                         )
+
+                        if let authenticationLaunchURL = model.websiteAuthenticationLaunchURL {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Label("Secure login ready", systemImage: "lock.shield.fill")
+                                    .appFont(.headline)
+                                    .foregroundColor(AppTheme.turquoise)
+                                Text(
+                                    "Continue in your web browser, then use the remote-browser image to sign in. Keep that page open—reloading or copying its one-time link requires starting over."
+                                )
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                Button {
+                                    openWebsiteAuthentication(authenticationLaunchURL)
+                                } label: {
+                                    Label("Continue in web browser", systemImage: "safari")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(AppTheme.orange)
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(AppTheme.turquoise.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
 
                         if let authentication = model.browserAuthentication {
                             Divider()
@@ -197,6 +241,20 @@ public struct ConnectionSettingsView: View {
                                     }
                                     .disabled(model.isManagingWebsiteAccess)
                                 }
+                                if authentication.status != .ready {
+                                    Button("Start over") {
+                                        Task { await model.cancelWebsiteAccessSetup() }
+                                    }
+                                    .disabled(model.isManagingWebsiteAccess)
+                                }
+                            }
+                            if !authentication.status.isTerminal {
+                                Text(
+                                    "Finish signing in on the secure browser page, return here, and check the status. Start over if the page was closed, reloaded, or expired."
+                                )
+                                .appFont(.caption)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             }
                         }
 
@@ -286,6 +344,11 @@ public struct ConnectionSettingsView: View {
                         icon: "textformat.size",
                         title: "Preferences",
                         detail: "Text size, typeface, and the server address stay on this device."
+                    )
+                    SettingsInfoRow(
+                        icon: "info.circle.fill",
+                        title: "Client build",
+                        detail: ClientBuildIdentity.current.displayName
                     )
 
                     if model.isConfigured {
@@ -414,13 +477,21 @@ public struct ConnectionSettingsView: View {
 
     private func addWebsiteAccess() {
         Task {
-            if let launchURL = await model.createWebsiteAccess(
+            await model.createWebsiteAccess(
                 origin: websiteOrigin,
                 loginURL: websiteLoginURL
-            ) {
-                openURL(launchURL)
+            )
+        }
+    }
+
+    private func openWebsiteAuthentication(_ launchURL: URL) {
+        openURL(launchURL) { accepted in
+            if accepted {
+                model.websiteAuthenticationLaunchOpened()
                 websiteOrigin = ""
                 websiteLoginURL = ""
+            } else {
+                Task { await model.websiteAuthenticationLaunchFailed() }
             }
         }
     }

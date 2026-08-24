@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from uuid import UUID
 from weakref import WeakValueDictionary
 
@@ -19,6 +19,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import RecallMoment, RecallProfile, RecallQuery, Sensitivity
 from agent_core.domain.messages import CacheBreakpoint, ResolvedModel
 from agent_core.domain.sessions import Session, project_scope
+from agent_core.domain.tools import ToolSpec
 from agent_core.ports.context import TokenEstimator
 from agent_core.ports.determinism import Clock
 from agent_core.ports.memory import MemoryRetriever
@@ -26,12 +27,14 @@ from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.skills import SkillCatalog
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "context-builder@3"
+BUILDER_VERSION = "context-builder@4"
 PLAN_EVENT_TYPES = frozenset({"context.plan.created", "context.epoch.rotated"})
 LATEST_EVENT_BOUNDARY = (1 << 63) - 1
 MAX_PLAN_APPEND_ATTEMPTS = 16
 _SKILL_LOAD_TOOL_NAME = "skill.load"
 _SKILL_REVIEW_RUN_KIND = "skill_review"
+
+type SessionToolFilter = Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]]
 
 
 class EventContextPlanner:
@@ -47,6 +50,7 @@ class EventContextPlanner:
         policy_version: str,
         skill_catalogs: SkillCatalog | None = None,
         memory_retriever: MemoryRetriever | None = None,
+        session_tool_filter: SessionToolFilter | None = None,
         cache_capacity: int = 1_024,
     ) -> None:
         if cache_capacity <= 0:
@@ -60,6 +64,7 @@ class EventContextPlanner:
         self._policy_version = policy_version
         self._skill_catalogs = skill_catalogs
         self._memory_retriever = memory_retriever
+        self._session_tool_filter = session_tool_filter
         self._allocator = ContextBudgetAllocator(config)
         self._cache_capacity = cache_capacity
         self._cache: OrderedDict[UUID, ContextPlan] = OrderedDict()
@@ -206,6 +211,8 @@ class EventContextPlanner:
             profile=self._policy_version,
             environment="runtime",
         )
+        if self._session_tool_filter is not None:
+            tools = self._session_tool_filter(session, tools)
         if (
             catalog is not None
             and not catalog.entries

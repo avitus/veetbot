@@ -59,10 +59,57 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
+    func testWebsiteAccessCreatesARecoverableBrowserHandoff() {
+        let settingsButton = app.buttons["Settings"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 10))
+        settingsButton.tap()
+        XCTAssertTrue(app.staticTexts["Settings"].waitForExistence(timeout: 5))
+
+        let websiteAccess = app.staticTexts["Website Access"]
+        scrollUntilVisible(websiteAccess)
+        XCTAssertTrue(websiteAccess.exists)
+
+        let origin = app.textFields["website-access.origin"]
+        let login = app.textFields["website-access.login-url"]
+        scrollUntilVisible(origin)
+        XCTAssertTrue(origin.exists)
+        origin.tap()
+        origin.typeText("https://example.org")
+        scrollUntilVisible(login)
+        XCTAssertTrue(login.exists)
+        login.tap()
+        login.typeText("https://example.org/login")
+        if app.keyboards.buttons["Return"].exists {
+            app.keyboards.buttons["Return"].tap()
+        }
+
+        let create = app.buttons["Create secure login"]
+        scrollUntilVisible(create)
+        XCTAssertTrue(create.isEnabled)
+        create.tap()
+
+        let continueInBrowser = app.buttons["Continue in web browser"]
+        XCTAssertTrue(continueInBrowser.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["Start over"].exists)
+
+        let clientBuild = app.staticTexts["Client build"]
+        scrollUntilVisible(clientBuild)
+        XCTAssertTrue(clientBuild.exists)
+        XCTAssertTrue(app.staticTexts["Version 0.1.1 (2)"].exists)
+    }
+
     private func revealSidebarIfNeeded(for row: XCUIElement) {
         guard !row.isHittable else { return }
         let backButton = app.navigationBars.buttons.element(boundBy: 0)
         XCTAssertTrue(backButton.waitForExistence(timeout: 5))
         backButton.tap()
+    }
+
+    private func scrollUntilVisible(_ element: XCUIElement) {
+        let scrollView = app.scrollViews.firstMatch
+        XCTAssertTrue(scrollView.waitForExistence(timeout: 5))
+        for _ in 0..<6 where !element.exists || !element.isHittable {
+            scrollView.swipeUp()
+        }
     }
 }

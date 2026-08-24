@@ -233,6 +233,15 @@ carries an item cap for the same reason and is capped at twenty;
 [skills.md](skills.md) argues that number and the 6,000-token body class beside
 it, which never yields because a third `skill.load` fails instead.
 
+The token side of the tool-definition cap measures the conservative larger form
+of the **model-visible** provider contract: name, description, and input schema
+plus provider framing. The complete pinned `ToolSpec` still participates in the
+prefix hash and replay identity, but its output schema, policy classification,
+timeouts, and execution limits are not sent to the model and therefore do not
+consume this prompt class. A session-bound capability is also a runtime-environment
+filter: when trusted session metadata has no selected binding, its definitions are
+absent before the plan is pinned rather than advertised as unusable tools.
+
 Knowledge passages are a separate class from in-turn recall rather than a share of
 it, and [knowledge-documents.md](knowledge-documents.md) argues both the split and
 the number. A passage is a verbatim quotation the model may cite, so it is three

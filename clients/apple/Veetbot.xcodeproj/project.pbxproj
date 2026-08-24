@@ -39,6 +39,9 @@
 		10000000000000000000001F /* DeviceRegistrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* DeviceRegistrationCoordinator.swift */; };
 		100000000000000000000020 /* InstallationIdentityStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000021 /* InstallationIdentityStore.swift */; };
 		100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000022 /* NotificationApplicationDelegate.swift */; };
+		100000000000000000000022 /* MemoryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000023 /* MemoryViewModel.swift */; };
+		100000000000000000000023 /* MemoryBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000024 /* MemoryBrowserView.swift */; };
+		100000000000000000000024 /* MemoryDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000025 /* MemoryDetailView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +89,9 @@
 		200000000000000000000020 /* DeviceRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRegistrationCoordinator.swift; sourceTree = "<group>"; };
 		200000000000000000000021 /* InstallationIdentityStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstallationIdentityStore.swift; sourceTree = "<group>"; };
 		200000000000000000000022 /* NotificationApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationApplicationDelegate.swift; sourceTree = "<group>"; };
+		200000000000000000000023 /* MemoryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryViewModel.swift; sourceTree = "<group>"; };
+		200000000000000000000024 /* MemoryBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryBrowserView.swift; sourceTree = "<group>"; };
+		200000000000000000000025 /* MemoryDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryDetailView.swift; sourceTree = "<group>"; };
 		6E9D16E3302FB8C900D2A51F /* Veetbot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Veetbot.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -183,6 +189,7 @@
 			isa = PBXGroup;
 			children = (
 				20000000000000000000000F /* ChatViewModel.swift */,
+				200000000000000000000023 /* MemoryViewModel.swift */,
 				200000000000000000000010 /* RunStateReducer.swift */,
 			);
 			path = ViewModels;
@@ -198,6 +205,8 @@
 				200000000000000000000019 /* ComposerTextEditor.swift */,
 				200000000000000000000014 /* ConnectionSettingsView.swift */,
 				20000000000000000000001B /* MarkdownContentView.swift */,
+				200000000000000000000024 /* MemoryBrowserView.swift */,
+				200000000000000000000025 /* MemoryDetailView.swift */,
 				200000000000000000000015 /* RootView.swift */,
 			);
 			path = Views;
@@ -345,6 +354,7 @@
 				10000000000000000000000E /* SwiftDataSessionHistoryStore.swift in Sources */,
 				100000000000000000000020 /* InstallationIdentityStore.swift in Sources */,
 				10000000000000000000000F /* ChatViewModel.swift in Sources */,
+				100000000000000000000022 /* MemoryViewModel.swift in Sources */,
 				100000000000000000000010 /* RunStateReducer.swift in Sources */,
 				100000000000000000000011 /* ActivityViews.swift in Sources */,
 				100000000000000000000012 /* ArtifactViewerView.swift in Sources */,
@@ -353,6 +363,8 @@
 				100000000000000000000019 /* ComposerTextEditor.swift in Sources */,
 				100000000000000000000014 /* ConnectionSettingsView.swift in Sources */,
 				10000000000000000000001B /* MarkdownContentView.swift in Sources */,
+				100000000000000000000023 /* MemoryBrowserView.swift in Sources */,
+				100000000000000000000024 /* MemoryDetailView.swift in Sources */,
 				100000000000000000000015 /* RootView.swift in Sources */,
 				10000000000000000000001C /* ConversationNavigationUITestFixture.swift in Sources */,
 				100000000000000000000021 /* NotificationApplicationDelegate.swift in Sources */,
@@ -480,7 +492,7 @@
 				CODE_SIGN_ENTITLEMENTS = Veetbot/Veetbot.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -488,6 +500,7 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Veetbot;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -500,7 +513,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -520,7 +533,7 @@
 				APS_ENVIRONMENT = production;
 				CODE_SIGN_ENTITLEMENTS = Veetbot/Veetbot.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEAD_CODE_STRIPPING = YES;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -528,6 +541,7 @@
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Veetbot;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -540,7 +554,7 @@
 					"@executable_path/Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 12.0;
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = auto;
@@ -557,7 +571,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 9UW358LB5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -566,7 +580,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -582,7 +596,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 9UW358LB5Z;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
@@ -591,7 +605,7 @@
 					"@executable_path/Frameworks",
 					"@loader_path/Frameworks",
 				);
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.veetbot.apple.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;

@@ -73,15 +73,15 @@ validates the floor, and no trailer means lane A.
 | Inbound surfaces, pairing, the Telegram channel | `inbound-surfaces.md` |
 | Backups, restore rehearsal, alerts, firewall, rollback | `operational-hardening.md` |
 | Memory evaluation, the benchmark, and lifecycle maintenance | `memory-evaluation-and-lifecycle.md` |
+| The memory read API and the native memory browser | `memory-read-api-and-browser.md` |
+| The Gmail MCP servers, email tools, and the bootstrap ceremony | `email-integration.md` |
 | Devices, surfaces, and the Section 29 seam | `multi-device-and-surfaces.md` |
 | Which milestone each gate belongs to | `milestone-map.md` |
 | What the corpus does and does not cover | `readiness.md` |
 
 ## Authority and conflicts
 
-- The **engineering plan** holds the normative requirements and acceptance
-  criteria; **project state** (`docs/status/project-state.yaml`) determines
-  what work is authorized; **code and tests** describe actual behavior.
+- The **engineering plan** holds the normative requirements and acceptance criteria; **project state** (`docs/status/project-state.yaml`) determines what work is authorized; **code and tests** describe actual behavior.
 - Do **not** silently modify requirements to match an implementation; propose
   divergence explicitly. An architectural conflict with the plan requires a
   **proposed ADR** in `docs/adr/` (index at `docs/adr/index.md`).
@@ -93,8 +93,9 @@ validates the floor, and no trailer means lane A.
 - Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
   12 through 15 — notifications and device identity, subagents and delegation,
   inbound surfaces and pairing, operational hardening — are authorized in that
-  order (ADR-0061), and Milestone 16 memory evaluation and lifecycle in
-  parallel (ADR-0069); model routing and the plan's roadmap items are not.
+  order (ADR-0061), with Milestone 16 memory evaluation (ADR-0069), 17 the
+  memory read API and browser (ADR-0070), and 18 email integration (ADR-0071)
+  in parallel; model routing and the plan's remaining roadmap items are not.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.
@@ -158,8 +159,7 @@ queued, running, has unresolved comments, or has not reviewed the latest push.
 ## Documentation update rules
 
 - Update the **smallest** relevant documentation surface when behavior changes.
-- Update `docs/status/project-state.yaml` when project status changes; move a
-  completed milestone's evidence to `docs/status/verification-history.yaml`.
+- Update `docs/status/project-state.yaml` when project status changes; move a completed milestone's evidence to `docs/status/verification-history.yaml`.
 - Update the current architecture documentation when an implementation changes it.
 - Add an **ADR** for material architectural decisions.
 - Add **verification evidence** before marking any acceptance criterion complete.

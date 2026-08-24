@@ -112,6 +112,13 @@ override it. A URL cannot authorize its own origin. The bound
 domain policy validates the initial URL, every redirect, the final URL, popup,
 iframe, and resource navigation according to provider enforcement rules.
 
+When hosted composition resolves profiles per session, the frozen context plan
+advertises the three browser tools only if that trusted reserved metadata contains
+a selected profile. An ordinary session therefore keeps public web capabilities
+without paying for or guessing unusable browser operations. A deployment-wide
+hosted profile, an explicitly injected provider, and the origin-pinned Playwright
+adapter remain globally bound runtime environments and keep their browser tools.
+
 Downloads, uploads, clipboard access, notifications, geolocation, camera,
 microphone, password-manager access, and new windows are denied until each has
 its own classified contract. Cross-origin popups are closed and reported.
@@ -417,6 +424,23 @@ capability to the profile, principal, expiry, and one browser runtime. Password,
 passkey, MFA, CAPTCHA, and consent interaction occurs inside that browser
 surface. The orchestration API sees neither keystrokes nor browser protocol
 frames and has no generic proxy endpoint.
+
+The trusted client presents the returned launch URL behind a user-initiated
+continue action and treats a rejected platform handoff as a failed setup. It
+cancels the ceremony and revokes and deletes the unused profile so retry does
+not collide with abandoned state. It also surrenders a live ceremony when the
+connection that began it changes: before it replaces or deletes that bearer
+credential it cancels the ceremony through the transport and credential that
+began it and drops the retained launch URL, so a capability bound to the former
+principal cannot outlive it in a client the user has repointed. That
+cancellation is best effort, since the former credential may already be
+rejected, and it never blocks the connection change; the client forgets the
+ceremony either way. The direct surface explains the screenshot and
+focused-field interaction, disables its credential controls until the runtime
+connects, and tells the user to return to the client and start over when the
+non-persisted fragment capability is missing or expired. Submitted text is
+cleared immediately and is never placed in diagnostics or durable client
+state.
 
 Only the isolated runtime determines completion. It may report `ready`,
 `needs_user`, `authentication_required`, `expired`, or `cancelled`; a caller

@@ -27,6 +27,10 @@ approval or question. The client does not persist a notification inbox. Before a
 physical-device push can work, the application identifier must have the push
 capability enabled and its provisioning profiles regenerated in the Apple
 Developer portal; the tracked project cannot perform those owner actions.
+The generated application property list declares
+`ITSAppUsesNonExemptEncryption=NO`: the client uses platform-provided HTTPS and
+Keychain protection and implements no non-exempt encryption. Reassess that
+declaration before adding a custom or third-party cryptographic implementation.
 
 The settings surface groups Connection, Website Access, Appearance, and Data &
 Privacy in a scrolling layout with connection actions pinned below it. On macOS,
@@ -36,13 +40,18 @@ sizes and positions independently. Device-local text-size and font-style control
 apply immediately throughout the client; system text sizing remains the default.
 
 Website Access creates and lists dedicated browser profiles. The app opens the
-server-provided isolated login ceremony, where the user enters website
+server-provided isolated login ceremony only after a separate Continue in web
+browser action, where the user enters website
 credentials directly; usernames, passwords, passkeys, MFA values, cookies, and
 browser storage never pass through this client or chat. Selecting a ready
 profile binds only its opaque UUID to newly created conversations.
 The saved selection is revalidated against the current principal when the
 bearer credential changes and when the app reconnects after launch; missing or
-non-ready profiles are cleared before another conversation can use them.
+non-ready profiles are cleared before another conversation can use them. If the
+platform rejects the browser handoff, the app cancels the ceremony and removes
+the unused profile. Start over provides the same recovery for a closed,
+reloaded, or expired one-time link. The installed version and build number are
+shown under Data & Privacy; this recovery release is 0.1.1 (2).
 
 The source is organized into `Models`, `Networking`, `Streaming`, `Store`,
 `ViewModels`, and `Views`. A Swift package builds the shared source and hosts its

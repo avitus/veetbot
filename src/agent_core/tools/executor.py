@@ -1713,9 +1713,12 @@ class ToolPipeline:
                 retryable=result.failure.retryable,
                 remediation=(
                     "modify_arguments"
-                    if result.failure.retryable
-                    or result.failure.kind
-                    in {ToolFailureKind.INVALID_ARGUMENTS, ToolFailureKind.NOT_FOUND}
+                    if not unavailable
+                    and (
+                        result.failure.retryable
+                        or result.failure.kind
+                        in {ToolFailureKind.INVALID_ARGUMENTS, ToolFailureKind.NOT_FOUND}
+                    )
                     else "none"
                 ),
             )

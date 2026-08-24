@@ -23,6 +23,11 @@ class MemoryStatus(StrEnum):
     RETIRED = "retired"
 
 
+# A browse that opened onto superseded and retired rows would show history
+# rather than belief; a caller that wants history names the statuses it wants.
+LIVE_MEMORY_STATUSES: tuple[MemoryStatus, ...] = (MemoryStatus.ACTIVE, MemoryStatus.PROVISIONAL)
+
+
 class BeliefType(StrEnum):
     FACT = "fact"
     PREFERENCE = "preference"
@@ -311,6 +316,30 @@ class MemoryRecord(BaseModel):
         if self.valid_to is not None and self.valid_to < self.valid_from:
             raise ValueError("memory valid_to precedes valid_from")
         return self
+
+
+class MemoryBrowseQuery(BaseModel):
+    """A principal's own beliefs, paged by store position for a human reader.
+
+    Browsing is a different surface from recall: it returns complete belief
+    views for someone paging through everything the store holds, filters
+    aside, rather than the ranked, budget-bounded candidates `query()` returns
+    for the retrieval arm. `cursor` is the last row's `(store_position, id)`
+    the caller has already seen; the store walks strictly past it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    tenant_id: str = Field(min_length=1)
+    principal_id: str = Field(min_length=1)
+    ceiling: Sensitivity
+    statuses: tuple[MemoryStatus, ...] = LIVE_MEMORY_STATUSES
+    belief_types: tuple[BeliefType, ...] = ()
+    subject: str | None = None
+    session_id: UUID | None = None
+    text: str | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+    cursor: tuple[int, UUID] | None = None
 
 
 class BeliefRejection(BaseModel):

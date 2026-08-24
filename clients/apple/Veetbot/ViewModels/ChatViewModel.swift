@@ -51,6 +51,20 @@ private func resolveMissingSessions(
     }
 }
 
+/// Guards a keyset paginator against a server that returns the cursor it was
+/// given, which would otherwise spin the client in a fetch loop forever.
+/// Shared by every view model that walks a `Page` by cursor.
+func nextPageCursor(
+    _ cursor: String?,
+    seen: inout Set<String>
+) throws -> String? {
+    guard let cursor else { return nil }
+    guard seen.insert(cursor).inserted else {
+        throw HTTPTransportError.invalidResponse
+    }
+    return cursor
+}
+
 @MainActor
 public final class ChatViewModel: ObservableObject {
     @Published public private(set) var history: [SessionHistoryEntry] = []
@@ -67,6 +81,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var browserProfiles: [BrowserProfileView] = []
     @Published public private(set) var selectedBrowserProfileID: UUID?
     @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
+    /// The one-time launch capability of the in-flight ceremony. It is held only
+    /// in memory, only while its ceremony is live, and is surrendered with the
+    /// ceremony so no view can offer it after the ceremony ends.
+    @Published public private(set) var websiteAuthenticationLaunchURL: URL?
     @Published public private(set) var isManagingWebsiteAccess = false
 
     public let runState: RunStateReducer
@@ -98,7 +116,7 @@ public final class ChatViewModel: ObservableObject {
         runState: RunStateReducer? = nil,
         urlSession: URLSession? = nil
     ) {
-        self.tokenStore = tokenStore
+        self.tokenStore = SessionTokenStore(durable: tokenStore)
         self.configurationStore = configurationStore
         self.historyStore = historyStore ?? SessionHistoryStoreFactory.makeDefault()
         self.artifactCache = artifactCache
@@ -115,22 +133,25 @@ public final class ChatViewModel: ObservableObject {
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
             let previousToken = try await tokenStore.readToken()
             let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
+            let previousConfiguration = await configurationStore.load()
+            if credentialsChanged || previousConfiguration?.baseURL != configuration.baseURL {
+                await abandonWebsiteAuthenticationCeremony()
+            }
             if !trimmedToken.isEmpty {
                 try await tokenStore.saveToken(trimmedToken)
             }
             guard try await tokenStore.readToken() != nil else {
                 throw HTTPTransportError.missingToken
             }
-            let previousConfiguration = await configurationStore.load()
             try await install(configuration)
             if previousConfiguration?.baseURL != configuration.baseURL {
                 selectedBrowserProfileID = nil
                 browserProfiles = []
-                browserAuthentication = nil
+                clearWebsiteAuthenticationState()
                 await configurationStore.saveBrowserProfileID(nil)
             } else if credentialsChanged {
                 browserProfiles = []
-                browserAuthentication = nil
+                clearWebsiteAuthenticationState()
                 if selectedBrowserProfileID != nil, let api {
                     do {
                         try await reloadBrowserProfiles(using: api)
@@ -153,6 +174,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        await abandonWebsiteAuthenticationCeremony()
         var revokeError: Error?
         if let api {
             do {
@@ -174,7 +196,7 @@ public final class ChatViewModel: ObservableObject {
         eventStream = nil
         browserProfiles = []
         selectedBrowserProfileID = nil
-        browserAuthentication = nil
+        clearWebsiteAuthenticationState()
         await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
         isConfigured = false
@@ -344,7 +366,7 @@ public final class ChatViewModel: ObservableObject {
             )
             guard selectionRequestID == requestID else { return [] }
             messages.append(contentsOf: page.items)
-            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+            cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
         } while cursor != nil
         return messages
     }
@@ -418,7 +440,7 @@ public final class ChatViewModel: ObservableObject {
                     return
                 }
             }
-            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+            cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
         } while cursor != nil
 
         let missingResolutions = try await resolveMissingSessions(
@@ -467,17 +489,6 @@ public final class ChatViewModel: ObservableObject {
         for sessionID in removedHistorySessionIDs {
             try? await historyStore.delete(sessionID: sessionID)
         }
-    }
-
-    static func nextPageCursor(
-        _ cursor: String?,
-        seen: inout Set<String>
-    ) throws -> String? {
-        guard let cursor else { return nil }
-        guard seen.insert(cursor).inserted else {
-            throw HTTPTransportError.invalidResponse
-        }
-        return cursor
     }
 
     @discardableResult
@@ -645,7 +656,7 @@ public final class ChatViewModel: ObservableObject {
                     loadedApprovalIDs.insert(approval.id)
                     runState.mergeApproval(approval)
                 }
-                cursor = try Self.nextPageCursor(page.nextCursor, seen: &seenCursors)
+                cursor = try nextPageCursor(page.nextCursor, seen: &seenCursors)
             } while cursor != nil
         } catch {
             present(error)
@@ -694,6 +705,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
     public func createWebsiteAccess(
         origin: String,
         loginURL: String
@@ -707,15 +719,18 @@ public final class ChatViewModel: ObservableObject {
         }
         isManagingWebsiteAccess = true
         defer { isManagingWebsiteAccess = false }
+        var createdProfileID: UUID?
         do {
             let profile = try await api.createBrowserProfile(
                 allowedOrigins: [normalizedOrigin]
             )
+            createdProfileID = profile.id
             let ceremony = try await api.beginBrowserAuthentication(
                 profileID: profile.id,
                 loginURL: normalizedLoginURL
             )
             browserAuthentication = ceremony
+            websiteAuthenticationLaunchURL = ceremony.launchURL
             browserProfiles.removeAll { $0.id == profile.id }
             browserProfiles.append(profile)
             errorMessage = nil
@@ -726,9 +741,45 @@ public final class ChatViewModel: ObservableObject {
             }
             return ceremony.launchURL
         } catch {
-            present(error)
+            let creationError = error
+            if let createdProfileID {
+                let cleanupError = await discardUnusedBrowserProfile(
+                    using: api,
+                    profileID: createdProfileID,
+                    authenticationID: nil
+                )
+                browserProfiles.removeAll { $0.id == createdProfileID }
+                if browserAuthentication?.profileID == createdProfileID {
+                    clearWebsiteAuthenticationState()
+                }
+                if let cleanupError {
+                    errorMessage =
+                        "\(displayMessage(for: creationError)) The unused browser profile could not be fully removed: \(displayMessage(for: cleanupError))"
+                } else {
+                    present(creationError)
+                }
+            } else {
+                present(creationError)
+            }
             return nil
         }
+    }
+
+    /// The handoff succeeded, so the client stops offering the one-time launch
+    /// capability. The ceremony itself stays live until the runtime reports it.
+    public func websiteAuthenticationLaunchOpened() {
+        websiteAuthenticationLaunchURL = nil
+    }
+
+    public func websiteAuthenticationLaunchFailed() async {
+        await discardCurrentWebsiteAccess(
+            successMessage:
+                "Veetbot couldn’t open the secure login page. The unused login was removed; try again."
+        )
+    }
+
+    public func cancelWebsiteAccessSetup() async {
+        await discardCurrentWebsiteAccess(successMessage: nil)
     }
 
     public func refreshBrowserAuthentication() async {
@@ -738,6 +789,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let updated = try await api.getBrowserAuthentication(browserAuthentication.id)
             self.browserAuthentication = updated
+            if updated.status.isTerminal {
+                websiteAuthenticationLaunchURL = nil
+            }
             try await reloadBrowserProfiles(using: api)
             if updated.status == .ready,
                 browserProfiles.contains(where: {
@@ -779,13 +833,95 @@ public final class ChatViewModel: ObservableObject {
                 await configurationStore.saveBrowserProfileID(nil)
             }
             if browserAuthentication?.profileID == profileID {
-                browserAuthentication = nil
+                clearWebsiteAuthenticationState()
             }
             try await reloadBrowserProfiles(using: api)
             errorMessage = nil
         } catch {
             present(error)
         }
+    }
+
+    private func discardCurrentWebsiteAccess(successMessage: String?) async {
+        guard let api, let authentication = browserAuthentication else {
+            if let successMessage { errorMessage = successMessage }
+            return
+        }
+        isManagingWebsiteAccess = true
+        defer { isManagingWebsiteAccess = false }
+        let profileID = authentication.profileID
+        let cleanupError = await discardUnusedBrowserProfile(
+            using: api,
+            profileID: profileID,
+            authenticationID: authentication.status.isTerminal ? nil : authentication.id
+        )
+        clearWebsiteAuthenticationState()
+        browserProfiles.removeAll { $0.id == profileID }
+        if selectedBrowserProfileID == profileID {
+            selectedBrowserProfileID = nil
+            await configurationStore.saveBrowserProfileID(nil)
+        }
+        do {
+            try await reloadBrowserProfiles(using: api)
+        } catch {
+            if cleanupError == nil {
+                present(error)
+                return
+            }
+        }
+        if let cleanupError {
+            errorMessage =
+                "The login setup could not be fully removed: \(displayMessage(for: cleanupError)). Refresh Website Access and use the trash button to try again."
+        } else {
+            errorMessage = successMessage
+        }
+    }
+
+    /// Surrenders an in-flight website-login ceremony before the connection it
+    /// was begun under is replaced or deleted. The launch capability stays live
+    /// until the ceremony is cancelled or expires, so the cancellation is sent
+    /// through the transport and credential that began it, before either
+    /// changes. It is best effort: the old credential may already be rejected,
+    /// and a failure here must not block the connection change. The client
+    /// forgets the ceremony either way, so nothing can offer the capability.
+    private func abandonWebsiteAuthenticationCeremony() async {
+        let ceremony = browserAuthentication
+        clearWebsiteAuthenticationState()
+        guard let api, let ceremony, !ceremony.status.isTerminal else { return }
+        _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+    }
+
+    /// Forgets the in-flight ceremony and its one-time launch capability.
+    private func clearWebsiteAuthenticationState() {
+        browserAuthentication = nil
+        websiteAuthenticationLaunchURL = nil
+    }
+
+    private func discardUnusedBrowserProfile(
+        using api: VeetbotAPIClient,
+        profileID: UUID,
+        authenticationID: UUID?
+    ) async -> Error? {
+        var firstError: Error?
+        if let authenticationID {
+            do {
+                _ = try await api.cancelBrowserAuthentication(authenticationID)
+            } catch {
+                firstError = error
+            }
+        }
+        do {
+            _ = try await api.revokeBrowserProfile(profileID)
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+        do {
+            try await api.deleteBrowserProfile(profileID)
+            return nil
+        } catch {
+            if firstError == nil { firstError = error }
+        }
+        return firstError
     }
 
     private func reloadBrowserProfiles(using api: VeetbotAPIClient) async throws {
@@ -795,7 +931,7 @@ public final class ChatViewModel: ObservableObject {
         repeat {
             let page = try await api.listBrowserProfiles(cursor: cursor)
             profiles.append(contentsOf: page.items)
-            cursor = try Self.nextPageCursor(page.nextCursor, seen: &seen)
+            cursor = try nextPageCursor(page.nextCursor, seen: &seen)
         } while cursor != nil
         browserProfiles = profiles
         if let selectedBrowserProfileID,
@@ -826,7 +962,7 @@ public final class ChatViewModel: ObservableObject {
                     } catch {
                         selectedBrowserProfileID = nil
                         browserProfiles = []
-                        browserAuthentication = nil
+                        clearWebsiteAuthenticationState()
                         await configurationStore.saveBrowserProfileID(nil)
                         clearInstalledConnection()
                         throw error
@@ -992,6 +1128,10 @@ public final class ChatViewModel: ObservableObject {
             requiresReauthentication = true
         }
         errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+    }
+
+    private func displayMessage(for error: Error) -> String {
+        (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
     }
 }
 

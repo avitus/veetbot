@@ -26,7 +26,7 @@ from agent_core.tools.registry import RegisteredTool
 from agent_core.tools.web_fetch import WebFetchTool
 from agent_core.tools.web_search import WebSearchTool
 from tests.unit.test_config import base_environment
-from tests.unit.test_web_tools import FakeWebProvider
+from tests.unit.test_web_tools import FailingWebProvider, FakeWebProvider
 
 
 async def test_recommended_hybrid_registers_tavily_search_and_firecrawl_fetch() -> None:
@@ -129,6 +129,42 @@ async def test_web_search_runs_through_policy_and_persists_untrusted_result() ->
     assert invocations[0].status is ToolInvocationStatus.SUCCEEDED
     assert invocations[0].result_item is not None
     assert invocations[0].result_item.trust is TrustLevel.EXTERNAL_UNTRUSTED
+
+
+async def test_retryable_web_provider_outage_does_not_advise_argument_changes() -> None:
+    provider = FailingWebProvider()
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[
+                    ScriptedToolCall(
+                        name="web.fetch",
+                        arguments={"url": "https://example.org/ada"},
+                    )
+                ],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="The web provider is temporarily unavailable."),
+        ]
+    )
+    settings = load_settings({**base_environment(), "SANDBOX_MECHANISM": "fake"})
+
+    async with build(
+        settings=settings,
+        script=script,
+        sequential_ids=True,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        run_id = await composition.runs.submit("Fetch the public page.")
+        await composition.runs.wait_terminal(run_id)
+        async with composition.uow_factory() as uow:
+            invocations = await uow.invocations.list_for_run(run_id, composition.principal)
+
+    assert len(invocations) == 1
+    assert invocations[0].outcome is not None
+    assert invocations[0].outcome.status.value == "unavailable"
+    assert invocations[0].outcome.retryable is True
+    assert invocations[0].outcome.remediation == "none"
 
 
 async def test_web_result_reaches_the_next_model_step_inside_an_untrusted_envelope() -> None:

@@ -405,6 +405,113 @@ public struct Page<Item: Codable & Sendable>: Codable, Sendable {
     }
 }
 
+public enum MemoryStatusKind: String, Codable, CaseIterable, Sendable {
+    case candidate
+    case provisional
+    case active
+    case superseded
+    case expired
+    case retired
+}
+
+public enum MemoryBeliefTypeKind: String, Codable, CaseIterable, Sendable {
+    case fact
+    case preference
+    case relationship
+    case userModelAttr = "user_model_attr"
+    case procedurePointer = "procedure_pointer"
+}
+
+public enum MemoryPolarityKind: String, Codable, CaseIterable, Sendable {
+    case assert
+    case retract
+}
+
+public enum MemoryPortabilityKind: String, Codable, CaseIterable, Sendable {
+    case portable
+    case contextual
+    case local
+}
+
+public enum MemoryAuthorityKind: String, Codable, CaseIterable, Sendable {
+    case user
+    case affirmed
+    case inferred
+}
+
+public enum MemorySensitivityKind: String, Codable, CaseIterable, Sendable {
+    case `public`
+    case `internal`
+    case sensitive
+    case restricted
+}
+
+/// The public projection of a belief, mirroring the server's `MemoryView`
+/// exposure list field-for-field (memory-read-api-and-browser.md). The
+/// enum-like fields decode as raw strings with typed known-case accessors
+/// below, so a value this client does not yet know about decodes instead of
+/// throwing (ADR-0049 decision 4).
+public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let subject: String
+    public let statement: String
+    public let beliefType: String
+    public let status: String
+    public let polarity: String
+    public let scope: String
+    public let portability: String
+    public let authority: String
+    public let sensitivity: String
+    public let confidence: Double
+    public let corroborationCount: Int
+    public let flaggedForReview: Bool
+    public let conflictsWith: [UUID]
+    public let supersededBy: UUID?
+    public let sourceSessionID: UUID
+    public let sourceEventIDs: [Int]
+    public let formationRunID: UUID
+    public let consolidationPolicyVersion: String
+    public let originScopes: [String]
+    public let validFrom: Date
+    public let validTo: Date?
+    public let expiresAt: Date?
+    public let lastReinforcedAt: Date
+    public let createdAt: Date
+    public let updatedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id, subject, statement, status, polarity, scope, portability, authority, sensitivity,
+            confidence
+        case beliefType = "belief_type"
+        case corroborationCount = "corroboration_count"
+        case flaggedForReview = "flagged_for_review"
+        case conflictsWith = "conflicts_with"
+        case supersededBy = "superseded_by"
+        case sourceSessionID = "source_session_id"
+        case sourceEventIDs = "source_event_ids"
+        case formationRunID = "formation_run_id"
+        case consolidationPolicyVersion = "consolidation_policy_version"
+        case originScopes = "origin_scopes"
+        case validFrom = "valid_from"
+        case validTo = "valid_to"
+        case expiresAt = "expires_at"
+        case lastReinforcedAt = "last_reinforced_at"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+
+    public var statusKind: MemoryStatusKind? { MemoryStatusKind(rawValue: status) }
+    public var beliefTypeKind: MemoryBeliefTypeKind? { MemoryBeliefTypeKind(rawValue: beliefType) }
+    public var polarityKind: MemoryPolarityKind? { MemoryPolarityKind(rawValue: polarity) }
+    public var portabilityKind: MemoryPortabilityKind? {
+        MemoryPortabilityKind(rawValue: portability)
+    }
+    public var authorityKind: MemoryAuthorityKind? { MemoryAuthorityKind(rawValue: authority) }
+    public var sensitivityKind: MemorySensitivityKind? {
+        MemorySensitivityKind(rawValue: sensitivity)
+    }
+}
+
 public enum ContentBlock: Codable, Hashable, Sendable {
     case text(String)
     case image(artifactID: UUID, mediaType: String, detail: String)

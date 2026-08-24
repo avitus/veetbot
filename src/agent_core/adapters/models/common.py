@@ -19,7 +19,7 @@ from agent_core.domain.messages import (
     sanitize_provider_code,
     sanitize_provider_parameter,
 )
-from agent_core.domain.tools import ToolSpec
+from agent_core.model.tool_definitions import tool_definition as tool_definition
 
 type RawEventSource = Callable[[dict[str, Any]], AsyncIterator[dict[str, Any]]]
 
@@ -59,23 +59,6 @@ def text_content(parts: list[ContentPart]) -> str:
 
 def assistant_text(message: AssistantMessage) -> str:
     return text_content(message.content)
-
-
-def tool_definition(spec: object, *, anthropic: bool = False) -> dict[str, Any]:
-    tool = ToolSpec.model_validate(spec)
-    if anthropic:
-        return {
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.input_schema,
-        }
-    return {
-        "type": "function",
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": tool.input_schema,
-        "strict": True,
-    }
 
 
 def failed_event(

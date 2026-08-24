@@ -1,11 +1,104 @@
-Warning: truncated output (original token count: 50280)
-Total output lines: 3224
-
 ---
 title: Changelog
 ---
 
 # Changelog
+
+## 2026-08-24 — Milestone 18 specified: first-class email integration
+
+- Added `docs/plan/email-integration.md` and proposed ADR-0071, meeting
+  roadmap item B11's entry condition for its email half: owner intent, with
+  email arriving as MCP servers. Three first-party stdio servers in one new
+  package, `src/gmail_mcp/`, import-isolated from `agent_core` in both
+  directions and split by side effect because the tool system classifies at
+  the server level — `gmail_read` at `NETWORK_READ`/`LOW`/`READ_ONLY`,
+  `gmail_write` at `EXTERNAL_WRITE`/`MEDIUM`/`NON_IDEMPOTENT`, and
+  `gmail_send` at `EXTERNAL_MESSAGE`/`HIGH`/`NON_IDEMPOTENT` — eight tools,
+  no permanent deletion on any roster, every write and send
+  approval-gated by the default matrix. Credentials are broker-held
+  `env`-scheme references holding a refresh-token document only the server
+  understands, obtained by a one-time `python -m gmail_mcp bootstrap`
+  consent ceremony; composition is default-off behind `AGENT_EMAIL_ENABLED`;
+  monitoring is a recipe over existing schedules and notifications.
+  Thirteen hard gates in a new `email` area take the census from 335 to 348.
+- ADR-0071 also owns the one repair the milestone needs in shared code: the
+  deterministic `host_on_allowlist` condition, which today recognizes only
+  the web and browser fixed provider targets and so denies every read-only
+  MCP call, gains an arm for an `mcp` target whose specification declares
+  `NETWORK_READ` and `READ_ONLY`, on the same operator-declared
+  justification ADR-0054 recorded for the web arm. Calendar, attachments,
+  Gmail push, interval recurrence, the email Surface, and the email
+  notification transport stay on the roadmap.
+- Two boundaries the specification now states rather than implies, after
+  review. A stdio MCP server is a child of the worker and inherits its
+  network position, so neither the sandbox proxy nor the worker's outbound
+  guard confines it: `gmail_mcp` is held to Google by its own endpoint
+  constants, refused redirects, and gates 1 and 12, and host-level egress
+  enforcement is named as a deployment precondition the milestone does not
+  require. And because the two write servers are `NON_IDEMPOTENT` and Gmail
+  can commit before answering, a rate limit, 5xx, or lost response after
+  dispatch resolves `uncertain` and is never re-proposed, rather than being
+  retried into a duplicate label change or a second message — ADR-0071
+  decision 10, generalizing the rule the adapter already applies to a
+  post-watermark 401. Reconciliation is explicit: a write is read back
+  through `gmail_read`, and a send goes to human review. The engineering
+  plan's gate census sentence catches up with the registry at 351
+  declarations and 348 entries.
+
+## 2026-08-23 — The provenance trio is exposed, not withheld
+
+- The owner answered the open question the specification flagged for
+  sign-off: `formation_run_id`, `consolidation_policy_version`, and
+  `origin_scopes` are exposed in `MemoryView` rather than withheld
+  (`docs/status/questions-for-review.md`, Milestone 17 section). The
+  exposure list grows from twenty-three fields to twenty-six; `tenant_id`,
+  `principal_id`, `utility`, and `store_position` remain withheld outright,
+  and hard gate 9 asserts the new list exactly, in both directions, with its
+  exact-match mechanism unchanged. The native Apple client's memory detail
+  view gains a formation run, a consolidation policy version, and an origin
+  scopes row in its Provenance section.
+
+## 2026-08-23 — Milestone 17 specified: the memory read API and browser
+
+- Added `docs/plan/memory-read-api-and-browser.md` and proposed ADR-0070: two
+  read-only routes under `/v1/memories`, a keyset-paginated list and a detail
+  route, both GET, both requiring the exact scope `memory.read` and mounted
+  only when `AGENT_MEMORY_API_ENABLED` is set, which is off by default; a
+  sensitivity `ceiling` that every request must supply and the server never
+  infers, filtered strictly, with an above-ceiling belief indistinguishable
+  from one that does not exist; status, belief-type, subject, source-session,
+  and text filters, the text filter answered identically by both store
+  adapters through the shared lexical helpers; a `MemoryView` built from an
+  explicit exposure list that withholds tenant identity, retriever-internal
+  utility, cursor internals, and — as a recommendation flagged for owner
+  sign-off — three operator-tier provenance fields; and a browsing surface in
+  the native Apple client that declares the `restricted` ceiling explicitly
+  and degrades gracefully against a server without the flag. Ten hard gates.
+- ADR-0070 supersedes ADR-0045's closure of the HTTP route set for inspection
+  only, on the precedent ADR-0050 set, and is the authorized contract and
+  security review ADR-0049 requires before the server is expanded for the
+  native client. Writes over HTTP, recall-trace viewing, consolidation audit
+  routes, and knowledge documents stay out; trace viewing is additionally
+  blocked until `PostgresTraceStore.for_turn` gains tenant and principal
+  predicates.
+- Registered the ten gates in the existing `memory` area, which now spans four
+  declaring specifications: the registry bound and declaring-spec census, the
+  milestone-map area paragraph, per-spec table, gate-table digits (23 specs,
+  329 subject gates, 338 declarations, 335 entries), census row for Milestone
+  17 and its Decision 9 note, readiness verdict and section, current
+  milestone, project state, AGENTS.md routing row and scope bullet, mkdocs
+  nav, ADR index, a route-extension subsection in the API design, the review
+  log, and this changelog. Raised the plan to version 2.6.
+
+## 2026-08-23 — Milestone 16 complete
+
+- Milestone 16, memory evaluation and lifecycle, completed as the parallel
+  workstream: all twenty `gate.memory.*` gates pass, the checked-in benchmark
+  baseline equals a fresh deterministic run exactly, the provider evidence is
+  republished at `formation@8`, and hosted CI plus the CodeRabbit review loop
+  finished clean on the `dev` to `main` pull request. Its evidence moved from
+  project state to the verification history. The verified gate ceiling stays
+  at Milestone 12 and advances only in numerical order.
 
 ## 2026-08-23 — Live benchmark failures made diagnosable, and the arm published
 

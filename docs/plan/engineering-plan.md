@@ -3,7 +3,7 @@ title: Modular General-Purpose AI Agent Engineering Plan
 status: normative
 canonical: true
 source_document: archive/Modular_General_Purpose_AI_Agent_Engineering_Plan.docx
-version: "2.5"
+version: "2.6"
 ---
 
 # Modular General-Purpose AI Agent Engineering Plan
@@ -68,6 +68,13 @@ Version 2.5 (memory evaluation pass, 2026-08-22):
 - Memory acquires a yardstick: a checked-in multi-session benchmark with a deterministic in-CI arm, an exact baseline, an opt-in live arm with a cost ceiling and self-validating evidence, and opt-in loaders for three public long-horizon datasets that are never vendored. No model judges an answer.
 - The memory lifecycle the Milestone 9 specifications describe — decay, usage feedback, the recall delta and its correction lines, established facts as a formation input, surfaced conflicts, opt-in re-derivation, and the memory profile document — becomes implemented behavior rather than described behavior.
 - Roadmap item B6 narrows to the residue Milestone 16 does not take, and each remaining item's entry condition becomes that milestone's benchmark evidence.
+
+Version 2.6 (memory read surface pass, 2026-08-23):
+
+- Section 21 gains Milestone 17 — the memory read API and the native memory browser — authorized by the repository owner as a parallel workstream alongside Milestones 13 through 15 and Milestone 16, and specified by a detailed-design document that declares its ten gates before implementation begins (ADR-0070).
+- Memory becomes readable over HTTP for the first time: two GET routes under `/v1/memories`, one exact scope, `memory.read`, and one default-off feature flag. ADR-0045's closure of the route set is superseded for inspection only; every write stays on the governed `agent memory` command line.
+- The sensitivity ceiling is a required parameter on every request rather than a value the server infers, and the native Apple client browses at full parity by declaring the `restricted` ceiling explicitly.
+- Milestone 16's exclusion of an HTTP memory surface gives up its read half and keeps the rest; recall-trace viewing, consolidation audits, and knowledge documents stay out.
 
 ## 1. Mission
 
@@ -2369,7 +2376,7 @@ Live tests should have strict call and cost limits.
 
 Do not work on multiple milestones simultaneously. Complete each milestone’s acceptance criteria before moving to the next.
 
-The milestone each stated requirement must hold at - three hundred and twenty-eight gate declarations, comprising three hundred and nineteen across twenty-two detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and twenty-five registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 16; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and twenty-five registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
+The milestone each stated requirement must hold at - three hundred and fifty-one gate declarations, comprising three hundred and forty-two across twenty-four detailed-design specifications, the import-boundary walk and secret scanner this plan declares in Milestone 0, and seven the map declares over the corpus itself; the three cross-spec aliases that reduce those declarations to three hundred and forty-eight registry entries; the rule that produced every assignment, which is that a gate lands at the milestone that builds the last thing it observes; the one heading, one form, and one `**M<n>.**` suffix that make Milestone 0's docs check writable at all; the three gates declared twice and which document owns each; and the generated census the written distribution is asserted against - is specified in [milestone-map.md](milestone-map.md) and ADR-0027. That document expands this section and Sections 20 and 26 and Milestones 0 through 18; it decides when each stated requirement must hold and states no requirement of its own, so where a gate's statement is wrong the fix belongs in the spec that declares it. Two findings it reports rather than fixes: forty-one of the three hundred and forty-eight registry entries are green before Milestone 2, thirteen of them against a repository with no agent in it, and no milestone with work in it adds none - the three zeros it first reported, at Milestones 6, 8, and 10, were closed by the specifications later written for them, and Milestone 8's MCP half, which those specifications left at zero, by four gates added on the pass that produced this sentence and three more on the pass that gave its authentication configuration a scheme.
 
 ### 21.1 Sequencing of the version 2.2 additions
 
@@ -3326,6 +3333,115 @@ history or artifacts as retrieval sources, belief merge or global
 consolidation, an HTTP memory surface, or experiential and strategy memory.
 Those remain roadmap item B6, each entering on this milestone's evidence.
 
+### Milestone 17: Memory read API and browser
+
+The owner authorized this milestone on 2026-08-23 (ADR-0070) as a parallel
+workstream alongside Milestones 13 through 15 and Milestone 16. The belief
+store is the one durable record about a person that this platform holds and
+never shows them: the only inspection surface is the `agent memory` command
+line on the host, which is right for an operator and useless to the person the
+beliefs are about. ADR-0045 closed the HTTP route set until a later milestone
+explicitly designed a remote management API, and ADR-0049 forbade expanding the
+server for the native client absent an authorized contract and a security
+review of its own; this milestone is both, restricted to inspection. The
+detailed design is
+[memory-read-api-and-browser.md](memory-read-api-and-browser.md) and ADR-0070;
+the design declares this milestone's ten gates.
+
+Implement:
+
+- A read-only `/v1/memories` router — a keyset-paginated list and a detail
+  route, both GET, both requiring the exact scope `memory.read` — mounted only
+  when `AGENT_MEMORY_API_ENABLED` is set, which is off by default.
+- A required `ceiling` parameter on every request, filtered strictly against
+  the sensitivity order, never inferred from a scope, a role, or a principal,
+  and a validation error when it is absent.
+- Status, belief-type, subject, source-session, and text filters, with the text
+  filter answered identically by both store adapters through the shared lexical
+  helpers and proven by a shared browse contract suite.
+- A `MemoryView` projection built from an explicit exposure list, withholding
+  tenant identity, retriever-internal utility, and cursor internals.
+- A browsing surface in the native Apple client that declares the `restricted`
+  ceiling explicitly, pages by cursor, debounces its search, and degrades
+  gracefully against a server that does not mount the router.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- A request without a ceiling is refused, and no response ever carries a belief
+  whose sensitivity exceeds the ceiling the caller supplied.
+- A belief above the ceiling, a belief belonging to another principal or
+  tenant, and a belief that does not exist are indistinguishable to the caller.
+- Every route under `/v1/memories` is a GET declaring exactly `memory.read`,
+  and nothing under it mutates.
+- Paging under concurrent writes neither skips nor repeats a belief, and every
+  error is a member of the existing closed error-code vocabulary.
+- With the feature flag unset the routes are absent from the application and
+  from the OpenAPI document.
+
+The milestone does not include any write, edit, retraction, or deletion route;
+recall-trace viewing, which is blocked on adding tenant and principal
+predicates to the trace store's per-turn read; consolidation or formation audit
+routes; or knowledge documents. Writes over HTTP remain excluded exactly as
+ADR-0069 left them.
+
+### Milestone 18: First-class email integration
+
+The owner authorized this milestone on 2026-08-24 (ADR-0071) as a parallel
+workstream alongside Milestones 13 through 15 and Milestone 17, meeting
+roadmap item B11's entry condition for its email half: owner intent, with
+email arriving as MCP servers. Section 2.6 excluded email from the initial
+version and built the interfaces for its later addition; this milestone is
+that addition, carried entirely by the Milestone 8 MCP adapter, the
+Milestone 4 approval lifecycle, the Milestone 11 scheduler, and the
+Milestone 12 notification outbox. The detailed design is
+[email-integration.md](email-integration.md) and ADR-0071; the design
+declares this milestone's thirteen gates.
+
+Implement:
+
+- Three first-party stdio MCP servers in one package, `src/gmail_mcp/`,
+  beside `agent_core` and import-isolated from it in both directions:
+  `gmail_read` at `NETWORK_READ`/`LOW`/`READ_ONLY`, `gmail_write` at
+  `EXTERNAL_WRITE`/`MEDIUM`/`NON_IDEMPOTENT`, and `gmail_send` at
+  `EXTERNAL_MESSAGE`/`HIGH`/`NON_IDEMPOTENT`, eight tools in all, with no
+  permanent-deletion tool on any roster.
+- Broker-held credentials, one `env`-scheme reference per server resolving
+  to a JSON document with the client id, client secret, and refresh token;
+  the server runs the refresh exchange internally and no token material or
+  upstream text crosses the stdio pipe.
+- A one-time operator consent ceremony, `python -m gmail_mcp bootstrap`,
+  writing owner-only credential files that enter the broker through
+  file-backed settings references.
+- An MCP arm on the deterministic `host_on_allowlist` condition: it holds
+  for an `mcp` target when the executing tool's specification declares
+  `NETWORK_READ` and `READ_ONLY`, landed in the same change as the
+  policy-and-approvals amendment that states it.
+- Default-off composition behind `AGENT_EMAIL_ENABLED`: unset, no server
+  row, no registered or advertised `mcp.gmail_*` tool, no scope grant.
+- A documented monitoring recipe over existing daily and weekly schedules
+  and the existing approval and schedule-outcome notifications.
+
+Acceptance criteria:
+
+- Every hard gate declared by the milestone's design document passes.
+- All eight tools pass one shared contract suite in all three modes against
+  a fake Gmail API, and no mode exposes permanent deletion.
+- Under the default ruleset a read-server call is allowed while every
+  write-server and send-server call requires approval, and a send proposed
+  after reading untrusted mail cannot be plain-allowed.
+- The credential reaches each server only as the one declared variable in a
+  constructed environment, and no token material or upstream text appears
+  in `argv`, tool results, events, or logs.
+- With the flag unset the servers, tools, and scope grants are absent.
+- A daily triage schedule produces reads without approvals, writes with
+  them, and content-free notifications.
+
+The milestone does not include calendar; permanent deletion; attachments;
+Gmail push; interval or cron recurrence (B5); the email inbound Surface (B3)
+or the email notification transport (B4); a second provider or account; or
+any auto-approval or standing-grant mechanism (B8).
+
 ### Roadmap beyond Milestone 15
 
 Section 24 requires deferred work to become documented issues or a roadmap
@@ -3346,7 +3462,7 @@ owner's current ranking, not a schedule.
 | B8 | General standing approval grants; LLM-assisted approval as a restrictive-only signal | A policy ADR |
 | B9 | Trajectory-to-fine-tuning loop (Section 31.3) | A design and enough captured trajectories |
 | B10 | S3-compatible artifact storage | An operational need to scale past one host |
-| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers |
+| B11 | Voice input, computer-use automation, first-class email or calendar integration, a visual workflow builder | Owner intent; email and calendar first as MCP servers. The email half entered as Milestone 18 on 2026-08-24 (ADR-0071); calendar still waits here |
 | B12 | Billing, per-tenant quotas, single sign-on | Only if the direction changes to a multi-tenant product |
 
 ## 22. Security baseline

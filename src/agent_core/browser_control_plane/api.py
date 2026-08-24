@@ -558,41 +558,157 @@ def _private_ref_digest(value: str) -> str:
 
 _AUTHENTICATION_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Authenticate browser profile</title>
-<style>body{font:16px system-ui;margin:0;background:#111;color:#eee}
-main{max-width:1100px;margin:auto;padding:16px}
-img{display:block;max-width:100%;border:1px solid #555;background:white}
-input{width:75%;padding:10px}
-button{padding:10px;margin:4px}small{display:block;color:#bbb;margin:8px 0}</style></head>
-<body><main><h1>Authenticate browser profile</h1>
-<small>Credentials stay in this isolated browser surface.</small>
-<img id="frame" alt="Remote browser"><p><input id="text" type="password" autocomplete="off"
-placeholder="Type into the focused browser field"><button id="send">Send text</button>
-<button data-key="Enter">Enter</button><button data-key="Tab">Tab</button>
-<button data-key="Backspace">Backspace</button></p><p id="status">Connecting…</p></main>
+<title>Secure website login · Veetbot</title>
+<style>
+:root {
+  color-scheme:dark;--ink:#f5f7fa;--muted:#aeb8c6;--panel:#172131;--line:#334155;
+  --turquoise:#32d6c4;--orange:#ff9f43;--navy:#0b1220;--danger:#ff7b86
+}
+* {box-sizing:border-box}
+body {
+  font:16px/1.45 system-ui,-apple-system,sans-serif;margin:0;color:var(--ink);
+  background:radial-gradient(circle at top left,#12354a 0,var(--navy) 44%)
+}
+main {max-width:1180px;margin:auto;padding:clamp(18px,4vw,44px)}
+.eyebrow {
+  color:var(--turquoise);font-size:.78rem;font-weight:750;letter-spacing:.11em;
+  text-transform:uppercase
+}
+h1 {font-size:clamp(1.8rem,4vw,3rem);line-height:1.05;margin:.35rem 0 .6rem}
+h2 {font-size:1.05rem;margin:0 0 .75rem}
+.lede {color:var(--muted);max-width:760px;margin:0 0 1.4rem}
+.grid {display:grid;gap:18px;grid-template-columns:minmax(240px,340px) minmax(0,1fr)}
+.card {
+  background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;
+  box-shadow:0 20px 45px rgba(0,0,0,.18)
+}
+ol {padding-left:1.25rem;margin:.25rem 0 1rem}
+li {margin:.7rem 0;color:var(--muted)}
+li strong {color:var(--ink)}
+.privacy {
+  border-left:3px solid var(--turquoise);padding:.15rem 0 .15rem .8rem;
+  color:var(--muted);font-size:.88rem
+}
+.status {
+  display:flex;align-items:flex-start;gap:.65rem;margin-top:1rem;padding:.75rem .85rem;
+  border-radius:10px;background:#0d1726;color:var(--muted)
+}
+.status::before {
+  content:'';width:.65rem;height:.65rem;margin-top:.32rem;border-radius:50%;
+  background:var(--orange);flex:none
+}
+.status[data-state=connected]::before {background:var(--turquoise)}
+.status[data-state=error]::before {background:var(--danger)}
+.viewport {padding:0;overflow:hidden}
+.viewport-head {
+  display:flex;justify-content:space-between;gap:12px;align-items:center;padding:13px 16px;
+  border-bottom:1px solid var(--line)
+}
+.viewport-head span {font-size:.82rem;color:var(--muted)}
+.frame-wrap {min-height:330px;background:#eef2f7;display:grid;place-items:center}
+img {
+  display:block;width:100%;height:auto;max-height:68vh;object-fit:contain;
+  cursor:crosshair;color:#263244
+}
+.controls {padding:16px;border-top:1px solid var(--line)}
+label {display:block;font-size:.88rem;font-weight:700;margin-bottom:.45rem}
+.send-row {display:flex;gap:8px}
+input {
+  min-width:0;flex:1;border:1px solid #4c5d73;border-radius:9px;background:#0d1726;
+  color:var(--ink);padding:12px;font:inherit
+}
+button {
+  border:1px solid #52647b;border-radius:9px;background:#26364b;color:var(--ink);
+  font:inherit;font-weight:700;padding:10px 13px;cursor:pointer
+}
+button.primary {background:var(--turquoise);border-color:var(--turquoise);color:#07151b}
+button:disabled {cursor:not-allowed;opacity:.45}
+.keys {display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.hint {color:var(--muted);font-size:.8rem;margin:.7rem 0 0}
+@media(max-width:820px) {
+  .grid {grid-template-columns:1fr}.frame-wrap {min-height:240px}
+  .send-row {align-items:stretch;flex-direction:column}
+}
+</style></head>
+<body><main><div class="eyebrow">Veetbot · isolated browser</div>
+<h1>Secure website login</h1>
+<p class="lede">You control this temporary browser. The Veetbot agent and public API
+receive only the finished browser profile—not the username, password, passkey, or MFA
+value you send directly to this isolated browser.</p>
+<div class="grid"><aside class="card"><h2>How to sign in</h2><ol>
+<li><strong>Click the website field in the remote browser</strong> on the right.</li>
+<li>Type the matching username, password, or MFA value in the secure field below it,
+then choose <strong>Send securely</strong>.</li>
+<li>Use Tab, Enter, and Backspace as needed. Repeat until the website confirms you are
+signed in.</li>
+<li><strong>Return to Veetbot</strong> and choose <strong>Check login status</strong>.</li></ol>
+<p class="privacy">Keep this tab open. This link works once and expires after five
+minutes. If it was closed, copied, or reloaded, return to Veetbot and choose
+<strong>Start over</strong>.</p>
+<p id="status" class="status" data-state="connecting" role="status" aria-live="polite">
+Connecting to the isolated browser…</p></aside>
+<section class="card viewport" aria-label="Interactive remote browser">
+<div class="viewport-head"><h2>Remote browser</h2>
+<span>Click a field in the image first</span></div>
+<div class="frame-wrap"><img id="frame"
+alt="Remote browser view. Click a website field to focus it."></div>
+<div class="controls"><label for="text">Send text to the focused website field</label>
+<div class="send-row"><input id="text" type="password" autocomplete="off"
+autocapitalize="off" spellcheck="false" placeholder="Username, password, or MFA value">
+<button id="send" class="primary" type="button" disabled>Send securely</button></div>
+<div class="keys"><button type="button" data-key="Tab" disabled>Tab</button>
+<button type="button" data-key="Enter" disabled>Enter</button>
+<button type="button" data-key="Backspace" disabled>Backspace</button></div>
+<p class="hint">Text is cleared from this page immediately after it is sent.</p>
+</div></section></div></main>
 <script src="/authentication-surface.js"></script></body></html>"""
 
 _AUTHENTICATION_SCRIPT = """(()=>{'use strict';const p=new URLSearchParams(location.hash.slice(1));
-const capability=p.get('capability');history.replaceState(null,'',location.pathname);
-const root=location.pathname;
-const headers={'X-Browser-Ceremony-Capability':capability||''};
+const capability=p.get('capability');const root=location.pathname;
 const frame=document.getElementById('frame');const status=document.getElementById('status');
+const input=document.getElementById('text');const send=document.getElementById('send');
+const controls=[send,...document.querySelectorAll('[data-key]')];
+let refreshTimer=null;let connected=false;
+function setStatus(message,state){status.textContent=message;status.dataset.state=state;}
+function disable(message){connected=false;controls.forEach(control=>control.disabled=true);
+setStatus(message,'error');
+if(refreshTimer!==null){clearInterval(refreshTimer);refreshTimer=null;}}
+if(!capability){disable('This secure login link is incomplete or has expired. '
++'Return to Veetbot and choose Start over.');return;}
+history.replaceState(null,'',location.pathname);
+const headers={'X-Browser-Ceremony-Capability':capability};
 async function event(value){const r=await fetch(root+'/events',
 {method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify(value)});
-if(!r.ok)throw new Error('interaction rejected')}
+if(r.status===401){disable('This secure login has expired. Return to Veetbot and '
++'choose Start over.');throw new Error('expired');}
+if(!r.ok)throw new Error('interaction rejected');}
 async function refresh(){try{const r=await fetch(root+'/frame',{headers});
+if(r.status===401){disable('This secure login has expired. Return to Veetbot and '
++'choose Start over.');return;}
 if(!r.ok)throw new Error('session unavailable');const blob=await r.blob();const old=frame.src;
-frame.src=URL.createObjectURL(blob);if(old)URL.revokeObjectURL(old);status.textContent='Connected';}
-catch(e){status.textContent='Authentication session unavailable';}}
-frame.addEventListener('click',e=>{const box=frame.getBoundingClientRect();
-event({kind:'click',x:Math.round((e.clientX-box.left)*frame.naturalWidth/box.width),
-y:Math.round((e.clientY-box.top)*frame.naturalHeight/box.height)}).then(refresh).catch(()=>{});});
-document.getElementById('send').addEventListener('click',()=>{
-const input=document.getElementById('text');
-event({kind:'text',text:input.value}).then(()=>{input.value='';return refresh();}).catch(()=>{});});
-document.querySelectorAll('[data-key]').forEach(b=>b.addEventListener('click',()=>
-event({kind:'key',key:b.dataset.key})
-.then(refresh).catch(()=>{})));refresh();setInterval(refresh,1000);})();"""
+frame.src=URL.createObjectURL(blob);if(old)URL.revokeObjectURL(old);connected=true;
+controls.forEach(control=>control.disabled=false);
+setStatus('Connected — click a website field in the remote browser.','connected');}
+catch(e){if(refreshTimer!==null){setStatus(
+'The isolated browser is temporarily unavailable. Retrying…','connecting');}}}
+frame.addEventListener('click',async e=>{
+if(!connected||!frame.naturalWidth)return;const box=frame.getBoundingClientRect();
+try{await event({kind:'click',x:Math.round((e.clientX-box.left)*frame.naturalWidth/box.width),
+y:Math.round((e.clientY-box.top)*frame.naturalHeight/box.height)});await refresh();input.focus();}
+catch(e){if(connected)setStatus('The click could not be sent. Try again.','error');}});
+async function sendText(){if(!connected)return;const text=input.value;input.value='';
+if(!text)return;controls.forEach(control=>control.disabled=true);
+try{await event({kind:'text',text});await refresh();}
+catch(e){if(connected){setStatus(
+'The text could not be sent. Refocus the website field and try again.','error');}}
+finally{if(connected)controls.forEach(control=>control.disabled=false);input.focus();}}
+send.addEventListener('click',sendText);
+input.addEventListener('keydown',e=>{
+if(e.key==='Enter'){e.preventDefault();sendText();}});
+document.querySelectorAll('[data-key]').forEach(button=>button.addEventListener('click',async()=>{
+if(!connected)return;try{await event({kind:'key',key:button.dataset.key});await refresh();}
+catch(e){if(connected)setStatus('The key could not be sent. Try again.','error');}}));
+refresh();refreshTimer=setInterval(refresh,1000);})();"""
 
 
 def _validate_lifecycle_request(

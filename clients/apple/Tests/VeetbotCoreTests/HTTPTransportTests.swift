@@ -58,6 +58,16 @@ import Testing
     }
 
     @Test
+    func testSessionTokenStoreDoesNotReopenKeychainForEveryRequest() async throws {
+        let durable = OneSuccessfulReadTokenStore(token: "device-token")
+        let store = SessionTokenStore(durable: durable)
+
+        #expect(try await store.readToken() == "device-token")
+        #expect(try await store.readToken() == "device-token")
+        #expect(await durable.readCount == 1)
+    }
+
+    @Test
     func testWebsiteAccessUsesProfileIdentifiersAndDirectAuthenticationCeremonies() async throws {
         defer { StubURLProtocol.handler = nil }
         let profileID = try #require(
@@ -767,6 +777,164 @@ import Testing
         #expect(captured[2].url?.path == "/v1/devices/\(deviceID.uuidString)/revoke")
     }
 
+    @Test
+    func testListMemoriesSendsTheCeilingAndEachRepeatableFilterExactlyOnce() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000201")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(#"{"items":[],"next_cursor":null}"#.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        _ = try await client.listMemories(
+            ceiling: memoryBrowsingCeiling,
+            limit: 10,
+            cursor: "memory cursor",
+            statuses: [.active, .provisional],
+            beliefTypes: [.fact],
+            subject: "Alice",
+            sessionID: sessionID,
+            text: "dark mode"
+        )
+
+        let request = try #require(lock.withLock { requests.first })
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.path == "/v1/memories")
+        let query = try #require(
+            URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+        )
+        #expect(query.contains(URLQueryItem(name: "ceiling", value: "restricted")))
+        #expect(query.contains(URLQueryItem(name: "limit", value: "10")))
+        #expect(query.contains(URLQueryItem(name: "cursor", value: "memory cursor")))
+        #expect(
+            query.filter { $0.name == "status" } == [
+                URLQueryItem(name: "status", value: "active"),
+                URLQueryItem(name: "status", value: "provisional"),
+            ]
+        )
+        #expect(
+            query.filter { $0.name == "belief_type" } == [
+                URLQueryItem(name: "belief_type", value: "fact")
+            ]
+        )
+        #expect(query.contains(URLQueryItem(name: "subject", value: "Alice")))
+        #expect(query.contains(URLQueryItem(name: "session_id", value: sessionID.uuidString)))
+        #expect(query.contains(URLQueryItem(name: "text", value: "dark mode")))
+    }
+
+    @Test
+    func testGetMemorySendsTheDeclaredCeiling() async throws {
+        defer { StubURLProtocol.handler = nil }
+        let memoryID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000202")
+        )
+        let sessionID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-000000000203")
+        )
+        let lock = NSLock()
+        var requests: [URLRequest] = []
+        let memoryJSON = """
+            {"id":"\(memoryID.uuidString)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(sessionID.uuidString)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
+            """
+        StubURLProtocol.handler = { request in
+            lock.withLock { requests.append(request) }
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )
+            )
+            return (response, Data(memoryJSON.utf8))
+        }
+        let client = try makeClient(token: "valid")
+
+        let memory = try await client.getMemory(memoryID, ceiling: memoryBrowsingCeiling)
+
+        #expect(memory.id == memoryID)
+        let request = try #require(lock.withLock { requests.first })
+        #expect(request.url?.path == "/v1/memories/\(memoryID.uuidString)")
+        let query = try #require(
+            URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+        )
+        #expect(query == [URLQueryItem(name: "ceiling", value: "restricted")])
+    }
+
+    @Test
+    func testMemoryListDegradesWhenTheServerDoesNotMountTheRouter() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"not_found","message":"Not found.","details":{},"request_id":"old-server"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.listMemories(ceiling: memoryBrowsingCeiling)
+            Issue.record("expected the memory index to degrade rather than surface a not-found")
+        } catch let error as VeetbotAPIClientError {
+            guard case .memoryBrowsingUnavailable = error else {
+                Issue.record("unexpected compatibility error: \(error)")
+                return
+            }
+            #expect(error.errorDescription == "This server does not support memory browsing yet.")
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
+    @Test
+    func testMemoryDetailNotFoundStaysAPlainAPIError() async throws {
+        defer { StubURLProtocol.handler = nil }
+        StubURLProtocol.handler = { request in
+            let response = try #require(
+                HTTPURLResponse(
+                    url: request.url!, statusCode: 404, httpVersion: nil, headerFields: nil
+                )
+            )
+            return (
+                response,
+                Data(
+                    #"{"error":{"code":"not_found","message":"Belief not found.","details":{},"request_id":"req-1"}}"#
+                        .utf8)
+            )
+        }
+        let client = try makeClient(token: "valid")
+
+        do {
+            _ = try await client.getMemory(UUID(), ceiling: memoryBrowsingCeiling)
+            Issue.record("expected a not-found belief to raise a plain API error")
+        } catch HTTPTransportError.api(let apiError) {
+            #expect(apiError.code == .notFound)
+            #expect(apiError.statusCode == 404)
+        } catch {
+            Issue.record("unexpected error: \(error)")
+        }
+    }
+
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
         let data: Data
         if let body = request.httpBody {
@@ -802,6 +970,29 @@ import Testing
         )
         return VeetbotAPIClient(transport: transport)
     }
+}
+
+private actor OneSuccessfulReadTokenStore: TokenStore {
+    private let token: String
+    private(set) var readCount = 0
+
+    init(token: String) {
+        self.token = token
+    }
+
+    func readToken() throws -> String? {
+        readCount += 1
+        guard readCount == 1 else {
+            throw KeychainTokenStoreError.operationFailed(13)
+        }
+        return token
+    }
+
+    func saveToken(_ token: String) throws {
+        _ = token
+    }
+
+    func deleteToken() throws {}
 }
 
 private final class StubURLProtocol: URLProtocol {

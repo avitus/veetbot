@@ -15,6 +15,7 @@ from agent_core.adapters.browser.hosted_provider import (
 from agent_core.adapters.browser.playwright import PlaywrightBrowserProvider
 from agent_core.bootstrap import Composition, build
 from agent_core.config import Settings, load_settings
+from agent_core.context.estimator import ConservativeTokenEstimator
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.browser import (
     BrowserAction,
@@ -30,13 +31,14 @@ from agent_core.domain.errors import InvalidStateTransition, NotFoundError
 from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn, StopReason
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import RunStatus
-from agent_core.domain.tools import ToolInvocationStatus
+from agent_core.domain.tools import ToolInvocationStatus, ToolSpec
 from agent_core.tools.browser_act import BrowserActTool
 from agent_core.tools.browser_navigate import BrowserNavigateTool
 from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.registry import RegisteredTool
 from tests.unit.test_browser_tools import FakeBrowserProvider
 from tests.unit.test_config import base_environment
+from tests.unit.test_web_tools import FakeWebProvider
 
 PROFILE_ID = UUID("00000000-0000-0000-0000-0000000000e7")
 GRANT_ID = UUID("00000000-0000-0000-0000-0000000000e8")
@@ -198,6 +200,79 @@ async def test_configured_hosted_provider_can_select_a_profile_from_each_session
             navigate.implementation._provider,
             SessionBoundHostedBrowserProvider,
         )
+
+
+def session_bound_hosted_settings() -> Settings:
+    return load_settings(
+        {
+            **base_environment(),
+            "SANDBOX_MECHANISM": "fake",
+            "BROWSER_PROVIDER": "hosted",
+            "BROWSER_PROFILE_SERVICE_URL": "https://browser.internal.example",
+            "BROWSER_PROFILE_CONTROL_PLANE_API_KEY": "opaque-control-plane-token",
+        }
+    )
+
+
+async def context_plan_payload(composition: Composition, session_id: UUID) -> dict[str, object]:
+    async with composition.uow_factory() as uow:
+        event = await uow.events.latest_before(
+            session_id,
+            (1 << 63) - 1,
+            "context.plan.created",
+            composition.principal,
+        )
+    assert event is not None
+    return cast(dict[str, object], event.payload["plan"])
+
+
+async def test_session_bound_browser_tools_are_omitted_without_a_selected_profile() -> None:
+    provider = FakeWebProvider()
+    async with build(
+        settings=session_bound_hosted_settings(),
+        script=FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)]),
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        session_id = await composition.sessions.create()
+        run_id = await composition.runs.submit("Check the weather.", session_id)
+        run = await composition.runs.wait_terminal(run_id)
+        assert run.status is RunStatus.COMPLETED
+        plan = await context_plan_payload(composition, session_id)
+
+    tool_names = cast(list[str], plan["tool_names"])
+    assert "web.search" in tool_names
+    assert "web.fetch" in tool_names
+    assert not set(tool_names) & {"browser.navigate", "browser.observe", "browser.act"}
+
+
+async def test_selected_profile_browser_plan_stays_within_the_tool_definition_cap() -> None:
+    provider = FakeWebProvider()
+    async with build(
+        settings=session_bound_hosted_settings(),
+        script=FakeModelScript(turns=[ScriptedTurn(text="ready", stop_reason=StopReason.END_TURN)]),
+        web_search_provider_override=provider,
+        web_fetch_provider_override=provider,
+    ) as composition:
+        await seed_browser_authority(composition)
+        created = await composition.services.sessions.create(
+            composition.principal,
+            "general",
+            {},
+            browser_profile_id=PROFILE_ID,
+        )
+        run_id = await composition.runs.submit("Open my selected website.", created.id)
+        run = await composition.runs.wait_terminal(run_id)
+        assert run.status is RunStatus.COMPLETED
+        plan = await context_plan_payload(composition, created.id)
+
+    tool_names = cast(list[str], plan["tool_names"])
+    assert {"browser.navigate", "browser.observe", "browser.act"} <= set(tool_names)
+    tool_specs = [
+        ToolSpec.model_validate(value)
+        for value in cast(list[dict[str, object]], plan["tool_specs"])
+    ]
+    assert ConservativeTokenEstimator().estimate_tools(tool_specs, "fake:scripted") <= 6_000
 
 
 async def test_session_creation_binds_only_a_ready_principal_owned_browser_profile() -> None:

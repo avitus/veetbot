@@ -13,7 +13,7 @@ import yaml
 
 GATE_ID = re.compile(
     r"^gate\.(structure|runtime|tool|builtin|model|policy|event|context|memory|"
-    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops)"
+    r"harness|api|sandbox|skill|knowledge|web|browser|schedule|device|notify|delegate|surface|ops|email)"
     r"\.[a-z0-9]+(?:_[a-z0-9]+)*$"
 )
 MAP_ROW = re.compile(
@@ -22,10 +22,11 @@ MAP_ROW = re.compile(
     re.MULTILINE,
 )
 # The highest milestone the corpus authorizes; Milestones 12 through 15 were
-# authorized on 2026-08-20 (ADR-0061) and Milestone 16 on 2026-08-22
-# (ADR-0069). The census reports a zero row for each authorized milestone whose
-# specification has not yet declared gates.
-MAX_MILESTONE = 16
+# authorized on 2026-08-20 (ADR-0061), Milestone 16 on 2026-08-22 (ADR-0069),
+# Milestone 17 on 2026-08-23 (ADR-0070), and Milestone 18 on 2026-08-24
+# (ADR-0071). The census reports a zero row for each authorized milestone
+# whose specification has not yet declared gates.
+MAX_MILESTONE = 18
 REQUIRED_FIELDS = {"id", "milestone", "kind", "spec", "statement", "check"}
 
 # declared count, aliases owned elsewhere
@@ -52,6 +53,8 @@ DECLARING_SPECS: dict[str, tuple[int, int]] = {
     "inbound-surfaces.md": (21, 0),
     "operational-hardening.md": (16, 0),
     "memory-evaluation-and-lifecycle.md": (20, 0),
+    "memory-read-api-and-browser.md": (10, 0),
+    "email-integration.md": (13, 0),
     "milestone-map.md": (7, 0),
 }
 

@@ -68,6 +68,8 @@ def test_milestone_tokens_present() -> None:
         "inbound-surfaces.md",
         "operational-hardening.md",
         "memory-evaluation-and-lifecycle.md",
+        "memory-read-api-and-browser.md",
+        "email-integration.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -96,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 325
+    assert len(entries) == 348
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -161,6 +163,8 @@ def test_census_is_derived() -> None:
         14: 21,
         15: 16,
         16: 20,
+        17: 10,
+        18: 13,
     }
 
 
@@ -191,12 +195,12 @@ def test_browser_automation_has_complete_milestone_10_gate_area() -> None:
 
 
 _GATE_TABLE_DERIVED = {
-    "subject_specs": 22,
-    "subject_gates": 319,
+    "subject_specs": 23,
+    "subject_gates": 329,
     "plan_gates": 2,
     "map_gates": 7,
-    "declarations": 328,
-    "entries": 325,
+    "declarations": 338,
+    "entries": 335,
     "aliases": 3,
 }
 
@@ -210,19 +214,19 @@ def test_gate_table_arithmetic_reports_stale_digits() -> None:
         "```text\n"
     )
     assert gate_table_arithmetic_errors(stale, _GATE_TABLE_DERIVED) == [
-        "gate table intro says 15 subject specs; registry derives 22",
-        "gate table intro says 178 subject gates; registry derives 319",
-        "gate table intro says 187 declarations; registry derives 328",
-        "gate table intro says 184 entries; registry derives 325",
+        "gate table intro says 15 subject specs; registry derives 23",
+        "gate table intro says 178 subject gates; registry derives 329",
+        "gate table intro says 187 declarations; registry derives 338",
+        "gate table intro says 184 entries; registry derives 335",
     ]
 
 
 def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
     shifted = (
         "## The gate table\n\n"
-        "The 22 subject specifications declare 319 gates, the engineering plan\n"
-        "declares 3 more, and this document declares 6 over the corpus: 328\n"
-        "declarations, 325 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 23 subject specifications declare 329 gates, the engineering plan\n"
+        "declares 3 more, and this document declares 6 over the corpus: 338\n"
+        "declarations, 335 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(shifted, _GATE_TABLE_DERIVED) == [
@@ -234,9 +238,9 @@ def test_gate_table_arithmetic_rejects_compensating_component_edits() -> None:
 def test_gate_table_arithmetic_accepts_reconciled_digits() -> None:
     reconciled = (
         "## The gate table\n\n"
-        "The 22 subject specifications declare 319 gates, the engineering plan\n"
-        "declares 2 more, and this document declares 7 over the corpus: 328\n"
-        "declarations, 325 registry entries once the 3 aliases are subtracted.\n\n"
+        "The 23 subject specifications declare 329 gates, the engineering plan\n"
+        "declares 2 more, and this document declares 7 over the corpus: 338\n"
+        "declarations, 335 registry entries once the 3 aliases are subtracted.\n\n"
         "```text\n"
     )
     assert gate_table_arithmetic_errors(reconciled, _GATE_TABLE_DERIVED) == []
@@ -277,10 +281,10 @@ def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> No
 
 
 def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> None:
-    """Milestone 16 is authorized; the registry admits it and stops there."""
+    """Milestone 18 is authorized; the registry admits it and stops there."""
     import scripts.gate_registry as gate_registry
 
-    assert getattr(gate_registry, "MAX_MILESTONE", None) == 16
+    assert getattr(gate_registry, "MAX_MILESTONE", None) == 18
 
     gates = tmp_path / "evals" / "gates"
     gates.mkdir(parents=True)
@@ -290,8 +294,8 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         (plan_dir / filename).write_text("## Hard gates\n", encoding="utf-8")
     (plan_dir / "milestone-map.md").write_text(
         "## The gate table\n\n```text\n"
-        "gate.schedule.roadmap_probe   case   16\n"
-        "gate.schedule.beyond_probe    case   17\n"
+        "gate.schedule.roadmap_probe   case   18\n"
+        "gate.schedule.beyond_probe    case   19\n"
         "```\n\n## The census\n\n```text\n```\n",
         encoding="utf-8",
     )
@@ -307,12 +311,12 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         }
 
     (gates / "schedule.yaml").write_text(
-        yaml.safe_dump([entry("roadmap_probe", 16), entry("beyond_probe", 17)]),
+        yaml.safe_dump([entry("roadmap_probe", 18), entry("beyond_probe", 19)]),
         encoding="utf-8",
     )
     errors = registry_errors(tmp_path)
-    assert "gate.schedule.roadmap_probe has invalid milestone 16" not in errors
-    assert "gate.schedule.beyond_probe has invalid milestone 17" in errors
+    assert "gate.schedule.roadmap_probe has invalid milestone 18" not in errors
+    assert "gate.schedule.beyond_probe has invalid milestone 19" in errors
 
 
 def test_notifications_and_devices_have_complete_milestone_12_gate_areas() -> None:
@@ -383,3 +387,28 @@ def test_memory_evaluation_and_lifecycle_has_complete_milestone_16_gate_area() -
         for entry in memory_entries
     )
     assert all(GATE_ID.fullmatch(entry.id) for entry in memory_entries)
+
+
+def test_memory_read_api_and_browser_has_complete_milestone_17_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    read_api_entries = [entry for entry in entries if entry.milestone == 17]
+
+    assert len(read_api_entries) == 10
+    assert all(entry.id.startswith("gate.memory.") for entry in read_api_entries)
+    assert all(
+        entry.spec == "docs/plan/memory-read-api-and-browser.md#hard-gates"
+        for entry in read_api_entries
+    )
+    assert all(GATE_ID.fullmatch(entry.id) for entry in read_api_entries)
+
+
+def test_email_integration_has_complete_milestone_18_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    email_entries = [entry for entry in entries if entry.milestone == 18]
+
+    assert len(email_entries) == 13
+    assert all(entry.id.startswith("gate.email.") for entry in email_entries)
+    assert all(entry.spec == "docs/plan/email-integration.md#hard-gates" for entry in email_entries)
+    assert all(GATE_ID.fullmatch(entry.id) for entry in email_entries)

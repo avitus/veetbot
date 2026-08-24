@@ -166,20 +166,25 @@ gate.<area>.<slug>
 area  one of: structure, runtime, tool, builtin, model, policy,
       event, context, memory, harness, api, sandbox, skill,
       knowledge, web, browser, schedule, device, notify, delegate,
-      surface, ops
+      surface, ops, email
 slug  lowercase, underscore-separated, unique within its area
 ```
 
 The area is not the filename. `structure` exists because three gates —
 the import-boundary walk, the transaction-hygiene check, and the secret
 scanner — are structural statements about the repository that no single
-subject spec owns, and `memory` covers all three memory specs because
-formation, retrieval, and the Milestone 16 benchmark share a harness and
-their gates cross-reference each other. It is the only area a third
-specification joined:
+subject spec owns, and `memory` covers all four memory specs because
+formation, retrieval, the Milestone 16 benchmark, and the Milestone 17
+read surface share a harness and their gates cross-reference each other.
+It is the only area more than two specifications share, and the two that
+joined it did so on the same argument:
 [memory-evaluation-and-lifecycle.md](memory-evaluation-and-lifecycle.md)
-measures the subject the area already names, and its gates read the same
-beliefs and the same traces the other two declare gates over.
+measures the subject the area already names and
+[memory-read-api-and-browser.md](memory-read-api-and-browser.md) shows
+it, so both read the beliefs the first two declare gates over. A route
+that returns a belief is a statement about the belief store rather than
+about the API, which is why the read surface's gates take `memory` and
+not `api`.
 
 `sandbox` is the twelfth and it follows the `memory` precedent rather
 than the `structure` one: one spec owns all thirteen, and they are
@@ -251,6 +256,15 @@ jobs add no milestone gate; the subject is the operational lifecycle — backup,
 restore, watch, harden, roll back — and it is one spec owning one area, as
 `sandbox` was.
 
+`email` is the twenty-third, declared by
+[email-integration.md](email-integration.md) at Milestone 18. It is not
+folded into `tool` even though every one of its tools crosses the MCP
+adapter the tool system owns, because its gates are statements about the
+Gmail servers, their rosters, their credential ceremony, and their policy
+posture rather than about the adapter that carries them — the same argument
+that kept `web` and `browser` out of `tool`. One spec owns all thirteen, as
+`sandbox` and `ops` were owned.
+
 Every identifier in the tables below is written in full. Thirteen rows
 across four of them used to carry a truncated one, which this grammar
 does not admit — a slug is underscore-separated and holds no dots, so
@@ -309,9 +323,9 @@ count per spec and the check subtracts it.
 
 ## The gate table
 
-The 22 subject specifications declare 319 gates, the engineering plan
-declares 2 more, and this document declares 7 over the corpus: 328
-declarations, 325 registry entries once the 3 aliases are subtracted.
+The 24 subject specifications declare 342 gates, the engineering plan
+declares 2 more, and this document declares 7 over the corpus: 351
+declarations, 348 registry entries once the 3 aliases are subtracted.
 `make docs-check` reconciles this paragraph's digits against the
 registry, so the arithmetic here cannot drift silently.
 Each table gives the gate's number in its own spec, its registry
@@ -1167,6 +1181,73 @@ document against its models. The remaining fifteen are boundary cases over
 the benchmark run, the belief store, the recall trace, the context builder,
 the command line, and the versioned provider-evidence corpus.
 
+### Memory read API and browser, ten gates
+
+Ten gates, all new, in the same `memory` area and all at Milestone 17. Seven
+are statements about what the two read routes may return — the required
+ceiling, the strict ceiling filter, principal isolation, keyset paging under
+concurrent writes, the filters, the exposure list, and the closed error
+vocabulary — and three are statements about the surface itself: that every
+route is a GET declaring exactly `memory.read`, that the router is absent
+without its flag, and that both store adapters browse identically.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.memory.read_api_ceiling_required           case         17
+2   gate.memory.read_api_ceiling_filter             property     17
+3   gate.memory.read_api_principal_isolation        case         17
+4   gate.memory.read_api_pagination                 case         17
+5   gate.memory.read_api_filters                    case         17
+6   gate.memory.read_api_read_only                  structural   17
+7   gate.memory.read_api_flag_absent                case         17
+8   gate.memory.browse_contract_parity              structural   17
+9   gate.memory.read_api_view_projection            structural   17
+10  gate.memory.read_api_error_vocabulary           case         17
+```
+
+Gate 2 is a property because the ceiling claim is over generated pairs of
+belief sensitivity and request ceiling rather than over one arrangement of
+rows; gates 6, 8, and 9 are structural because they inspect the router's
+declared methods and scopes, the adapters against one contract suite, and a
+serialized model against its exposure list. The remaining six are boundary
+cases over the two routes.
+
+### Email integration, thirteen gates
+
+Thirteen gates, all new, in the new `email` area and all at Milestone 18.
+Five are statements about the servers themselves — the package boundary, the
+shared contract, the rosters, the declared classifications, and the failure
+taxonomy — five are statements about credentials and configuration — the
+constructed environment, token confinement, the default-off flag, scope
+confinement, and the bootstrap ceremony — and three are statements about
+policy and composition in use: the read-allows-write-approves split, the
+untrusted-origin send, and the monitoring recipe.
+
+```text
+#   id                                              kind         M
+--  ----------------------------------------------  -----------  --
+1   gate.email.package_isolation                    structural   18
+2   gate.email.contract_parity                      case         18
+3   gate.email.roster_confinement                   structural   18
+4   gate.email.classification                       case         18
+5   gate.email.read_allow_write_approve             case         18
+6   gate.email.untrusted_origin                     case         18
+7   gate.email.credential_confinement               property     18
+8   gate.email.token_confinement                    case         18
+9   gate.email.default_off                          case         18
+10  gate.email.scope_confinement                    case         18
+11  gate.email.bootstrap_consent                    case         18
+12  gate.email.failure_taxonomy                     case         18
+13  gate.email.monitoring_recipe                    case         18
+```
+
+Gate 7 is a property because the credential claim is over generated server
+configurations rather than one arrangement; gates 1 and 3 are structural
+because they inspect the import graph and the advertised rosters rather than
+a behavior. The remaining ten are boundary cases over the three servers, the
+policy engine, the composition root, and the bootstrap command.
+
 ### This document, seven gates
 
 The seven gates stated under [Hard gates](#hard-gates) below are this
@@ -1246,6 +1327,15 @@ milestone  new gates  cumulative  the earliest of them
                                   live evidence, decay, usage feedback,
                                   the recall delta, conflicts, expanded
                                   provider-formation coverage
+17                10         335  the required ceiling, the ceiling
+                                  filter, principal isolation, keyset
+                                  paging, the read-only router, the
+                                  exposure list
+18                13         348  the package boundary, the server
+                                  contract, honest classification,
+                                  credential and token confinement,
+                                  the bootstrap ceremony, the
+                                  monitoring recipe
 ```
 
 Two facts fall out of the table and both are worth stating rather than
@@ -1266,24 +1356,26 @@ leaving for someone to notice.
     step 9 unobserved. It now carries seven — six in the tool system
     and one in the harness — and they are the ones that say the widened
     surface is still the same surface.
-2.  **Forty-one of three hundred and twenty-five gates are green before
+2.  **Forty-one of three hundred and forty-eight gates are green before
     Milestone 2.** Less than a fifth of the plan's stated invariants are
     checkable against the in-memory slice, and thirteen of them against
     a repository with no agent in it at all. That is the number that
     makes the in-memory tier worth building as real adapters rather
     than as test doubles.
 
-The cumulative column reaches three hundred and twenty-five, which is every
-registry entry, at Milestone 16. Six of Milestone 10's gates are
+The cumulative column reaches three hundred and forty-eight, which is every
+registry entry, at Milestone 18. Six of Milestone 10's gates are
 `gate.skill.*`, fifteen are `gate.memory.*`, seven are `gate.web.*`, ten are
 `gate.browser.*`, all twenty-three Milestone 11 gates are `gate.schedule.*`,
 Milestone 12's twenty are six `gate.device.*` and fourteen `gate.notify.*`,
 Milestone 13's twenty-one are `gate.delegate.*`, Milestone 14's twenty-one are
-`gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, and Milestone
-16's twenty are `gate.memory.*` again, in the area those two specs already
-shared. Every authorized milestone now has a specification that declares its
-gates; the roadmap's items add none until the owner authorizes one and a
-specification lands for it. Routing remains deferred and adds none.
+`gate.surface.*`, Milestone 15's sixteen are `gate.ops.*`, Milestone
+16's twenty and Milestone 17's ten are `gate.memory.*` again, in the area
+those specs already shared, and Milestone 18's thirteen are `gate.email.*` in
+an area of their own. Every authorized milestone now has a specification
+that declares its gates; the roadmap's items add none until the owner
+authorizes one and a specification lands for it. Routing remains deferred and
+adds none.
 
 ## Build-sequence milestones
 
@@ -1546,9 +1638,9 @@ tracked metrics move to a sibling `## Tracked metrics` section.
     stands for the next milestone that shows a zero. Milestones 12
     through 15 each showed one on the day they were authorized and
     each closed it the way the decision implies, with a specification
-    that had gates to declare. Milestone 16 never showed one: its
-    authorization and its specification landed in the same change, so
-    the row it added was already twenty.
+    that had gates to declare. Milestones 16 and 17 never showed one:
+    each milestone's authorization and its specification landed in the
+    same change, so the rows they added were already twenty and ten.
 10. **Milestone 1's cancellation is `SIGINT` plus a lazy deadline.**
     Both are cheap, both exercise the observation points from the
     first commit, and neither requires the queue. The alternative —
