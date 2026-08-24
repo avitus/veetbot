@@ -17,11 +17,11 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import httpx
 import pytest
-from fastapi.routing import APIRoute
 
 from agent_core.api import create_app
 from agent_core.bootstrap import Composition, build
@@ -36,6 +36,7 @@ from agent_core.domain.memory import (
     Sensitivity,
 )
 from agent_core.policy.scopes import PLATFORM_SCOPES
+from tests.gates.memory_api_support import memory_routes
 from tests.integration.m2_support import memory_settings
 
 NOW = datetime(2026, 8, 20, 16, tzinfo=UTC)
@@ -134,7 +135,9 @@ async def _client(composition: Composition, *, principal: Principal | None = Non
         yield client
 
 
-async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
+async def test_memory_routes_cover_listing_detail_scopes_and_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     principal = Principal(
         tenant_id=TENANT,
         principal_id=PRINCIPAL_ID,
@@ -186,10 +189,9 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
             )
             assert malformed_cursor.status_code == 400
 
-            # The cap is observed directly, not inferred from the domain
-            # query's own `le=200` backstop: seed enough beliefs that a
-            # request for 300 can only be satisfied by two pages if the
-            # route's `min(limit, 200)` clamp is actually applied.
+            # Keep the page-content assertions as end-to-end coverage of the
+            # service cap, then spy on the service call below to distinguish
+            # the route's own clamp from that service backstop.
             many = [
                 _belief(
                     belief_id=100 + offset,
@@ -206,10 +208,16 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
             all_ids = {str(visible.id), str(restricted.id)} | {str(b.id) for b in many}
             assert len(all_ids) == 203
 
+            list_spy = AsyncMock(wraps=composition.services.memory.list)
+            monkeypatch.setattr(composition.services.memory, "list", list_spy)
             oversized = await client.get(
                 "/v1/memories", params={"ceiling": "restricted", "limit": 300}
             )
             assert oversized.status_code == 200, oversized.text
+            list_spy.assert_awaited_once()
+            awaited = list_spy.await_args
+            assert awaited is not None
+            assert awaited.kwargs["limit"] == 200
             oversized_body = oversized.json()
             assert len(oversized_body["items"]) == 200
             assert oversized_body["next_cursor"] is not None
@@ -272,22 +280,11 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
             composition.new_request_id,
             composition.readiness_probe,
         )
-        all_routes = [
-            nested
-            for route in app.routes
-            for nested in (
-                route.original_router.routes if hasattr(route, "original_router") else (route,)
-            )
-        ]
-        memory_routes = [
-            route
-            for route in all_routes
-            if isinstance(route, APIRoute) and route.path.startswith("/v1/memories")
-        ]
-        assert len(memory_routes) == 2
+        routes = memory_routes(app)
+        assert len(routes) == 2
         assert {
             (method, (route.openapi_extra or {})["required_scope"])
-            for route in memory_routes
+            for route in routes
             for method in (route.methods or set())
         } == {("GET", "memory.read")}
 
@@ -304,11 +301,7 @@ async def test_memory_http_surface_is_absent_by_default() -> None:
             composition.new_request_id,
             composition.readiness_probe,
         )
-        assert not [
-            route
-            for route in app.routes
-            if isinstance(route, APIRoute) and route.path.startswith("/v1/memories")
-        ]
+        assert memory_routes(app) == []
         assert "/v1/memories" not in app.openapi()["paths"]
 
 

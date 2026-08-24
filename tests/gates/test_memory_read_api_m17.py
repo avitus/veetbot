@@ -22,7 +22,6 @@ from uuid import UUID
 
 import httpx
 import pytest
-from fastapi.routing import APIRoute
 from hypothesis import given
 from hypothesis import settings as hypothesis_settings
 from hypothesis import strategies as st
@@ -50,6 +49,7 @@ from agent_core.domain.memory import (
 )
 from agent_core.domain.views import MemoryView
 from agent_core.policy.scopes import PLATFORM_SCOPES, validate_required_scopes
+from tests.gates.memory_api_support import memory_routes
 from tests.integration.m2_support import memory_settings
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -193,23 +193,6 @@ async def _seed(composition: Composition, records: list[MemoryRecord]) -> None:
 
 def _ids(body: dict[str, Any]) -> list[str]:
     return [item["id"] for item in body["items"]]
-
-
-def _memory_routes(app: Any) -> list[APIRoute]:
-    """Every mounted route under `/v1/memories`, middleware nesting included."""
-
-    flattened = [
-        nested
-        for route in app.routes
-        for nested in (
-            route.original_router.routes if hasattr(route, "original_router") else (route,)
-        )
-    ]
-    return [
-        route
-        for route in flattened
-        if isinstance(route, APIRoute) and route.path.startswith("/v1/memories")
-    ]
 
 
 def _redacted(response: httpx.Response) -> bytes:
@@ -678,7 +661,7 @@ async def test_the_router_is_read_only() -> None:
             composition.readiness_probe,
         )
 
-    routes = _memory_routes(app)
+    routes = memory_routes(app)
     assert {route.path for route in routes} == {"/v1/memories", "/v1/memories/{memory_id}"}
     for route in routes:
         methods = set(route.methods or set())
@@ -729,7 +712,7 @@ async def test_the_flag_is_a_real_switch() -> None:
             composition.new_request_id,
             composition.readiness_probe,
         )
-        assert _memory_routes(app) == []
+        assert memory_routes(app) == []
         document = app.openapi()
         assert not [path for path in document["paths"] if path.startswith("/v1/memories")]
 

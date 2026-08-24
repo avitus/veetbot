@@ -67,7 +67,14 @@ class MemoryStore(Protocol):
         limit: int = 200,
     ) -> list[MemoryRecord]: ...
 
-    async def browse(self, query: MemoryBrowseQuery) -> list[MemoryRecord]: ...
+    async def browse(self, query: MemoryBrowseQuery) -> list[MemoryRecord]:
+        """Return up to ``query.limit + 1`` records, newest store position first.
+
+        The extra row is the has-more probe used by the paging service; an
+        adapter that returns exactly ``query.limit`` rows would truncate the
+        walk by suppressing a non-final page's next cursor.
+        """
+        ...
 
     async def list_idle(
         self,
