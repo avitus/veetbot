@@ -107,29 +107,34 @@ def test_child_outcome_requires_a_terminal_status() -> None:
         )
 
 
-def test_ledger_row_carries_children_and_erasure_clears_identifiers() -> None:
-    delegation = Delegation(
-        id=UUID("00000000-0000-0000-0000-000000000144"),
-        tenant_id="tenant-a",
-        principal_id="principal-a",
-        parent_run_id=UUID("00000000-0000-0000-0000-000000000145"),
-        parent_session_id=UUID("00000000-0000-0000-0000-000000000146"),
-        invocation_id=UUID("00000000-0000-0000-0000-000000000147"),
-        depth=0,
-        request=DelegationRequest(briefs=[_brief()]),
-        status=DelegationStatus.PENDING,
-        children=[
+def _delegation(**updates: object) -> Delegation:
+    values: dict[str, object] = {
+        "id": UUID("00000000-0000-0000-0000-000000000144"),
+        "tenant_id": "tenant-a",
+        "principal_id": "principal-a",
+        "parent_run_id": UUID("00000000-0000-0000-0000-000000000145"),
+        "parent_session_id": UUID("00000000-0000-0000-0000-000000000146"),
+        "invocation_id": UUID("00000000-0000-0000-0000-000000000147"),
+        "depth": 0,
+        "request": DelegationRequest(briefs=[_brief()]),
+        "derived_limits": [RunLimits(deadline_at=NOW)],
+        "granted_scopes": [frozenset({"web.read"})],
+        "status": DelegationStatus.PENDING,
+        "children": [
             DelegationChild(
                 index=0,
-                brief=_brief(),
-                derived_limits=RunLimits(deadline_at=NOW),
-                granted_scopes=frozenset({"web.read"}),
                 child_run_id=CHILD_RUN_ID,
                 child_session_id=CHILD_SESSION_ID,
             )
         ],
-        created_at=NOW,
-    )
+        "created_at": NOW,
+    }
+    values.update(updates)
+    return Delegation.model_validate(values)
+
+
+def test_ledger_row_carries_children_and_erasure_clears_identifiers() -> None:
+    delegation = _delegation()
 
     assert delegation.result is None
     assert delegation.joined_at is None
@@ -140,3 +145,16 @@ def test_ledger_row_carries_children_and_erasure_clears_identifiers() -> None:
         update={"child_run_id": None, "child_session_id": None}
     )
     assert erased.child_run_id is None
+
+
+def test_ledger_row_requires_one_child_and_one_authority_entry_per_brief() -> None:
+    with pytest.raises(ValidationError, match="per brief"):
+        _delegation(children=[])
+    with pytest.raises(ValidationError, match="per brief"):
+        _delegation(derived_limits=[])
+    with pytest.raises(ValidationError, match="per brief"):
+        _delegation(granted_scopes=[])
+    with pytest.raises(ValidationError, match="ordered"):
+        _delegation(children=[DelegationChild(index=1)])
+    with pytest.raises(ValidationError, match="joined"):
+        _delegation(status=DelegationStatus.JOINED)

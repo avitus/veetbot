@@ -8,7 +8,7 @@ from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from agent_core.domain.errors import DelegationValidationError
 from agent_core.domain.runs import TERMINAL_RUN_STATUSES, Run, RunLimits, RunStatus, RunUsage
@@ -93,16 +93,15 @@ class DelegationStatus(StrEnum):
 
 
 class DelegationChild(BaseModel):
-    """One ledger child: its brief, derived authority, and terminal facts once known.
+    """One ledger child's identifiers and its terminal facts once known.
 
     The identifiers are cleared, not the row deleted, when the child session
-    alone is erased; ``links_erased_at`` on the ledger row records when.
+    alone is erased; ``links_erased_at`` on the ledger row records when. The
+    child's brief, derived limits, and granted scopes live on the ledger row,
+    indexed by brief order.
     """
 
     index: int = Field(ge=0)
-    brief: DelegationBrief
-    derived_limits: RunLimits
-    granted_scopes: frozenset[str]
     child_run_id: UUID | None = None
     child_session_id: UUID | None = None
     status: RunStatus | None = None
@@ -130,12 +129,37 @@ class Delegation(BaseModel):
     invocation_id: UUID
     depth: int = Field(ge=0)
     request: DelegationRequest
+    derived_limits: list[RunLimits]
+    granted_scopes: list[frozenset[str]]
     status: DelegationStatus
     children: list[DelegationChild]
     result: DelegationResult | None = None
     links_erased_at: datetime | None = None
     created_at: datetime
     joined_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def one_child_per_brief(self) -> Delegation:
+        count = len(self.request.briefs)
+        if (
+            len(self.children) != count
+            or len(self.derived_limits) != count
+            or len(self.granted_scopes) != count
+        ):
+            raise ValueError(
+                "a delegation carries one child, one derived limit set, "
+                "and one granted scope set per brief"
+            )
+        if [child.index for child in self.children] != list(range(count)):
+            raise ValueError("delegation children are ordered by brief index")
+        return self
+
+    @model_validator(mode="after")
+    def joined_fields_are_consistent(self) -> Delegation:
+        joined = self.status is DelegationStatus.JOINED
+        if joined != (self.joined_at is not None) or joined != (self.result is not None):
+            raise ValueError("a joined delegation carries its result and join instant")
+        return self
 
 
 class DelegationDefaults(BaseModel):

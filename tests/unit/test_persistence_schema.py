@@ -1,10 +1,13 @@
 """Static checks for query-critical persistence indexes."""
 
+from pathlib import Path
 from typing import cast
 
 from sqlalchemy import CheckConstraint, Table, UniqueConstraint
 
 from agent_core.adapters.persistence.sqlalchemy_models import Base, EvalScenarioAttemptCostRow
+
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_capability_attempt_costs_index_the_scenario_run_foreign_key() -> None:
@@ -262,3 +265,56 @@ def test_notification_tables_encode_routing_identity_and_query_constraints() -> 
         if isinstance(constraint, UniqueConstraint)
     }
     assert ("notification_id", "device_id", "attempt") in delivery_unique_columns
+
+
+def test_delegation_table_encodes_trust_boundaries() -> None:
+    tables = Base.metadata.tables
+    assert "delegations" in tables
+
+    delegations = tables["delegations"]
+    assert tuple(column.name for column in delegations.primary_key.columns) == ("id",)
+    assert "links_erased_at" in delegations.columns
+    unique_columns = {
+        tuple(column.name for column in constraint.columns)
+        for constraint in delegations.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert ("invocation_id",) in unique_columns
+    assert {
+        foreign_key.parent.name: (foreign_key.target_fullname, foreign_key.ondelete)
+        for foreign_key in delegations.foreign_keys
+    } == {
+        "parent_run_id": ("runs.id", "CASCADE"),
+        "parent_session_id": ("sessions.id", "CASCADE"),
+        "invocation_id": ("tool_invocations.id", "CASCADE"),
+    }
+    check_sql = " ".join(
+        str(constraint.sqltext)
+        for constraint in delegations.constraints
+        if isinstance(constraint, CheckConstraint)
+    )
+    assert "PENDING" in check_sql
+    assert "JOINED" in check_sql
+    assert "depth" in check_sql
+    assert {tuple(column.name for column in index.columns) for index in delegations.indexes} >= {
+        ("parent_run_id",),
+        ("tenant_id", "principal_id", "created_at", "id"),
+    }
+
+    runs = tables["runs"]
+    sibling_indexes = [
+        index
+        for index in runs.indexes
+        if tuple(column.name for column in index.columns) == ("parent_run_id", "run_kind")
+    ]
+    assert len(sibling_indexes) == 1
+    assert (
+        str(sibling_indexes[0].dialect_options["postgresql"]["where"])
+        == "parent_run_id IS NOT NULL"
+    )
+
+    migration = next((ROOT / "migrations" / "versions").glob("*_add_milestone_13_delegations.py"))
+    migration_sql = migration.read_text(encoding="utf-8")
+    assert "ALTER TABLE delegations ENABLE ROW LEVEL SECURITY" in migration_sql
+    assert "ALTER TABLE delegations FORCE ROW LEVEL SECURITY" in migration_sql
+    assert "delegations_tenant_isolation" in migration_sql

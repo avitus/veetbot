@@ -12,6 +12,7 @@ from agent_core.domain.runs import Run, RunCheckpoint
 from agent_core.ports.browser_authentications import BrowserAuthenticationRepository
 from agent_core.ports.browser_grants import BrowserGrantRepository
 from agent_core.ports.browser_profiles import BrowserProfileRepository
+from agent_core.ports.delegations import DelegationRepository
 from agent_core.ports.devices import (
     DeviceRegistrationIdempotencyRepository,
     DeviceRegistry,
@@ -85,6 +86,7 @@ class RepositoryUnitOfWork(Protocol):
     devices: DeviceRegistry
     device_registration_idempotency: DeviceRegistrationIdempotencyRepository
     notification_outbox: NotificationOutbox
+    delegations: DelegationRepository
     queue: RunQueue | None
 
     def on_rollback(self, callback: TransactionCallback) -> None:

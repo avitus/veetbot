@@ -11,6 +11,7 @@ from agent_core.adapters.memory.in_memory import (
     InMemoryMemoryStore,
     InMemoryTraceStore,
 )
+from agent_core.adapters.persistence.delegations import InMemoryDelegationRepository
 from agent_core.adapters.persistence.memory import (
     InMemoryApprovalRepository,
     InMemoryArtifactRepository,
@@ -33,11 +34,13 @@ from agent_core.adapters.persistence.session_deletions import (
 from agent_core.domain.agents import Principal
 from agent_core.domain.errors import ConflictError, NotFoundError
 from agent_core.domain.policies import RiskLevel, SideEffectClass, TrustLevel
-from agent_core.domain.runs import RunStatus
+from agent_core.domain.runs import RunKind, RunStatus
 from agent_core.domain.schedules import OccurrenceDisposition, ScheduleOccurrence
+from agent_core.domain.sessions import Session, SessionStatus
 from agent_core.domain.tools import ToolInvocation, ToolInvocationStatus
 from agent_core.domain.trajectory import ArtifactRef, TrajectoryExport
 from tests.contract.support import NOW, RUN_ID, SESSION_ID, memory_stack, principal, run
+from tests.contract.test_delegation_repository_contract import delegation
 from tests.contract.test_schedule_repository_contract import revision, schedule
 
 
@@ -57,12 +60,14 @@ async def _repository() -> tuple[
     InMemoryToolInvocationRepository,
     InMemoryTrajectoryExportRepository,
     InMemoryScheduleRepository,
+    InMemoryDelegationRepository,
 ]:
     clock, sessions, runs, events = await memory_stack()
     artifacts = InMemoryArtifactRepository()
     invocations = InMemoryToolInvocationRepository(runs)
     trajectory_exports = InMemoryTrajectoryExportRepository()
     schedules = InMemoryScheduleRepository()
+    delegations = InMemoryDelegationRepository()
     notification_outbox = InMemoryNotificationOutbox(clock, InMemoryDeviceRegistry())
     repository = InMemorySessionDeletionRepository(
         sessions=sessions,
@@ -80,8 +85,18 @@ async def _repository() -> tuple[
         knowledge=InMemoryKnowledgeStore(clock),
         schedules=schedules,
         notification_outbox=notification_outbox,
+        delegations=delegations,
     )
-    return repository, artifacts, sessions, runs, invocations, trajectory_exports, schedules
+    return (
+        repository,
+        artifacts,
+        sessions,
+        runs,
+        invocations,
+        trajectory_exports,
+        schedules,
+        delegations,
+    )
 
 
 async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() -> None:
@@ -93,6 +108,7 @@ async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() ->
         invocations,
         trajectory_exports,
         _schedules,
+        _delegations,
     ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     artifact = ArtifactRef(
@@ -171,7 +187,7 @@ async def test_delete_is_owned_idempotent_and_keeps_sanitized_artifact_work() ->
 
 
 async def test_delete_rejects_a_nonterminal_run_without_removing_the_session() -> None:
-    repository, _artifacts, sessions, runs, _invocations, _exports, _schedules = await _repository()
+    repository, _artifacts, sessions, runs, *_others = await _repository()
     await runs.create(run(status=RunStatus.WAITING_FOR_USER))
 
     with pytest.raises(ConflictError) as raised:
@@ -181,7 +197,16 @@ async def test_delete_rejects_a_nonterminal_run_without_removing_the_session() -
 
 
 async def test_in_memory_deletion_erases_materialized_occurrence_links() -> None:
-    repository, _artifacts, _sessions, runs, _invocations, _exports, schedules = await _repository()
+    (
+        repository,
+        _artifacts,
+        _sessions,
+        runs,
+        _invocations,
+        _exports,
+        schedules,
+        _delegations,
+    ) = await _repository()
     await runs.create(run(status=RunStatus.COMPLETED))
     scheduled = schedule()
     await schedules.create(scheduled, revision())
@@ -206,3 +231,100 @@ async def test_in_memory_deletion_erases_materialized_occurrence_links() -> None
     assert erased.session_id is None
     assert erased.run_id is None
     assert erased.links_erased_at == erased_at
+
+
+async def _delegated_child_graph(
+    sessions: InMemorySessionRepository,
+    runs: InMemoryRunRepository,
+    delegations: InMemoryDelegationRepository,
+) -> None:
+    ledger = delegation()
+    child_session_id = ledger.children[0].child_session_id
+    child_run_id = ledger.children[0].child_run_id
+    assert child_session_id is not None
+    assert child_run_id is not None
+    await sessions.create(
+        Session(
+            id=child_session_id,
+            tenant_id=principal().tenant_id,
+            principal_id=principal().principal_id,
+            agent_id=UUID(int=90),
+            agent_version="1.0.0",
+            status=SessionStatus.ACTIVE,
+            title="Find the three most-cited retrieval papers.",
+            metadata={
+                "run_kind": "delegated",
+                "parent_run_id": str(RUN_ID),
+                "parent_session_id": str(SESSION_ID),
+                "delegation_id": str(ledger.id),
+            },
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+    await runs.create(
+        run(status=RunStatus.COMPLETED).model_copy(
+            update={
+                "id": child_run_id,
+                "session_id": child_session_id,
+                "parent_run_id": RUN_ID,
+                "kind": RunKind.DELEGATED,
+            }
+        )
+    )
+    await delegations.create(ledger)
+
+
+async def test_in_memory_deletion_of_a_child_session_alone_stamps_the_ledger() -> None:
+    (
+        repository,
+        _artifacts,
+        sessions,
+        runs,
+        _invocations,
+        _exports,
+        _schedules,
+        delegations,
+    ) = await _repository()
+    await runs.create(run(status=RunStatus.COMPLETED))
+    await _delegated_child_graph(sessions, runs, delegations)
+    ledger = delegation()
+    child_session_id = ledger.children[0].child_session_id
+    assert child_session_id is not None
+
+    erased_at = NOW + timedelta(seconds=1)
+    await repository.delete(child_session_id, principal(), erased_at)
+
+    stamped = await delegations.get(ledger.id, principal())
+    assert stamped.links_erased_at == erased_at
+    assert stamped.children[0].child_run_id is None
+    assert stamped.children[0].child_session_id is None
+    assert await sessions.get(SESSION_ID, principal()) is not None
+
+
+async def test_in_memory_deletion_of_the_parent_session_erases_child_sessions() -> None:
+    (
+        repository,
+        _artifacts,
+        sessions,
+        runs,
+        _invocations,
+        _exports,
+        _schedules,
+        delegations,
+    ) = await _repository()
+    await runs.create(run(status=RunStatus.COMPLETED))
+    await _delegated_child_graph(sessions, runs, delegations)
+    ledger = delegation()
+    child_session_id = ledger.children[0].child_session_id
+    assert child_session_id is not None
+
+    await repository.delete(SESSION_ID, principal(), NOW + timedelta(seconds=1))
+
+    with pytest.raises(NotFoundError):
+        await sessions.get(child_session_id, principal())
+    assert await delegations.get_by_invocation(ledger.invocation_id) is None
+    assert set(await repository.pending_sessions(principal(), limit=10)) <= {
+        SESSION_ID,
+        child_session_id,
+    }

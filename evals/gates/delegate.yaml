@@ -106,13 +106,13 @@
   kind: structural
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The delegation schema encodes its trust boundaries.** Metadata inspection proves keys, invocation uniqueness, the sibling index, the erasure marker, and row-level security."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/unit/test_persistence_schema.py::test_delegation_table_encodes_trust_boundaries
 - id: gate.delegate.migration_stepwise
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The delegation migration is reversible at its boundary.** Upgrade, downgrade, and re-upgrade from the immediate predecessor leave a valid schema."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_migrations.py::test_migrations_round_trip_each_step_from_its_predecessor
 - id: gate.delegate.default_off
   milestone: 13
   kind: case

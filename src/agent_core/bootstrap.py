@@ -89,6 +89,10 @@ from agent_core.adapters.persistence.database import (
     create_engine,
     create_session_factory,
 )
+from agent_core.adapters.persistence.delegations import (
+    InMemoryDelegationRepository,
+    PostgresDelegationRepository,
+)
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
     InMemoryApprovalRepository,
@@ -585,6 +589,7 @@ def _memory_uow_repositories(
     devices = InMemoryDeviceRegistry()
     notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
+    delegations = InMemoryDelegationRepository()
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -606,6 +611,7 @@ def _memory_uow_repositories(
         knowledge=knowledge,
         schedules=schedules,
         notification_outbox=notification_outbox,
+        delegations=delegations,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -642,6 +648,7 @@ def _memory_uow_repositories(
         devices=devices,
         device_registration_idempotency=InMemoryDeviceRegistrationIdempotencyRepository(),
         notification_outbox=notification_outbox,
+        delegations=delegations,
         queue=None,
     )
 
@@ -721,6 +728,7 @@ def _postgres_repository_factory(
                 PostgresDeviceRegistrationIdempotencyRepository(session)
             ),
             notification_outbox=PostgresNotificationOutbox(session, clock),
+            delegations=PostgresDelegationRepository(session),
             queue=PostgresRunQueue(
                 session,
                 clock,
