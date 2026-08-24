@@ -443,10 +443,14 @@ async def test_keyset_paging_neither_skips_nor_repeats() -> None:
             first_body = first.json()
             assert first_body["next_cursor"] is not None
 
-            # Reading the same cursor position twice over an unchanged store
-            # returns the identical page, cursor included.
-            replay = await client.get("/v1/memories", params={"ceiling": "restricted", "limit": 2})
-            assert replay.json() == first_body
+            # The cursorless first page is itself idempotent over an unchanged
+            # store. This is not the declaration's cursor-replay clause — no
+            # cursor is sent — so it is a preliminary; every real cursor is
+            # replayed after the walk below.
+            unpaged_again = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "limit": 2}
+            )
+            assert unpaged_again.json() == first_body
 
             # One belief lands inside the unwalked range and one lands behind
             # the walk; one unwalked belief is retired out of the live set.
@@ -503,6 +507,28 @@ async def test_keyset_paging_neither_skips_nor_repeats() -> None:
             # A short page is the end of the walk, never a hole in it: the
             # store overfetches by one, so only the final page is short.
             assert all(len(body["items"]) == 2 for body in pages[:-1])
+
+            # Re-reading a cursor against an unchanged store returns an
+            # identical page. Nothing has been written since the walk began
+            # its second request, so every cursor the walk emitted must
+            # reproduce, byte for byte, the page it originally produced —
+            # including that page's own `next_cursor`. This is the clause's
+            # real instrument: it drives the encode/decode round trip, so a
+            # cursor carrying a nonce or a timestamp, or one that decoded
+            # lossily, would fail here where the cursorless re-read above
+            # would not notice.
+            assert len(pages) >= 3, pages
+            for index, body in enumerate(pages[:-1]):
+                again = await client.get(
+                    "/v1/memories",
+                    params={
+                        "ceiling": "restricted",
+                        "limit": 2,
+                        "cursor": body["next_cursor"],
+                    },
+                )
+                assert again.status_code == 200, again.text
+                assert again.json() == pages[index + 1], body["next_cursor"]
 
 
 # ---------------------------------------------------------------------------

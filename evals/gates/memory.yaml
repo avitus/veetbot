@@ -345,7 +345,7 @@
   milestone: 17
   kind: structural
   spec: docs/plan/memory-read-api-and-browser.md#hard-gates
-  statement: "**Both stores browse identically.** The shared browse contract suite covers order, the keyset boundary, every filter, and the text query against the in-memory adapter, and the PostgreSQL parity suite answers the same `MemoryBrowseQuery` values from a live store and compares the two adapters over one corpus; both adapters reach their text and subject predicates through the same shared helpers."
+  statement: "**Both stores browse identically.** The shared browse contract suite covers order, the keyset boundary, every filter, and the text query against the in-memory adapter, and the PostgreSQL parity suite answers the same `MemoryBrowseQuery` values from a live store and compares the two adapters over one corpus; both adapters derive their query terms through the same shared helper and lowercase their subject comparison alike."
   check: tests/gates/test_memory_read_api_m17.py::test_both_stores_browse_identically
 - id: gate.memory.read_api_view_projection
   milestone: 17

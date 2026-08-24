@@ -128,13 +128,19 @@ practice, since a candidate is not a stored belief.
 store's SQL `lower()` semantics exactly; `casefold()` would diverge from it on
 non-ASCII subjects and break parity between the two adapters.
 
-`text` uses the shared lexical helpers in `src/agent_core/domain/memory.py`,
-`lexical_query_terms` to split the query and `lexical_text_matches` to test a
-record, with any-term semantics: a belief matches when it overlaps one term or
-more. Both store adapters call the same two functions, so lexical parity holds
-by construction rather than by two implementations agreeing, which is the
-mistake Milestone 16 already had to repair once. Text too short to yield a term
-is matched whole rather than matching everything.
+`text` is split into terms by `lexical_query_terms` in
+`src/agent_core/domain/memory.py`, which both store adapters call, and matched
+with any-term semantics: a belief matches when it overlaps one term or more.
+Term derivation is therefore shared; matching is not, and cannot be. PostgreSQL
+tests each term with `plainto_tsquery('simple', term)` against
+`to_tsvector('simple', subject || ' ' || statement)`, and the in-memory tier
+tests it with `lexical_text_matches`, whose `lexical_tokens` reproduces that
+lexeme split and whose all-lexemes-of-one-term rule reproduces
+`plainto_tsquery`'s conjunction. One half holds by construction and the other
+is a deliberate emulation, which is exactly why the cross-adapter tests below
+have to check it rather than assume it — assuming it is the mistake Milestone
+16 already had to repair once. Text too short to yield a term is matched whole
+rather than matching everything.
 
 Repeated parameters intersect across kinds and union within a kind: two
 `status` values mean either status, and a `status` together with a
@@ -340,21 +346,27 @@ The browser is where the lifecycle becomes visible. `flagged_for_review`,
 in the exposure list precisely because they are the fields that say what the
 lifecycle did, and until now nothing outside the CLI could read them.
 
-Lexical parity between the two adapters holds by construction, since both call
-`lexical_query_terms` and `lexical_text_matches`, and it is asserted rather
-than assumed. The requirement is that both stores browse identically. The
-mechanism that asserts it is the one the store contract suite already uses for
-recall, and it is two halves rather than one parametrized run: the shared
-browse contract suite in `tests/contract/test_memory_store_contract.py` covers
-order, the keyset boundary including its identifier tiebreak, every filter, and
-the text query against the in-memory adapter, and
+Lexical parity between the two adapters rests on one shared half and one
+emulated half: both call `lexical_query_terms` to derive the query's terms, and
+each then matches with its own engine — `plainto_tsquery('simple', …)` against
+a `to_tsvector('simple', …)` in PostgreSQL, `lexical_text_matches` emulating
+that lexeme split and its conjunction in memory. Only the first half holds by
+construction, so the second is asserted rather than assumed. The same is true
+of the subject predicate, where SQL `lower()` and Python `lower()` are two
+implementations that have to be shown to agree.
+
+The requirement is that both stores browse identically. The mechanism that
+asserts it is the one the store contract suite already uses for recall, and it
+is two suites rather than one parametrized run. The shared browse contract
+suite in `tests/contract/test_memory_store_contract.py` covers order, the
+keyset boundary including its identifier tiebreak, every filter, and the text
+query against the in-memory adapter.
 `tests/integration/test_memory_postgres_m9.py` runs the same
 `MemoryBrowseQuery` values against a live PostgreSQL store and compares its
-answer to the in-memory adapter's over the identical corpus, adding the
-keyset walk and the principal-isolation and status-override predicates. Neither
-half is optional: the first fixes the behavior, the second proves the
-PostgreSQL adapter answers alike. Hard gate 8 asserts that mechanism is in
-place.
+answer to the in-memory adapter's over the identical corpus, adding the keyset
+walk and the principal-isolation and status-override predicates. Neither suite
+is optional: the first fixes the behavior, the second proves the PostgreSQL
+adapter answers alike. Hard gate 8 asserts that mechanism is in place.
 
 ## Build sequence
 
@@ -422,8 +434,8 @@ enumeration ship together or the corpus disagrees with the code.
    order, the keyset boundary, every filter, and the text query against the
    in-memory adapter, and the PostgreSQL parity suite answers the same
    `MemoryBrowseQuery` values from a live store and compares the two adapters
-   over one corpus; both adapters reach their text and subject predicates
-   through the same shared helpers. Registered as
+   over one corpus; both adapters derive their query terms through the same
+   shared helper and lowercase their subject comparison alike. Registered as
    `gate.memory.browse_contract_parity`, structural. **M17.**
 9. **The projection is exactly the exposure list.** A serialized `MemoryView`
    carries every field the exposure list names and no other key, and no
