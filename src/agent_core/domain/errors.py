@@ -132,6 +132,21 @@ class UserInputRequiredError(AgentCoreError):
         self.invocation_id = invocation_id
 
 
+class ChildRunRequiredError(AgentCoreError):
+    """Normal control flow indicating child runs have parked the parent."""
+
+    def __init__(
+        self,
+        delegation_id: UUID,
+        invocation_id: UUID,
+        child_run_ids: list[UUID],
+    ) -> None:
+        super().__init__(f"delegation {delegation_id} is running")
+        self.delegation_id = delegation_id
+        self.invocation_id = invocation_id
+        self.child_run_ids = child_run_ids
+
+
 class ApprovalDenied(ConflictError):  # noqa: N818 - normative taxonomy name
     """A required approval was denied."""
 

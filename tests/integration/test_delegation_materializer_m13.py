@@ -76,7 +76,6 @@ def _materializer(
 
     return DelegationMaterializer(
         uow_factory=composition.uow_factory,
-        dispatcher=None,
         clock=composition.clock,
         ids=composition.ids,
         seed_checkpoint=DurableCheckpointSeeder(composition.clock),

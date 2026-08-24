@@ -44,6 +44,7 @@ class RunService:
         seed_checkpoint: CheckpointSeeder,
         cancel_parked_run: CancelParkedRun,
         trajectory_export_enabled: bool = False,
+        on_parked_cancelled: Callable[[UUID], Awaitable[None]] | None = None,
     ) -> None:
         self._uow_factory = uow_factory
         self._dispatcher = dispatcher
@@ -55,6 +56,7 @@ class RunService:
         self._seed_checkpoint = seed_checkpoint
         self._cancel_parked_run = cancel_parked_run
         self._trajectory_export_enabled = trajectory_export_enabled
+        self._on_parked_cancelled = on_parked_cancelled
 
     async def submit(
         self,
@@ -189,19 +191,27 @@ class RunService:
             return [event for event in events if event.run_id == run.id]
 
     async def cancel(self, run_id: UUID) -> Run:
+        cancelled_parked: Run | None = None
         async with self._uow_factory() as uow:
             run = await uow.runs.get(run_id, self._principal)
             if run.status in TERMINAL_RUN_STATUSES:
                 return run
             if run.status in {RunStatus.QUEUED, RunStatus.WAITING_FOR_APPROVAL}:
-                return await self._cancel_parked_run(uow, run, self._principal.principal_id)
-            try:
-                requested = await uow.runs.request_cancellation(run.id, run.status)
-            except ConflictError:
-                refreshed = await uow.runs.get(run_id, self._principal)
-                if refreshed.status in TERMINAL_RUN_STATUSES:
-                    return refreshed
-                raise
+                cancelled_parked = await self._cancel_parked_run(
+                    uow, run, self._principal.principal_id
+                )
+            else:
+                try:
+                    requested = await uow.runs.request_cancellation(run.id, run.status)
+                except ConflictError:
+                    refreshed = await uow.runs.get(run_id, self._principal)
+                    if refreshed.status in TERMINAL_RUN_STATUSES:
+                        return refreshed
+                    raise
+        if cancelled_parked is not None:
+            if self._on_parked_cancelled is not None:
+                await self._on_parked_cancelled(cancelled_parked.id)
+            return cancelled_parked
         self._cancel_active(run_id)
         return requested
 

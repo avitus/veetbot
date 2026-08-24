@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from types import TracebackType
@@ -195,6 +196,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_management import (
     DeviceManagementService,
     NotificationInboxService,
@@ -276,6 +278,7 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import PushProvider
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
@@ -452,6 +455,22 @@ class Composition:
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
 _BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
+# Milestone 13 starting values (subagents-and-delegation.md); the delegation
+# limits block in runtime/limits.yaml supersedes these when it lands.
+DELEGATION_DEFAULTS = DelegationDefaults(
+    max_steps=8,
+    max_model_calls=8,
+    max_tool_calls=16,
+    max_cost=Decimal("2"),
+    wall_seconds=900,
+)
+DELEGATION_CAPS = DelegationCaps(
+    max_children_per_call=3,
+    max_live_children_per_parent=8,
+    max_depth=1,
+    max_live_delegated_runs_per_tenant=16,
+    summary_max_bytes=16384,
+)
 
 
 def _session_tool_filter(
@@ -1791,6 +1810,19 @@ async def _compose(
                 policy=policy_engine,
                 now=clock.now,
             )
+        checkpoint_seeder = DurableCheckpointSeeder(clock)
+        delegation_materializer = (
+            DelegationMaterializer(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                defaults=DELEGATION_DEFAULTS,
+                caps=DELEGATION_CAPS,
+            )
+            if settings.delegation_enabled
+            else None
+        )
         pipeline = ToolPipeline(
             registry,
             uow_factory,
@@ -1806,9 +1838,9 @@ async def _compose(
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
+            delegations=delegation_materializer,
         )
         token_slot = _ActiveToken()
-        checkpoint_seeder = DurableCheckpointSeeder(clock)
         notification_producer = (
             NotificationProducer(clock=clock, ids=ids)
             if settings.notification_dispatch_enabled
@@ -1823,6 +1855,11 @@ async def _compose(
         )
         principal_resolver = StaticPrincipalResolver(principal)
         skill_reviews: SkillBackgroundReview | None = None
+        delegation_joins: DelegationJoin | None = None
+
+        async def on_child_suspension(run_id: UUID, delegation_id: UUID) -> None:
+            if delegation_joins is not None:
+                await delegation_joins.parent_parked(run_id, delegation_id)
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
@@ -1876,6 +1913,8 @@ async def _compose(
                     )
                 except Exception:
                     logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
+            if delegation_joins is not None:
+                await delegation_joins.after_run(run_id)
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 
@@ -1900,6 +1939,7 @@ async def _compose(
             on_token=token_slot.set,
             on_token_complete=token_slot.discard,
             on_run_complete=complete_run_resources,
+            on_child_suspension=on_child_suspension,
             on_model_event=lambda run, event: _publish_model_event(
                 live_events, run.session_id, run.id, event
             ),
@@ -1914,6 +1954,17 @@ async def _compose(
             if storage == "memory"
             else PostgresRunDispatcher()
         )
+        if settings.delegation_enabled:
+            delegation_joins = DelegationJoin(
+                uow_factory=uow_factory,
+                dispatcher=dispatcher,
+                requeue_parent=executor.requeue_after_child,
+                fail_parent_on_budget=executor.fail_suspended_on_budget,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                summary_max_bytes=DELEGATION_CAPS.summary_max_bytes,
+            )
         skill_reviews = SkillBackgroundReview(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
@@ -1956,6 +2007,7 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             cancel_parked_run=executor.cancel_parked_run,
             trajectory_export_enabled=trajectory_export_enabled,
+            on_parked_cancelled=(None if delegation_joins is None else delegation_joins.after_run),
         )
         approval_service = ApprovalService(
             uow_factory=uow_factory,
@@ -2504,6 +2556,7 @@ async def build(
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
         *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
+        *(["delegate.run"] if effective_settings.delegation_enabled else []),
     ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),

@@ -2328,6 +2328,20 @@ class PostgresArtifactRepository:
             )
         )
 
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]:
+        rows = (
+            await self._session.scalars(
+                select(ArtifactRow)
+                .where(
+                    ArtifactRow.run_id == run_id,
+                    ArtifactRow.tenant_id == principal.tenant_id,
+                    ArtifactRow.principal_id == principal.principal_id,
+                )
+                .order_by(ArtifactRow.created_at, ArtifactRow.id)
+            )
+        ).all()
+        return [artifact_to_domain(row) for row in rows]
+
     async def get(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
         row = (
             await self._session.scalars(

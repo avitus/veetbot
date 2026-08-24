@@ -22,19 +22,19 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The parent suspends as a child-run wait.** The parent enters WAITING_FOR_APPROVAL with suspension kind CHILD_RUN and the child identifiers, releases its lease once, appends no approval request, and enqueues no notification."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_the_parent_suspends_as_a_child_run_wait
 - id: gate.delegate.tools_subset
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The child's tools are a subset.** The child advertises exactly the allowed tools within the parent's pinned set, never delegate.run or skill.manage; a call outside the set is denied by policy."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_the_childs_tools_are_a_subset
 - id: gate.delegate.scopes_intersected
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The child's scopes are intersected.** The child's scopes are a subset of the parent's and of what its tools require; cross-tenant and cross-principal reads of a child return not found."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_the_childs_scopes_are_intersected
 - id: gate.delegate.limits_derived
   milestone: 13
   kind: property
@@ -46,13 +46,13 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Usage is additive.** After the join the parent's usage equals its own plus every child's, and a parent whose children exceed its remaining cost fails on budget while suspended."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_usage_is_additive_after_the_join
 - id: gate.delegate.depth_one
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Delegation is one level deep.** A child's advertised tools never include delegate.run, and a forged call from a child is denied before materialization."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_delegation_is_one_level_deep
 - id: gate.delegate.fanout_capped
   milestone: 13
   kind: case
@@ -64,43 +64,43 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**A child's result is external and untrusted.** The re-entered result item carries EXTERNAL_UNTRUSTED, and a child result instructing a REQUIRE_APPROVAL action produces an approval request and no execution."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_a_child_result_is_external_and_untrusted
 - id: gate.delegate.join_once
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The join completes once.** Siblings finishing concurrently complete the parent's invocation exactly once and re-queue the parent exactly once through the single terminal writer."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_the_join_completes_the_parent_exactly_once
 - id: gate.delegate.child_failure_is_tool_error
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**A failed child is a tool error.** A failed or cancelled child completes the parent's invocation as an error result with the child's reason; the parent continues and siblings are unaffected."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_a_failed_child_is_a_tool_error_not_a_parent_failure
 - id: gate.delegate.cancel_propagates
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Cancellation propagates downward only.** Cancelling a suspended parent cancels every non-terminal child and fails the suspended invocation with tool.run_cancelled; cancelling a child cancels nothing else."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_cancellation_propagates_downward_only
 - id: gate.delegate.prefix_stable
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Child results leave the prefix stable.** Injecting child results into the parent does not change the parent's prefix hash across the join."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_child_results_leave_the_prefix_stable
 - id: gate.delegate.trace_separate
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The trace is separate.** The child's events, invocations, and checkpoints exist only in the child session; the parent's log holds the link, status, and bounded summary, never the transcript."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_the_trace_is_separate
 - id: gate.delegate.artifact_refs
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Artifacts come back as references.** With the artifact return shape the parent receives artifact identifiers it can read; no artifact content or transcript is inlined."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_artifacts_come_back_as_references
 - id: gate.delegate.persistence_schema
   milestone: 13
   kind: structural

@@ -11,7 +11,12 @@ from typing import Any, Protocol, cast
 
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.context import ContextPlan, WorkingState
-from agent_core.domain.errors import ApprovalRequiredError, ContextOverflow, UserInputRequiredError
+from agent_core.domain.errors import (
+    ApprovalRequiredError,
+    ChildRunRequiredError,
+    ContextOverflow,
+    UserInputRequiredError,
+)
 from agent_core.domain.events import NewEvent
 from agent_core.domain.messages import (
     AssistantMessage,
@@ -657,6 +662,17 @@ async def run_loop(context: RunContext) -> RunOutcome:
                 suspension={
                     "kind": "approval",
                     "approval_id": str(exc.approval_id),
+                },
+            )
+        except ChildRunRequiredError as exc:
+            await checkpoint(context, "suspended")
+            return RunOutcome(
+                kind=OutcomeKind.SUSPENDED,
+                suspension={
+                    "kind": "child_run",
+                    "delegation_id": str(exc.delegation_id),
+                    "invocation_id": str(exc.invocation_id),
+                    "child_run_ids": [str(child_id) for child_id in exc.child_run_ids],
                 },
             )
         except UserInputRequiredError as exc:
