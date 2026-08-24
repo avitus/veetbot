@@ -112,6 +112,13 @@ override it. A URL cannot authorize its own origin. The bound
 domain policy validates the initial URL, every redirect, the final URL, popup,
 iframe, and resource navigation according to provider enforcement rules.
 
+When hosted composition resolves profiles per session, the frozen context plan
+advertises the three browser tools only if that trusted reserved metadata contains
+a selected profile. An ordinary session therefore keeps public web capabilities
+without paying for or guessing unusable browser operations. A deployment-wide
+hosted profile, an explicitly injected provider, and the origin-pinned Playwright
+adapter remain globally bound runtime environments and keep their browser tools.
+
 Downloads, uploads, clipboard access, notifications, geolocation, camera,
 microphone, password-manager access, and new windows are denied until each has
 its own classified contract. Cross-origin popups are closed and reported.

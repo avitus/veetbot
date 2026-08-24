@@ -35,7 +35,7 @@ post-terminal hook that is genuinely part of the run lifecycle
 `EXTERNAL_UNTRUSTED` and the child's tool set is resolved with the child's
 principal (tool-system.md:968-974); the child seeds from the parent's concise
 instruction and recalls under its own, smaller, recall class
-(context-engine.md:278, memory-retrieval-and-ranking.md:87); and the
+(context-engine.md:291-294, memory-retrieval-and-ranking.md:87); and the
 background-review child run of Milestone 10A already materializes a dedicated
 child session and child run with a restricted tool allow-list and
 failure isolation ([skills.md](skills.md#the-background-review-is-a-child-run-with-four-restrictions)).
@@ -125,7 +125,7 @@ The plan's "explicit objective" requirement had a carrier and no schema. One
 because independent parallel work — the first of the gate's five reasons — is
 exactly fan-out from one invocation, and a parent that suspends on the call
 cannot fan out any other way. Each brief is structured, because the child
-seeds from its brief and from nothing else (context-engine.md:278), so
+seeds from its brief and from nothing else (context-engine.md:291-294), so
 everything the child needs to stop correctly has to be in it:
 
 ```python

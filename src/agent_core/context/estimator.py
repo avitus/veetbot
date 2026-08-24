@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 from agent_core.domain.messages import ConversationItem
 from agent_core.domain.tools import ToolSpec
+from agent_core.model.tool_definitions import tool_definition
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -59,7 +60,10 @@ class ConservativeTokenEstimator:
         return self._estimate("items", payload, len(items), model_id)
 
     def estimate_tools(self, tools: Sequence[ToolSpec], model_id: str) -> int:
-        payload = canonical_json_bytes([tool.model_dump(mode="json") for tool in tools])
+        # Use the larger normalized provider shape as the conservative bound.
+        # Output schemas and policy/runtime metadata stay pinned in ContextPlan,
+        # but providers do not send those fields to the model.
+        payload = canonical_json_bytes([tool_definition(tool) for tool in tools])
         return self._estimate("tools", payload, len(tools), model_id)
 
     def estimate_text(self, text: str, model_id: str) -> int:

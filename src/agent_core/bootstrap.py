@@ -9,7 +9,7 @@ import logging
 import os
 import signal
 import socket
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -300,10 +300,11 @@ from agent_core.domain.schedules import ScheduleAdmissionLimits, ScheduleDefinit
 from agent_core.domain.sessions import (
     DEFAULT_PROJECT_SCOPE,
     SESSION_BROWSER_PROFILE_METADATA_KEY,
+    Session,
     project_scope,
 )
 from agent_core.domain.skills import SkillPackage, SkillSource
-from agent_core.domain.tools import ToolExecutionContext
+from agent_core.domain.tools import ToolExecutionContext, ToolSpec
 from agent_core.execution.egress import validate_destination
 from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
@@ -445,6 +446,22 @@ class Composition:
 
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
+_BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
+
+
+def _session_tool_filter(
+    browser_provider: BrowserProvider | None,
+) -> Callable[[Session, Sequence[ToolSpec]], list[ToolSpec]] | None:
+    if not isinstance(browser_provider, SessionBoundHostedBrowserProvider):
+        return None
+
+    def filter_tools(session: Session, tools: Sequence[ToolSpec]) -> list[ToolSpec]:
+        selected_profile = session.metadata.get(SESSION_BROWSER_PROFILE_METADATA_KEY)
+        if isinstance(selected_profile, str) and selected_profile:
+            return list(tools)
+        return [tool for tool in tools if tool.name not in _BROWSER_TOOL_NAMES]
+
+    return filter_tools
 
 
 def _content_addressed_agent_version(agent: AgentSpec) -> str:
@@ -1653,6 +1670,7 @@ async def _compose(
             policy_version=ruleset.policy_version,
             skill_catalogs=skill_catalogs,
             memory_retriever=memory_retriever,
+            session_tool_filter=_session_tool_filter(browser_provider),
         )
 
         async def session_project_scope(session_id: UUID) -> str:
