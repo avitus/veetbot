@@ -20,6 +20,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
+import pytest
 from fastapi.routing import APIRoute
 
 from agent_core.api import create_app
@@ -185,11 +186,51 @@ async def test_memory_routes_cover_listing_detail_scopes_and_ceiling() -> None:
             )
             assert malformed_cursor.status_code == 400
 
+            # The cap is observed directly, not inferred from the domain
+            # query's own `le=200` backstop: seed enough beliefs that a
+            # request for 300 can only be satisfied by two pages if the
+            # route's `min(limit, 200)` clamp is actually applied.
+            many = [
+                _belief(
+                    belief_id=100 + offset,
+                    position=100 + offset,
+                    sensitivity=Sensitivity.RESTRICTED,
+                )
+                for offset in range(201)
+            ]
+            async with composition.uow_factory() as uow:
+                for belief in many:
+                    await uow.memories.upsert_belief(belief)
+            # `visible` (internal) and `restricted` are both within the
+            # "restricted" ceiling too, so the full live set is 203 beliefs.
+            all_ids = {str(visible.id), str(restricted.id)} | {str(b.id) for b in many}
+            assert len(all_ids) == 203
+
             oversized = await client.get(
                 "/v1/memories", params={"ceiling": "restricted", "limit": 300}
             )
             assert oversized.status_code == 200, oversized.text
-            assert len(oversized.json()["items"]) <= 200
+            oversized_body = oversized.json()
+            assert len(oversized_body["items"]) == 200
+            assert oversized_body["next_cursor"] is not None
+
+            remainder = await client.get(
+                "/v1/memories",
+                params={
+                    "ceiling": "restricted",
+                    "limit": 300,
+                    "cursor": oversized_body["next_cursor"],
+                },
+            )
+            assert remainder.status_code == 200, remainder.text
+            remainder_body = remainder.json()
+            assert len(remainder_body["items"]) == 3
+            assert remainder_body["next_cursor"] is None
+
+            paged_ids = {item["id"] for item in oversized_body["items"]} | {
+                item["id"] for item in remainder_body["items"]
+            }
+            assert paged_ids == all_ids
 
             detail = await client.get(f"/v1/memories/{visible.id}", params={"ceiling": "internal"})
             assert detail.status_code == 200, detail.text
@@ -313,6 +354,41 @@ async def test_memory_list_rejects_a_cursor_position_beyond_bigint_range() -> No
                 "/v1/memories", params={"ceiling": "restricted", "cursor": boundary}
             )
             assert response.status_code == 200, response.text
+
+
+async def test_memory_list_non_cursor_value_error_is_not_mislabeled_as_a_bad_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A `ValueError` can also come from converting a stored row into a
+    # `MemoryRecord` (an unrecognized enum value, an unparseable UUID) — a
+    # data-corruption failure with nothing to do with the cursor. Only the
+    # cursor codec's own `MemoryCursorError` may be mapped to the cursor's
+    # 400; any other `ValueError` must fall through to `internal_error`/500,
+    # the correct outcome for genuine data corruption.
+    principal = Principal(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        roles={"user"},
+        scopes=set(PLATFORM_SCOPES) | {"memory.read"},
+    )
+    settings = replace(memory_settings(), memory_api_enabled=True)
+    async with build(
+        settings=settings,
+        storage="memory",
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+
+        async def broken_list(*args: object, **kwargs: object) -> None:
+            del args, kwargs
+            raise ValueError("boom")
+
+        monkeypatch.setattr(composition.services.memory, "list", broken_list)
+
+        async with _client(composition) as client:
+            response = await client.get("/v1/memories", params={"ceiling": "restricted"})
+            assert response.status_code == 500, response.text
+            assert response.json()["error"]["code"] == "internal_error"
 
 
 async def test_memory_list_pages_every_belief_exactly_once() -> None:

@@ -15,6 +15,7 @@ from uuid import UUID
 
 from agent_core.application.authorization import require_scope
 from agent_core.application.errors import (
+    MemoryCursorError,
     SessionMessageCursorError,
     SessionMetadataValidationError,
 )
@@ -1288,7 +1289,7 @@ def _decode_memory_cursor(value: str | None) -> tuple[int, UUID] | None:
             raise ValueError
         return (position, UUID(identifier))
     except (ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError("memory cursor is malformed") from exc
+        raise MemoryCursorError("memory cursor is malformed") from exc
 
 
 class PublicMemoryService:
