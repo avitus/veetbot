@@ -21,6 +21,16 @@ public final class MemoryViewModel: ObservableObject {
     private var seenCursors: Set<String> = []
     private var reloadRequestID: UUID?
     private var searchDebounceTask: Task<Void, Never>?
+    private var lastFailedOperation: FailedOperation?
+
+    /// Which fetch last failed, so a single `retry()` can re-run the right
+    /// one: `loadMore()` no-ops once `reload()` has already reset the
+    /// cursor to nil, and re-running the wrong operation is exactly how a
+    /// footer's Retry button goes dead.
+    private enum FailedOperation {
+        case reload
+        case loadMore
+    }
 
     private static let searchDebounceNanoseconds: UInt64 = 300_000_000
 
@@ -104,6 +114,7 @@ public final class MemoryViewModel: ObservableObject {
             guard reloadRequestID == requestID else { return }
             items = []
             unavailable = true
+            lastFailedOperation = .reload
             return
         }
 
@@ -116,16 +127,38 @@ public final class MemoryViewModel: ObservableObject {
             )
             guard reloadRequestID == requestID else { return }
             unavailable = false
+            lastFailedOperation = nil
             items = page.items
             nextCursor = consumeNextCursor(page.nextCursor)
         } catch VeetbotAPIClientError.memoryBrowsingUnavailable {
             guard reloadRequestID == requestID else { return }
             items = []
             unavailable = true
+            lastFailedOperation = .reload
         } catch {
             guard reloadRequestID == requestID else { return }
             unavailable = false
+            // A reload is always the result of the initial load or a filter
+            // or search-text change (reload() is never called to merely
+            // refresh the current page): on failure, the previous selection's
+            // rows must not sit under the new one, so they're cleared rather
+            // than left stale. The full-screen error state this produces
+            // carries its own retry.
+            items = []
             errorMessage = displayMessage(for: error)
+            lastFailedOperation = .reload
+        }
+    }
+
+    /// Re-runs whichever fetch last failed. Both the full-screen error
+    /// state's retry and the inline loadMore footer's retry call this rather
+    /// than hard-coding which underlying method to call.
+    public func retry() async {
+        switch lastFailedOperation {
+        case .loadMore:
+            await loadMore()
+        case .reload, nil:
+            await reload()
         }
     }
 
@@ -159,6 +192,7 @@ public final class MemoryViewModel: ObservableObject {
             )
             guard reloadRequestID == requestID else { return }
             unavailable = false
+            lastFailedOperation = nil
             let existingIDs = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
             nextCursor = consumeNextCursor(page.nextCursor)
@@ -166,9 +200,11 @@ public final class MemoryViewModel: ObservableObject {
             guard reloadRequestID == requestID else { return }
             unavailable = true
             errorMessage = displayMessage(for: VeetbotAPIClientError.memoryBrowsingUnavailable)
+            lastFailedOperation = .loadMore
         } catch {
             guard reloadRequestID == requestID else { return }
             errorMessage = displayMessage(for: error)
+            lastFailedOperation = .loadMore
         }
     }
 

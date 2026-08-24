@@ -43,8 +43,23 @@ import Testing
     func testTheListFootersASurvivableLoadMoreFailureWithRetry() throws {
         let source = try memoryBrowserViewSource()
 
-        #expect(source.contains("} else if let errorMessage = model.errorMessage {\n                loadMoreFailureFooter(errorMessage)"))
+        #expect(
+            source.contains(
+                "} else if let errorMessage = model.errorMessage {\n                loadMoreFailureFooter(errorMessage)"
+            )
+        )
         #expect(source.contains("Task { await model.loadMore() }"))
+    }
+
+    @Test
+    func testBothRetrySurfacesCallTheUnifiedRetryMethodRatherThanHardCodingWhichFetch() throws {
+        let source = try memoryBrowserViewSource()
+
+        let occurrences = source.components(separatedBy: "Task { await model.retry() }").count - 1
+        #expect(
+            occurrences == 2,
+            "the inline loadMore footer and the full-screen error state must each retry through model.retry() — which re-runs whichever fetch actually failed — rather than one of them hard-coding loadMore() or reload() directly"
+        )
     }
 
     private func memoryBrowserViewSource() throws -> String {

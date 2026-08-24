@@ -201,6 +201,163 @@ import Testing
     }
 
     @Test
+    func testRetryAfterAReloadFailureReRunsReloadAndRecovers() async throws {
+        let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000431"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000432"))
+        let lock = NSLock()
+        var attempts = 0
+        let model = try makeModel { request in
+            let attempt = lock.withLock {
+                attempts += 1
+                return attempts
+            }
+            if attempt == 2 {
+                return try self.response(
+                    for: request,
+                    statusCode: 503,
+                    body: #"{"error":{"code":"service_unavailable","message":"unavailable","details":{},"request_id":"reload-failed"}}"#
+                )
+            }
+            return try self.response(
+                for: request,
+                statusCode: 200,
+                body: """
+                    {"items":[\(self.memoryJSON(id: firstID, sessionID: sessionID))],"next_cursor":null}
+                    """
+            )
+        }
+
+        await model.reload()
+        #expect(model.items.map(\.id) == [firstID])
+
+        // A second reload (as a filter or search-text change would trigger)
+        // fails; the footer's Retry would previously call loadMore(), which
+        // no-ops once reload() has already nulled the cursor, leaving it
+        // permanently dead.
+        await model.reload()
+        #expect(model.errorMessage != nil)
+
+        await model.retry()
+
+        #expect(
+            model.items.map(\.id) == [firstID],
+            "retry() must re-run reload() (not the dead loadMore()) and recover"
+        )
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test
+    func testFilterChangeFailureDoesNotLeaveThePreviousFiltersRowsDisplayed() async throws {
+        let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000441"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000442"))
+        let lock = NSLock()
+        var attempts = 0
+        let model = try makeModel { request in
+            let attempt = lock.withLock {
+                attempts += 1
+                return attempts
+            }
+            if attempt == 1 {
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: firstID, sessionID: sessionID))],"next_cursor":null}
+                        """
+                )
+            }
+            return try self.response(
+                for: request,
+                statusCode: 503,
+                body: #"{"error":{"code":"service_unavailable","message":"unavailable","details":{},"request_id":"filter-failed"}}"#
+            )
+        }
+
+        await model.reload()
+        #expect(model.items.map(\.id) == [firstID])
+
+        model.setStatusFilter(.active)
+
+        for _ in 0 ..< 200 where model.errorMessage == nil {
+            try await Task.sleep(nanoseconds: 5_000_000)
+        }
+
+        #expect(
+            model.items.isEmpty,
+            "a filter-change reload failure must not leave the previous filter's rows displayed"
+        )
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test
+    func testRetryAfterALoadMoreFailureStillReRunsLoadMoreNotReload() async throws {
+        let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000451"))
+        let secondID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000452"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000453"))
+        let lock = NSLock()
+        var pageTwoAttempts = 0
+        var totalRequests = 0
+        let model = try makeModel { request in
+            lock.withLock { totalRequests += 1 }
+            let query =
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                ?? []
+            let cursor = query.first(where: { $0.name == "cursor" })?.value
+            switch cursor {
+            case nil:
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: firstID, sessionID: sessionID))],"next_cursor":"page-2"}
+                        """
+                )
+            case "page-2":
+                let attempt = lock.withLock {
+                    pageTwoAttempts += 1
+                    return pageTwoAttempts
+                }
+                if attempt == 1 {
+                    return try self.response(
+                        for: request,
+                        statusCode: 503,
+                        body: #"{"error":{"code":"service_unavailable","message":"unavailable","details":{},"request_id":"loadmore-failed"}}"#
+                    )
+                }
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: secondID, sessionID: sessionID))],"next_cursor":null}
+                        """
+                )
+            default:
+                Issue.record("unexpected cursor \(cursor ?? "nil")")
+                return try self.response(for: request, statusCode: 500, body: "")
+            }
+        }
+
+        await model.reload()
+        #expect(model.items.map(\.id) == [firstID])
+
+        await model.loadMore()
+        #expect(model.items.map(\.id) == [firstID], "a page-2 failure must not empty the already-loaded page")
+        #expect(model.errorMessage != nil)
+
+        await model.retry()
+
+        #expect(
+            model.items.map(\.id) == [firstID, secondID],
+            "retry() after a loadMore failure must still re-run loadMore(), not reload()"
+        )
+        #expect(model.errorMessage == nil)
+        #expect(
+            lock.withLock { totalRequests } == 3,
+            "a correct retry re-fetches page two only, not page one again"
+        )
+    }
+
+    @Test
     func testStaleGuardDropsAnOutOfOrderResponse() async throws {
         let staleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000501"))
         let freshID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000502"))

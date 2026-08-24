@@ -100,7 +100,7 @@ public struct MemoryBrowserView: View {
                 .appFont(.caption)
                 .foregroundColor(.secondary)
             Button("Retry") {
-                Task { await model.loadMore() }
+                Task { await model.retry() }
             }
             .appFont(.caption)
         }
@@ -223,6 +223,9 @@ public struct MemoryBrowserView: View {
             Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
+            Button("Retry") {
+                Task { await model.retry() }
+            }
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
