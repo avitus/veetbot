@@ -81,6 +81,10 @@ public final class ChatViewModel: ObservableObject {
     @Published public private(set) var browserProfiles: [BrowserProfileView] = []
     @Published public private(set) var selectedBrowserProfileID: UUID?
     @Published public private(set) var browserAuthentication: BrowserAuthenticationView?
+    /// The one-time launch capability of the in-flight ceremony. It is held only
+    /// in memory, only while its ceremony is live, and is surrendered with the
+    /// ceremony so no view can offer it after the ceremony ends.
+    @Published public private(set) var websiteAuthenticationLaunchURL: URL?
     @Published public private(set) var isManagingWebsiteAccess = false
 
     public let runState: RunStateReducer
@@ -129,22 +133,25 @@ public final class ChatViewModel: ObservableObject {
             let trimmedToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
             let previousToken = try await tokenStore.readToken()
             let credentialsChanged = !trimmedToken.isEmpty && trimmedToken != previousToken
+            let previousConfiguration = await configurationStore.load()
+            if credentialsChanged || previousConfiguration?.baseURL != configuration.baseURL {
+                await abandonWebsiteAuthenticationCeremony()
+            }
             if !trimmedToken.isEmpty {
                 try await tokenStore.saveToken(trimmedToken)
             }
             guard try await tokenStore.readToken() != nil else {
                 throw HTTPTransportError.missingToken
             }
-            let previousConfiguration = await configurationStore.load()
             try await install(configuration)
             if previousConfiguration?.baseURL != configuration.baseURL {
                 selectedBrowserProfileID = nil
                 browserProfiles = []
-                browserAuthentication = nil
+                clearWebsiteAuthenticationState()
                 await configurationStore.saveBrowserProfileID(nil)
             } else if credentialsChanged {
                 browserProfiles = []
-                browserAuthentication = nil
+                clearWebsiteAuthenticationState()
                 if selectedBrowserProfileID != nil, let api {
                     do {
                         try await reloadBrowserProfiles(using: api)
@@ -167,6 +174,7 @@ public final class ChatViewModel: ObservableObject {
     }
 
     public func forgetCredentials() async {
+        await abandonWebsiteAuthenticationCeremony()
         var revokeError: Error?
         if let api {
             do {
@@ -188,7 +196,7 @@ public final class ChatViewModel: ObservableObject {
         eventStream = nil
         browserProfiles = []
         selectedBrowserProfileID = nil
-        browserAuthentication = nil
+        clearWebsiteAuthenticationState()
         await configurationStore.saveBrowserProfileID(nil)
         await artifactCache.removeAll()
         isConfigured = false
@@ -697,6 +705,7 @@ public final class ChatViewModel: ObservableObject {
         }
     }
 
+    @discardableResult
     public func createWebsiteAccess(
         origin: String,
         loginURL: String
@@ -721,6 +730,7 @@ public final class ChatViewModel: ObservableObject {
                 loginURL: normalizedLoginURL
             )
             browserAuthentication = ceremony
+            websiteAuthenticationLaunchURL = ceremony.launchURL
             browserProfiles.removeAll { $0.id == profile.id }
             browserProfiles.append(profile)
             errorMessage = nil
@@ -740,7 +750,7 @@ public final class ChatViewModel: ObservableObject {
                 )
                 browserProfiles.removeAll { $0.id == createdProfileID }
                 if browserAuthentication?.profileID == createdProfileID {
-                    browserAuthentication = nil
+                    clearWebsiteAuthenticationState()
                 }
                 if let cleanupError {
                     errorMessage =
@@ -753,6 +763,12 @@ public final class ChatViewModel: ObservableObject {
             }
             return nil
         }
+    }
+
+    /// The handoff succeeded, so the client stops offering the one-time launch
+    /// capability. The ceremony itself stays live until the runtime reports it.
+    public func websiteAuthenticationLaunchOpened() {
+        websiteAuthenticationLaunchURL = nil
     }
 
     public func websiteAuthenticationLaunchFailed() async {
@@ -773,6 +789,9 @@ public final class ChatViewModel: ObservableObject {
         do {
             let updated = try await api.getBrowserAuthentication(browserAuthentication.id)
             self.browserAuthentication = updated
+            if updated.status.isTerminal {
+                websiteAuthenticationLaunchURL = nil
+            }
             try await reloadBrowserProfiles(using: api)
             if updated.status == .ready,
                 browserProfiles.contains(where: {
@@ -814,7 +833,7 @@ public final class ChatViewModel: ObservableObject {
                 await configurationStore.saveBrowserProfileID(nil)
             }
             if browserAuthentication?.profileID == profileID {
-                browserAuthentication = nil
+                clearWebsiteAuthenticationState()
             }
             try await reloadBrowserProfiles(using: api)
             errorMessage = nil
@@ -836,7 +855,7 @@ public final class ChatViewModel: ObservableObject {
             profileID: profileID,
             authenticationID: authentication.status.isTerminal ? nil : authentication.id
         )
-        browserAuthentication = nil
+        clearWebsiteAuthenticationState()
         browserProfiles.removeAll { $0.id == profileID }
         if selectedBrowserProfileID == profileID {
             selectedBrowserProfileID = nil
@@ -856,6 +875,26 @@ public final class ChatViewModel: ObservableObject {
         } else {
             errorMessage = successMessage
         }
+    }
+
+    /// Surrenders an in-flight website-login ceremony before the connection it
+    /// was begun under is replaced or deleted. The launch capability stays live
+    /// until the ceremony is cancelled or expires, so the cancellation is sent
+    /// through the transport and credential that began it, before either
+    /// changes. It is best effort: the old credential may already be rejected,
+    /// and a failure here must not block the connection change. The client
+    /// forgets the ceremony either way, so nothing can offer the capability.
+    private func abandonWebsiteAuthenticationCeremony() async {
+        let ceremony = browserAuthentication
+        clearWebsiteAuthenticationState()
+        guard let api, let ceremony, !ceremony.status.isTerminal else { return }
+        _ = try? await api.cancelBrowserAuthentication(ceremony.id)
+    }
+
+    /// Forgets the in-flight ceremony and its one-time launch capability.
+    private func clearWebsiteAuthenticationState() {
+        browserAuthentication = nil
+        websiteAuthenticationLaunchURL = nil
     }
 
     private func discardUnusedBrowserProfile(
@@ -923,7 +962,7 @@ public final class ChatViewModel: ObservableObject {
                     } catch {
                         selectedBrowserProfileID = nil
                         browserProfiles = []
-                        browserAuthentication = nil
+                        clearWebsiteAuthenticationState()
                         await configurationStore.saveBrowserProfileID(nil)
                         clearInstalledConnection()
                         throw error

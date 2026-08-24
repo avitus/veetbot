@@ -963,8 +963,13 @@ async def _projection_over_the_wire() -> None:
     for response in (listed, detail, missing):
         for withheld in WITHHELD_FIELDS:
             assert f'"{withheld}"' not in response.text, (response.url, withheld)
-        assert "4242" not in response.text
+    # The store-position sentinel is a bare number, so it is only meaningful in
+    # a body that can carry a belief. The error envelope carries a random
+    # request id instead, which contains "4242" by chance about once in a few
+    # thousand runs; asserting over it would make the gate a coin flip without
+    # covering anything, since `store_position` cannot reach an error body.
     for response in (listed, detail):
+        assert "4242" not in response.text, response.url
         assert "exposed-policy@99" in response.text, response.url
 
 

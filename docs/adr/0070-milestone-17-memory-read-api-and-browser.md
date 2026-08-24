@@ -132,7 +132,10 @@ let somebody look.
 - Three provenance fields — the formation run, the consolidation policy version,
   and the origin scopes — are withheld from the projection as a recommendation
   rather than as a settled decision, and the owner signs off on that trio during
-  review of the implementing change.
+  review of the implementing change. Update (2026-08-23): the owner decided to
+  expose all three, so the projection carries twenty-six fields — see
+  `memory-read-api-and-browser.md`'s exposure list and the Milestone 17 section
+  of `docs/status/questions-for-review.md`.
 
 ## Alternatives considered
 

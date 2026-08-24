@@ -1036,6 +1036,197 @@ import Testing
         #expect(model.errorMessage == "browser temporarily unavailable")
     }
 
+    @Test
+    func testReplacingTheCredentialCancelsTheInFlightWebsiteLogin() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000e1")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000e2")
+        )
+        let recorder = WebsiteLoginRequestRecorder()
+        let model = try await modelWithLiveWebsiteLogin(
+            profileID: profileID,
+            authenticationID: authenticationID,
+            recorder: recorder,
+            token: "principal-one"
+        )
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://veetbot.test",
+                token: "principal-two"
+            )
+        )
+
+        let cancels = recorder.matching(
+            method: "POST",
+            url:
+                "https://veetbot.test/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+        )
+        #expect(cancels.count == 1)
+        #expect(cancels.first?.authorization == "Bearer principal-one")
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
+    @Test
+    func testMovingToAnotherServerCancelsTheInFlightWebsiteLogin() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000e3")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000e4")
+        )
+        let recorder = WebsiteLoginRequestRecorder()
+        let model = try await modelWithLiveWebsiteLogin(
+            profileID: profileID,
+            authenticationID: authenticationID,
+            recorder: recorder,
+            token: "principal-one"
+        )
+
+        #expect(
+            await model.configure(
+                baseURLString: "https://other.veetbot.test",
+                token: "principal-one"
+            )
+        )
+
+        let cancels = recorder.matching(
+            method: "POST",
+            path:
+                "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+        )
+        #expect(cancels.count == 1)
+        #expect(
+            cancels.first?.url
+                == "https://veetbot.test/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+        )
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
+    @Test
+    func testForgettingTheCredentialCancelsTheInFlightWebsiteLogin() async throws {
+        let profileID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000e5")
+        )
+        let authenticationID = try #require(
+            UUID(uuidString: "00000000-0000-0000-0000-0000000000e6")
+        )
+        let recorder = WebsiteLoginRequestRecorder()
+        let model = try await modelWithLiveWebsiteLogin(
+            profileID: profileID,
+            authenticationID: authenticationID,
+            recorder: recorder,
+            token: "principal-one",
+            deviceRegistrationCoordinator: DeviceRegistrationCoordinator(
+                identityStore: InMemoryInstallationIdentityStore(
+                    installationID: "00000000-0000-0000-0000-0000000000e7"
+                )
+            )
+        )
+
+        await model.forgetCredentials()
+
+        let cancels = recorder.matching(
+            method: "POST",
+            url:
+                "https://veetbot.test/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+        )
+        #expect(cancels.count == 1)
+        #expect(cancels.first?.authorization == "Bearer principal-one")
+        #expect(model.browserAuthentication == nil)
+        #expect(model.websiteAuthenticationLaunchURL == nil)
+    }
+
+    /// Configures a model against `https://veetbot.test` and leaves one
+    /// non-terminal website-login ceremony in flight, with its one-time launch
+    /// capability still held by the client.
+    private func modelWithLiveWebsiteLogin(
+        profileID: UUID,
+        authenticationID: UUID,
+        recorder: WebsiteLoginRequestRecorder,
+        token: String,
+        deviceRegistrationCoordinator: DeviceRegistrationCoordinator? = nil
+    ) async throws -> ChatViewModel {
+        let profile = #"{"id":"\#(profileID.uuidString)","allowed_origins":["https://example.org"],"status":"authentication_required","generation":1,"created_at":"2026-08-23T12:00:00Z","updated_at":"2026-08-23T12:00:00Z","last_used_at":null}"#
+        let ceremony = #"{"id":"\#(authenticationID.uuidString)","profile_id":"\#(profileID.uuidString)","status":"authentication_required","expires_at":"2026-08-23T12:05:00Z","launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque"}"#
+        let session = urlSession { request in
+            let method = request.httpMethod ?? ""
+            let path = request.url?.path ?? ""
+            recorder.record(request)
+            switch (method, path) {
+            case ("GET", "/v1/sessions"), ("GET", "/v1/devices"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[],"next_cursor":null}"#
+                )
+            case ("POST", "/v1/browser-profiles"):
+                return try response(for: request, statusCode: 201, body: profile)
+            case (
+                "POST",
+                "/v1/browser-profiles/\(profileID.uuidString)/authentication-ceremonies"
+            ):
+                return try response(for: request, statusCode: 201, body: ceremony)
+            case ("GET", "/v1/browser-profiles"):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: #"{"items":[\#(profile)],"next_cursor":null}"#
+                )
+            case (
+                "POST",
+                "/v1/browser-authentication-ceremonies/\(authenticationID.uuidString)/cancel"
+            ):
+                return try response(
+                    for: request,
+                    statusCode: 200,
+                    body: ceremony.replacingOccurrences(
+                        of: #""status":"authentication_required""#,
+                        with: #""status":"cancelled""#
+                    )
+                    .replacingOccurrences(
+                        of:
+                            #""launch_url":"https://browser.example/authentication/\#(authenticationID.uuidString)#capability=opaque""#,
+                        with: #""launch_url":null"#
+                    )
+                )
+            default:
+                Issue.record("unexpected request: \(method) \(path)")
+                return try response(for: request, statusCode: 500, body: "{}")
+            }
+        }
+        let suiteName = "com.veetbot.tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        let model = ChatViewModel(
+            tokenStore: InMemoryTokenStore(),
+            configurationStore: ConnectionConfigurationStore(defaults: defaults),
+            historyStore: VolatileSessionHistoryStore(),
+            deviceRegistrationCoordinator: deviceRegistrationCoordinator
+                ?? DeviceRegistrationCoordinator(
+                    identityStore: InMemoryInstallationIdentityStore(
+                        installationID: "00000000-0000-0000-0000-0000000000ff"
+                    )
+                ),
+            urlSession: session
+        )
+        #expect(
+            await model.configure(baseURLString: "https://veetbot.test", token: token)
+        )
+        let launchURL = await model.createWebsiteAccess(
+            origin: "https://example.org",
+            loginURL: "https://example.org/login"
+        )
+        #expect(launchURL?.fragment == "capability=opaque")
+        #expect(model.browserAuthentication?.status == .authenticationRequired)
+        #expect(model.websiteAuthenticationLaunchURL == launchURL)
+        return model
+    }
+
     private func requestJSONObject(_ request: URLRequest) throws -> [String: Any] {
         let data: Data
         if let body = request.httpBody {
@@ -1103,6 +1294,39 @@ import Testing
             )
         )
         return (response, Data(body.utf8))
+    }
+}
+
+/// Records the transport identity of every request a website-login test makes,
+/// so a cancellation can be attributed to the connection that began the
+/// ceremony rather than to whichever connection replaced it.
+private final class WebsiteLoginRequestRecorder: @unchecked Sendable {
+    struct Entry: Sendable {
+        let method: String
+        let url: String
+        let path: String
+        let authorization: String?
+    }
+
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+
+    func record(_ request: URLRequest) {
+        let entry = Entry(
+            method: request.httpMethod ?? "",
+            url: request.url?.absoluteString ?? "",
+            path: request.url?.path ?? "",
+            authorization: request.value(forHTTPHeaderField: "Authorization")
+        )
+        lock.withLock { entries.append(entry) }
+    }
+
+    func matching(method: String, url: String) -> [Entry] {
+        lock.withLock { entries.filter { $0.method == method && $0.url == url } }
+    }
+
+    func matching(method: String, path: String) -> [Entry] {
+        lock.withLock { entries.filter { $0.method == method && $0.path == path } }
     }
 }
 
