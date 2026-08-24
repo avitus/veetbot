@@ -45,7 +45,7 @@
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
-  statement: "**Token confinement** — access tokens, refresh tokens, and upstream Google text never appear in tool results or durable events; failures cross the pipe only as the closed stable codes."
+  statement: "**Token confinement** — access tokens, refresh tokens, and raw upstream error text or diagnostic headers never appear in tool results or durable events; failures cross the pipe only as the closed stable codes, and normalized mailbox content is the only upstream content that crosses at all."
   check: tests/gates/pending.py::pending_gate
 - id: gate.email.default_off
   milestone: 18
@@ -69,7 +69,7 @@
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
-  statement: "**Failure taxonomy** — connect-time auth failure is terminal, the mid-session ladder is bounded, rate limits and server errors are retryable and stable, and oversized upstream bodies truncate within the declared output budget."
+  statement: "**Failure taxonomy** — connect-time auth failure is terminal, the mid-session ladder is bounded, rate limits and server errors are retryable and stable, a redirect is refused rather than followed, and oversized upstream bodies truncate within the declared output budget."
   check: tests/gates/pending.py::pending_gate
 - id: gate.email.monitoring_recipe
   milestone: 18

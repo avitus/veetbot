@@ -82,7 +82,13 @@ already promises: an operator-declared read-only MCP classification. Decision
    model-authored or server-claimed — the operator declares it at
    configuration time, stdio command lines are operator-configured only, and a
    tenant-supplied HTTP endpoint was validated against the egress allowlist
-   when the configuration row was written. The change is one additive arm in
+   when the configuration row was written. The arm authorizes no worker
+   egress: an `mcp` target executes with networking disabled, the platform's
+   HTTP transport to a remote server follows no redirect, and the destination
+   that ultimately serves a read is governed on its own path — the
+   operator-configured command line, or the egress-allowlisted endpoint — so
+   no model-authored argument can select where a read goes. The change is one
+   additive arm in
    one function, amended in [policy-and-approvals.md](../plan/policy-and-approvals.md)
    in the same change, and it repairs the existing denial of the adapter's own
    read-only `read_resource` tool rather than relaxing anything: every
@@ -96,7 +102,10 @@ already promises: an operator-declared read-only MCP classification. Decision
    variable in a constructed child environment. The value is a JSON document
    holding the client id, client secret, and refresh token; the server runs
    the refresh exchange against Google inside its own process, checking expiry
-   at use, and the platform never learns the credential is OAuth. Initial
+   at use, and the platform never learns the credential is OAuth. The server
+   dials exactly two fixed HTTPS endpoints — the Gmail API host and the token
+   endpoint, both package constants — and follows no redirect, so credential
+   material cannot be walked to a third host; a contract test asserts both. Initial
    consent is a one-time operator ceremony, `python -m gmail_mcp bootstrap`,
    which runs the installed-app loopback flow and writes owner-readable
    credential files that enter the broker through file-backed settings

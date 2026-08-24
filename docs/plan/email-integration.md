@@ -110,8 +110,10 @@ an inherited environment, never an event or a log.
 
 The resolved value is a JSON document: `client_id`, `client_secret`,
 `refresh_token`, and the granted Google scope. The server exchanges the
-refresh token for access tokens against Google's token endpoint inside its own
-process, checking expiry at use rather than on a timer. Access tokens, the
+refresh token for access tokens against Google's fixed HTTPS token endpoint
+inside its own process — a package constant, with redirects never followed,
+the same transport rule the Gmail calls obey — checking expiry at use rather
+than on a timer. Access tokens, the
 refresh token, and Google's error bodies never cross the stdio pipe; the
 platform never learns the credential is OAuth. A refresh token Google refuses
 surfaces as the adapter's ordinary `tool.server_unauthorized`, terminal at
@@ -173,7 +175,12 @@ justification is the web-provider arm's own: that classification is
 operator-declared at configuration time and can never be model-authored or
 server-claimed, stdio command lines are operator-configured only, and
 tenant-supplied HTTP endpoints were egress-validated when written. The arm
-lands with the change that implements it, amending
+authorizes no worker egress at all — an `mcp` target executes with
+networking disabled, the platform's own HTTP transport to a remote server
+follows no redirect, and the destination that ultimately serves a read is
+governed on its own path: the operator-configured command line for stdio,
+the egress allowlist for HTTP. A model-authored argument can select neither.
+The arm lands with the change that implements it, amending
 [policy-and-approvals.md](policy-and-approvals.md) in the same commit, and
 every non-read MCP call remains exactly as gated as before.
 
@@ -199,6 +206,12 @@ cadence floor is daily until roadmap B5; Gmail push stays out with B3 and B4.
 
 ## Bounds and failures
 
+The server dials exactly two fixed HTTPS endpoints — the Gmail API host and
+Google's token endpoint — both constants in the package, never arguments. It
+follows no redirect: a 3xx answer is a permanent rejection, never a second
+request, so a credentialed call cannot be walked to another host. A contract
+test asserts both properties.
+
 Gmail API responses are decoded under a hard byte bound; thread bodies are
 truncated to the server's declared output budget before crossing the pipe, so
 one bounded result always returns. The server maps upstream failures to a
@@ -206,8 +219,10 @@ closed set of stable, content-free codes: credential rejection, rate limit,
 temporary provider unavailability, permanent provider rejection, and invalid
 provider output. Rate limits and 5xx are retryable; auth failures, other 4xx,
 and schema-invalid arguments are not; the tool pipeline retains ownership of
-any retry inside the run deadline. Google's response text, headers, and
-`WWW-Authenticate` values never cross the pipe. Connect-time auth failure is
+any retry inside the run deadline. Google's raw error text, diagnostic
+headers, and `WWW-Authenticate` values never cross the pipe — normalized
+mailbox content is the tool result, and it is the only upstream content that
+does. Connect-time auth failure is
 terminal for the session and mid-session 401s run the adapter's bounded
 ladder, both exactly as [tool-system.md](tool-system.md) already specifies for
 every MCP server.
@@ -272,9 +287,11 @@ every MCP server.
    resolved credential reaches the child only as the one declared variable in
    a constructed environment — never `argv`, never inherited, never an event,
    result, or log. **M18.**
-8. **Token confinement.** Access tokens, refresh tokens, and upstream Google
-   text never appear in tool results or durable events; failures cross the
-   pipe only as the closed stable codes. **M18.**
+8. **Token confinement.** Access tokens, refresh tokens, and raw upstream
+   error text or diagnostic headers never appear in tool results or durable
+   events; failures cross the pipe only as the closed stable codes, and
+   normalized mailbox content is the only upstream content that crosses at
+   all. **M18.**
 9. **Default off.** With the flag unset, no `mcp.gmail_*` server row is
    composed and no such tool is registered or advertised. **M18.**
 10. **Scope confinement.** Each server requires exactly its own
@@ -285,8 +302,9 @@ every MCP server.
     per-server Google scopes, and never prints token material. **M18.**
 12. **Failure taxonomy.** Connect-time auth failure is terminal, the
     mid-session ladder is bounded, rate limits and server errors are
-    retryable and stable, and oversized upstream bodies truncate within the
-    declared output budget. **M18.**
+    retryable and stable, a redirect is refused rather than followed, and
+    oversized upstream bodies truncate within the declared output budget.
+    **M18.**
 13. **Monitoring recipe.** A daily triage schedule materializes a run whose
     reads pass without approval, whose first write parks an approval whose
     notification is content-free, and whose outcome is reported. **M18.**
