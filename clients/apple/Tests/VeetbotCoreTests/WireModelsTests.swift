@@ -115,6 +115,47 @@ import Testing
     }
 
     @Test
+    func testMemoryViewDecodesTheFullExposureListAndToleratesAnUnknownStatus() throws {
+        let data = Data(
+            #"{"id":"00000000-0000-0000-0000-000000000101","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","status":"archived","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":true,"conflicts_with":["00000000-0000-0000-0000-000000000102"],"superseded_by":null,"source_session_id":"00000000-0000-0000-0000-000000000103","source_event_ids":[10,11,12],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}"#
+                .utf8
+        )
+
+        let memory = try JSONDecoder.server.decode(MemoryView.self, from: data)
+        let isoDate = ISO8601DateFormatter()
+
+        #expect(memory.id.uuidString == "00000000-0000-0000-0000-000000000101")
+        #expect(memory.subject == "the user")
+        #expect(memory.statement == "The user prefers dark mode.")
+        #expect(memory.beliefType == "preference")
+        #expect(memory.beliefTypeKind == .preference)
+        #expect(memory.status == "archived")
+        #expect(memory.statusKind == nil)
+        #expect(memory.polarity == "assert")
+        #expect(memory.polarityKind == .assert)
+        #expect(memory.scope == "session")
+        #expect(memory.portability == "portable")
+        #expect(memory.portabilityKind == .portable)
+        #expect(memory.authority == "user")
+        #expect(memory.authorityKind == .user)
+        #expect(memory.sensitivity == "restricted")
+        #expect(memory.sensitivityKind == .restricted)
+        #expect(memory.confidence == 0.87)
+        #expect(memory.corroborationCount == 3)
+        #expect(memory.flaggedForReview)
+        #expect(memory.conflictsWith.map(\.uuidString) == ["00000000-0000-0000-0000-000000000102"])
+        #expect(memory.supersededBy == nil)
+        #expect(memory.sourceSessionID.uuidString == "00000000-0000-0000-0000-000000000103")
+        #expect(memory.sourceEventIDs == [10, 11, 12])
+        #expect(memory.validFrom == isoDate.date(from: "2026-08-01T00:00:00Z"))
+        #expect(memory.validTo == nil)
+        #expect(memory.expiresAt == nil)
+        #expect(memory.lastReinforcedAt == isoDate.date(from: "2026-08-15T00:00:00Z"))
+        #expect(memory.createdAt == isoDate.date(from: "2026-07-01T00:00:00Z"))
+        #expect(memory.updatedAt == isoDate.date(from: "2026-08-20T00:00:00Z"))
+    }
+
+    @Test
     func testUnknownSessionMessageRoleRoundTripsWithoutRejectingThePage() throws {
         let page = Data(
             #"{"items":[{"sequence":1,"role":"system","content":[{"type":"text","text":"Notice"}]}],"next_cursor":null}"#.utf8
