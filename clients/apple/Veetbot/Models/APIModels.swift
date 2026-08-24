@@ -469,6 +469,9 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
     public let supersededBy: UUID?
     public let sourceSessionID: UUID
     public let sourceEventIDs: [Int]
+    public let formationRunID: UUID
+    public let consolidationPolicyVersion: String
+    public let originScopes: [String]
     public let validFrom: Date
     public let validTo: Date?
     public let expiresAt: Date?
@@ -486,6 +489,9 @@ public struct MemoryView: Codable, Equatable, Identifiable, Sendable {
         case supersededBy = "superseded_by"
         case sourceSessionID = "source_session_id"
         case sourceEventIDs = "source_event_ids"
+        case formationRunID = "formation_run_id"
+        case consolidationPolicyVersion = "consolidation_policy_version"
+        case originScopes = "origin_scopes"
         case validFrom = "valid_from"
         case validTo = "valid_to"
         case expiresAt = "expires_at"

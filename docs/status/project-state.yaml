@@ -268,6 +268,23 @@ milestones:
           Python gate observes Swift (ADR-0049 decision 9), so none of the ten
           gates above is satisfied by client code, and none of them is
           blocked by its absence either.
+      - check: manual smoke of the read API over HTTP
+        outcome: passed
+        detail: >-
+          2026-08-24, development-mode server (AUTH_MODE=dev, loopback
+          principal local/local-user, fake sandbox) over the shared dev
+          Postgres with AGENT_MEMORY_API_ENABLED=1: list returned the
+          principal's four live beliefs as twenty-six-field views with a null
+          terminal cursor; limit=2 walked two disjoint pages ending null;
+          a request without ceiling was a 400 malformed_request naming
+          query.ceiling with empty details; detail returned all
+          twenty-six fields including the provenance trio; an unknown id was
+          the plain not_found envelope; text search matched all four rows on
+          a shared statement token (the rows are gate-run residue, which is
+          what the shared development database holds); ceiling=public
+          filtered to one row. With the flag unset the routes were absent
+          (plain 404). The 401/403 arms are not reachable under dev auth and
+          rest on gates 3, 6, and 10 plus the boundary suite.
       - check: hosted CI and the dev-to-main review loop
         outcome: not_started
         detail: >-

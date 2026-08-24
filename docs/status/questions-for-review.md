@@ -6951,14 +6951,14 @@ imagine.
 would weaken a stated security requirement, which needs your explicit approval
 rather than a reviewer's.
 
-### Three provenance fields are withheld, and this one is genuinely open
+### Three provenance fields were withheld, and this one is now decided
 
-**Decided:** `MemoryView` exposes twenty-three fields from an explicit
-allow-list. `tenant_id`, `principal_id`, `utility`, and `store_position` are
-withheld outright and that is settled. `formation_run_id`,
-`consolidation_policy_version`, and `origin_scopes` are withheld as a
-**recommendation flagged for your sign-off**, not as a decision the
-specification makes on its own.
+**Originally decided (superseded below):** `MemoryView` exposes twenty-three
+fields from an explicit allow-list. `tenant_id`, `principal_id`, `utility`,
+and `store_position` are withheld outright and that is settled.
+`formation_run_id`, `consolidation_policy_version`, and `origin_scopes` are
+withheld as a **recommendation flagged for your sign-off**, not as a decision
+the specification makes on its own.
 
 **Why:** the trio is genuine provenance and you could reasonably want it in a
 belief's detail view. It is also the operator-tier vocabulary that the
@@ -6975,6 +6975,13 @@ without an answer to.
 **Reversal cost:** cheap before the code ships. Moderate after: adding a field
 to a response is additive, but removing one a client has started reading is a
 breaking change on a surface the native client consumes.
+
+**Decided:** exposed, 2026-08-23. You answered the question above during
+review of the implementing change: `formation_run_id`,
+`consolidation_policy_version`, and `origin_scopes` join the exposure list, so
+`MemoryView` now exposes twenty-six fields rather than twenty-three.
+`tenant_id`, `principal_id`, `utility`, and `store_position` remain withheld
+outright, unchanged from above.
 
 ### The default page is the live set, not the whole history
 

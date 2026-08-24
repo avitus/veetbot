@@ -41,7 +41,7 @@ NOW = datetime(2026, 8, 20, 16, tzinfo=UTC)
 TENANT = "local"
 PRINCIPAL_ID = "local-user"
 
-# The spec's exact 23-field exposure list (memory-read-api-and-browser.md).
+# The spec's exact 26-field exposure list (memory-read-api-and-browser.md).
 MEMORY_VIEW_FIELDS = {
     "id",
     "subject",
@@ -60,6 +60,9 @@ MEMORY_VIEW_FIELDS = {
     "superseded_by",
     "source_session_id",
     "source_event_ids",
+    "formation_run_id",
+    "consolidation_policy_version",
+    "origin_scopes",
     "valid_from",
     "valid_to",
     "expires_at",

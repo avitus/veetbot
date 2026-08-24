@@ -47,6 +47,19 @@ public struct MemoryDetailView: View {
                         value: memory.sourceEventIDs.map(String.init).joined(separator: ", ")
                     )
                 }
+                KeyValueRow(key: "Formation run", value: memory.formationRunID.uuidString)
+                if !memory.consolidationPolicyVersion.isEmpty {
+                    KeyValueRow(
+                        key: "Consolidation policy version",
+                        value: memory.consolidationPolicyVersion
+                    )
+                }
+                if !memory.originScopes.isEmpty {
+                    KeyValueRow(
+                        key: "Origin scopes",
+                        value: memory.originScopes.joined(separator: ", ")
+                    )
+                }
                 if !memory.conflictsWith.isEmpty {
                     KeyValueRow(
                         key: "Conflicts with",

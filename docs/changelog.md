@@ -7,6 +7,19 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-23 — The provenance trio is exposed, not withheld
+
+- The owner answered the open question the specification flagged for
+  sign-off: `formation_run_id`, `consolidation_policy_version`, and
+  `origin_scopes` are exposed in `MemoryView` rather than withheld
+  (`docs/status/questions-for-review.md`, Milestone 17 section). The
+  exposure list grows from twenty-three fields to twenty-six; `tenant_id`,
+  `principal_id`, `utility`, and `store_position` remain withheld outright,
+  and hard gate 9 asserts the new list exactly, in both directions, with its
+  exact-match mechanism unchanged. The native Apple client's memory detail
+  view gains a formation run, a consolidation policy version, and an origin
+  scopes row in its Provenance section.
+
 ## 2026-08-23 — Milestone 17 specified: the memory read API and browser
 
 - Added `docs/plan/memory-read-api-and-browser.md` and proposed ADR-0070: two
