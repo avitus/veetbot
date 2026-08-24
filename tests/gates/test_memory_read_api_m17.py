@@ -820,9 +820,15 @@ def test_both_stores_browse_identically() -> None:
     adapter — order, the keyset boundary and its identifier tiebreak, every
     filter, and the text query — and the PostgreSQL parity suite answers the
     same `MemoryBrowseQuery` values from a live store and compares the two
-    adapters over one corpus. Both adapters reach their text and subject
-    predicates through the same shared helpers, so parity holds by
-    construction and is asserted rather than assumed.
+    adapters over one corpus. Only one half of lexical parity holds by
+    construction: both adapters derive the query's terms through the same
+    `lexical_query_terms` helper, then match with two different engines —
+    `plainto_tsquery('simple', ...)` against a `to_tsvector('simple', ...)` in
+    PostgreSQL, `lexical_text_matches` emulating that lexeme split and its
+    conjunction in memory — so the second half is asserted rather than
+    assumed. The subject predicate is the same shape: SQL `lower()` and
+    Python `lower()` are two implementations shown to agree here, not one
+    shared function.
     """
 
     contract_functions = _function_names(_module(_CONTRACT_SUITE))
@@ -860,9 +866,11 @@ def test_both_stores_browse_identically() -> None:
     # It lives in the integration tree, so it runs against a real database.
     assert _PARITY_SUITE.parent.name == "integration"
 
-    # Both adapters answer text and subject through the shared helpers, which
-    # is what makes lexical and subject parity structural rather than a
-    # coincidence of two implementations agreeing.
+    # Both adapters derive their query terms through the same
+    # lexical_query_terms helper and lowercase their subject comparison, which
+    # is what the shared contract and PostgreSQL parity suites above then show
+    # two different matching engines agree on — structural rather than a
+    # coincidence of two implementations.
     for adapter in (_IN_MEMORY_ADAPTER, _POSTGRES_ADAPTER):
         referenced = _referenced_names(_browse_method(adapter))
         assert "lexical_query_terms" in referenced, adapter
