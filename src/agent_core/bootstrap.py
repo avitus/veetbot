@@ -310,6 +310,7 @@ from agent_core.execution.manager import SandboxManager
 from agent_core.execution.proxy import WorkerEgressProxy, start_worker_egress_proxy
 from agent_core.knowledge.service import KnowledgeService
 from agent_core.mcp.configuration import validate_mcp_config
+from agent_core.mcp.email import EMAIL_SCOPES, email_server_configs
 from agent_core.mcp.runtime import MCPRuntime
 from agent_core.memory.formation import (
     FORMATION_POLICY_VERSION,
@@ -2359,6 +2360,7 @@ async def build(
         overlay_root=effective_settings.config_dir,
     )
 
+    email_scopes = frozenset(EMAIL_SCOPES) if effective_settings.email_enabled else frozenset()
     if principal is not None:
         effective_principal = principal
     elif effective_settings.auth_mode.value == "dev":
@@ -2366,7 +2368,7 @@ async def build(
             tenant_id="local",
             principal_id="local-user",
             roles={"user"},
-            scopes=set(PLATFORM_SCOPES),
+            scopes=set(PLATFORM_SCOPES) | email_scopes,
         )
     else:
         unknown_scopes = set(effective_settings.auth_scopes) - set(PLATFORM_SCOPES)
@@ -2378,13 +2380,18 @@ async def build(
             tenant_id=effective_settings.auth_tenant_id,
             principal_id=effective_settings.auth_principal_id,
             roles=set(effective_settings.auth_roles),
-            scopes=set(effective_settings.auth_scopes),
+            scopes=set(effective_settings.auth_scopes) | email_scopes,
         )
     validate_runtime_identity(
         effective_settings,
         tenant_id=effective_principal.tenant_id,
         principal_id=effective_principal.principal_id,
         policy_profile=policy_profile,
+    )
+    effective_mcp_servers = tuple(mcp_servers) + (
+        email_server_configs(effective_principal.tenant_id)
+        if effective_settings.email_enabled
+        else ()
     )
     runtime_config = load_config_document(effective_settings, "runtime/limits.yaml")
     tool_config = load_config_document(effective_settings, "tools/limits.yaml")
@@ -2728,7 +2735,7 @@ async def build(
             mcp_clients=mcp_client_factory,
             mcp_scripts=mcp_scripts,
             credential_resolver=effective_credential_resolver,
-            mcp_server_configs=mcp_servers,
+            mcp_server_configs=effective_mcp_servers,
             web_search_provider=web_search_provider,
             web_fetch_provider=web_fetch_provider,
             memory_provider_evaluation_mode=memory_provider_evaluation_mode,

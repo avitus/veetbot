@@ -93,6 +93,7 @@ class Settings:
     notification_api_enabled: bool = False
     notification_dispatch_enabled: bool = False
     memory_api_enabled: bool = False
+    email_enabled: bool = False
     push_provider: PushProviderKind = PushProviderKind.DISABLED
     apns_key_file: Path | None = None
     apns_key_id: str | None = None
@@ -382,23 +383,28 @@ def _optional_uuid(values: Mapping[str, str], name: str) -> UUID | None:
         raise ConfigurationError(f"{name} must be a UUID") from exc
 
 
-def _read_private_credential_file(raw_path: str) -> str:
+def _read_private_credential_file(
+    raw_path: str,
+    *,
+    label: str = "browser control-plane",
+    maximum_length: int = 512,
+) -> str:
     path = Path(raw_path)
     if not path.is_absolute() or path.is_symlink():
-        raise ConfigurationError("browser control-plane credential file is invalid")
+        raise ConfigurationError(f"{label} credential file is invalid")
     try:
         metadata = path.stat()
         payload = path.read_bytes()
     except OSError as exc:
-        raise ConfigurationError("browser control-plane credential file is unavailable") from exc
+        raise ConfigurationError(f"{label} credential file is unavailable") from exc
     if not stat.S_ISREG(metadata.st_mode) or metadata.st_mode & 0o077 or metadata.st_size > 4096:
-        raise ConfigurationError("browser control-plane credential file is invalid")
+        raise ConfigurationError(f"{label} credential file is invalid")
     try:
         value = payload.decode("ascii").removesuffix("\n").removesuffix("\r")
     except UnicodeDecodeError as exc:
-        raise ConfigurationError("browser control-plane credential file is invalid") from exc
-    if not 32 <= len(value) <= 512 or any(character.isspace() for character in value):
-        raise ConfigurationError("browser control-plane credential file is invalid")
+        raise ConfigurationError(f"{label} credential file is invalid") from exc
+    if not 32 <= len(value) <= maximum_length or any(character.isspace() for character in value):
+        raise ConfigurationError(f"{label} credential file is invalid")
     return value
 
 
@@ -875,6 +881,18 @@ def _load_settings(
         credentials["browser_profile_control_plane"] = SecretStr(
             _read_private_credential_file(browser_credential_file)
         )
+    email_enabled = _parse_flag(values, "AGENT_EMAIL_ENABLED")
+    for gmail_server_id in ("gmail_read", "gmail_write", "gmail_send"):
+        gmail_variable = f"{gmail_server_id.upper()}_CREDENTIAL_FILE"
+        gmail_file = values.get(gmail_variable, "").strip()
+        if gmail_file:
+            credentials[gmail_server_id] = SecretStr(
+                _read_private_credential_file(
+                    gmail_file, label=gmail_server_id, maximum_length=2048
+                )
+            )
+        elif email_enabled:
+            raise ConfigurationError(f"AGENT_EMAIL_ENABLED requires {gmail_variable}")
     veetbot_openai_key = values.get("VEETBOT_OPENAI_KEY", "").strip()
     if veetbot_openai_key:
         credentials["openai"] = SecretStr(veetbot_openai_key)
@@ -1024,6 +1042,7 @@ def _load_settings(
         notification_api_enabled=notification_api_enabled,
         notification_dispatch_enabled=notification_dispatch_enabled,
         memory_api_enabled=memory_api_enabled,
+        email_enabled=email_enabled,
         push_provider=push_provider,
         apns_key_file=apns_key_file,
         apns_key_id=apns_key_id,

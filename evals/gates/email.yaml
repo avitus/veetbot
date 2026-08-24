@@ -22,7 +22,7 @@
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Classification** — the registered `mcp.gmail_*` specifications carry exactly the three declared side-effect, risk, and idempotency tuples, `EXTERNAL_UNTRUSTED` output, and `ToolSource.MCP`."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_registered_specifications_carry_the_declared_classification
 - id: gate.email.read_allow_write_approve
   milestone: 18
   kind: case
@@ -40,25 +40,25 @@
   kind: property
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Credential confinement** — over generated server configurations, the resolved credential reaches the child only as the one declared variable in a constructed environment, never argv, never inherited, never an event, result, or log."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_the_credential_reaches_the_child_only_as_the_declared_variable
 - id: gate.email.token_confinement
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Token confinement** — access tokens, refresh tokens, and raw upstream error text or diagnostic headers never appear in tool results or durable events; failures cross the pipe only as the closed stable codes, and normalized mailbox content is the only upstream content that crosses at all."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_token_confinement_crosses_only_stable_codes
 - id: gate.email.default_off
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Default off** — with the flag unset, no `mcp.gmail_*` server row is composed and no such tool is registered or advertised."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_default_off_composes_no_gmail_row_or_scope
 - id: gate.email.scope_confinement
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Scope confinement** — each server requires exactly its own `mcp.{server_id}.use` scope, and a configuration declaring a platform scope for a `gmail_*` server is rejected."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_each_server_requires_exactly_its_own_scope
 - id: gate.email.bootstrap_consent
   milestone: 18
   kind: case
