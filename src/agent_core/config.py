@@ -134,7 +134,7 @@ SHIPPED_CONFIGS = (
     "sandbox/limits.yaml",
     "memory/profiles.yaml",
 )
-# The design corpus declares 137 operator-reviewable knobs. Metadata such as
+# The design corpus declares 147 operator-reviewable knobs. Metadata such as
 # schema versions, rule identifiers, catalog records, and frozen hardline
 # predicates are intentionally not counted as knobs.
 SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
@@ -257,6 +257,16 @@ SHIPPED_KNOB_PATHS: Mapping[str, tuple[str, ...]] = MappingProxyType(
             "notifications.fallback_poll_seconds",
             "notifications.retry_delays_seconds",
             "notifications.terminal_expiry_seconds",
+            "delegation.max_children_per_call",
+            "delegation.max_live_children_per_parent",
+            "delegation.max_depth",
+            "delegation.max_live_delegated_runs_per_tenant",
+            "delegation.child_max_steps",
+            "delegation.child_max_model_calls",
+            "delegation.child_max_tool_calls",
+            "delegation.child_max_cost",
+            "delegation.child_wall_seconds",
+            "delegation.summary_max_bytes",
         ),
         "memory/profiles.yaml": (
             "formation.session_boundary_enabled",
@@ -321,6 +331,16 @@ MINIMUM_CONFIG_VALUES: Mapping[str, float] = MappingProxyType(
         "runtime/limits.yaml:notifications.lease_seconds": 1,
         "runtime/limits.yaml:notifications.fallback_poll_seconds": 1,
         "runtime/limits.yaml:notifications.terminal_expiry_seconds": 1,
+        "runtime/limits.yaml:delegation.max_children_per_call": 1,
+        "runtime/limits.yaml:delegation.max_live_children_per_parent": 1,
+        "runtime/limits.yaml:delegation.max_depth": 1,
+        "runtime/limits.yaml:delegation.max_live_delegated_runs_per_tenant": 1,
+        "runtime/limits.yaml:delegation.child_max_steps": 1,
+        "runtime/limits.yaml:delegation.child_max_model_calls": 1,
+        "runtime/limits.yaml:delegation.child_max_tool_calls": 1,
+        "runtime/limits.yaml:delegation.child_max_cost": 0.01,
+        "runtime/limits.yaml:delegation.child_wall_seconds": 1,
+        "runtime/limits.yaml:delegation.summary_max_bytes": 1,
         "memory/profiles.yaml:formation.scheduled_interval_seconds": 1,
         "memory/profiles.yaml:formation.decay.max_per_sweep": 1,
         "memory/profiles.yaml:retrieval.reciprocal_rank_fusion_k": 1,

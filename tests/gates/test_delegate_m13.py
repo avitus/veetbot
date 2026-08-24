@@ -481,7 +481,7 @@ async def test_every_child_gets_a_dedicated_session() -> None:
     assert replay == delegation
 
 
-def _delegation_settings(tmp_path: Path) -> Settings:
+def _delegation_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
     return Settings(
         database_url="postgresql+asyncpg://localhost/unused",
         deployment_mode=DeploymentMode.DEVELOPMENT,
@@ -492,7 +492,7 @@ def _delegation_settings(tmp_path: Path) -> Settings:
         credentials={},
         interpolation={"OPENAI_MODEL": ""},
         artifact_root=tmp_path / "artifacts",
-        delegation_enabled=True,
+        delegation_enabled=enabled,
     )
 
 
@@ -1161,3 +1161,42 @@ async def test_artifacts_come_back_as_references(tmp_path: Path) -> None:
         assert "findings.md" not in rendered
         assert str(artifact.id) not in rendered
         assert rendered == "The findings are exported."
+
+
+async def test_delegation_is_default_off(tmp_path: Path) -> None:
+    """Leave delegate.run unregistered without the flag, behind gate.delegate.default_off."""
+
+    script = FakeModelScript(
+        turns=[
+            ScriptedTurn(
+                tool_calls=[_delegate_call("Add two and two.")],
+                stop_reason=StopReason.TOOL_USE,
+            ),
+            ScriptedTurn(text="No delegation available.", stop_reason=StopReason.END_TURN),
+        ]
+    )
+    async with build(settings=_delegation_settings(tmp_path, enabled=False), script=script) as app:
+        run_id = await app.runs.submit("attempt delegation with the flag off")
+        parent = await app.runs.get(run_id)
+
+        assert parent.status is RunStatus.COMPLETED
+        assert parent.final_message == "No delegation available."
+        events = await _events(app, parent.session_id)
+        [denied] = [
+            event
+            for event in events
+            if event.event_type == "tool.call.denied"
+            and event.payload.get("name") == "delegate.run"
+        ]
+        assert denied.payload["reason_code"] == "policy.matrix.unknown_tool"
+        async with app.uow_factory() as uow:
+            assert await uow.delegations.get_for_parent_run(run_id) == []
+            checkpoint = await uow.checkpoints.latest(run_id)
+            assert checkpoint is not None
+            assert "delegate.run" not in checkpoint.pinned_tool_names
+            invocations = await uow.invocations.list_for_run(run_id, app.principal)
+            assert [record for record in invocations if record.tool_name == "delegate.run"] == []
+            requested = await uow.process_events.list("delegation.requested")
+            assert [
+                event for event in requested if event.payload.get("parent_run_id") == str(run_id)
+            ] == []

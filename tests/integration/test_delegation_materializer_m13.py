@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -17,6 +18,7 @@ from agent_core.domain.delegations import (
     DelegationRequest,
     DelegationStatus,
 )
+from agent_core.domain.errors import DelegationValidationError
 from agent_core.domain.policies import (
     IdempotencyClass,
     RiskLevel,
@@ -68,7 +70,10 @@ class _InjectedCrashError(Exception):
 
 
 def _materializer(
-    composition: Composition, *, crash_at: str | None = None
+    composition: Composition,
+    *,
+    crash_at: str | None = None,
+    caps: DelegationCaps | None = None,
 ) -> DelegationMaterializer:
     def probe(boundary: str) -> None:
         if boundary == crash_at:
@@ -86,7 +91,8 @@ def _materializer(
             max_cost=Decimal("2"),
             wall_seconds=600,
         ),
-        caps=DelegationCaps(
+        caps=caps
+        or DelegationCaps(
             max_children_per_call=3,
             max_live_children_per_parent=8,
             max_depth=1,
@@ -106,6 +112,25 @@ def _request() -> DelegationRequest:
                 allowed_tools=["math.calculate"],
             )
         ]
+    )
+
+
+def _invocation(invocation_id: UUID, run_id: UUID, session_id: UUID) -> ToolInvocation:
+    return ToolInvocation(
+        id=invocation_id,
+        run_id=run_id,
+        session_id=session_id,
+        step_number=1,
+        call_id=f"delegate-atomic-{invocation_id}",
+        tool_name="delegate.run",
+        tool_version="1.0.0",
+        side_effect=SideEffectClass.NONE,
+        risk=RiskLevel.LOW,
+        status=ToolInvocationStatus.RUNNING,
+        raw_arguments="{}",
+        idempotency_key=f"delegate-atomic-{invocation_id}",
+        created_at=NOW,
+        updated_at=NOW,
     )
 
 
@@ -135,22 +160,7 @@ async def _parent_graph(composition: Composition) -> tuple[Run, ToolInvocation]:
         created_at=NOW,
         updated_at=NOW,
     )
-    invocation = ToolInvocation(
-        id=invocation_id,
-        run_id=run_id,
-        session_id=session_id,
-        step_number=1,
-        call_id=f"delegate-atomic-{invocation_id}",
-        tool_name="delegate.run",
-        tool_version="1.0.0",
-        side_effect=SideEffectClass.NONE,
-        risk=RiskLevel.LOW,
-        status=ToolInvocationStatus.RUNNING,
-        raw_arguments="{}",
-        idempotency_key=f"delegate-atomic-{invocation_id}",
-        created_at=NOW,
-        updated_at=NOW,
-    )
+    invocation = _invocation(invocation_id, run_id, session_id)
     async with composition.uow_factory() as uow:
         await uow.agents.put(agent())
         await uow.sessions.create(
@@ -267,3 +277,99 @@ async def test_crash_after_the_final_write_still_commits_nothing() -> None:
             )
 
         await _assert_nothing_survives(composition, parent, invocation.id, sessions_before)
+
+
+def _capped_request(objectives: int) -> DelegationRequest:
+    return DelegationRequest(
+        briefs=[
+            DelegationBrief(
+                objective=f"Capped objective number {index}.",
+                success_condition="A one-line answer.",
+                allowed_tools=["math.calculate"],
+            )
+            for index in range(objectives)
+        ]
+    )
+
+
+async def test_fanout_caps_reject_whole_and_tenant_race_serializes() -> None:
+    async with build(
+        settings=database_settings(), storage="postgres", fixed_clock_at=NOW
+    ) as composition:
+        tenant = composition.principal.tenant_id
+        async with composition.uow_factory() as uow:
+            baseline = await uow.delegations.live_children_for_tenant(tenant)
+        caps = DelegationCaps(
+            max_children_per_call=3,
+            max_live_children_per_parent=4,
+            max_depth=1,
+            max_live_delegated_runs_per_tenant=baseline + 4,
+            summary_max_bytes=16384,
+        )
+
+        first_parent, first_invocation = await _parent_graph(composition)
+        first = await _materializer(composition, caps=caps).materialize(
+            request=_capped_request(3),
+            run=first_parent,
+            agent=agent(),
+            principal=composition.principal,
+            invocation=first_invocation,
+            pinned_tools=PINNED,
+        )
+        assert len(first.children) == 3
+
+        second_invocation = _invocation(uuid4(), first_parent.id, first_parent.session_id)
+        async with composition.uow_factory() as uow:
+            await uow.invocations.create(second_invocation)
+        with pytest.raises(DelegationValidationError) as parent_capped:
+            await _materializer(composition, caps=caps).materialize(
+                request=_capped_request(2),
+                run=first_parent,
+                agent=agent(),
+                principal=composition.principal,
+                invocation=second_invocation,
+                pinned_tools=PINNED,
+            )
+        assert parent_capped.value.reason == "delegation.fanout_exceeded"
+        async with composition.uow_factory() as uow:
+            assert await uow.delegations.get_by_invocation(second_invocation.id) is None
+
+        second_parent, second_parent_invocation = await _parent_graph(composition)
+        with pytest.raises(DelegationValidationError) as tenant_capped:
+            await _materializer(composition, caps=caps).materialize(
+                request=_capped_request(2),
+                run=second_parent,
+                agent=agent(),
+                principal=composition.principal,
+                invocation=second_parent_invocation,
+                pinned_tools=PINNED,
+            )
+        assert tenant_capped.value.reason == "delegation.tenant_cap"
+        async with composition.uow_factory() as uow:
+            assert await uow.delegations.get_by_invocation(second_parent_invocation.id) is None
+
+        racer_one, racer_one_invocation = await _parent_graph(composition)
+        racer_two, racer_two_invocation = await _parent_graph(composition)
+
+        async def _race(parent: Run, invocation: ToolInvocation) -> object:
+            try:
+                return await _materializer(composition, caps=caps).materialize(
+                    request=_capped_request(1),
+                    run=parent,
+                    agent=agent(),
+                    principal=composition.principal,
+                    invocation=invocation,
+                    pinned_tools=PINNED,
+                )
+            except DelegationValidationError as error:
+                return error
+
+        outcomes = await asyncio.gather(
+            _race(racer_one, racer_one_invocation),
+            _race(racer_two, racer_two_invocation),
+        )
+        errors = [value for value in outcomes if isinstance(value, DelegationValidationError)]
+        assert len(errors) == 1
+        assert errors[0].reason == "delegation.tenant_cap"
+        async with composition.uow_factory() as uow:
+            assert await uow.delegations.live_children_for_tenant(tenant) == baseline + 4

@@ -455,22 +455,6 @@ class Composition:
 
 DEFAULT_AGENT_ID = UUID("8ad3e17d-449f-5ec8-a807-4e14f2b3a716")
 _BROWSER_TOOL_NAMES = frozenset({"browser.navigate", "browser.observe", "browser.act"})
-# Milestone 13 starting values (subagents-and-delegation.md); the delegation
-# limits block in runtime/limits.yaml supersedes these when it lands.
-DELEGATION_DEFAULTS = DelegationDefaults(
-    max_steps=8,
-    max_model_calls=8,
-    max_tool_calls=16,
-    max_cost=Decimal("2"),
-    wall_seconds=900,
-)
-DELEGATION_CAPS = DelegationCaps(
-    max_children_per_call=3,
-    max_live_children_per_parent=8,
-    max_depth=1,
-    max_live_delegated_runs_per_tenant=16,
-    summary_max_bytes=16384,
-)
 
 
 def _session_tool_filter(
@@ -1252,6 +1236,8 @@ async def _compose(
     schedule_fallback_poll_seconds: float,
     schedule_admission_backoff_seconds: float,
     schedule_definition_limits: ScheduleDefinitionLimits,
+    delegation_defaults: DelegationDefaults,
+    delegation_caps: DelegationCaps,
     notification_expiry_seconds: float,
     schedule_notify: Callable[[], Awaitable[None]],
     schedule_wait: Callable[[float], Awaitable[None]],
@@ -1817,8 +1803,8 @@ async def _compose(
                 clock=clock,
                 ids=ids,
                 seed_checkpoint=checkpoint_seeder,
-                defaults=DELEGATION_DEFAULTS,
-                caps=DELEGATION_CAPS,
+                defaults=delegation_defaults,
+                caps=delegation_caps,
             )
             if settings.delegation_enabled
             else None
@@ -1963,7 +1949,7 @@ async def _compose(
                 clock=clock,
                 ids=ids,
                 principal=principal,
-                summary_max_bytes=DELEGATION_CAPS.summary_max_bytes,
+                summary_max_bytes=delegation_caps.summary_max_bytes,
             )
         skill_reviews = SkillBackgroundReview(
             uow_factory=uow_factory,
@@ -2502,6 +2488,23 @@ async def build(
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
+    delegation_config = runtime_config["delegation"]
+    delegation_defaults = DelegationDefaults(
+        max_steps=int(delegation_config["child_max_steps"]),
+        max_model_calls=int(delegation_config["child_max_model_calls"]),
+        max_tool_calls=int(delegation_config["child_max_tool_calls"]),
+        max_cost=Decimal(str(delegation_config["child_max_cost"])),
+        wall_seconds=int(delegation_config["child_wall_seconds"]),
+    )
+    delegation_caps = DelegationCaps(
+        max_children_per_call=int(delegation_config["max_children_per_call"]),
+        max_live_children_per_parent=int(delegation_config["max_live_children_per_parent"]),
+        max_depth=int(delegation_config["max_depth"]),
+        max_live_delegated_runs_per_tenant=int(
+            delegation_config["max_live_delegated_runs_per_tenant"]
+        ),
+        summary_max_bytes=int(delegation_config["summary_max_bytes"]),
+    )
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
     if clock is not None and fixed_clock_at is not None:
@@ -2778,6 +2781,8 @@ async def build(
                 scheduling_config["admission_backoff_seconds"]
             ),
             schedule_definition_limits=schedule_definition_limits,
+            delegation_defaults=delegation_defaults,
+            delegation_caps=delegation_caps,
             notification_expiry_seconds=float(notification_config["terminal_expiry_seconds"]),
             schedule_notify=schedule_wakeup.notify,
             schedule_wait=schedule_wakeup.wait,

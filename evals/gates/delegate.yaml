@@ -58,7 +58,7 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Fan-out is capped.** A request whose brief count exceeds the per-call cap, or whose briefs would exceed live children per parent or live delegated runs per tenant, is rejected whole with a stable reason and no rows for any brief; two parents racing for the last tenant slot serialize."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_delegation_materializer_m13.py::test_fanout_caps_reject_whole_and_tenant_race_serializes
 - id: gate.delegate.result_untrusted
   milestone: 13
   kind: case
@@ -118,7 +118,7 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Delegation is default-off.** With the flag off delegate.run is not registered and the advertised set, prefix, and registry census are unchanged."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_delegation_is_default_off
 - id: gate.delegate.changes_outcome
   milestone: 13
   kind: case

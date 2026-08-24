@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -155,6 +155,12 @@ class PostgresDelegationRepository:
         return sum(_live_children(delegation_to_domain(row)) for row in rows)
 
     async def live_children_for_tenant(self, tenant_id: str) -> int:
+        # The scheduling materializer's tenant-admission pattern: an advisory
+        # transaction lock serializes two parents racing for the last slot.
+        await self._session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended('delegation:' || :tenant, 0))"),
+            {"tenant": tenant_id},
+        )
         rows = (
             await self._session.scalars(
                 select(DelegationRow).where(
