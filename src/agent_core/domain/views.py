@@ -219,9 +219,11 @@ class MemoryView(BaseModel):
 
     Built by an explicit allow-list rather than by excluding fields from
     `MemoryRecord`, so a field added later to the record does not leak here
-    by omission. `tenant_id`, `principal_id`, `utility`, `store_position`,
-    `formation_run_id`, `consolidation_policy_version`, and `origin_scopes`
-    are withheld and do not exist on this model at all.
+    by omission. `tenant_id`, `principal_id`, `utility`, and `store_position`
+    are withheld and do not exist on this model at all. `formation_run_id`,
+    `consolidation_policy_version`, and `origin_scopes` are exposed by owner
+    decision (docs/status/questions-for-review.md, Milestone 17 section,
+    2026-08-23).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -243,6 +245,9 @@ class MemoryView(BaseModel):
     superseded_by: UUID | None
     source_session_id: UUID
     source_event_ids: list[int]
+    formation_run_id: UUID
+    consolidation_policy_version: str
+    origin_scopes: list[str]
     valid_from: datetime
     valid_to: datetime | None
     expires_at: datetime | None
@@ -270,6 +275,9 @@ class MemoryView(BaseModel):
             superseded_by=record.superseded_by,
             source_session_id=record.source_session_id,
             source_event_ids=list(record.source_event_ids),
+            formation_run_id=record.formation_run_id,
+            consolidation_policy_version=record.consolidation_policy_version,
+            origin_scopes=list(record.origin_scopes),
             valid_from=record.valid_from,
             valid_to=record.valid_to,
             expires_at=record.expires_at,

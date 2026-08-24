@@ -59,7 +59,7 @@ PRINCIPAL_ID = "local-user"
 SESSION_A = UUID(int=901)
 SESSION_B = UUID(int=902)
 
-# The spec's exposure list, verbatim: twenty-three names that serialize.
+# The spec's exposure list, verbatim: twenty-six names that serialize.
 EXPOSED_FIELDS = (
     "id",
     "subject",
@@ -78,6 +78,9 @@ EXPOSED_FIELDS = (
     "superseded_by",
     "source_session_id",
     "source_event_ids",
+    "formation_run_id",
+    "consolidation_policy_version",
+    "origin_scopes",
     "valid_from",
     "valid_to",
     "expires_at",
@@ -86,15 +89,12 @@ EXPOSED_FIELDS = (
     "updated_at",
 )
 
-# The spec's withheld list, verbatim: seven names that must never appear.
+# The spec's withheld list, verbatim: four names that must never appear.
 WITHHELD_FIELDS = (
     "tenant_id",
     "principal_id",
     "utility",
     "store_position",
-    "formation_run_id",
-    "consolidation_policy_version",
-    "origin_scopes",
 )
 
 SENSITIVITIES = (
@@ -892,21 +892,22 @@ def test_the_projection_is_exactly_the_exposure_list() -> None:
     """
 
     assert set(MemoryView.model_fields) == set(EXPOSED_FIELDS)
-    assert len(EXPOSED_FIELDS) == 23
+    assert len(EXPOSED_FIELDS) == 26
     assert MemoryView.model_config["extra"] == "forbid"
     assert MemoryView.model_config["frozen"] is True
     assert set(WITHHELD_FIELDS).isdisjoint(MemoryView.model_fields)
 
     # Every withheld field is populated with a value that would be
-    # unmistakable if it leaked.
+    # unmistakable if it leaked; the exposed provenance trio is populated
+    # with a value that would be unmistakable if it did NOT appear.
     record = _belief(belief_id=7, position=4242).model_copy(
         update={
             "tenant_id": "leaked-tenant",
             "principal_id": "leaked-principal",
             "utility": 0.7654321,
             "formation_run_id": UUID(int=0xF0F0),
-            "consolidation_policy_version": "leaked-policy@99",
-            "origin_scopes": ["leaked-scope"],
+            "consolidation_policy_version": "exposed-policy@99",
+            "origin_scopes": ["exposed-scope"],
         }
     )
     view = MemoryView.from_record(record)
@@ -917,14 +918,17 @@ def test_the_projection_is_exactly_the_exposure_list() -> None:
         "leaked-tenant",
         "leaked-principal",
         "0.7654321",
-        "leaked-policy@99",
-        "leaked-scope",
-        str(UUID(int=0xF0F0)),
         "4242",
     ):
         assert sentinel not in serialized, sentinel
     for withheld in WITHHELD_FIELDS:
         assert f'"{withheld}"' not in serialized, withheld
+
+    # The trio is exposed: its value is present and its key serializes.
+    for exposed_sentinel in ("exposed-policy@99", "exposed-scope", str(UUID(int=0xF0F0))):
+        assert exposed_sentinel in serialized, exposed_sentinel
+    for exposed_name in ("formation_run_id", "consolidation_policy_version", "origin_scopes"):
+        assert f'"{exposed_name}"' in serialized, exposed_name
 
     # A withheld field cannot be introduced on any construction path.
     for withheld in WITHHELD_FIELDS:
@@ -945,7 +949,7 @@ async def _projection_over_the_wire() -> None:
         principal=_principal(),
     ) as composition:
         record = _belief(belief_id=7, position=4242).model_copy(
-            update={"consolidation_policy_version": "leaked-policy@99"}
+            update={"consolidation_policy_version": "exposed-policy@99"}
         )
         await _seed(composition, [record])
         async with _client(composition) as client:
@@ -959,8 +963,9 @@ async def _projection_over_the_wire() -> None:
     for response in (listed, detail, missing):
         for withheld in WITHHELD_FIELDS:
             assert f'"{withheld}"' not in response.text, (response.url, withheld)
-        assert "leaked-policy@99" not in response.text
         assert "4242" not in response.text
+    for response in (listed, detail):
+        assert "exposed-policy@99" in response.text, response.url
 
 
 # ---------------------------------------------------------------------------

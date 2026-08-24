@@ -90,7 +90,7 @@ rather than smoothed.
 | 14 | Inbound surfaces and pairing | Authorized | 21 | Nothing in the corpus; the Telegram bot and its private token file are owner actions outside it |
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
 | 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
-| 17 | Memory read API and browser | Authorized | 10 | Nothing in the corpus; the three withheld provenance fields await the owner's sign-off during review of the implementing change |
+| 17 | Memory read API and browser | Authorized | 10 | Nothing; the owner decided on 2026-08-23 to expose the three provenance fields, so the projection carries twenty-six fields |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -1223,8 +1223,12 @@ already share, so parity holds by construction and is asserted by a browse
 contract suite that runs against the in-memory and PostgreSQL tiers alike. The
 `MemoryView` projection is an explicit exposure list rather than an exclusion
 list, withholding tenant identity, the retriever's internal utility, and the
-cursor's store position outright, and withholding three operator-tier
-provenance fields as a recommendation the owner signs off on during review. The
+cursor's store position outright. Three operator-tier provenance fields —
+`formation_run_id`, `consolidation_policy_version`, and `origin_scopes` — were
+withheld as a recommendation pending the owner's sign-off; the owner decided
+on 2026-08-23 to expose them instead
+(docs/status/questions-for-review.md, Milestone 17 section), so the
+projection now carries twenty-six fields rather than twenty-three. The
 native Apple client browses at full parity by declaring the `restricted`
 ceiling, an owner decision taken over the conservative lower ceiling on the
 grounds that a silently filtered list teaches its reader the platform forgot
@@ -1236,15 +1240,15 @@ Two exclusions are preconditions rather than preferences and the document says
 so. Recall-trace viewing waits on a defect: `PostgresTraceStore.for_turn`
 selects by turn identifier with no tenant or principal predicate, and no route
 can reach traces until that is fixed and observed by the trace store's contract
-suite. Consolidation and formation audit routes wait on the same provenance
-question the withheld field trio raises. Writes over HTTP are excluded outright
-and stay on the governed `agent memory` command line.
+suite. Consolidation and formation audit routes remain a candidate for a later
+round on their own, separate exposure question — model selection, watermarks,
+and attempt audits. Writes over HTTP are excluded outright and stay on the
+governed `agent memory` command line.
 
 The readiness verdict is therefore **Authorized**: there is no unnamed design
-choice between the corpus and the first red tests. What remains outside the
-corpus is the owner's sign-off on the three withheld provenance fields, and
-that is a review decision on a change that has not been written rather than a
-gap in the design.
+choice between the corpus and the first red tests. The provenance trio's
+exposure question is resolved rather than outstanding; nothing about it
+remains outside the corpus.
 
 ## The three plan sections no specification expanded
 

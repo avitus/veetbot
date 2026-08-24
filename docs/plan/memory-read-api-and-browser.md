@@ -69,8 +69,7 @@ find it here should find the reason here.
 3. **Consolidation and formation audit routes.** `formations` and `diagnose`
    expose model selection, watermarks, and attempt audits — operator-tier
    provenance whose exposure question is a different question from a belief's.
-   They are a candidate for a later round, together with the three provenance
-   fields this document withholds.
+   They are a candidate for a later round.
 4. **Knowledge documents.** Passages and their ingestion are a separate subject
    with a separate design and a separate governance story
    ([knowledge-documents.md](knowledge-documents.md)); a memory browser that
@@ -232,32 +231,32 @@ to the record.
 exposed   id, subject, statement, belief_type, status, polarity, scope,
           portability, authority, sensitivity, confidence,
           corroboration_count, flagged_for_review, conflicts_with,
-          superseded_by, source_session_id, source_event_ids, valid_from,
-          valid_to, expires_at, last_reinforced_at, created_at, updated_at
+          superseded_by, source_session_id, source_event_ids,
+          formation_run_id, consolidation_policy_version, origin_scopes,
+          valid_from, valid_to, expires_at, last_reinforced_at, created_at,
+          updated_at
 
 withheld  tenant_id, principal_id      the API never returns tenant identity
           utility                      retriever-internal ranking state
           store_position               cursor internals
-          formation_run_id             operator and tuning provenance
-          consolidation_policy_version
-          origin_scopes
 ```
 
-The first four fields are settled. Tenant identity is never a field of a
-response anywhere in this API; `utility` is a number the ranker moves and a
-number a reader would misread as a judgment about the belief; and
+These four fields are withheld outright and settled. Tenant identity is never
+a field of a response anywhere in this API; `utility` is a number the ranker
+moves and a number a reader would misread as a judgment about the belief; and
 `store_position` is the cursor's internals, which stay inside the cursor for
 the same reason the cursor is opaque.
 
-The last three are **a recommendation, flagged for owner sign-off during review
-of the implementing change**, not a decision this document makes alone.
-`formation_run_id`, `consolidation_policy_version`, and `origin_scopes` are
-genuine provenance and a user could reasonably want them; they are also the
-operator-tier vocabulary that the `formations` audit surface owns, and exposing
-them here would answer a question this milestone deliberately deferred. The
-recommendation is to withhold them now and revisit them with a consolidations
-view, so that provenance arrives as one coherent surface rather than as three
-fields that raise questions the response cannot answer.
+`formation_run_id`, `consolidation_policy_version`, and `origin_scopes` were
+initially withheld here as a recommendation flagged for owner sign-off,
+reasoning that they are the operator-tier vocabulary the `formations` audit
+surface owns and that exposing them would answer a question this milestone
+deliberately deferred. The owner decided otherwise on 2026-08-23: the trio is
+exposed (docs/status/questions-for-review.md, Milestone 17 section). They are
+genuine provenance a user could reasonably want in a belief's detail view, and
+the `formations` and `diagnose` audit routes' own exposure question — model
+selection, watermarks, and attempt audits — remains open on its own terms
+rather than tied to this one.
 
 Hard gate 9 asserts the exposure list exactly in both directions: every named
 field serializes, and no withheld field can appear however the view is
@@ -473,15 +472,18 @@ Metrics carry no belief statement, no subject, and no identifier.
 
 ## Open questions
 
-1. Whether `formation_run_id`, `consolidation_policy_version`, and
-   `origin_scopes` should be exposed after all. The recommendation here is to
-   withhold them and revisit with a consolidations view; the owner signs off
-   during review of the implementing change.
-2. Whether a later round should add ordering by `last_reinforced_at` or by
+Whether `formation_run_id`, `consolidation_policy_version`, and
+`origin_scopes` should be exposed was the one item in this section the
+implementing change could not land without an answer to. It is answered: the
+owner decided on 2026-08-23 to expose the trio rather than withhold it
+(docs/status/questions-for-review.md, Milestone 17 section). The three
+questions below remain open.
+
+1. Whether a later round should add ordering by `last_reinforced_at` or by
    confidence. Store position is the only order the keyset predicate is proven
    for, and a second order means a second cursor shape.
-3. Whether the detail route should carry the belief's supersession chain rather
+2. Whether the detail route should carry the belief's supersession chain rather
    than one `superseded_by` identifier. A chain is what a reader usually wants
    and is also an unbounded walk over records the ceiling has to filter twice.
-4. When the trace-store predicate is fixed, whether trace viewing arrives as a
+3. When the trace-store predicate is fixed, whether trace viewing arrives as a
    third route here or as its own milestone with the consolidation audits.
