@@ -40,7 +40,7 @@
   kind: property
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Child limits are derived and bounded.** Over generated parents and briefs every child limit is at most the parent's remaining value, the child deadline is at most the parent's, and a parent with nothing remaining cannot delegate."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_child_limits_are_derived_and_bounded
 - id: gate.delegate.usage_additive
   milestone: 13
   kind: case
