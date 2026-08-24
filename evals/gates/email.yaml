@@ -28,13 +28,13 @@
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Read allows, write approves** — under the default ruleset a read-server tool call is allowed and a write-server and send-server call each require approval, observing the condition's MCP arm."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_reads_allow_while_writes_and_sends_require_approval
 - id: gate.email.untrusted_origin
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Untrusted origin** — a send proposed after untrusted mail content entered the run cannot resolve to a plain allow."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_a_send_proposed_from_untrusted_mail_cannot_be_plain_allowed
 - id: gate.email.credential_confinement
   milestone: 18
   kind: property

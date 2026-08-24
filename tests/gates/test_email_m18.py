@@ -3,10 +3,153 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
+from agent_core.domain.policies import (
+    ActionKind,
+    ExecutionTarget,
+    IdempotencyClass,
+    PolicyDecisionType,
+    ProposedAction,
+    RiskLevel,
+    SideEffectClass,
+    TrustLevel,
+)
+from agent_core.policy.engine import DeterministicPolicyEngine
+from agent_core.policy.loader import DEFAULT_RULESET
 from scripts.architecture_checks import architecture_errors
+from tests.contract.support import NOW, RUN_ID, SESSION_ID, principal, run
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _gmail_action(
+    *,
+    name: str,
+    server_id: str,
+    side_effect: SideEffectClass,
+    risk: RiskLevel,
+    idempotency: IdempotencyClass,
+    argument_trust: dict[str, TrustLevel] | None = None,
+) -> ProposedAction:
+    return ProposedAction(
+        kind=ActionKind.TOOL_CALL,
+        action_id=UUID(int=181),
+        tenant_id="tenant-a",
+        session_id=SESSION_ID,
+        run_id=RUN_ID,
+        step_number=1,
+        name=name,
+        version="1.0.0",
+        summary="A Gmail server tool call.",
+        side_effect=side_effect,
+        risk=risk,
+        idempotency=idempotency,
+        arguments={"query": "newer_than:1d"},
+        normalized_arguments_hash="hash",
+        argument_trust=argument_trust or {},
+        origin_trust=TrustLevel.USER,
+        target=ExecutionTarget(
+            kind="mcp",
+            isolated=False,
+            network_enabled=False,
+            server_id=server_id,
+        ),
+        evaluated_at=NOW,
+    )
+
+
+async def test_reads_allow_while_writes_and_sends_require_approval() -> None:
+    """Gate 5: the default ruleset splits the three servers by their classes."""
+
+    engine = DeterministicPolicyEngine(DEFAULT_RULESET)
+    read = await engine.evaluate(
+        _gmail_action(
+            name="mcp.gmail_read.search_threads",
+            server_id="gmail_read",
+            side_effect=SideEffectClass.NETWORK_READ,
+            risk=RiskLevel.LOW,
+            idempotency=IdempotencyClass.READ_ONLY,
+        ),
+        principal(),
+        run(),
+    )
+    assert read.decision is PolicyDecisionType.ALLOW
+
+    write = await engine.evaluate(
+        _gmail_action(
+            name="mcp.gmail_write.trash_thread",
+            server_id="gmail_write",
+            side_effect=SideEffectClass.EXTERNAL_WRITE,
+            risk=RiskLevel.MEDIUM,
+            idempotency=IdempotencyClass.NON_IDEMPOTENT,
+        ),
+        principal(),
+        run(),
+    )
+    assert write.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+    send = await engine.evaluate(
+        _gmail_action(
+            name="mcp.gmail_send.send_message",
+            server_id="gmail_send",
+            side_effect=SideEffectClass.EXTERNAL_MESSAGE,
+            risk=RiskLevel.HIGH,
+            idempotency=IdempotencyClass.NON_IDEMPOTENT,
+        ),
+        principal(),
+        run(),
+    )
+    assert send.decision is PolicyDecisionType.REQUIRE_APPROVAL
+
+    not_read_only = await engine.evaluate(
+        _gmail_action(
+            name="mcp.gmail_read.search_threads",
+            server_id="gmail_read",
+            side_effect=SideEffectClass.NETWORK_READ,
+            risk=RiskLevel.LOW,
+            idempotency=IdempotencyClass.NON_IDEMPOTENT,
+        ),
+        principal(),
+        run(),
+    )
+    assert not_read_only.decision is PolicyDecisionType.DENY
+
+
+async def test_a_send_proposed_from_untrusted_mail_cannot_be_plain_allowed() -> None:
+    """Gate 6: the trust overlay outranks even a profile that allows sends."""
+
+    permissive = DEFAULT_RULESET.model_copy(
+        update={
+            "rules": tuple(
+                rule
+                if rule.side_effect is not SideEffectClass.EXTERNAL_MESSAGE
+                else rule.model_copy(
+                    update={"decision": PolicyDecisionType.ALLOW, "condition": None}
+                )
+                for rule in DEFAULT_RULESET.rules
+            )
+        }
+    )
+    engine = DeterministicPolicyEngine(permissive)
+
+    def send(argument_trust: dict[str, TrustLevel]) -> ProposedAction:
+        return _gmail_action(
+            name="mcp.gmail_send.send_message",
+            server_id="gmail_send",
+            side_effect=SideEffectClass.EXTERNAL_MESSAGE,
+            risk=RiskLevel.HIGH,
+            idempotency=IdempotencyClass.NON_IDEMPOTENT,
+            argument_trust=argument_trust,
+        )
+
+    trusted = await engine.evaluate(send({}), principal(), run())
+    assert trusted.decision is PolicyDecisionType.ALLOW
+
+    tainted = await engine.evaluate(
+        send({"body": TrustLevel.EXTERNAL_UNTRUSTED}), principal(), run()
+    )
+    assert tainted.decision is PolicyDecisionType.REQUIRE_APPROVAL
 
 
 def test_gmail_mcp_two_way_isolation(tmp_path: Path) -> None:

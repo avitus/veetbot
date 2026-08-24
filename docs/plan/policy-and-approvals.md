@@ -602,6 +602,14 @@ They resolve as follows, without changing any outcome the plan states.
   [web-access.md](web-access.md) supplies the first constructed predicate: a
   `web_provider` execution target whose actual HTTPS API host is fixed by the
   composition root. Model-authored URL fields do not satisfy the predicate.
+  [email-integration.md](email-integration.md) adds the predicate's third arm:
+  an `mcp` execution target whose specification the operator classified
+  `NETWORK_READ` and `READ_ONLY` at configuration time. The target executes
+  with worker networking disabled, the classification can be neither
+  server-claimed nor model-authored, and the destination that serves the read
+  is governed on its own path — the operator-configured stdio command line, or
+  the egress-allowlisted HTTP endpoint validated when the row was written — so
+  the arm authorizes a read through a vouched channel and no egress at all.
 - **"Allow only in sandbox"** (execute code) is the same shape, with
   `target.isolated` as the predicate.
 - **"Deny initially"** (install packages, enable sandbox network) is `DENY` in

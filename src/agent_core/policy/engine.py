@@ -73,8 +73,17 @@ def _condition_holds(condition: PolicyCondition | None, action: ProposedAction) 
             and action.target.network_enabled
             and action.name in _BROWSER_PROVIDER_TOOLS
         )
+        # An MCP target executes with worker networking disabled, and its
+        # read-only classification is operator-declared at configuration
+        # time, never claimed by the server or authored by the model. The
+        # destination serving the read is governed on its own path: the
+        # operator-configured stdio command line, or the egress-allowlisted
+        # HTTP endpoint validated when the configuration row was written.
+        operator_declared_mcp_read = (
+            action.target.kind == "mcp" and not action.target.network_enabled
+        )
         return (
-            fixed_provider_target
+            (fixed_provider_target or operator_declared_mcp_read)
             and action.side_effect is SideEffectClass.NETWORK_READ
             and action.idempotency is IdempotencyClass.READ_ONLY
         )
