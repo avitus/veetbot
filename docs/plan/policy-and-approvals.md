@@ -319,17 +319,28 @@ unchanged.
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`
 for the device and notification routes in
 [notifications-and-devices.md](notifications-and-devices.md), making the
-executable vocabulary twenty-five strings. Future authorized work in Milestone
+executable vocabulary twenty-five strings. Milestone 17, authorized as a
+parallel workstream rather than the next number in sequence
+([ADR-0070](../adr/0070-milestone-17-memory-read-api-and-browser.md)), adds
+one more:
+
+```text
+memory.read
+```
+
+`memory.read` gates the two read-only routes in
+[memory-read-api-and-browser.md](memory-read-api-and-browser.md), making the
+executable vocabulary twenty-six strings. Future authorized work in Milestone
 13 will add `run.delegate` for the `delegate.run` control tool in
 [subagents-and-delegation.md](subagents-and-delegation.md), and Milestone 14
 `surface.read` and `surface.write` for the pairing routes in
-[inbound-surfaces.md](inbound-surfaces.md); until then the twenty-five-string
+[inbound-surfaces.md](inbound-surfaces.md); until then the twenty-six-string
 count above stands.
 
 ### The grammar, and the contributor a closed list cannot hold
 
 A scope is two or more lowercase segments matching `[a-z][a-z0-9_]*`
-joined by dots, of which the last is the action. All twenty-five have
+joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
@@ -337,7 +348,7 @@ contributor the list cannot enumerate. `tool-system.md:1219` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal
-when it is one of the twenty-five, or when its first segment is `mcp` and its
+when it is one of the twenty-six, or when its first segment is `mcp` and its
 second is the server id. `mcp.files.write` is legal on a tool from the
 `files` server. `run.cancel` on that tool is not.
 
@@ -442,7 +453,7 @@ now so that it does not have to be added later, and the resolution step
 arrives with the second principal.
 
 `AUTH_MODE=dev` binds the full scope set, and this section is what "full"
-means: all twenty-five, and no `mcp.` scope. Those exist only once a server
+means: all twenty-six, and no `mcp.` scope. Those exist only once a server
 is configured, and a development principal that silently held every scope
 an operator could declare would make the misdeclaration above the one
 class of mistake development cannot surface.
@@ -1095,7 +1106,7 @@ one blocks the milestone, not a warning.
 10. **Prompt is not authorization.** Across the injection corpus Section 22
     requires, untrusted content instructing a `REQUIRE_APPROVAL` action produces
     an approval request in every case and an execution in none. **M4.**
-11. **Scope grammar.** Every entry in the twenty-five-string vocabulary and
+11. **Scope grammar.** Every entry in the twenty-six-string vocabulary and
     every `required_scopes` entry on a registered `ToolSpec` matches the
     grammar, and registration rejects an MCP tool declaring a scope that is
     neither in the vocabulary nor prefixed `mcp.{server_id}.`. **M4.**
@@ -1208,10 +1219,11 @@ those routes already says.
     `TRUSTED_CONFIGURATION`, and `USER` can authorize anything.
 30. `GET /v1/approvals` and `GET /v1/approvals/{id}` are added so
     `agent approval list` has an endpoint.
-31. The scope vocabulary is one closed set of twenty-five dotted strings through
-    Milestone 12, shared by the API's route checks and by this pipeline's tool
-    check. Milestones 11 and 12 add exact schedule, device, and notification
-    application scopes without changing the Milestone 4 baseline gate.
+31. The scope vocabulary is one closed set of twenty-six dotted strings through
+    Milestone 17, shared by the API's route checks and by this pipeline's tool
+    check. Milestones 11, 12, and 17 add exact schedule, device, notification,
+    and memory-read application scopes without changing the Milestone 4
+    baseline gate.
 32. An MCP tool may require only scopes whose first segment is `mcp` and
     whose second is the server id, so an operator configuring a server
     cannot borrow a platform scope for a remote capability.

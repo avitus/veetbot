@@ -106,7 +106,7 @@ cursor       opaque base64url keyset token
 status       repeatable; MemoryStatus values
                        default: the live set, active + provisional
 belief_type  repeatable; BeliefType values
-subject      exact match, casefolded
+subject      lowercased (exact, case-insensitive)
 session_id   the source session's identifier
 text         any-term search over subject and statement
 ```
@@ -124,13 +124,23 @@ rather than belief. History is one parameter away: a caller that wants it names
 the statuses it wants. `candidate` is a legal value and returns nothing in
 practice, since a candidate is not a stored belief.
 
-`text` uses the shared lexical helpers in `src/agent_core/domain/memory.py`,
-`lexical_query_terms` to split the query and `lexical_text_matches` to test a
-record, with any-term semantics: a belief matches when it overlaps one term or
-more. Both store adapters call the same two functions, so lexical parity holds
-by construction rather than by two implementations agreeing, which is the
-mistake Milestone 16 already had to repair once. Text too short to yield a term
-is matched whole rather than matching everything.
+`subject` is lowercased on both sides of the comparison, which matches the
+store's SQL `lower()` semantics exactly; `casefold()` would diverge from it on
+non-ASCII subjects and break parity between the two adapters.
+
+`text` is split into terms by `lexical_query_terms` in
+`src/agent_core/domain/memory.py`, which both store adapters call, and matched
+with any-term semantics: a belief matches when it overlaps one term or more.
+Term derivation is therefore shared; matching is not, and cannot be. PostgreSQL
+tests each term with `plainto_tsquery('simple', term)` against
+`to_tsvector('simple', subject || ' ' || statement)`, and the in-memory tier
+tests it with `lexical_text_matches`, whose `lexical_tokens` reproduces that
+lexeme split and whose all-lexemes-of-one-term rule reproduces
+`plainto_tsquery`'s conjunction. One half holds by construction and the other
+is a deliberate emulation, which is exactly why the cross-adapter tests below
+have to check it rather than assume it — assuming it is the mistake Milestone
+16 already had to repair once. Text too short to yield a term is matched whole
+rather than matching everything.
 
 Repeated parameters intersect across kinds and union within a kind: two
 `status` values mean either status, and a `status` together with a
@@ -159,25 +169,26 @@ The closed error-code vocabulary is unchanged
 members and add no code of their own.
 
 ```text
-400  validation_error  missing or unknown ceiling, unknown status or
-                       belief type, malformed or undecodable cursor,
-                       limit that is not a positive integer
-401  unauthenticated   no credential, or a credential that does not resolve
-403  forbidden         a principal without memory.read
-404  not_found         a belief above the ceiling, in another principal's
-                       store, or absent
+400  malformed_request     missing or unknown ceiling, unknown status or
+                           belief type, malformed or undecodable cursor,
+                           limit that is not a positive integer
+401  authentication_error  no credential, or a credential that does not
+                           resolve
+403  authorization_error   a principal without memory.read
+404  not_found             a belief above the ceiling, in another
+                           principal's store, or absent
 ```
 
 A `limit` above 200 is clamped rather than rejected, which is the pagination
 rule the API already applies everywhere; only a `limit` that is not a positive
-integer is a validation error.
+integer is refused, as `malformed_request`.
 
 ### Pagination
 
 The four pagination rules stated in
 [http-api-and-streaming.md](http-api-and-streaming.md) — keyset never offset,
 opaque base64url, `limit` defaulting to 50 and capping at 200, `next_cursor`
-null on the last page (http-api-and-streaming.md:1492-1509) — apply unchanged.
+null on the last page (http-api-and-streaming.md:1493-1510) — apply unchanged.
 This surface fixes their two free parameters:
 
 ```text
@@ -335,11 +346,27 @@ The browser is where the lifecycle becomes visible. `flagged_for_review`,
 in the exposure list precisely because they are the fields that say what the
 lifecycle did, and until now nothing outside the CLI could read them.
 
-Lexical parity between the two adapters holds by construction, since both call
-`lexical_query_terms` and `lexical_text_matches`, and it is asserted rather
-than assumed: the browse contract suite runs against both the in-memory and the
-PostgreSQL store, as the store contract suite already does for recall. Hard
-gate 8 is that suite.
+Lexical parity between the two adapters rests on one shared half and one
+emulated half: both call `lexical_query_terms` to derive the query's terms, and
+each then matches with its own engine — `plainto_tsquery('simple', …)` against
+a `to_tsvector('simple', …)` in PostgreSQL, `lexical_text_matches` emulating
+that lexeme split and its conjunction in memory. Only the first half holds by
+construction, so the second is asserted rather than assumed. The same is true
+of the subject predicate, where SQL `lower()` and Python `lower()` are two
+implementations that have to be shown to agree.
+
+The requirement is that both stores browse identically. The mechanism that
+asserts it is the one the store contract suite already uses for recall, and it
+is two suites rather than one parametrized run. The shared browse contract
+suite in `tests/contract/test_memory_store_contract.py` covers order, the
+keyset boundary including its identifier tiebreak, every filter, and the text
+query against the in-memory adapter.
+`tests/integration/test_memory_postgres_m9.py` runs the same
+`MemoryBrowseQuery` values against a live PostgreSQL store and compares its
+answer to the in-memory adapter's over the identical corpus, adding the keyset
+walk and the principal-isolation and status-override predicates. Neither suite
+is optional: the first fixes the behavior, the second proves the PostgreSQL
+adapter answers alike. Hard gate 8 asserts that mechanism is in place.
 
 ## Build sequence
 
@@ -380,8 +407,9 @@ enumeration ship together or the corpus disagrees with the code.
    Registered as `gate.memory.read_api_ceiling_filter`, property. **M17.**
 3. **A principal sees only its own beliefs.** A list request returns nothing
    belonging to another principal or another tenant, and a detail request for
-   such a belief is `not_found` with status 404 rather than `forbidden`.
-   Registered as `gate.memory.read_api_principal_isolation`, case. **M17.**
+   such a belief is `not_found` with status 404 rather than
+   `authorization_error`. Registered as
+   `gate.memory.read_api_principal_isolation`, case. **M17.**
 4. **Keyset paging neither skips nor repeats.** Walking every page while
    beliefs are written and retired between requests yields each live belief at
    most once and every belief that existed throughout exactly once; a malformed
@@ -402,9 +430,12 @@ enumeration ship together or the corpus disagrees with the code.
    `/v1/memories` route is registered and none appears in the OpenAPI document,
    while `memory.read` remains a recognized scope for configuration validation.
    Registered as `gate.memory.read_api_flag_absent`, case. **M17.**
-8. **Both stores browse identically.** The shared browse contract suite passes
-   against the in-memory adapter and the PostgreSQL adapter, covering order,
-   the keyset boundary, every filter, and the text query. Registered as
+8. **Both stores browse identically.** The shared browse contract suite covers
+   order, the keyset boundary, every filter, and the text query against the
+   in-memory adapter, and the PostgreSQL parity suite answers the same
+   `MemoryBrowseQuery` values from a live store and compares the two adapters
+   over one corpus; both adapters derive their query terms through the same
+   shared helper and lowercase their subject comparison alike. Registered as
    `gate.memory.browse_contract_parity`, structural. **M17.**
 9. **The projection is exactly the exposure list.** A serialized `MemoryView`
    carries every field the exposure list names and no other key, and no
@@ -414,9 +445,9 @@ enumeration ship together or the corpus disagrees with the code.
 10. **Every error is a member of the closed vocabulary.** Across missing and
     malformed parameters, absent and insufficient credentials, unknown
     identifiers, and above-ceiling reads, every response either succeeds or
-    carries one of `validation_error`, `unauthenticated`, `forbidden`, or
-    `not_found` with its documented status. Registered as
-    `gate.memory.read_api_error_vocabulary`, case. **M17.**
+    carries one of `malformed_request`, `authentication_error`,
+    `authorization_error`, or `not_found` with its documented status.
+    Registered as `gate.memory.read_api_error_vocabulary`, case. **M17.**
 
 ## Tracked metrics
 

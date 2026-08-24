@@ -19,8 +19,10 @@ from agent_core.domain.knowledge import (
     KnowledgeVisibility,
 )
 from agent_core.domain.memory import (
+    LIVE_MEMORY_STATUSES,
     BeliefType,
     MemoryAuthority,
+    MemoryBrowseQuery,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -160,6 +162,33 @@ def recall_query(
         max_items=max_items,
         min_score=min_score,
         sensitivity_ceiling=sensitivity_ceiling,
+    )
+
+
+def browse_query(
+    *,
+    tenant_id: str = TENANT,
+    principal_id: str = PRINCIPAL_ID,
+    ceiling: Sensitivity = Sensitivity.RESTRICTED,
+    statuses: tuple[MemoryStatus, ...] = LIVE_MEMORY_STATUSES,
+    belief_types: tuple[BeliefType, ...] = (),
+    subject: str | None = None,
+    session_id: UUID | None = None,
+    text: str | None = None,
+    limit: int = 50,
+    cursor: tuple[int, UUID] | None = None,
+) -> MemoryBrowseQuery:
+    return MemoryBrowseQuery(
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        ceiling=ceiling,
+        statuses=statuses,
+        belief_types=belief_types,
+        subject=subject,
+        session_id=session_id,
+        text=text,
+        limit=limit,
+        cursor=cursor,
     )
 
 

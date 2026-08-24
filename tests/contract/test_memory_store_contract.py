@@ -17,8 +17,11 @@ from agent_core.domain.memory import (
     MemoryStatus,
     RejectionKind,
     Sensitivity,
+    lexical_query_terms,
+    lexical_term_lexemes,
+    lexical_text_matches,
 )
-from tests.contract.memory_fixtures import memory, recall_query
+from tests.contract.memory_fixtures import browse_query, memory, recall_query
 from tests.contract.support import NOW, PRINCIPAL_ID, SESSION_ID, TENANT, principal
 
 
@@ -506,3 +509,251 @@ async def test_conflict_links_and_the_review_flag_survive_a_round_trip() -> None
     assert stored.flagged_for_review is True
     assert stored.status is MemoryStatus.ACTIVE
     assert await store.query(recall_query()) == [linked]
+
+
+async def test_browse_ceiling_filter_excludes_records_above_it() -> None:
+    store = _store()
+    visible = memory(belief_id=541).model_copy(
+        update={"sensitivity": Sensitivity.INTERNAL, "store_position": 1}
+    )
+    hidden = memory(belief_id=542, statement="A restricted belief").model_copy(
+        update={"subject": "secret", "sensitivity": Sensitivity.RESTRICTED, "store_position": 2}
+    )
+    await store.upsert_belief(visible)
+    await store.upsert_belief(hidden)
+
+    page = await store.browse(browse_query(ceiling=Sensitivity.INTERNAL))
+    assert [record.id for record in page] == [visible.id]
+
+    page_all = await store.browse(browse_query(ceiling=Sensitivity.RESTRICTED))
+    assert {record.id for record in page_all} == {visible.id, hidden.id}
+
+
+async def test_browse_enforces_tenant_and_principal_isolation() -> None:
+    store = _store()
+    mine = memory(belief_id=543)
+    foreign_principal = memory(belief_id=544, statement="Another principal's belief").model_copy(
+        update={"principal_id": "principal-b", "subject": "other", "store_position": 2}
+    )
+    foreign_tenant = memory(belief_id=545, statement="Another tenant's belief").model_copy(
+        update={"tenant_id": "tenant-b", "subject": "other-tenant", "store_position": 3}
+    )
+    for record in (mine, foreign_principal, foreign_tenant):
+        await store.upsert_belief(record)
+
+    page = await store.browse(browse_query())
+    assert [record.id for record in page] == [mine.id]
+
+
+async def test_browse_status_default_is_the_live_set_and_can_be_overridden() -> None:
+    store = _store()
+    active = memory(belief_id=551).model_copy(update={"store_position": 1})
+    provisional = memory(belief_id=552, statement="A provisional belief").model_copy(
+        update={"subject": "draft", "status": MemoryStatus.PROVISIONAL, "store_position": 2}
+    )
+    superseded = memory(belief_id=553, statement="An old belief").model_copy(
+        update={
+            "subject": "history",
+            "status": MemoryStatus.SUPERSEDED,
+            "valid_to": NOW,
+            "superseded_by": UUID(int=999),
+            "store_position": 3,
+        }
+    )
+    for record in (active, provisional, superseded):
+        await store.upsert_belief(record)
+
+    default_page = await store.browse(browse_query())
+    assert {record.id for record in default_page} == {active.id, provisional.id}
+
+    with_history = await store.browse(browse_query(statuses=(MemoryStatus.SUPERSEDED,)))
+    assert [record.id for record in with_history] == [superseded.id]
+
+
+async def test_browse_belief_type_filter_composes_with_the_live_default() -> None:
+    store = _store()
+    preference = memory(belief_id=561)
+    fact = memory(belief_id=562, statement="Deployment runs on Fridays").model_copy(
+        update={"subject": "release cadence", "belief_type": BeliefType.FACT, "store_position": 2}
+    )
+    for record in (preference, fact):
+        await store.upsert_belief(record)
+
+    page = await store.browse(browse_query(belief_types=(BeliefType.FACT,)))
+    assert [record.id for record in page] == [fact.id]
+
+    everything = await store.browse(browse_query())
+    assert {record.id for record in everything} == {preference.id, fact.id}
+
+
+async def test_browse_subject_filter_is_exact_and_lowercased() -> None:
+    """Exact, case-insensitive, and lowercased — not casefolded.
+
+    The PostgreSQL adapter compares SQL `lower()`, and `casefold()` disagrees
+    with it on non-ASCII text: "Straße" casefolds to "strasse" and lowers to
+    "straße". Both adapters lowercase so both select the same set; the
+    cross-adapter half of that claim is asserted against a live store in
+    `tests/integration/test_memory_postgres_m9.py`.
+    """
+
+    store = _store()
+    target = memory(belief_id=571)
+    other = memory(belief_id=572, statement="User prefers tabs").model_copy(
+        update={"subject": "indentation", "store_position": 2}
+    )
+    non_ascii = memory(belief_id=573, statement="Deliveries go to the flat").model_copy(
+        update={"subject": "straße", "store_position": 3}
+    )
+    for record in (target, other, non_ascii):
+        await store.upsert_belief(record)
+
+    page = await store.browse(browse_query(subject="ANSWER STYLE"))
+    assert [record.id for record in page] == [target.id]
+    assert await store.browse(browse_query(subject="answer styles")) == []
+
+    lowered = await store.browse(browse_query(subject="Straße"))
+    assert [record.id for record in lowered] == [non_ascii.id]
+    # Casefolding would have matched here; lowercasing must not.
+    assert await store.browse(browse_query(subject="STRASSE")) == []
+
+
+async def test_browse_session_id_filter_matches_the_source_session() -> None:
+    store = _store()
+    in_session = memory(belief_id=581)
+    other_session = memory(belief_id=582, statement="Another session's belief").model_copy(
+        update={"subject": "other", "source_session_id": UUID(int=999), "store_position": 2}
+    )
+    for record in (in_session, other_session):
+        await store.upsert_belief(record)
+
+    page = await store.browse(browse_query(session_id=SESSION_ID))
+    assert [record.id for record in page] == [in_session.id]
+
+
+async def test_browse_text_filter_matches_the_shared_lexical_helpers_directly() -> None:
+    """Browse's text filter is exactly what the shared lexical helpers say.
+
+    Both belief stores answer a text query by calling `lexical_query_terms`
+    and `lexical_text_matches`; this asserts the in-memory store's browse
+    results equal those two functions applied directly to the same corpus.
+    Cross-adapter parity is asserted separately, against a live PostgreSQL
+    store, in `tests/integration/test_memory_postgres_m9.py`.
+    """
+
+    store = _store()
+    records = [
+        memory(belief_id=591, statement="Dashboards use the emerald themes").model_copy(
+            update={"subject": "dashboard palette", "store_position": 1}
+        ),
+        memory(belief_id=592, statement="The theme is emerald").model_copy(
+            update={"subject": "editor colours", "store_position": 2}
+        ),
+        memory(belief_id=593, statement="Apple Watch charges overnight").model_copy(
+            update={"subject": "wearables", "store_position": 3}
+        ),
+    ]
+    for record in records:
+        await store.upsert_belief(record)
+
+    for text in ("theme", "themes", "apple", "..."):
+        term_lexemes = lexical_term_lexemes(lexical_query_terms(text))
+        expected = {
+            record.id
+            for record in records
+            if lexical_text_matches(term_lexemes, f"{record.subject} {record.statement}")
+        }
+        page = await store.browse(browse_query(text=text))
+        assert {record.id for record in page} == expected, f"mismatch for text={text!r}"
+
+
+async def test_browse_orders_newest_first_with_id_tiebreak_and_overfetches_by_one() -> None:
+    store = _store()
+    tied_low_id = memory(belief_id=620, statement="Tied belief, lower id").model_copy(
+        update={"subject": "tie-a", "store_position": 5}
+    )
+    tied_high_id = memory(belief_id=621, statement="Tied belief, higher id").model_copy(
+        update={"subject": "tie-b", "store_position": 5}
+    )
+    newest = memory(belief_id=622, statement="Newest belief").model_copy(
+        update={"subject": "newest", "store_position": 6}
+    )
+    for record in (tied_low_id, tied_high_id, newest):
+        await store.upsert_belief(record)
+
+    page = await store.browse(browse_query(limit=2))
+    assert len(page) == 3  # limit + 1 overfetch, so the caller can detect has-more
+    assert [record.store_position for record in page] == [6, 5, 5]
+    assert [record.id for record in page[1:]] == [tied_low_id.id, tied_high_id.id]
+
+
+async def test_browse_keyset_tiebreak_includes_the_higher_identifier_sibling() -> None:
+    """The `store_position = p AND id > i` branch is an inclusion path, not only a guard.
+
+    Two beliefs tied at one position are the case the tiebreak exists for: a
+    cursor at the lower identifier must still return the higher one, or the
+    walk silently drops it. Ordering alone never observes this, because a
+    page taken without a cursor cannot exercise the predicate.
+    """
+
+    store = _store()
+    tied_low_id = memory(belief_id=630, statement="Tied belief, lower id").model_copy(
+        update={"subject": "tie-a", "store_position": 5}
+    )
+    tied_high_id = memory(belief_id=631, statement="Tied belief, higher id").model_copy(
+        update={"subject": "tie-b", "store_position": 5}
+    )
+    older = memory(belief_id=632, statement="Older belief").model_copy(
+        update={"subject": "older", "store_position": 4}
+    )
+    for record in (tied_low_id, tied_high_id, older):
+        await store.upsert_belief(record)
+
+    assert tied_low_id.id < tied_high_id.id
+    page = await store.browse(browse_query(cursor=(5, tied_low_id.id)))
+    assert [record.id for record in page] == [tied_high_id.id, older.id]
+
+    # And the guard half still holds: a cursor at the higher identifier
+    # excludes both tied rows.
+    beyond = await store.browse(browse_query(cursor=(5, tied_high_id.id)))
+    assert [record.id for record in beyond] == [older.id]
+
+
+async def test_browse_keyset_predicate_walks_without_skipping_or_repeating_across_writes() -> None:
+    """A page is point-in-time: a write between fetches lands, but is never lost or doubled."""
+
+    store = _store()
+    records = {
+        position: memory(belief_id=610 + position, statement=f"Belief at {position}").model_copy(
+            update={"subject": f"walk-{position}", "store_position": position}
+        )
+        for position in (10, 8, 6, 4, 2)
+    }
+    for record in records.values():
+        await store.upsert_belief(record)
+
+    first_batch = await store.browse(browse_query(limit=2))
+    first_batch_again = await store.browse(browse_query(limit=2))
+    assert first_batch_again == first_batch
+    assert [record.store_position for record in first_batch] == [10, 8, 6]
+    page_one = first_batch[:2]
+    cursor = (page_one[-1].store_position, page_one[-1].id)
+
+    # A belief is written between page fetches, landing inside the unwalked range.
+    inserted = memory(belief_id=699, statement="Inserted mid-walk").model_copy(
+        update={"subject": "inserted", "store_position": 5}
+    )
+    await store.upsert_belief(inserted)
+    records[5] = inserted
+
+    second_batch = await store.browse(browse_query(limit=2, cursor=cursor))
+    assert [record.store_position for record in second_batch] == [6, 5, 4]
+    page_two = second_batch[:2]
+    cursor2 = (page_two[-1].store_position, page_two[-1].id)
+
+    third_batch = await store.browse(browse_query(limit=2, cursor=cursor2))
+    assert [record.store_position for record in third_batch] == [4, 2]
+    page_three = third_batch
+
+    walked_ids = [record.id for record in (*page_one, *page_two, *page_three)]
+    assert set(walked_ids) == {record.id for record in records.values()}
+    assert len(walked_ids) == len(set(walked_ids))  # no repeats across the walk

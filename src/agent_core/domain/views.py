@@ -17,6 +17,15 @@ from agent_core.domain.devices import (
     PushEnvironment,
     PushProvider,
 )
+from agent_core.domain.memory import (
+    BeliefType,
+    MemoryAuthority,
+    MemoryRecord,
+    MemoryStatus,
+    Polarity,
+    Portability,
+    Sensitivity,
+)
 from agent_core.domain.notifications import (
     Notification,
     NotificationDelivery,
@@ -203,6 +212,71 @@ class NotificationInboxItem(BaseModel):
 class Page[T](BaseModel):
     items: list[T]
     next_cursor: str | None = None
+
+
+class MemoryView(BaseModel):
+    """The public projection of a belief: the spec's exposure list, exactly.
+
+    Built by an explicit allow-list rather than by excluding fields from
+    `MemoryRecord`, so a field added later to the record does not leak here
+    by omission. `tenant_id`, `principal_id`, `utility`, `store_position`,
+    `formation_run_id`, `consolidation_policy_version`, and `origin_scopes`
+    are withheld and do not exist on this model at all.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: UUID
+    subject: str
+    statement: str
+    belief_type: BeliefType
+    status: MemoryStatus
+    polarity: Polarity
+    scope: str
+    portability: Portability
+    authority: MemoryAuthority
+    sensitivity: Sensitivity
+    confidence: float
+    corroboration_count: int
+    flagged_for_review: bool
+    conflicts_with: list[UUID]
+    superseded_by: UUID | None
+    source_session_id: UUID
+    source_event_ids: list[int]
+    valid_from: datetime
+    valid_to: datetime | None
+    expires_at: datetime | None
+    last_reinforced_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_record(cls, record: MemoryRecord) -> MemoryView:
+        return cls(
+            id=record.id,
+            subject=record.subject,
+            statement=record.statement,
+            belief_type=record.belief_type,
+            status=record.status,
+            polarity=record.polarity,
+            scope=record.scope,
+            portability=record.portability,
+            authority=record.authority,
+            sensitivity=record.sensitivity,
+            confidence=record.confidence,
+            corroboration_count=record.corroboration_count,
+            flagged_for_review=record.flagged_for_review,
+            conflicts_with=list(record.conflicts_with),
+            superseded_by=record.superseded_by,
+            source_session_id=record.source_session_id,
+            source_event_ids=list(record.source_event_ids),
+            valid_from=record.valid_from,
+            valid_to=record.valid_to,
+            expires_at=record.expires_at,
+            last_reinforced_at=record.last_reinforced_at,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
 
 
 class ArtifactView(BaseModel):

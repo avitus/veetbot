@@ -38,6 +38,15 @@ from agent_core.domain.errors import (
     NotFoundError,
 )
 from agent_core.domain.events import EventEnvelope, NewEvent, conversation_items
+from agent_core.domain.memory import (
+    LIVE_MEMORY_STATUSES,
+    SENSITIVITY_ORDER,
+    BeliefType,
+    MemoryBrowseQuery,
+    MemoryRecord,
+    MemoryStatus,
+    Sensitivity,
+)
 from agent_core.domain.messages import (
     AssistantMessage,
     FileReferencePart,
@@ -67,6 +76,7 @@ from agent_core.domain.views import (
     ContentBlock,
     FileContentBlock,
     ImageContentBlock,
+    MemoryView,
     Page,
     PersistedStreamFrame,
     RunFailureView,
@@ -1245,3 +1255,103 @@ class PublicArtifactService:
                 raise NotFoundError("artifact not found") from exc
 
         return ArtifactContent(artifact=_artifact_view(artifact), open=open_stream)
+
+
+def _encode_memory_cursor(row: MemoryRecord) -> str:
+    payload = json.dumps({"p": row.store_position, "i": str(row.id)}, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+_MAX_STORE_POSITION = 2**63 - 1  # store_position is a PostgreSQL BIGINT column.
+
+
+def _decode_memory_cursor(value: str | None) -> tuple[int, UUID] | None:
+    if value is None:
+        return None
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        raw = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        if not isinstance(raw, dict) or set(raw) != {"p", "i"}:
+            raise ValueError
+        position = raw["p"]
+        identifier = raw["i"]
+        if not isinstance(position, int) or isinstance(position, bool):
+            raise ValueError
+        if position < 0 or position > _MAX_STORE_POSITION:
+            # Out of BIGINT range is malformed, the same as any other
+            # unparseable cursor: a crafted value must never reach the
+            # keyset predicate and surface a driver error as a 500.
+            raise ValueError
+        if not isinstance(identifier, str):
+            raise ValueError
+        return (position, UUID(identifier))
+    except (ValueError, TypeError, KeyError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("memory cursor is malformed") from exc
+
+
+class PublicMemoryService:
+    """Principal-first read surface over the belief store (Milestone 17).
+
+    Mirrors `PublicApprovalService`: `uow_factory` injection, the principal
+    supplied as an argument rather than bound at construction, and a keyset
+    cursor codec beside the approval one. The ceiling is supplied by the
+    caller on every call and is never inferred (ADR-0045 decision 11); an
+    above-ceiling, cross-principal, or absent belief are all the same
+    `NotFoundError` so a detail read never distinguishes "too sensitive"
+    from "does not exist".
+    """
+
+    def __init__(self, *, uow_factory: UnitOfWorkFactory) -> None:
+        self._uow_factory = uow_factory
+
+    async def list(
+        self,
+        principal: Principal,
+        *,
+        ceiling: Sensitivity,
+        statuses: list[MemoryStatus] | None,
+        belief_types: list[BeliefType] | None,
+        subject: str | None,
+        session_id: UUID | None,
+        text: str | None,
+        limit: int,
+        cursor: str | None,
+    ) -> Page[MemoryView]:
+        require_scope(principal, "memory.read")
+        effective_limit = min(max(limit, 1), 200)
+        decoded = _decode_memory_cursor(cursor)
+        query = MemoryBrowseQuery(
+            tenant_id=principal.tenant_id,
+            principal_id=principal.principal_id,
+            ceiling=ceiling,
+            statuses=tuple(statuses) if statuses else LIVE_MEMORY_STATUSES,
+            belief_types=tuple(belief_types) if belief_types else (),
+            subject=subject,
+            session_id=session_id,
+            text=text,
+            limit=effective_limit,
+            cursor=decoded,
+        )
+        async with self._uow_factory() as uow:
+            rows = await uow.memories.browse(query)
+        has_more = len(rows) > effective_limit
+        page_rows = rows[:effective_limit]
+        return Page[MemoryView](
+            items=[MemoryView.from_record(row) for row in page_rows],
+            next_cursor=(_encode_memory_cursor(page_rows[-1]) if has_more and page_rows else None),
+        )
+
+    async def get(
+        self, principal: Principal, memory_id: UUID, *, ceiling: Sensitivity
+    ) -> MemoryView:
+        require_scope(principal, "memory.read")
+        async with self._uow_factory() as uow:
+            record = await uow.memories.get(memory_id, principal)
+        if SENSITIVITY_ORDER[record.sensitivity] > SENSITIVITY_ORDER[ceiling]:
+            # Above the caller's ceiling is indistinguishable from absent:
+            # a distinguishable 403 or 409 would make every identifier an
+            # oracle over which beliefs are merely too sensitive to show.
+            raise NotFoundError("memory not found")
+        return MemoryView.from_record(record)

@@ -27,6 +27,7 @@ from agent_core.domain.events import NewEvent
 from agent_core.domain.memory import (
     BeliefType,
     MemoryAuthority,
+    MemoryBrowseQuery,
     MemoryRecord,
     MemoryStatus,
     Polarity,
@@ -80,6 +81,34 @@ def _query(
             "sensitivity_ceiling": sensitivity_ceiling,
         }
     )
+
+
+def _browse_query(
+    composition: Composition,
+    *,
+    ceiling: Sensitivity = Sensitivity.RESTRICTED,
+    statuses: tuple[MemoryStatus, ...] | None = None,
+    belief_types: tuple[BeliefType, ...] = (),
+    subject: str | None = None,
+    session_id: UUID | None = None,
+    text: str | None = None,
+    limit: int = 50,
+    cursor: tuple[int, UUID] | None = None,
+) -> MemoryBrowseQuery:
+    kwargs: dict[str, object] = {
+        "tenant_id": composition.principal.tenant_id,
+        "principal_id": composition.principal.principal_id,
+        "ceiling": ceiling,
+        "belief_types": belief_types,
+        "subject": subject,
+        "session_id": session_id,
+        "text": text,
+        "limit": limit,
+        "cursor": cursor,
+    }
+    if statuses is not None:
+        kwargs["statuses"] = statuses
+    return MemoryBrowseQuery.model_validate(kwargs)
 
 
 async def _remember(
@@ -316,6 +345,293 @@ async def test_postgres_and_memory_stores_agree_on_lexical_matching(tmp_path: Pa
             assert {record.id for record in stored} == {
                 record.id for record in await mirror.query(query)
             }, f"stores disagree on {text!r}"
+
+
+async def test_postgres_and_memory_stores_agree_on_browse_filters_and_text(
+    tmp_path: Path,
+) -> None:
+    """`browse()`'s filters and text query answer identically on both adapters.
+
+    The same way `query()`'s lexical matching already does above.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"membrw{uuid4().hex[:10]}"
+        fact = await _remember(
+            composition,
+            session_id,
+            f"Dashboards use the {marker} emerald theme",
+            subject=f"dash-{marker}",
+            belief_type=BeliefType.FACT,
+            sensitivity=Sensitivity.INTERNAL,
+        )
+        preference = await _remember(
+            composition,
+            session_id,
+            f"User prefers the {marker} theme",
+            subject=f"pref-{marker}",
+            sensitivity=Sensitivity.RESTRICTED,
+        )
+        # A non-ASCII subject is where `casefold()` and SQL `lower()` used to
+        # part company: "Straße" casefolds to "strasse" but lowers to
+        # "straße", so the in-memory adapter matched a query PostgreSQL did
+        # not. Both adapters lowercase now, and both must answer alike.
+        non_ascii_subject = f"straße-{marker}"
+        non_ascii = await _remember(
+            composition,
+            session_id,
+            f"Deliveries for {marker} go to the flat",
+            subject=non_ascii_subject,
+        )
+
+        mirror = InMemoryMemoryStore(composition.clock)
+        for record in await composition.memory.list_memories():
+            await mirror.upsert_belief(record)
+
+        cases = [
+            _browse_query(composition, text=marker),
+            _browse_query(composition, text=marker, ceiling=Sensitivity.INTERNAL),
+            _browse_query(composition, text=marker, belief_types=(BeliefType.FACT,)),
+            _browse_query(composition, subject=f"pref-{marker}"),
+            _browse_query(composition, session_id=session_id, text=marker),
+            _browse_query(composition, subject=non_ascii_subject),
+            _browse_query(composition, subject=f"Straße-{marker}"),
+            _browse_query(composition, subject=f"STRASSE-{marker}"),
+        ]
+        for query in cases:
+            async with composition.uow_factory() as uow:
+                stored = await uow.memories.browse(query)
+            assert {record.id for record in stored} == {
+                record.id for record in await mirror.browse(query)
+            }, f"stores disagree on {query!r}"
+
+        # Sanity: the fixtures actually exercise the filters they claim to.
+        async with composition.uow_factory() as uow:
+            ceiling_filtered = await uow.memories.browse(
+                _browse_query(composition, text=marker, ceiling=Sensitivity.INTERNAL)
+            )
+            lowered = await uow.memories.browse(
+                _browse_query(composition, subject=f"Straße-{marker}")
+            )
+            casefolded = await uow.memories.browse(
+                _browse_query(composition, subject=f"STRASSE-{marker}")
+            )
+        assert {record.id for record in ceiling_filtered} == {fact.id, non_ascii.id}
+        assert preference.id not in {record.id for record in ceiling_filtered}
+        # The subject predicate is lowercased, so the ASCII-cased query hits
+        # and the casefolded spelling does not — on both adapters alike.
+        assert {record.id for record in lowered} == {non_ascii.id}
+        assert casefolded == []
+
+
+async def test_postgres_browse_keyset_pagination_matches_the_documented_predicate(
+    tmp_path: Path,
+) -> None:
+    """The keyset order and predicate are `store_position DESC, id ASC` over live rows.
+
+    Real store positions come from a single cluster-wide sequence and are
+    therefore gapped; the SQL predicate must still walk every row this test
+    wrote, in strictly decreasing position order, with no skip and no repeat.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"membrwpg{uuid4().hex[:10]}"
+        now = composition.clock.now()
+
+        async def _seed(belief_id: UUID) -> MemoryRecord:
+            async with composition.uow_factory() as uow:
+                record = MemoryRecord.model_validate(
+                    {
+                        "id": belief_id,
+                        "tenant_id": composition.principal.tenant_id,
+                        "principal_id": composition.principal.principal_id,
+                        "scope": "integration",
+                        "subject": marker,
+                        "statement": f"belief {belief_id} for {marker}",
+                        "source_session_id": session_id,
+                        "source_event_ids": [1],
+                        "confidence": 0.9,
+                        "sensitivity": Sensitivity.INTERNAL,
+                        "valid_from": now,
+                        "status": MemoryStatus.ACTIVE,
+                        "belief_type": BeliefType.FACT,
+                        "polarity": Polarity.ASSERT,
+                        "portability": Portability.CONTEXTUAL,
+                        "origin_scopes": ["integration"],
+                        "last_reinforced_at": now,
+                        "formation_run_id": uuid4(),
+                        "consolidation_policy_version": "formation@1",
+                        "authority": MemoryAuthority.USER,
+                        "store_position": await uow.memories.next_position(),
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                return await uow.memories.upsert_belief(record)
+
+        records = [await _seed(uuid4()) for _ in range(5)]
+        query = _browse_query(composition, subject=marker, limit=2)
+
+        walked: list[MemoryRecord] = []
+        cursor: tuple[int, UUID] | None = None
+        for _ in range(len(records) + 1):
+            async with composition.uow_factory() as uow:
+                page = await uow.memories.browse(query.model_copy(update={"cursor": cursor}))
+            positions = [record.store_position for record in page]
+            assert positions == sorted(positions, reverse=True)
+            batch = page[: query.limit]
+            walked.extend(batch)
+            if len(page) <= query.limit:
+                break
+            cursor = (batch[-1].store_position, batch[-1].id)
+
+        assert [record.id for record in walked] == [record.id for record in reversed(records)]
+        walked_positions = [record.store_position for record in walked]
+        assert walked_positions == sorted(walked_positions, reverse=True)
+        assert len(walked_positions) == len(set(walked_positions))
+
+
+async def test_postgres_browse_keyset_tiebreak_includes_the_higher_identifier_sibling(
+    tmp_path: Path,
+) -> None:
+    """A cursor at a lower identifier still returns the row at that position.
+
+    `PostgresMemoryStore.browse` walks
+    `(store_position < p) OR (store_position = p AND id > i)`. The second
+    disjunct is what a total key needs, and until it is observed selecting a
+    row it could be dropped without a test noticing. `store_position` carries
+    a UNIQUE constraint, so the tie is expressed as a cursor identifier below
+    the one row at that position rather than as two rows sharing it; the
+    in-memory adapter asserts the literally tied pair in its contract suite.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"membrwtie{uuid4().hex[:10]}"
+        now = composition.clock.now()
+
+        async def _seed(belief_id: UUID) -> MemoryRecord:
+            async with composition.uow_factory() as uow:
+                record = MemoryRecord.model_validate(
+                    {
+                        "id": belief_id,
+                        "tenant_id": composition.principal.tenant_id,
+                        "principal_id": composition.principal.principal_id,
+                        "scope": "integration",
+                        "subject": marker,
+                        "statement": f"belief {belief_id} for {marker}",
+                        "source_session_id": session_id,
+                        "source_event_ids": [1],
+                        "confidence": 0.9,
+                        "sensitivity": Sensitivity.INTERNAL,
+                        "valid_from": now,
+                        "status": MemoryStatus.ACTIVE,
+                        "belief_type": BeliefType.FACT,
+                        "polarity": Polarity.ASSERT,
+                        "portability": Portability.CONTEXTUAL,
+                        "origin_scopes": ["integration"],
+                        "last_reinforced_at": now,
+                        "formation_run_id": uuid4(),
+                        "consolidation_policy_version": "formation@1",
+                        "authority": MemoryAuthority.USER,
+                        "store_position": await uow.memories.next_position(),
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                return await uow.memories.upsert_belief(record)
+
+        older = await _seed(uuid4())
+        pivot = await _seed(uuid4())
+        assert pivot.store_position > older.store_position
+
+        async with composition.uow_factory() as uow:
+            included = await uow.memories.browse(
+                _browse_query(
+                    composition, subject=marker, limit=5, cursor=(pivot.store_position, UUID(int=0))
+                )
+            )
+            excluded = await uow.memories.browse(
+                _browse_query(
+                    composition, subject=marker, limit=5, cursor=(pivot.store_position, pivot.id)
+                )
+            )
+
+        assert [record.id for record in included] == [pivot.id, older.id]
+        assert [record.id for record in excluded] == [older.id]
+
+
+async def test_postgres_browse_enforces_principal_isolation_and_status_override(
+    tmp_path: Path,
+) -> None:
+    """PostgreSQL's browse predicate isolates principals and honors the status set.
+
+    The live default excludes a superseded row; naming the status explicitly
+    includes it, and no other tenant or principal's row is ever visible.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"membrwiso{uuid4().hex[:10]}"
+        subject = f"style-{marker}"
+        active = await _remember(
+            composition,
+            session_id,
+            f"User prefers the {marker} answer style",
+            subject=subject,
+        )
+        now = composition.clock.now()
+        superseded_id = uuid4()
+        async with composition.uow_factory() as uow:
+            superseded = MemoryRecord.model_validate(
+                {
+                    "id": superseded_id,
+                    "tenant_id": composition.principal.tenant_id,
+                    "principal_id": composition.principal.principal_id,
+                    "scope": "integration",
+                    "subject": subject,
+                    "statement": f"User used to prefer the old {marker} style",
+                    "source_session_id": session_id,
+                    "source_event_ids": [1],
+                    "confidence": 0.9,
+                    "sensitivity": Sensitivity.INTERNAL,
+                    "valid_from": now - timedelta(hours=1),
+                    "valid_to": now,
+                    "status": MemoryStatus.SUPERSEDED,
+                    "belief_type": BeliefType.PREFERENCE,
+                    "polarity": Polarity.ASSERT,
+                    "portability": Portability.CONTEXTUAL,
+                    "origin_scopes": ["integration"],
+                    "last_reinforced_at": now - timedelta(hours=1),
+                    "superseded_by": active.id,
+                    "formation_run_id": uuid4(),
+                    "consolidation_policy_version": "formation@1",
+                    "authority": MemoryAuthority.USER,
+                    "store_position": await uow.memories.next_position(),
+                    "created_at": now - timedelta(hours=1),
+                    "updated_at": now,
+                }
+            )
+            await uow.memories.upsert_belief(superseded)
+
+        foreign_query = MemoryBrowseQuery(
+            tenant_id=composition.principal.tenant_id,
+            principal_id=f"absent-{uuid4().hex[:8]}",
+            ceiling=Sensitivity.RESTRICTED,
+            subject=subject,
+        )
+        async with composition.uow_factory() as uow:
+            default_page = await uow.memories.browse(_browse_query(composition, subject=subject))
+            with_history = await uow.memories.browse(
+                _browse_query(composition, subject=subject, statuses=(MemoryStatus.SUPERSEDED,))
+            )
+            isolated = await uow.memories.browse(foreign_query)
+
+        assert {record.id for record in default_page} == {active.id}
+        assert {record.id for record in with_history} == {superseded_id}
+        assert isolated == []
 
 
 async def test_postgres_sensitivity_ceiling_and_local_portability_predicates(
