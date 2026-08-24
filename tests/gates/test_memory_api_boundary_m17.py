@@ -11,6 +11,8 @@ schedule and notification API boundary tests (`test_schedule_api_m11.py`,
 
 from __future__ import annotations
 
+import base64
+import json
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -102,6 +104,16 @@ def _belief(
         created_at=NOW,
         updated_at=NOW,
     )
+
+
+def _crafted_cursor(position: int, identifier: UUID) -> str:
+    """Hand-build a cursor's wire shape to test decode robustness against
+    adversarial input, independent of `_encode_memory_cursor`'s internals."""
+
+    payload = json.dumps({"p": position, "i": str(identifier)}, separators=(",", ":")).encode(
+        "utf-8"
+    )
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
 
 
 @asynccontextmanager
@@ -240,3 +252,124 @@ async def test_memory_http_surface_is_absent_by_default() -> None:
             if isinstance(route, APIRoute) and route.path.startswith("/v1/memories")
         ]
         assert "/v1/memories" not in app.openapi()["paths"]
+
+
+async def test_memory_list_rejects_a_cursor_position_beyond_bigint_range() -> None:
+    # store_position is a PostgreSQL BIGINT column; a crafted cursor that
+    # decodes to a position outside int64 range must never reach the keyset
+    # predicate. Left unvalidated, asyncpg raises DataError constructing the
+    # query, which is not a ValueError and would otherwise escape the closed
+    # error vocabulary as an internal_error/500.
+    principal = Principal(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        roles={"user"},
+        scopes=set(PLATFORM_SCOPES) | {"memory.read"},
+    )
+    settings = replace(memory_settings(), memory_api_enabled=True)
+    async with build(
+        settings=settings,
+        storage="memory",
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        async with composition.uow_factory() as uow:
+            await uow.memories.upsert_belief(_belief(belief_id=1, position=1))
+
+        async with _client(composition) as client:
+            too_large = _crafted_cursor(2**63, UUID(int=1))
+            response = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "cursor": too_large}
+            )
+            assert response.status_code == 400, response.text
+            assert response.json()["error"]["code"] == "malformed_request"
+
+            negative = _crafted_cursor(-1, UUID(int=1))
+            response = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "cursor": negative}
+            )
+            assert response.status_code == 400, response.text
+            assert response.json()["error"]["code"] == "malformed_request"
+
+            boundary = _crafted_cursor(2**63 - 1, UUID(int=1))
+            response = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "cursor": boundary}
+            )
+            assert response.status_code == 200, response.text
+
+
+async def test_memory_list_pages_every_belief_exactly_once() -> None:
+    principal = Principal(
+        tenant_id=TENANT,
+        principal_id=PRINCIPAL_ID,
+        roles={"user"},
+        scopes=set(PLATFORM_SCOPES) | {"memory.read"},
+    )
+    settings = replace(memory_settings(), memory_api_enabled=True)
+    async with build(
+        settings=settings,
+        storage="memory",
+        sequential_ids=True,
+        principal=principal,
+    ) as composition:
+        beliefs = [_belief(belief_id=i, position=i) for i in range(1, 6)]
+        async with composition.uow_factory() as uow:
+            for belief in beliefs:
+                await uow.memories.upsert_belief(belief)
+
+        async with _client(composition) as client:
+            first_page = await client.get(
+                "/v1/memories", params={"ceiling": "restricted", "limit": 2}
+            )
+            assert first_page.status_code == 200, first_page.text
+            first_body = first_page.json()
+            assert len(first_body["items"]) == 2
+            assert first_body["next_cursor"] is not None
+
+            second_page = await client.get(
+                "/v1/memories",
+                params={
+                    "ceiling": "restricted",
+                    "limit": 2,
+                    "cursor": first_body["next_cursor"],
+                },
+            )
+            assert second_page.status_code == 200, second_page.text
+            second_body = second_page.json()
+            assert len(second_body["items"]) == 2
+            assert second_body["next_cursor"] is not None
+
+            first_ids = {item["id"] for item in first_body["items"]}
+            second_ids = {item["id"] for item in second_body["items"]}
+            assert first_ids.isdisjoint(second_ids)
+
+            third_page = await client.get(
+                "/v1/memories",
+                params={
+                    "ceiling": "restricted",
+                    "limit": 2,
+                    "cursor": second_body["next_cursor"],
+                },
+            )
+            assert third_page.status_code == 200, third_page.text
+            third_body = third_page.json()
+            assert len(third_body["items"]) == 1
+            assert third_body["next_cursor"] is None
+
+            third_ids = {item["id"] for item in third_body["items"]}
+            walked_ids = first_ids | second_ids | third_ids
+            assert walked_ids == {str(belief.id) for belief in beliefs}
+            # Newest first by store_position, descending across pages too.
+            assert [item["id"] for item in first_body["items"]] == [
+                str(beliefs[4].id),
+                str(beliefs[3].id),
+            ]
+            assert [item["id"] for item in second_body["items"]] == [
+                str(beliefs[2].id),
+                str(beliefs[1].id),
+            ]
+            assert [item["id"] for item in third_body["items"]] == [str(beliefs[0].id)]
+
+            # Re-reading an earlier page against an unchanged store is stable.
+            replay = await client.get("/v1/memories", params={"ceiling": "restricted", "limit": 2})
+            assert replay.json() == first_body

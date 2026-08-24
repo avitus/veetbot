@@ -1264,6 +1264,9 @@ def _encode_memory_cursor(row: MemoryRecord) -> str:
     return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
 
 
+_MAX_STORE_POSITION = 2**63 - 1  # store_position is a PostgreSQL BIGINT column.
+
+
 def _decode_memory_cursor(value: str | None) -> tuple[int, UUID] | None:
     if value is None:
         return None
@@ -1274,7 +1277,12 @@ def _decode_memory_cursor(value: str | None) -> tuple[int, UUID] | None:
             raise ValueError
         position = raw["p"]
         identifier = raw["i"]
-        if not isinstance(position, int) or isinstance(position, bool) or position < 0:
+        if not isinstance(position, int) or isinstance(position, bool):
+            raise ValueError
+        if position < 0 or position > _MAX_STORE_POSITION:
+            # Out of BIGINT range is malformed, the same as any other
+            # unparseable cursor: a crafted value must never reach the
+            # keyset predicate and surface a driver error as a 500.
             raise ValueError
         if not isinstance(identifier, str):
             raise ValueError
