@@ -373,6 +373,17 @@ async def test_postgres_and_memory_stores_agree_on_browse_filters_and_text(
             subject=f"pref-{marker}",
             sensitivity=Sensitivity.RESTRICTED,
         )
+        # A non-ASCII subject is where `casefold()` and SQL `lower()` used to
+        # part company: "Straße" casefolds to "strasse" but lowers to
+        # "straße", so the in-memory adapter matched a query PostgreSQL did
+        # not. Both adapters lowercase now, and both must answer alike.
+        non_ascii_subject = f"straße-{marker}"
+        non_ascii = await _remember(
+            composition,
+            session_id,
+            f"Deliveries for {marker} go to the flat",
+            subject=non_ascii_subject,
+        )
 
         mirror = InMemoryMemoryStore(composition.clock)
         for record in await composition.memory.list_memories():
@@ -384,6 +395,9 @@ async def test_postgres_and_memory_stores_agree_on_browse_filters_and_text(
             _browse_query(composition, text=marker, belief_types=(BeliefType.FACT,)),
             _browse_query(composition, subject=f"pref-{marker}"),
             _browse_query(composition, session_id=session_id, text=marker),
+            _browse_query(composition, subject=non_ascii_subject),
+            _browse_query(composition, subject=f"Straße-{marker}"),
+            _browse_query(composition, subject=f"STRASSE-{marker}"),
         ]
         for query in cases:
             async with composition.uow_factory() as uow:
@@ -397,8 +411,18 @@ async def test_postgres_and_memory_stores_agree_on_browse_filters_and_text(
             ceiling_filtered = await uow.memories.browse(
                 _browse_query(composition, text=marker, ceiling=Sensitivity.INTERNAL)
             )
-        assert {record.id for record in ceiling_filtered} == {fact.id}
+            lowered = await uow.memories.browse(
+                _browse_query(composition, subject=f"Straße-{marker}")
+            )
+            casefolded = await uow.memories.browse(
+                _browse_query(composition, subject=f"STRASSE-{marker}")
+            )
+        assert {record.id for record in ceiling_filtered} == {fact.id, non_ascii.id}
         assert preference.id not in {record.id for record in ceiling_filtered}
+        # The subject predicate is lowercased, so the ASCII-cased query hits
+        # and the casefolded spelling does not — on both adapters alike.
+        assert {record.id for record in lowered} == {non_ascii.id}
+        assert casefolded == []
 
 
 async def test_postgres_browse_keyset_pagination_matches_the_documented_predicate(
@@ -467,6 +491,76 @@ async def test_postgres_browse_keyset_pagination_matches_the_documented_predicat
         walked_positions = [record.store_position for record in walked]
         assert walked_positions == sorted(walked_positions, reverse=True)
         assert len(walked_positions) == len(set(walked_positions))
+
+
+async def test_postgres_browse_keyset_tiebreak_includes_the_higher_identifier_sibling(
+    tmp_path: Path,
+) -> None:
+    """A cursor at a lower identifier still returns the row at that position.
+
+    `PostgresMemoryStore.browse` walks
+    `(store_position < p) OR (store_position = p AND id > i)`. The second
+    disjunct is what a total key needs, and until it is observed selecting a
+    row it could be dropped without a test noticing. `store_position` carries
+    a UNIQUE constraint, so the tie is expressed as a cursor identifier below
+    the one row at that position rather than as two rows sharing it; the
+    in-memory adapter asserts the literally tied pair in its contract suite.
+    """
+
+    async with build(settings=_settings(tmp_path), storage="postgres") as composition:
+        session_id = await composition.sessions.create()
+        marker = f"membrwtie{uuid4().hex[:10]}"
+        now = composition.clock.now()
+
+        async def _seed(belief_id: UUID) -> MemoryRecord:
+            async with composition.uow_factory() as uow:
+                record = MemoryRecord.model_validate(
+                    {
+                        "id": belief_id,
+                        "tenant_id": composition.principal.tenant_id,
+                        "principal_id": composition.principal.principal_id,
+                        "scope": "integration",
+                        "subject": marker,
+                        "statement": f"belief {belief_id} for {marker}",
+                        "source_session_id": session_id,
+                        "source_event_ids": [1],
+                        "confidence": 0.9,
+                        "sensitivity": Sensitivity.INTERNAL,
+                        "valid_from": now,
+                        "status": MemoryStatus.ACTIVE,
+                        "belief_type": BeliefType.FACT,
+                        "polarity": Polarity.ASSERT,
+                        "portability": Portability.CONTEXTUAL,
+                        "origin_scopes": ["integration"],
+                        "last_reinforced_at": now,
+                        "formation_run_id": uuid4(),
+                        "consolidation_policy_version": "formation@1",
+                        "authority": MemoryAuthority.USER,
+                        "store_position": await uow.memories.next_position(),
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+                return await uow.memories.upsert_belief(record)
+
+        older = await _seed(uuid4())
+        pivot = await _seed(uuid4())
+        assert pivot.store_position > older.store_position
+
+        async with composition.uow_factory() as uow:
+            included = await uow.memories.browse(
+                _browse_query(
+                    composition, subject=marker, limit=5, cursor=(pivot.store_position, UUID(int=0))
+                )
+            )
+            excluded = await uow.memories.browse(
+                _browse_query(
+                    composition, subject=marker, limit=5, cursor=(pivot.store_position, pivot.id)
+                )
+            )
+
+        assert [record.id for record in included] == [pivot.id, older.id]
+        assert [record.id for record in excluded] == [older.id]
 
 
 async def test_postgres_browse_enforces_principal_isolation_and_status_override(

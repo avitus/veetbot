@@ -106,7 +106,7 @@ cursor       opaque base64url keyset token
 status       repeatable; MemoryStatus values
                        default: the live set, active + provisional
 belief_type  repeatable; BeliefType values
-subject      exact match, casefolded
+subject      lowercased (exact, case-insensitive)
 session_id   the source session's identifier
 text         any-term search over subject and statement
 ```
@@ -123,6 +123,10 @@ a browser that opened onto superseded and retired rows would be showing history
 rather than belief. History is one parameter away: a caller that wants it names
 the statuses it wants. `candidate` is a legal value and returns nothing in
 practice, since a candidate is not a stored belief.
+
+`subject` is lowercased on both sides of the comparison, which matches the
+store's SQL `lower()` semantics exactly; `casefold()` would diverge from it on
+non-ASCII subjects and break parity between the two adapters.
 
 `text` uses the shared lexical helpers in `src/agent_core/domain/memory.py`,
 `lexical_query_terms` to split the query and `lexical_text_matches` to test a
@@ -337,9 +341,19 @@ lifecycle did, and until now nothing outside the CLI could read them.
 
 Lexical parity between the two adapters holds by construction, since both call
 `lexical_query_terms` and `lexical_text_matches`, and it is asserted rather
-than assumed: the browse contract suite runs against both the in-memory and the
-PostgreSQL store, as the store contract suite already does for recall. Hard
-gate 8 is that suite.
+than assumed. The requirement is that both stores browse identically. The
+mechanism that asserts it is the one the store contract suite already uses for
+recall, and it is two halves rather than one parametrized run: the shared
+browse contract suite in `tests/contract/test_memory_store_contract.py` covers
+order, the keyset boundary including its identifier tiebreak, every filter, and
+the text query against the in-memory adapter, and
+`tests/integration/test_memory_postgres_m9.py` runs the same
+`MemoryBrowseQuery` values against a live PostgreSQL store and compares its
+answer to the in-memory adapter's over the identical corpus, adding the
+keyset walk and the principal-isolation and status-override predicates. Neither
+half is optional: the first fixes the behavior, the second proves the
+PostgreSQL adapter answers alike. Hard gate 8 asserts that mechanism is in
+place.
 
 ## Build sequence
 
@@ -402,9 +416,12 @@ enumeration ship together or the corpus disagrees with the code.
    `/v1/memories` route is registered and none appears in the OpenAPI document,
    while `memory.read` remains a recognized scope for configuration validation.
    Registered as `gate.memory.read_api_flag_absent`, case. **M17.**
-8. **Both stores browse identically.** The shared browse contract suite passes
-   against the in-memory adapter and the PostgreSQL adapter, covering order,
-   the keyset boundary, every filter, and the text query. Registered as
+8. **Both stores browse identically.** The shared browse contract suite covers
+   order, the keyset boundary, every filter, and the text query against the
+   in-memory adapter, and the PostgreSQL parity suite answers the same
+   `MemoryBrowseQuery` values from a live store and compares the two adapters
+   over one corpus; both adapters reach their text and subject predicates
+   through the same shared helpers. Registered as
    `gate.memory.browse_contract_parity`, structural. **M17.**
 9. **The projection is exactly the exposure list.** A serialized `MemoryView`
    carries every field the exposure list names and no other key, and no

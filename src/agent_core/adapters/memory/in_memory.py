@@ -196,7 +196,11 @@ class InMemoryMemoryStore:
     async def browse(self, query: MemoryBrowseQuery) -> list[MemoryRecord]:
         statuses = set(query.statuses)
         belief_types = set(query.belief_types)
-        subject = None if query.subject is None else query.subject.casefold()
+        # `lower()`, not `casefold()`: the PostgreSQL adapter compares
+        # SQL `lower()`, and the two disagree on non-ASCII text ("Straße"
+        # casefolds to "strasse" and lowers to "straße"). Both adapters
+        # must select the same set, so both lowercase.
+        subject = None if query.subject is None else query.subject.lower()
         term_lexemes = lexical_term_lexemes(lexical_query_terms(query.text))
         async with self._lock:
             result = []
@@ -209,7 +213,7 @@ class InMemoryMemoryStore:
                     continue
                 if belief_types and record.belief_type not in belief_types:
                     continue
-                if subject is not None and record.subject.casefold() != subject:
+                if subject is not None and record.subject.lower() != subject:
                     continue
                 if query.session_id is not None and record.source_session_id != query.session_id:
                     continue

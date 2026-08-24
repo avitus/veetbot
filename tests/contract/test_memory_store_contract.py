@@ -586,18 +586,35 @@ async def test_browse_belief_type_filter_composes_with_the_live_default() -> Non
     assert {record.id for record in everything} == {preference.id, fact.id}
 
 
-async def test_browse_subject_filter_is_exact_and_casefolded() -> None:
+async def test_browse_subject_filter_is_exact_and_lowercased() -> None:
+    """Exact, case-insensitive, and lowercased — not casefolded.
+
+    The PostgreSQL adapter compares SQL `lower()`, and `casefold()` disagrees
+    with it on non-ASCII text: "Straße" casefolds to "strasse" and lowers to
+    "straße". Both adapters lowercase so both select the same set; the
+    cross-adapter half of that claim is asserted against a live store in
+    `tests/integration/test_memory_postgres_m9.py`.
+    """
+
     store = _store()
     target = memory(belief_id=571)
     other = memory(belief_id=572, statement="User prefers tabs").model_copy(
         update={"subject": "indentation", "store_position": 2}
     )
-    for record in (target, other):
+    non_ascii = memory(belief_id=573, statement="Deliveries go to the flat").model_copy(
+        update={"subject": "straße", "store_position": 3}
+    )
+    for record in (target, other, non_ascii):
         await store.upsert_belief(record)
 
     page = await store.browse(browse_query(subject="ANSWER STYLE"))
     assert [record.id for record in page] == [target.id]
     assert await store.browse(browse_query(subject="answer styles")) == []
+
+    lowered = await store.browse(browse_query(subject="Straße"))
+    assert [record.id for record in lowered] == [non_ascii.id]
+    # Casefolding would have matched here; lowercasing must not.
+    assert await store.browse(browse_query(subject="STRASSE")) == []
 
 
 async def test_browse_session_id_filter_matches_the_source_session() -> None:
@@ -667,6 +684,38 @@ async def test_browse_orders_newest_first_with_id_tiebreak_and_overfetches_by_on
     assert len(page) == 3  # limit + 1 overfetch, so the caller can detect has-more
     assert [record.store_position for record in page] == [6, 5, 5]
     assert [record.id for record in page[1:]] == [tied_low_id.id, tied_high_id.id]
+
+
+async def test_browse_keyset_tiebreak_includes_the_higher_identifier_sibling() -> None:
+    """The `store_position = p AND id > i` branch is an inclusion path, not only a guard.
+
+    Two beliefs tied at one position are the case the tiebreak exists for: a
+    cursor at the lower identifier must still return the higher one, or the
+    walk silently drops it. Ordering alone never observes this, because a
+    page taken without a cursor cannot exercise the predicate.
+    """
+
+    store = _store()
+    tied_low_id = memory(belief_id=630, statement="Tied belief, lower id").model_copy(
+        update={"subject": "tie-a", "store_position": 5}
+    )
+    tied_high_id = memory(belief_id=631, statement="Tied belief, higher id").model_copy(
+        update={"subject": "tie-b", "store_position": 5}
+    )
+    older = memory(belief_id=632, statement="Older belief").model_copy(
+        update={"subject": "older", "store_position": 4}
+    )
+    for record in (tied_low_id, tied_high_id, older):
+        await store.upsert_belief(record)
+
+    assert tied_low_id.id < tied_high_id.id
+    page = await store.browse(browse_query(cursor=(5, tied_low_id.id)))
+    assert [record.id for record in page] == [tied_high_id.id, older.id]
+
+    # And the guard half still holds: a cursor at the higher identifier
+    # excludes both tied rows.
+    beyond = await store.browse(browse_query(cursor=(5, tied_high_id.id)))
+    assert [record.id for record in beyond] == [older.id]
 
 
 async def test_browse_keyset_predicate_walks_without_skipping_or_repeating_across_writes() -> None:

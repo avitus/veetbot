@@ -192,6 +192,77 @@ milestones:
       - every write, edit, retraction, and deletion over HTTP
       - recall-trace viewing, blocked on tenant and principal trace predicates
       - consolidation and formation audit routes, knowledge documents
+    evidence:
+      - check: ten Milestone 17 gate.memory.read_api_* and browse_contract_parity gates
+        outcome: passed_locally
+        detail: >-
+          The ten registered Milestone 17 entries in evals/gates/memory.yaml
+          resolve to ten distinct checks, all in
+          tests/gates/test_memory_read_api_m17.py, and all ten pass when
+          executed by node identifier — one test function per gate, so the
+          whole file passes its ten tests. Each was confirmed to be a live
+          instrument by mutating the implementation it observes and watching
+          it fail: defaulting the route's ceiling parameter trips gate 1;
+          removing the detail ceiling filter trips gates 2 and 10; dropping
+          the principal predicate from the store's browse trips gate 3;
+          widening the default status set from the live one trips gate 5;
+          turning the detail route into a POST trips gate 6; mounting the
+          router unconditionally trips gate 7; returning the in-memory
+          subject predicate to casefold trips gate 8; adding store_position
+          to MemoryView trips gate 9. The harness cannot execute these ten
+          through agent eval gates yet, for the same reason Milestone 16's
+          evidence recorded: --milestone means treat every gate at or below
+          MILESTONE as active, so --milestone 17 activates the fifty-eight
+          still-pending Milestone 13 through 15 gates and the registry
+          validator correctly refuses. They become executable through the
+          harness when project.current_milestone advances past them.
+      - check: cumulative gate registry
+        outcome: passed_locally
+        detail: >-
+          agent eval gates reports 247 active gates across Milestones 0
+          through 12 with 247 passing and none failing, and 88 pending across
+          Milestones 13 through 17, for the 335 registry entries the milestone
+          map declares. make docs-check reconciles all 335 entries and
+          AST-resolves every check, including the ten Milestone 17 entries
+          repointed off tests/gates/pending.py in this change. The verified
+          gate ceiling stays at Milestone 12.
+      - check: make check
+        outcome: passed_locally
+        detail: >-
+          Ruff formatting over 564 files and Ruff linting pass, strict mypy
+          reports no issue in 519 source files, the static partition passes
+          1252 tests, the contract partition passes 364, the release, manual
+          rollback, and nginx deployment-script tests pass, and the strict
+          documentation build passes with 179 citations checked.
+      - check: PostgreSQL integration lane
+        outcome: passed_locally
+        detail: >-
+          make test-integration passes all 138 selected tests against
+          PostgreSQL 16 on the dedicated development database, with 1628
+          deselected. That includes the three new cases in
+          tests/integration/test_memory_read_postgres_m17.py — full-text
+          search through the read service, a keyset walk over real gapped
+          store positions with an interleaved write, and the ceiling
+          predicate over all four sensitivity values with above-ceiling
+          detail reads indistinguishable from absent ones — and the four
+          browse cases in tests/integration/test_memory_postgres_m9.py,
+          which now include a non-ASCII subject proving both adapters agree
+          on lowercased matching and a keyset tiebreak inclusion case.
+      - check: complete non-live suite
+        outcome: passed_locally
+        detail: >-
+          pytest -m "not live" passes all 1764 tests with 2 deselected,
+          against the development database.
+      - check: Apple client, hosted CI, and review loop
+        outcome: not_started
+        detail: >-
+          Build-sequence steps 6 through 8 — the Apple client models, the
+          browser view model and views, the user-interface fixture, the
+          hosted Apple package and simulator lanes, hosted CI, and the
+          CodeRabbit review loop on one final head — are still outstanding.
+          No Python gate observes Swift (ADR-0049 decision 9), so none of the
+          ten gates above is satisfied by client code, and none of them is
+          blocked by its absence either.
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's

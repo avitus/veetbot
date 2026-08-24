@@ -393,7 +393,10 @@ class PostgresMemoryStore:
                 MemoryRow.belief_type.in_(tuple(item.value for item in query.belief_types))
             )
         if query.subject is not None:
-            predicates.append(func.lower(MemoryRow.subject) == query.subject.casefold())
+            # Both sides lowercase: SQL `lower()` on the column and Python
+            # `lower()` on the term. `casefold()` here would disagree with
+            # the column for non-ASCII subjects and break adapter parity.
+            predicates.append(func.lower(MemoryRow.subject) == query.subject.lower())
         if query.session_id is not None:
             predicates.append(MemoryRow.source_session_id == query.session_id)
         terms = lexical_query_terms(query.text)
