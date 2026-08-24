@@ -1021,7 +1021,7 @@ verification:
           Milestone 11. Pull request 37 merged as bc1b471 on 2026-08-21.
     remaining: []
   milestone_12:
-    recorded_at: 2026-08-22T21:14:08Z
+    recorded_at: 2026-08-24T00:58:16Z
     status: complete
     evidence:
       - check: notification-domain and content-free-payload red-green cycle
@@ -1305,6 +1305,18 @@ verification:
           All previously reported review conversations were resolved. The final
           integration was delivered directly to dev; code review is reserved for
           the final merge into main.
+      - check: owner-side production APNs activation
+        outcome: passed
+        detail: >-
+          On 2026-08-23 the owner completed the external production activation:
+          Push Notifications is enabled for com.veetbot.apple, the production
+          APNs provider key is mounted as a mode-0600 credential confined to the
+          notify role, both notification flags are enabled, and the production
+          notify service is active. A signed TestFlight build on a physical
+          iPhone registered one active production APNs target; the authenticated
+          test-notification route accepted a targeted notification and the phone
+          received the Test notification alert. No credential, device token, or
+          provider identifier is recorded here.
     remaining: []
   milestone_16:
     recorded_at: 2026-08-23T21:03:53Z

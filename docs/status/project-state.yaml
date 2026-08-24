@@ -292,9 +292,12 @@ readiness:
   summary: >-
     Milestones 0 through 12 are complete and implementable from the corpus.
     Milestone 12 completed notifications and device identity with all twenty
-    registered gates and the 247-gate cumulative registry passing. On 2026-08-20
-    the owner authorized Milestones 12 through 15 in order (ADR-0061). Milestone
-    13 is the next sequential authorized work and is specified by
+    registered gates and the 247-gate cumulative registry passing. Production
+    APNs activation was owner-verified on 2026-08-23 with a signed TestFlight
+    build, a registered physical iPhone, and delivery through the authenticated
+    test-notification route. On 2026-08-20 the owner authorized Milestones 12
+    through 15 in order (ADR-0061). Milestone 13 is the next sequential
+    authorized work and is specified by
     subagents-and-delegation.md with twenty-one gates,
     Milestone 14 by
     inbound-surfaces.md with twenty-one, and Milestone 15 by
@@ -315,5 +318,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-23T23:30:00Z
+last_updated: 2026-08-24T00:58:16Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

@@ -1091,11 +1091,12 @@ repository, and why the push key lives in one role.
 The readiness verdict is therefore **Complete**: all twenty notification and
 device gates and all 247 cumulative gates pass, with the full PostgreSQL, Apple,
 and hosted CI lanes green on the recorded `4f0c7c4` candidate. There is no
-unnamed design choice between the corpus and the implementation. The owner's
-Apple Developer work — enabling the bundle identifier's push capability,
-regenerating provisioning profiles, and mounting a production APNs key — remains
-an external, default-off activation action rather than a repository completion
-condition.
+unnamed design choice between the corpus and the implementation. Production
+APNs activation was completed on 2026-08-23 as an external owner action, after
+repository completion: a signed TestFlight build registered a physical iPhone
+as a production APNs target and the authenticated test-notification route
+delivered the Test notification alert. The activation does not change the
+milestone's repository completion contract or its default-off design boundary.
 
 ## Milestone 13: subagents and delegation, authorized and specified
 

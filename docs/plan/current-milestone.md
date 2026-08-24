@@ -107,8 +107,11 @@ per-target delivery outcomes, and executes queued navigation plus initial and
 changed focus behavior. All twenty gates and all 247 cumulative gates pass;
 PostgreSQL, Apple package, iPhone and iPad UI, unsigned Release builds, and hosted
 CI pass; the completed integration is delivered directly to `dev`. Production
-APNs activation remains default-off until the owner supplies the external Apple
-capability, provisioning profiles, and provider key.
+APNs activation was completed by the owner on 2026-08-23: a signed TestFlight
+build registered a physical iPhone as a production target and the authenticated
+test-notification route delivered the Test notification alert. That external
+activation followed repository completion and leaves the default-off contract
+unchanged for fresh deployments.
 
 Authoritative acceptance criteria for every milestone are defined only by the
 canonical [engineering plan](engineering-plan.md); this page is a pointer, not a
