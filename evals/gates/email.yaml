@@ -1,0 +1,79 @@
+# Canonical gate registry entries for Milestone 18 first-class email integration.
+- id: gate.email.package_isolation
+  milestone: 18
+  kind: structural
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Package isolation** — `gmail_mcp` imports nothing from `agent_core` and `agent_core` imports nothing from `gmail_mcp`, walked in both directions by the architecture check."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.contract_parity
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Contract parity** — all three server modes pass the complete shared contract suite against the fake Gmail API and normalize to the same domain shapes."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.roster_confinement
+  milestone: 18
+  kind: structural
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Roster confinement** — each mode advertises exactly its declared roster, and no mode exposes permanent deletion."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.classification
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Classification** — the registered `mcp.gmail_*` specifications carry exactly the three declared side-effect, risk, and idempotency tuples, `EXTERNAL_UNTRUSTED` output, and `ToolSource.MCP`."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.read_allow_write_approve
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Read allows, write approves** — under the default ruleset a read-server tool call is allowed and a write-server and send-server call each require approval, observing the condition's MCP arm."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.untrusted_origin
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Untrusted origin** — a send proposed after untrusted mail content entered the run cannot resolve to a plain allow."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.credential_confinement
+  milestone: 18
+  kind: property
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Credential confinement** — over generated server configurations, the resolved credential reaches the child only as the one declared variable in a constructed environment, never argv, never inherited, never an event, result, or log."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.token_confinement
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Token confinement** — access tokens, refresh tokens, and raw upstream error text or diagnostic headers never appear in tool results or durable events; failures cross the pipe only as the closed stable codes, and normalized mailbox content is the only upstream content that crosses at all."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.default_off
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Default off** — with the flag unset, no `mcp.gmail_*` server row is composed and no such tool is registered or advertised."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.scope_confinement
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Scope confinement** — each server requires exactly its own `mcp.{server_id}.use` scope, and a configuration declaring a platform scope for a `gmail_*` server is rejected."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.bootstrap_consent
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Bootstrap consent** — the ceremony writes owner-only credential files that round-trip through the settings loader, requests exactly the per-server Google scopes, and never prints token material."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.failure_taxonomy
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Failure taxonomy** — connect-time auth failure is terminal, the mid-session ladder is bounded, rate limits and server errors are retryable and stable, a redirect is refused rather than followed, and oversized upstream bodies truncate within the declared output budget."
+  check: tests/gates/pending.py::pending_gate
+- id: gate.email.monitoring_recipe
+  milestone: 18
+  kind: case
+  spec: docs/plan/email-integration.md#hard-gates
+  statement: "**Monitoring recipe** — a daily triage schedule materializes a run whose reads pass without approval, whose first write parks an approval whose notification is content-free, and whose outcome is reported."
+  check: tests/gates/pending.py::pending_gate

@@ -553,7 +553,7 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3713-3790`
+Section 28 of the plan is not empty — `engineering-plan.md:3770-3847`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
@@ -572,7 +572,7 @@ bridge Section 8.5 requires is specified from `tool-system.md:1374`.
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3788` requires a container-escape attempt as
+    `engineering-plan.md:3845` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
@@ -993,7 +993,7 @@ carrier but no schema, since `delegate.run` is a control tool at
 the child budget is additive by `engineering-plan.md:580` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3697` and `engineering-plan.md:2977` and picked
+`engineering-plan.md:3754` and `engineering-plan.md:2977` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1250,11 +1250,50 @@ choice between the corpus and the first red tests. The provenance trio's
 exposure question is resolved rather than outstanding; nothing about it
 remains outside the corpus.
 
+## Milestone 18: first-class email integration, authorized and specified
+
+[email-integration.md](email-integration.md) takes the email half of roadmap
+item B11 on that item's own entry condition — owner intent, expressed
+2026-08-24, with email arriving as MCP servers — and ADR-0071 records the
+authorization. The mechanism is three first-party stdio servers in one
+package beside `agent_core`, split by side effect because the tool system
+classifies at the server level: a read server at
+`NETWORK_READ`/`LOW`/`READ_ONLY`, a write server at
+`EXTERNAL_WRITE`/`MEDIUM`/`NON_IDEMPOTENT`, and a send server at
+`EXTERNAL_MESSAGE`/`HIGH`/`NON_IDEMPOTENT`. The default matrix already sends
+every write and send to approval, so the milestone adds no policy rule; what
+it must add is one arm on the deterministic `host_on_allowlist` condition,
+which today recognizes only the web and browser fixed provider targets and
+therefore denies every read-only MCP call, the adapter's own `read_resource`
+included. The design names that repair, ADR-0071 decision 5 owns it, and gate
+5 observes it.
+
+Credentials follow the seam stdio servers already have: one `env`-scheme
+broker reference per server resolving to a JSON document the server alone
+understands, because Gmail's refresh-token grant is not the `oauth2_client`
+client-credentials exchange and is not forced into it. A one-time bootstrap
+ceremony obtains the three consents and writes owner-only files that enter
+through file-backed settings references, the browser-profile shape. Two owner
+decisions of 2026-08-24 bound the surface: no server exposes permanent
+deletion — trash, reversible for thirty days, is the write server's strongest
+verb — and the Google OAuth client runs in production publishing status so
+refresh tokens outlive the testing-status seven-day clock. Monitoring is a
+documented recipe over Milestone 11 schedules and Milestone 12 notifications
+rather than new runtime. Thirteen hard gates land in a new `email` area;
+calendar, Gmail push, interval recurrence, the email Surface, and the email
+notification transport stay on the roadmap where B11, B5, B3, and B4 hold
+them.
+
+The readiness verdict is **Authorized**: the specification, the ADR, the
+registry entries, and the census row land together, and the one shared-file
+overlap this milestone carries — the policy condition and the configuration
+surface — is named in the ADR rather than discovered in review.
+
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3792-3950` for links to other documents returned
+`engineering-plan.md:3849-4007` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1475,7 +1514,7 @@ under the conflict it settles.
     HTTP API. `builtin-tools.md:1473` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2528` against
-    `model-gateway.md:1795` and `milestone-map.md:1345`. The map
+    `model-gateway.md:1795` and `milestone-map.md:1395`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1484,7 +1523,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3788` requires a test the harness's case set
+    `engineering-plan.md:3845` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by

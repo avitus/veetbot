@@ -7,6 +7,32 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-24 — Milestone 18 specified: first-class email integration
+
+- Added `docs/plan/email-integration.md` and proposed ADR-0071, meeting
+  roadmap item B11's entry condition for its email half: owner intent, with
+  email arriving as MCP servers. Three first-party stdio servers in one new
+  package, `src/gmail_mcp/`, import-isolated from `agent_core` in both
+  directions and split by side effect because the tool system classifies at
+  the server level — `gmail_read` at `NETWORK_READ`/`LOW`/`READ_ONLY`,
+  `gmail_write` at `EXTERNAL_WRITE`/`MEDIUM`/`NON_IDEMPOTENT`, and
+  `gmail_send` at `EXTERNAL_MESSAGE`/`HIGH`/`NON_IDEMPOTENT` — eight tools,
+  no permanent deletion on any roster, every write and send
+  approval-gated by the default matrix. Credentials are broker-held
+  `env`-scheme references holding a refresh-token document only the server
+  understands, obtained by a one-time `python -m gmail_mcp bootstrap`
+  consent ceremony; composition is default-off behind `AGENT_EMAIL_ENABLED`;
+  monitoring is a recipe over existing schedules and notifications.
+  Thirteen hard gates in a new `email` area take the census from 335 to 348.
+- ADR-0071 also owns the one repair the milestone needs in shared code: the
+  deterministic `host_on_allowlist` condition, which today recognizes only
+  the web and browser fixed provider targets and so denies every read-only
+  MCP call, gains an arm for an `mcp` target whose specification declares
+  `NETWORK_READ` and `READ_ONLY`, on the same operator-declared
+  justification ADR-0054 recorded for the web arm. Calendar, attachments,
+  Gmail push, interval recurrence, the email Surface, and the email
+  notification transport stay on the roadmap.
+
 ## 2026-08-23 — The provenance trio is exposed, not withheld
 
 - The owner answered the open question the specification flagged for

@@ -69,6 +69,7 @@ def test_milestone_tokens_present() -> None:
         "operational-hardening.md",
         "memory-evaluation-and-lifecycle.md",
         "memory-read-api-and-browser.md",
+        "email-integration.md",
         "milestone-map.md",
     ):
         items = hard_gate_items(ROOT / "docs" / "plan" / filename)
@@ -97,7 +98,7 @@ def test_spec_anchors_resolve() -> None:
 def test_identifier_grammar() -> None:
     entries, errors = load_registry(ROOT)
     assert errors == []
-    assert len(entries) == 335
+    assert len(entries) == 348
     assert all(GATE_ID.fullmatch(entry.id) for entry in entries)
 
 
@@ -163,6 +164,7 @@ def test_census_is_derived() -> None:
         15: 16,
         16: 20,
         17: 10,
+        18: 13,
     }
 
 
@@ -279,10 +281,10 @@ def test_malformed_identifier_and_missing_map_are_reported(tmp_path: Path) -> No
 
 
 def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> None:
-    """Milestone 17 is authorized; the registry admits it and stops there."""
+    """Milestone 18 is authorized; the registry admits it and stops there."""
     import scripts.gate_registry as gate_registry
 
-    assert getattr(gate_registry, "MAX_MILESTONE", None) == 17
+    assert getattr(gate_registry, "MAX_MILESTONE", None) == 18
 
     gates = tmp_path / "evals" / "gates"
     gates.mkdir(parents=True)
@@ -292,8 +294,8 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         (plan_dir / filename).write_text("## Hard gates\n", encoding="utf-8")
     (plan_dir / "milestone-map.md").write_text(
         "## The gate table\n\n```text\n"
-        "gate.schedule.roadmap_probe   case   17\n"
-        "gate.schedule.beyond_probe    case   18\n"
+        "gate.schedule.roadmap_probe   case   18\n"
+        "gate.schedule.beyond_probe    case   19\n"
         "```\n\n## The census\n\n```text\n```\n",
         encoding="utf-8",
     )
@@ -309,12 +311,12 @@ def test_registry_bound_follows_the_authorized_milestones(tmp_path: Path) -> Non
         }
 
     (gates / "schedule.yaml").write_text(
-        yaml.safe_dump([entry("roadmap_probe", 17), entry("beyond_probe", 18)]),
+        yaml.safe_dump([entry("roadmap_probe", 18), entry("beyond_probe", 19)]),
         encoding="utf-8",
     )
     errors = registry_errors(tmp_path)
-    assert "gate.schedule.roadmap_probe has invalid milestone 17" not in errors
-    assert "gate.schedule.beyond_probe has invalid milestone 18" in errors
+    assert "gate.schedule.roadmap_probe has invalid milestone 18" not in errors
+    assert "gate.schedule.beyond_probe has invalid milestone 19" in errors
 
 
 def test_notifications_and_devices_have_complete_milestone_12_gate_areas() -> None:
@@ -399,3 +401,14 @@ def test_memory_read_api_and_browser_has_complete_milestone_17_gate_area() -> No
         for entry in read_api_entries
     )
     assert all(GATE_ID.fullmatch(entry.id) for entry in read_api_entries)
+
+
+def test_email_integration_has_complete_milestone_18_gate_area() -> None:
+    entries, errors = load_registry(ROOT)
+    assert errors == []
+    email_entries = [entry for entry in entries if entry.milestone == 18]
+
+    assert len(email_entries) == 13
+    assert all(entry.id.startswith("gate.email.") for entry in email_entries)
+    assert all(entry.spec == "docs/plan/email-integration.md#hard-gates" for entry in email_entries)
+    assert all(GATE_ID.fullmatch(entry.id) for entry in email_entries)

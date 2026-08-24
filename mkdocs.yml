@@ -90,6 +90,7 @@ nav:
       - Operational Hardening: plan/operational-hardening.md
       - Memory Evaluation & Lifecycle: plan/memory-evaluation-and-lifecycle.md
       - Memory Read API & Browser: plan/memory-read-api-and-browser.md
+      - Email Integration: plan/email-integration.md
       - Multi-Device & Surfaces: plan/multi-device-and-surfaces.md
       - Milestone Map: plan/milestone-map.md
   - Readiness: plan/readiness.md
@@ -176,4 +177,5 @@ nav:
       - ADR-0068 Retryable memory formation and governed replay: adr/0068-retryable-memory-formation-and-governed-replay.md
       - ADR-0069 Milestone 16 memory evaluation and lifecycle: adr/0069-milestone-16-memory-evaluation-and-lifecycle.md
       - ADR-0070 Milestone 17 memory read API and browser: adr/0070-milestone-17-memory-read-api-and-browser.md
+      - ADR-0071 Milestone 18 first-class email integration: adr/0071-milestone-18-email-integration.md
   - Changelog: changelog.md
