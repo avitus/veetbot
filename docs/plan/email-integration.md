@@ -410,11 +410,13 @@ the mailbox. The platform does not guess, and it does not send again.
     per-server Google scopes, and never prints token material. **M18.**
 12. **Failure taxonomy.** Connect-time auth failure is terminal, the
     mid-session ladder is bounded, rate limits and server errors are stable
-    and retryable for the read server but resolve `uncertain` and
-    unrepeatable for a write or send already dispatched, the two package
-    endpoints are the only hosts dialled, a redirect is refused rather than
-    followed, and oversized upstream bodies truncate within the declared
-    output budget. **M18.**
+    and retryable for the read server, but every post-dispatch failure for a
+    write or send — including rate limits, server errors, timeouts, and lost
+    responses — resolves `uncertain`, forbids any retry or second request,
+    and cannot be proposed again in the run; the two package endpoints are
+    the only hosts dialled, a redirect is refused rather than followed, and
+    oversized upstream bodies truncate within the declared output budget.
+    **M18.**
 13. **Monitoring recipe.** A daily triage schedule materializes a run whose
     reads pass without approval, whose first write parks an approval whose
     notification is content-free, and whose outcome is reported. **M18.**
