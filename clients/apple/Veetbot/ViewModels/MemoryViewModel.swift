@@ -132,11 +132,19 @@ public final class MemoryViewModel: ObservableObject {
     /// Fetches the next page via the stored cursor, guarding against a
     /// server that echoes back the cursor it was given and against a stale
     /// response for a reload that has since been superseded.
+    ///
+    /// A failure here — including a mid-scroll `memoryBrowsingUnavailable`
+    /// — never clears `items`: the caller already has a populated list, and
+    /// a page-2+ failure is exactly the case where throwing that list away
+    /// would be the worse outcome. `errorMessage` carries the failure so the
+    /// browser can show it inline with a retry, and is cleared optimistically
+    /// on every new attempt so it cannot outlive the failure that set it.
     public func loadMore() async {
         guard !isLoading, !isLoadingMore else { return }
         guard let cursor = nextCursor, let requestID = reloadRequestID else { return }
 
         isLoadingMore = true
+        errorMessage = nil
         defer { isLoadingMore = false }
 
         guard let api = await makeAPIClient() else { return }
@@ -150,12 +158,14 @@ public final class MemoryViewModel: ObservableObject {
                 text: normalizedSearchText
             )
             guard reloadRequestID == requestID else { return }
+            unavailable = false
             let existingIDs = Set(items.map(\.id))
             items.append(contentsOf: page.items.filter { !existingIDs.contains($0.id) })
             nextCursor = consumeNextCursor(page.nextCursor)
         } catch VeetbotAPIClientError.memoryBrowsingUnavailable {
             guard reloadRequestID == requestID else { return }
             unavailable = true
+            errorMessage = displayMessage(for: VeetbotAPIClientError.memoryBrowsingUnavailable)
         } catch {
             guard reloadRequestID == requestID else { return }
             errorMessage = displayMessage(for: error)

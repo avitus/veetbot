@@ -15,6 +15,12 @@ public struct MemoryBrowserView: View {
         NavigationView {
             content
                 .navigationTitle("Memory")
+                // No accessibility identifier is attached here: `.searchable`
+                // hoists its field into the navigation bar chrome, which is
+                // not a descendant of this content view, so an identifier
+                // placed on this chain would land on the content underneath
+                // it instead of the field itself. XCUITest reaches the field
+                // the way it reaches any search bar: `app.searchFields`.
                 .searchable(
                     text: Binding(
                         get: { model.searchText },
@@ -22,7 +28,6 @@ public struct MemoryBrowserView: View {
                     ),
                     prompt: "Search memories"
                 )
-                .accessibilityIdentifier("memory.search")
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Close") { dismiss() }
@@ -35,6 +40,7 @@ public struct MemoryBrowserView: View {
                     }
                 }
         }
+        .accessibilityIdentifier("memory.browser")
         .task { await model.reload() }
         #if os(macOS)
         .frame(minWidth: 560, minHeight: 520)
@@ -43,7 +49,12 @@ public struct MemoryBrowserView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.unavailable {
+        // Every branch below that fully replaces the screen is guarded by
+        // `model.items.isEmpty`: once a page has loaded, a degradation on a
+        // later page (a caught `memoryBrowsingUnavailable`, or a plain
+        // failure) must not throw away what is already on screen. `list`
+        // itself renders that degradation inline, with a retry affordance.
+        if model.unavailable && model.items.isEmpty {
             unavailableState
         } else if model.isLoading && model.items.isEmpty {
             ProgressView("Loading memories…")
@@ -77,8 +88,23 @@ public struct MemoryBrowserView: View {
                     ProgressView()
                     Spacer()
                 }
+            } else if let errorMessage = model.errorMessage {
+                loadMoreFailureFooter(errorMessage)
             }
         }
+    }
+
+    private func loadMoreFailureFooter(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(message, systemImage: "exclamationmark.triangle")
+                .appFont(.caption)
+                .foregroundColor(.secondary)
+            Button("Retry") {
+                Task { await model.loadMore() }
+            }
+            .appFont(.caption)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func row(_ item: MemoryView) -> some View {

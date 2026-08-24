@@ -95,6 +95,112 @@ import Testing
     }
 
     @Test
+    func testLoadMoreFailureKeepsItemsThenClearsOnASubsequentSuccess() async throws {
+        let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000411"))
+        let secondID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000412"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000413"))
+        let lock = NSLock()
+        var pageTwoAttempts = 0
+        let model = try makeModel { request in
+            let query =
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                ?? []
+            let cursor = query.first(where: { $0.name == "cursor" })?.value
+            switch cursor {
+            case nil:
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: firstID, sessionID: sessionID))],"next_cursor":"page-2"}
+                        """
+                )
+            case "page-2":
+                let attempt = lock.withLock {
+                    pageTwoAttempts += 1
+                    return pageTwoAttempts
+                }
+                if attempt == 1 {
+                    return try self.response(
+                        for: request,
+                        statusCode: 503,
+                        body: #"{"error":{"code":"service_unavailable","message":"unavailable","details":{},"request_id":"loadmore-failed"}}"#
+                    )
+                }
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: secondID, sessionID: sessionID))],"next_cursor":null}
+                        """
+                )
+            default:
+                Issue.record("unexpected cursor \(cursor ?? "nil")")
+                return try self.response(for: request, statusCode: 500, body: "")
+            }
+        }
+
+        await model.reload()
+        #expect(model.items.map(\.id) == [firstID])
+
+        await model.loadMore()
+        #expect(
+            model.items.map(\.id) == [firstID],
+            "a page-2 failure must not empty the already-loaded page"
+        )
+        #expect(model.errorMessage != nil)
+
+        await model.loadMore()
+        #expect(
+            model.items.map(\.id) == [firstID, secondID],
+            "a retry after the failure must still land on the same page"
+        )
+        #expect(
+            model.errorMessage == nil,
+            "a subsequent successful loadMore must clear the earlier failure"
+        )
+    }
+
+    @Test
+    func testUnavailableDuringLoadMoreKeepsAlreadyLoadedItems() async throws {
+        let firstID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000421"))
+        let sessionID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000422"))
+        let model = try makeModel { request in
+            let query =
+                URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+                ?? []
+            let cursor = query.first(where: { $0.name == "cursor" })?.value
+            if cursor == nil {
+                return try self.response(
+                    for: request,
+                    statusCode: 200,
+                    body: """
+                        {"items":[\(self.memoryJSON(id: firstID, sessionID: sessionID))],"next_cursor":"page-2"}
+                        """
+                )
+            }
+            return try self.response(
+                for: request,
+                statusCode: 404,
+                body: #"{"error":{"code":"not_found","message":"Not found.","details":{},"request_id":"old-server"}}"#
+            )
+        }
+
+        await model.reload()
+        #expect(model.items.map(\.id) == [firstID])
+        #expect(model.unavailable == false)
+
+        await model.loadMore()
+
+        #expect(
+            model.items.map(\.id) == [firstID],
+            "a mid-scroll degradation must not clobber the populated list"
+        )
+        #expect(model.unavailable == true)
+        #expect(model.errorMessage != nil)
+    }
+
+    @Test
     func testStaleGuardDropsAnOutOfOrderResponse() async throws {
         let staleID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000501"))
         let freshID = try #require(UUID(uuidString: "00000000-0000-0000-0000-000000000502"))
