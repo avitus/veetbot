@@ -27,24 +27,32 @@
 deploy ALL=(root) NOPASSWD: /usr/bin/install -d -m 0755 /etc/systemd/system
 deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/deploy/systemd/*.service /etc/systemd/system/
 deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/.veetbot-schedule.service /etc/systemd/system/veetbot-schedule.service
+deploy ALL=(root) NOPASSWD: /usr/bin/install -m 0644 /opt/veetbot/releases/*/.veetbot-notify.service /etc/systemd/system/veetbot-notify.service
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl daemon-reload
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now veetbot-schedule
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl disable --now veetbot-notify
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-notify veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl enable --now veetbot-notify veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-notify veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl restart veetbot-notify veetbot-schedule veetbot-execution veetbot-maintenance veetbot-worker veetbot-async-worker veetbot-api
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-execution
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-maintenance
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-worker
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-async-worker
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-api
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-schedule
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl is-active --quiet veetbot-notify
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-execution
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-maintenance
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-worker
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-async-worker
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-api
 deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-schedule
+deploy ALL=(root) NOPASSWD: /usr/bin/systemctl show --property MainPID --value veetbot-notify
 
 # deploy/nginx/deploy.sh — validate-and-reload phase
 deploy ALL=(root) NOPASSWD: /usr/bin/install -d -m 0755 /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/veetbot-backups

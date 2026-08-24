@@ -5,6 +5,50 @@ import Testing
 @MainActor
 @Suite struct RunStateReducerTests {
     @Test
+    func testFailedRunPresentsThePublicMessageReasonAndLocation() {
+        let reducer = RunStateReducer()
+
+        reducer.reduce(
+            SSEFrame(
+                id: 9,
+                event: "run.failed",
+                data: [
+                    "failure": .object([
+                        "reason": .string("internal_error"),
+                        "message": .string("The web search provider returned an invalid response."),
+                        "step_number": .number(2),
+                        "attempt_number": .number(1),
+                        "occurred_at": .string("2026-08-24T22:06:00Z"),
+                    ])
+                ]
+            )
+        )
+
+        #expect(reducer.runStatus == .failed)
+        #expect(
+            reducer.failure?.userFacingMessage
+                == "The web search provider returned an invalid response."
+        )
+        #expect(reducer.failure?.diagnosticSummary == "Internal error · Step 2 · Attempt 1")
+    }
+
+    @Test
+    func testChatRendersTheStructuredRunFailureInTheConversation() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: packageRoot.appendingPathComponent("Veetbot/Views/ChatView.swift"),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("if let failure = state.failure {"))
+        #expect(source.contains("RunFailureCard(failure: failure)"))
+        #expect(source.contains(".accessibilityIdentifier(\"conversation.failure\")"))
+    }
+
+    @Test
     func testTransientTextReconcilesToDurableAssistantMessage() {
         let reducer = RunStateReducer()
         reducer.reduce(

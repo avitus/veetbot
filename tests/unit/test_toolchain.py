@@ -1466,14 +1466,22 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     assert units_match is not None
     units = units_match.group(1).split()
     scheduled_units = ["veetbot-schedule", *units]
-    for argv in (units, scheduled_units):
+    notification_units = ["veetbot-notify", *units]
+    scheduled_notification_units = ["veetbot-notify", *scheduled_units]
+    for argv in (units, scheduled_units, notification_units, scheduled_notification_units):
         assert f"/usr/bin/systemctl enable --now {' '.join(argv)}" in specs
         assert f"/usr/bin/systemctl restart {' '.join(argv)}" in specs
-    for unit in scheduled_units:
+    for unit in [*scheduled_units, "veetbot-notify"]:
         assert f"/usr/bin/systemctl is-active --quiet {unit}" in specs
         assert f"/usr/bin/systemctl show --property MainPID --value {unit}" in specs
     assert "/usr/bin/systemctl daemon-reload" in specs
     assert "/usr/bin/systemctl disable --now veetbot-schedule" in specs
+    assert "/usr/bin/systemctl disable --now veetbot-notify" in specs
+    assert (
+        "/usr/bin/install -m 0644 "
+        "/opt/veetbot/releases/*/.veetbot-notify.service "
+        "/etc/systemd/system/veetbot-notify.service"
+    ) in specs
 
     used = set()
     for script in ("deploy/app/release.sh", "deploy/nginx/deploy.sh"):
