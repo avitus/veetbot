@@ -64,13 +64,13 @@
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Bootstrap consent** — the ceremony writes owner-only credential files that round-trip through the settings loader, requests exactly the per-server Google scopes, and never prints token material."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_bootstrap_consent_writes_round_tripping_owner_only_files
 - id: gate.email.failure_taxonomy
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
   statement: "**Failure taxonomy** — connect-time auth failure is terminal, the mid-session ladder is bounded, rate limits and server errors are retryable and stable, a redirect is refused rather than followed, and oversized upstream bodies truncate within the declared output budget."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_email_m18.py::test_failure_taxonomy_is_stable_and_bounded
 - id: gate.email.monitoring_recipe
   milestone: 18
   kind: case

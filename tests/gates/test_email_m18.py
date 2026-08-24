@@ -253,6 +253,62 @@ async def test_default_off_composes_no_gmail_row_or_scope(tmp_path: Path) -> Non
     await composition.test_email_default_off_composes_nothing(tmp_path)
 
 
+async def test_bootstrap_consent_writes_round_tripping_owner_only_files(
+    tmp_path: Path,
+) -> None:
+    """Gate 11: three consents, three 0600 files, exact scopes, no token."""
+
+    from tests.unit import test_gmail_mcp_bootstrap as ceremony
+
+    ceremony.test_the_ceremony_writes_three_owner_only_round_tripping_files(tmp_path / "a")
+    ceremony.test_each_consent_requests_exactly_its_server_scope(tmp_path / "b")
+    ceremony.test_the_ceremony_prints_paths_and_scopes_but_never_token_material(tmp_path / "c")
+    ceremony.test_the_files_round_trip_through_the_settings_loader(tmp_path / "d")
+    ceremony.test_a_state_mismatch_aborts_without_writing(tmp_path / "e")
+
+
+async def test_failure_taxonomy_is_stable_and_bounded() -> None:
+    """Gate 12: stable retryable codes, refused redirects, bounded bodies,
+    a bounded re-authentication ladder, and a server that will not serve a
+    credential it cannot parse."""
+
+    import json
+
+    from agent_core.adapters.mcp.sdk import SDKMCPClientFactory
+    from agent_core.domain.credentials import SecretValue
+    from agent_core.domain.errors import MCPTransportError, MCPUnauthorizedError
+    from agent_core.mcp.configuration import build_stdio_environment
+    from agent_core.mcp.email import email_server_configs
+    from tests.contract import test_gmail_mcp_contract as contract
+    from tests.gates import test_tool_m8 as tool_gates
+    from tests.unit import test_gmail_mcp_credential as credential_suite
+
+    for status, code in (
+        (429, "gmail.rate_limited"),
+        (500, "gmail.unavailable"),
+        (503, "gmail.unavailable"),
+        (403, "gmail.rejected"),
+    ):
+        await contract.test_upstream_failures_map_to_stable_codes(status, code)
+    await contract.test_redirects_are_refused_not_followed()
+    await contract.test_oversized_message_bodies_truncate_within_the_budget()
+    await contract.test_oversized_upstream_responses_are_invalid_output()
+    await credential_suite.test_refresh_failures_are_stable_and_content_free(
+        400, "gmail.credential_rejected"
+    )
+    await tool_gates.test_mcp_reauth_bounded()
+
+    unparseable = SecretValue(json.dumps({"not": "a-credential"}, separators=(",", ":")))
+    config = email_server_configs("local")[0]
+    environment = build_stdio_environment(config, unparseable)
+    client = SDKMCPClientFactory()(config, unparseable, environment)
+    import pytest
+
+    with pytest.raises((MCPTransportError, MCPUnauthorizedError)):
+        async with client:
+            await client.discover()
+
+
 def test_each_server_requires_exactly_its_own_scope() -> None:
     """Gate 10: one scope per server, and platform scopes are rejected."""
 
