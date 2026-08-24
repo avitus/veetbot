@@ -176,14 +176,53 @@ justification is the web-provider arm's own: that classification is
 operator-declared at configuration time and can never be model-authored or
 server-claimed, stdio command lines are operator-configured only, and
 tenant-supplied HTTP endpoints were egress-validated when written. The arm
-authorizes no worker egress at all — an `mcp` target executes with
-networking disabled, the platform's own HTTP transport to a remote server
-follows no redirect, and the destination that ultimately serves a read is
-governed on its own path: the operator-configured command line for stdio,
-the egress allowlist for HTTP. A model-authored argument can select neither.
-The arm lands with the change that implements it, amending
+widens no destination policy: it adds no host to the egress allowlist, grants
+the worker no outbound reach it did not already have, and leaves the
+destination that ultimately serves a read governed on its own path — the
+operator-configured command line for stdio, the platform's own no-redirect
+HTTP transport and the egress allowlist for HTTP. A model-authored argument
+can select neither. The arm lands with the change that implements it, amending
 [policy-and-approvals.md](policy-and-approvals.md) in the same commit, and
 every non-read MCP call remains exactly as gated as before.
+
+### The stdio network boundary
+
+Nothing here runs with networking disabled, and the specification says which
+process is which rather than leaving it to be inferred. The Milestone 8
+adapter spawns a stdio server as an ordinary child process of the worker, and
+[tool-system.md](tool-system.md) states the consequence
+(tool-system.md:1002-1004): a stdio child inherits the worker's network
+position, which in this platform is a privileged one, which is why stdio
+servers are operator-configured only. The restriction that applies to the
+worker is that the worker itself dials nothing on a `gmail_*` call; the child
+does, and neither egress enforcement point reaches the child. The sandbox
+proxy governs a network namespace no MCP child is placed in, and the worker's
+outbound guard checks URLs the platform itself dials
+(sandbox-isolation.md:807-816); `gmail_mcp` opens its own sockets, which that
+guard never sees. An `env`-scheme command line is not a network allowlist —
+it fixes who chose the binary, not where the binary may connect — and this
+document claims no more for it than that.
+
+What confines `gmail_mcp` to Google is therefore the package, and the
+milestone is built first-party for exactly that reason. The two endpoints are
+package constants rather than arguments, no redirect is followed, TLS
+verification cannot be overridden, and the credential the child holds is
+consented to one Google scope and useless anywhere else. Hard gate 12 makes
+the endpoint set and the refused redirect blocking assertions over the code
+this repository ships, and hard gate 1 keeps the package a separately
+auditable unit. This is confinement by construction rather than by
+enforcement, which is the honest description and also the second reading of
+ADR-0071's rejection of a third-party Gmail server: a stdio child's egress is
+not platform-enforceable, so a server this repository does not build is a
+server no gate can hold to a destination.
+
+One precondition follows, named here rather than assumed away. A deployment
+that wants egress enforcement underneath a worker-spawned child must impose
+it at the host, where the operational baseline deliberately leaves outbound
+open (operational-hardening.md:321-325). Milestone 18 neither changes that
+posture nor depends on changing it, and a platform-level allowlist for stdio
+children would be new mechanism in the sandbox and tool-system specifications
+that no milestone has designed.
 
 Every tool result from these servers is `EXTERNAL_UNTRUSTED` — the adapter
 forces it — which is the platform's standing answer to mail as an injection
@@ -221,16 +260,73 @@ Gmail API responses are decoded under a hard byte bound; thread bodies are
 truncated to the server's declared output budget before crossing the pipe, so
 one bounded result always returns. The server maps upstream failures to a
 closed set of stable, content-free codes: credential rejection, rate limit,
-temporary provider unavailability, permanent provider rejection, and invalid
-provider output. Rate limits and 5xx are retryable; auth failures, other 4xx,
-and schema-invalid arguments are not; the tool pipeline retains ownership of
-any retry inside the run deadline. Google's raw error text, diagnostic
+temporary provider unavailability, permanent provider rejection, invalid
+provider output, and — the sixth, and the one the two write servers need —
+an outcome the server cannot determine. Google's raw error text, diagnostic
 headers, and `WWW-Authenticate` values never cross the pipe — normalized
 mailbox content is the tool result, and it is the only upstream content that
 does. Connect-time auth failure is
 terminal for the session and mid-session 401s run the adapter's bounded
 ladder, both exactly as [tool-system.md](tool-system.md) already specifies for
 every MCP server.
+
+### Retryability splits on the classification, not on the status code
+
+A blanket "rate limits and 5xx are retryable" would be correct for a read
+server and wrong for the other two. `gmail_write` and `gmail_send` are
+`NON_IDEMPOTENT`, and a Gmail request can commit before the client reads the
+answer, so a retry after a lost response is a second label change or a second
+message rather than a second attempt at the first.
+
+For `gmail_read`, whose every tool is `READ_ONLY`, the ordinary rule holds:
+rate limits and 5xx are retryable, auth failures, other 4xx, and
+schema-invalid arguments are not, and the tool pipeline retains ownership of
+any retry inside the run deadline.
+
+For `gmail_write` and `gmail_send` no failure is retryable once the mutating
+request has been dispatched, and the corpus already owns the machinery that
+says so. The executor watermarks every call whose side effect is not `NONE`
+before the tool implementation runs — the conservative rule
+[ADR-0040](../adr/0040-milestone-4-policy-and-tool-seams.md) records and
+`mark_effect_sent` implements (tool-system.md:647-651) — so `effect_sent_at`
+is set on every write and send before its request leaves the worker, and the
+recovery table's answer for a `NON_IDEMPOTENT` call whose watermark is set is
+`UNCERTAIN` (tool-system.md:662). A rate limit, a 5xx, or a lost response
+observed after dispatch is therefore reported by the server as the
+undetermined-outcome code, resolves to the platform's `uncertain` outcome with
+`tool.outcome_unknown` and `retryable: false` (tool-system.md:801-805), and is
+blocked from being proposed again in the run by the unified breaker's
+threshold-of-one row (tool-system.md:844). This is the rule
+[tool-system.md](tool-system.md) already applies to a mid-session 401 arriving
+after the watermark (tool-system.md:1769-1771) and the one
+[browser-automation.md](browser-automation.md) reached for the same reason
+(browser-automation.md:532-536), generalized from those two cases to every
+failure a dispatched non-idempotent MCP call can return. It lands as an
+amendment to [tool-system.md](tool-system.md) in the change that implements
+it, keyed on the declared idempotency class rather than on any `gmail_*` name,
+because a rule that named this milestone's servers would be a rule the next
+non-idempotent server does not get.
+
+Failures the server can prove happened before dispatch are unaffected: a
+refresh exchange Google refused, arguments the server rejected against its own
+schema, and a connection that never carried the mutating request are ordinary
+failures with their ordinary retryability, because nothing was attempted. The
+line the server implements is the dispatch boundary, and where it cannot tell
+which side of that line a failure fell on, it reports the undetermined
+outcome. Turning a safe failure into an `uncertain` costs a review; the
+reverse costs a duplicate send.
+
+The milestone claims no provider idempotency. Nothing in the transport this
+document specifies carries an idempotency key, and asserting what Gmail
+deduplicates is not a claim this specification is in a position to make, so
+reconciliation is what closes an `uncertain` write and it is deliberately not
+automatic. A `gmail_write` outcome is reconciled by reading the affected
+threads back through `gmail_read`, whose search and thread tools show the
+labels and drafts that actually exist. A `gmail_send` outcome cannot be
+reconciled inside the milestone at all: the send server's roster is one tool
+and its Google scope carries no read, so an `uncertain` send is surfaced for
+the human review the recovery table already routes it to, and the owner reads
+the mailbox. The platform does not guess, and it does not send again.
 
 ## Acceptance criteria
 
@@ -252,6 +348,11 @@ every MCP server.
 - A send proposed after reading mail cannot be plain-allowed, and a daily
   triage schedule produces reads without approvals, writes with them, and
   content-free notifications.
+- Against the fake Gmail API, a write and a send whose request the provider
+  commits before answering with a 5xx, and again before the response is lost
+  to a timeout, each resolve `uncertain` rather than a retryable failure, are
+  refused if proposed again in the run, and produce no second Gmail request;
+  the same failures against `gmail_read` stay retryable.
 
 ## Build sequence
 
@@ -261,9 +362,11 @@ every MCP server.
    then `src/gmail_mcp/` read mode green, with the two-way import-isolation
    check. **M18.**
 3. Write and send modes green; roster, classification, and failure taxonomy
-   observed. **M18.**
-4. The `host_on_allowlist` MCP arm and the policy-and-approvals amendment, in
-   one change. **M18.**
+   observed, including the committed-then-5xx and committed-then-timeout
+   cases against the fake provider. **M18.**
+4. The `host_on_allowlist` MCP arm with the policy-and-approvals amendment,
+   and the dispatched-non-idempotent `uncertain` rule with the tool-system
+   amendment, each landing with the document it amends. **M18.**
 5. Composition: the flag, the credential-file settings, three synthesized
    server rows, scope grants. **M18.**
 6. The bootstrap consent command. **M18.**
@@ -306,10 +409,12 @@ every MCP server.
     that round-trip through the settings loader, requests exactly the
     per-server Google scopes, and never prints token material. **M18.**
 12. **Failure taxonomy.** Connect-time auth failure is terminal, the
-    mid-session ladder is bounded, rate limits and server errors are
-    retryable and stable, a redirect is refused rather than followed, and
-    oversized upstream bodies truncate within the declared output budget.
-    **M18.**
+    mid-session ladder is bounded, rate limits and server errors are stable
+    and retryable for the read server but resolve `uncertain` and
+    unrepeatable for a write or send already dispatched, the two package
+    endpoints are the only hosts dialled, a redirect is refused rather than
+    followed, and oversized upstream bodies truncate within the declared
+    output budget. **M18.**
 13. **Monitoring recipe.** A daily triage schedule materializes a run whose
     reads pass without approval, whose first write parks an approval whose
     notification is content-free, and whose outcome is reported. **M18.**

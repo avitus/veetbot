@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 50280)
-Total output lines: 3224
-
 ---
 title: Changelog
 ---
@@ -32,6 +29,21 @@ title: Changelog
   justification ADR-0054 recorded for the web arm. Calendar, attachments,
   Gmail push, interval recurrence, the email Surface, and the email
   notification transport stay on the roadmap.
+- Two boundaries the specification now states rather than implies, after
+  review. A stdio MCP server is a child of the worker and inherits its
+  network position, so neither the sandbox proxy nor the worker's outbound
+  guard confines it: `gmail_mcp` is held to Google by its own endpoint
+  constants, refused redirects, and gates 1 and 12, and host-level egress
+  enforcement is named as a deployment precondition the milestone does not
+  require. And because the two write servers are `NON_IDEMPOTENT` and Gmail
+  can commit before answering, a rate limit, 5xx, or lost response after
+  dispatch resolves `uncertain` and is never re-proposed, rather than being
+  retried into a duplicate label change or a second message — ADR-0071
+  decision 10, generalizing the rule the adapter already applies to a
+  post-watermark 401. Reconciliation is explicit: a write is read back
+  through `gmail_read`, and a send goes to human review. The engineering
+  plan's gate census sentence catches up with the registry at 351
+  declarations and 348 entries.
 
 ## 2026-08-23 — The provenance trio is exposed, not withheld
 

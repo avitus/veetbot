@@ -69,7 +69,7 @@
   milestone: 18
   kind: case
   spec: docs/plan/email-integration.md#hard-gates
-  statement: "**Failure taxonomy** — connect-time auth failure is terminal, the mid-session ladder is bounded, rate limits and server errors are retryable and stable, a redirect is refused rather than followed, and oversized upstream bodies truncate within the declared output budget."
+  statement: "**Failure taxonomy** — connect-time auth failure is terminal, the mid-session ladder is bounded, rate limits and server errors are stable and retryable for the read server but resolve `uncertain` and unrepeatable for a write or send already dispatched, the two package endpoints are the only hosts dialled, a redirect is refused rather than followed, and oversized upstream bodies truncate within the declared output budget."
   check: tests/gates/pending.py::pending_gate
 - id: gate.email.monitoring_recipe
   milestone: 18
