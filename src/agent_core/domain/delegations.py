@@ -172,6 +172,16 @@ class DelegationDefaults(BaseModel):
     wall_seconds: int = Field(gt=0)
 
 
+class DelegationCaps(BaseModel):
+    """Closed fan-out caps from the ``delegation:`` block; every cap positive."""
+
+    max_children_per_call: int = Field(gt=0)
+    max_live_children_per_parent: int = Field(gt=0)
+    max_depth: int = Field(ge=1)
+    max_live_delegated_runs_per_tenant: int = Field(gt=0)
+    summary_max_bytes: int = Field(gt=0)
+
+
 def _insufficient(dimension: str) -> DelegationValidationError:
     return DelegationValidationError(
         DelegationRejectionReason.BUDGET_INSUFFICIENT.value,

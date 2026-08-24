@@ -4,19 +4,19 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**The request is validated before anything exists.** A request with no briefs, more briefs than the per-call cap, or any brief missing its objective, success condition, or allowed tools or exceeding a cap, is rejected with a stable reason and creates no child, session, ledger row, or suspension for any of its briefs."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_briefs_are_validated_before_anything_exists
 - id: gate.delegate.materialize_atomic
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Materialization is atomic across a crash.** No injected pre-commit crash leaves a child session, run, seed, ledger row, or suspended invocation; a post-commit retry with the same invocation identity returns the one delegation."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/integration/test_delegation_materializer_m13.py::test_materialization_rolls_back_at_every_write_boundary_and_retries
 - id: gate.delegate.dedicated_session
   milestone: 13
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**A child never shares its parent's session.** Every child is created in a dedicated session; the parent session's one-active-run index is never contended and never widened."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_every_child_gets_a_dedicated_session
 - id: gate.delegate.parent_suspends
   milestone: 13
   kind: case
