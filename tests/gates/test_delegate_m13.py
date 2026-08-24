@@ -1200,3 +1200,25 @@ async def test_delegation_is_default_off(tmp_path: Path) -> None:
             assert [
                 event for event in requested if event.payload.get("parent_run_id") == str(run_id)
             ] == []
+
+
+async def test_delegation_changes_the_outcome() -> None:
+    """Run case 32's delegating and single-agent arms behind gate.delegate.changes_outcome."""
+
+    from agent_core.evals.cases import load_cases
+    from agent_core.evals.runner import run_case
+
+    root = Path(__file__).resolve().parents[2]
+    case = next(
+        item
+        for item in load_cases(root / "tests/eval_cases")
+        if item.name == "delegation_changes_outcome"
+    )
+
+    result = await run_case(case, root / "evals/fixtures/models")
+
+    before, after = result.arm_results
+    assert before.run.status is RunStatus.FAILED
+    assert before.run.failure is not None
+    assert after.run.status is RunStatus.COMPLETED
+    assert after.run.final_message == "FINDING_CONFIRMED"

@@ -8,7 +8,9 @@ title: Current Milestone
   complete. Milestone 13 — general-purpose subagents and delegation — is the
   next sequential authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
-  gates, and has not started. Milestone 14 — inbound surfaces and
+  gates, and is in progress: build steps 1 through 5 and the deterministic
+  half of 6 are implemented with every registered gate resolving to a live,
+  locally passing check. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
   twenty-one gates and follows Milestone 13. Milestone 15 — operational
   hardening — is specified by
@@ -41,9 +43,16 @@ title: Current Milestone
   gates, the full local and PostgreSQL lanes, Apple package and simulator lanes,
   hosted CI passed on the candidate head, and the completed integration was
   delivered directly to `dev`; code review is reserved for the final merge into
-  `main`. Milestones 13 through 15 remain
-  authorized and specified with twenty-one, twenty-one, and sixteen registered
-  gates; none has started. Milestone 16, the parallel memory-evaluation
+  `main`. Milestone 13 is in progress: the
+  delegation domain values and limit derivation, the ledger persistence and
+  erasure, delegate.run and its one-transaction materializer, the child-run
+  suspension, join, and cancel cascade, the delegation limits block with
+  tenant admission and the default-off flag, and case 32 with the tools arm
+  overlay are implemented, with all twenty-one gates passing locally; the
+  capability scenario awaits the owner's redacted failed trajectory, and
+  hosted CI and the CodeRabbit review loop remain outstanding. Milestones 14
+  and 15 remain authorized and specified with twenty-one and sixteen
+  registered gates; neither has started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the
   provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
   the CodeRabbit review loop finished clean on the `dev` to `main` pull

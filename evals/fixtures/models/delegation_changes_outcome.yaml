@@ -1,0 +1,21 @@
+turns:
+  - kind: tool_call
+    tool_name: delegate.run
+    arguments:
+      briefs:
+        - objective: Research the delegated question.
+          success_condition: A single confirmed finding sentinel.
+          allowed_tools: [math.calculate]
+    call_id: call_delegate_run
+    context_contains: delegate.run
+  - kind: final
+    context_contains: <delegation_brief
+    text: DELEGATED_FINDING_X
+    stop_reason: end_turn
+  - kind: final
+    context_contains: DELEGATED_FINDING_X
+    text: FINDING_CONFIRMED
+    stop_reason: end_turn
+  - kind: error
+    error_class: permanent
+    message: The delegated research could not be performed by a single agent.

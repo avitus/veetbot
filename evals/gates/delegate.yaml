@@ -124,4 +124,4 @@
   kind: case
   spec: docs/plan/subagents-and-delegation.md#hard-gates
   statement: "**Delegation changes the outcome.** Case 32's delegating arm completes where the single-agent arm fails, with no additional policy failure."
-  check: tests/gates/pending.py::pending_gate
+  check: tests/gates/test_delegate_m13.py::test_delegation_changes_the_outcome

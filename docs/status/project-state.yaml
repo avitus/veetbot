@@ -112,7 +112,7 @@ milestones:
       - email and webhook transports
   "13":
     title: General-purpose subagents and delegation
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-20
     design: docs/plan/subagents-and-delegation.md
     adr: docs/adr/0063-milestone-13-subagents-and-delegation.md
@@ -126,6 +126,43 @@ milestones:
     deferred_scope:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
+    evidence:
+      - check: twenty-one Milestone 13 gate.delegate.* gates
+        outcome: passed_locally
+        detail: >-
+          All twenty-one registered Milestone 13 entries in
+          evals/gates/delegate.yaml resolve to live checks — seventeen in
+          tests/gates/test_delegate_m13.py, one in
+          tests/unit/test_persistence_schema.py, and three in the
+          PostgreSQL integration lane
+          (tests/integration/test_delegation_materializer_m13.py and
+          tests/integration/test_migrations.py) — and all pass when
+          executed by node identifier. The harness cannot execute them
+          through agent eval gates yet for the reason Milestones 16 and 17
+          recorded: --milestone 13 would also activate the still-pending
+          Milestone 14 and 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
+      - check: build sequence steps 1 through 5 and the deterministic half of 6
+        outcome: passed_locally
+        detail: >-
+          The delegation domain values and limit derivation, the
+          delegations ledger persistence with erasure and its shared
+          repository contract on both tiers, delegate.run and the
+          one-transaction materializer with write-probe crash coverage,
+          the child_run suspension, join, requeue_after_child edge, and
+          downward-only cancel cascade, the delegation limits block with
+          the tenant admission lock and the default-off flag, and case 32
+          with the tools arm overlay are implemented and verified by the
+          static, contract, and PostgreSQL integration lanes.
+      - check: capability scenario from a real failed trajectory
+        outcome: not_started
+        detail: >-
+          The owner has not yet supplied the redacted failed long-research
+          trajectory the gate for multi-agent work names; without it the
+          milestone is buildable but not activatable. Its single-agent
+          baseline and delegating re-run scoring remain outstanding, as do
+          hosted CI and the CodeRabbit review loop of build step 7.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
@@ -371,5 +408,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-24T07:32:16Z
+last_updated: 2026-08-24T21:30:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round
