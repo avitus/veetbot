@@ -71,6 +71,11 @@ test-apple-ui:
 		echo 'test-apple-ui requires a full Xcode installation.' >&2; \
 		exit 1; \
 	fi; \
+	DEVELOPER_DIR="$$apple_developer_dir" xcodebuild test -quiet \
+		-project clients/apple/Veetbot.xcodeproj \
+		-scheme Veetbot \
+		-destination 'platform=macOS' \
+		-only-testing:VeetbotUITests/ConversationNavigationUITests/testMainWindowSizePersistsAcrossApplicationRestart || exit $$?; \
 	iphone_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \
 		| python3 -c 'import json, sys; devices = json.load(sys.stdin)["devices"]; candidates = [(tuple(map(int, runtime.rsplit("iOS-", 1)[1].split("-"))), device["udid"]) for runtime, values in devices.items() if "iOS-" in runtime for device in values if device["name"].startswith("iPhone")]; print(max(candidates)[1] if candidates else "")'); \
 	ipad_device_id=$$(DEVELOPER_DIR="$$apple_developer_dir" xcrun simctl list devices available -j \

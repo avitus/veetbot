@@ -178,7 +178,7 @@ Additional targets are explicit about their requirements:
 | `make test-integration` | Run PostgreSQL, resilience, security, and eval-case tests |
 | `make test-live` | Explicitly enable credentialed provider tests |
 | `make test-apple` | Run the Apple client's Swift Testing suite (requires full Xcode) |
-| `make test-apple-ui` | Run conversation-navigation UI tests on available iPhone and iPad simulators |
+| `make test-apple-ui` | Run the macOS window-restart test and conversation-navigation tests on available iPhone and iPad simulators |
 | `make test-deploy` | Exercise release and Nginx installers against isolated command stubs |
 | `make production-check` | Validate release identity, model credential, gVisor, sandbox image, storage, and migration head |
 | `make docs` | Build the MkDocs site and standalone HTML publication |

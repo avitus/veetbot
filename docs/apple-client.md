@@ -24,7 +24,9 @@ make test-apple-ui
 `make test-apple` requires full Xcode and guarantees that Swift Testing suites
 execute; it fails instead of accepting the Command Line Tools behavior that can
 compile the bundle without running it. `make test-apple-ui` also requires full
-Xcode, selects available iPhone and iPad simulators, and launches a debug-only,
+Xcode. It uses a debug-only hook to resize the real macOS SwiftUI window,
+terminates the app, and verifies the relaunched window has the same size. It
+then selects available iPhone and iPad simulators and launches a debug-only,
 in-process fixture to verify that historical rows open and switch conversations,
 new-conversation rows open the chat surface, and selected transcripts render.
 Both targets run in the required CircleCI Apple job.
