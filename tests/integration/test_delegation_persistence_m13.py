@@ -197,3 +197,37 @@ async def test_postgres_parent_session_erasure_deletes_children_and_the_ledger()
             with pytest.raises(NotFoundError):
                 await uow.sessions.get(graph.parent_session_id, graph.principal)
             assert await uow.delegations.get_by_invocation(graph.invocation_id) is None
+
+
+async def test_postgres_parent_erasure_survives_a_dangling_child_link() -> None:
+    """A ledger link whose child session and tombstone are gone never blocks the parent."""
+
+    from sqlalchemy import delete as sql_delete
+
+    from agent_core.adapters.persistence.sqlalchemy_models import SessionRow
+    from agent_core.adapters.persistence.unit_of_work import PostgresUnitOfWork
+
+    async with build(settings=database_settings(), storage="postgres") as composition:
+        graph = _DelegationGraph(composition.principal)
+        erased_at = NOW + timedelta(days=1)
+
+        async with composition.uow_factory() as uow:
+            await graph.create(uow)
+
+        # Remove the child session out of band, bypassing the deletion
+        # contract, so the ledger still names it but no tombstone exists.
+        async with composition.uow_factory() as uow:
+            assert isinstance(uow, PostgresUnitOfWork)
+            await uow.session.execute(
+                sql_delete(SessionRow).where(SessionRow.id == graph.child_session_id)
+            )
+
+        async with composition.uow_factory() as uow:
+            assert await uow.session_deletions.delete(
+                graph.parent_session_id, graph.principal, erased_at
+            )
+
+        async with composition.uow_factory() as uow:
+            with pytest.raises(NotFoundError):
+                await uow.sessions.get(graph.parent_session_id, graph.principal)
+            assert await uow.delegations.get_by_invocation(graph.invocation_id) is None

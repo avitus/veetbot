@@ -156,6 +156,21 @@ milestones:
           the tenant admission lock and the default-off flag, and case 32
           with the tools arm overlay are implemented and verified by the
           static, contract, and PostgreSQL integration lanes.
+      - check: red-green discipline for the Milestone 13 suites
+        outcome: recorded
+        detail: >-
+          Every build step began with a recorded failing run before its
+          green implementation. The focused red commands and their expected
+          failures were, in build order, pytest
+          tests/gates/test_delegate_m13.py failing on the unimplemented
+          limit derivation and materializer, tests/unit/
+          test_delegation_domain_m13.py failing on unenforced brief bounds,
+          tests/contract/test_delegation_repository_contract.py and
+          tests/unit/test_persistence_schema.py failing on the unimplemented
+          repositories and constraint-free row, the end-to-end suspension
+          suite failing with the parent completing without any delegation
+          machinery, and tests/unit/test_config.py failing on the ten
+          missing delegation knobs.
       - check: capability scenario from a real failed trajectory
         outcome: not_started
         detail: >-

@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import cast
+from uuid import UUID
 
 import pytest
 
@@ -11,7 +12,12 @@ from agent_core.config import Settings
 from agent_core.domain.agents import Principal
 from agent_core.domain.approvals import ApprovalResolutionType
 from agent_core.domain.errors import NotFoundError
-from agent_core.domain.messages import FakeModelScript, ScriptedToolCall, ScriptedTurn
+from agent_core.domain.messages import (
+    FakeModelScript,
+    ScriptedToolCall,
+    ScriptedTurn,
+    TextPart,
+)
 from agent_core.domain.policies import IdempotencyClass, RiskLevel, SideEffectClass
 from agent_core.domain.runs import RunStatus
 from agent_core.domain.tools import ToolFailureKind
@@ -239,3 +245,39 @@ async def test_schedule_create_tool_replays_one_idempotent_schedule() -> None:
     assert mismatched.failure is not None
     assert mismatched.failure.reason_code == "schedule.idempotency_mismatch"
     assert len(page.items) == 1
+
+
+async def test_schedule_create_tool_replays_a_cancelled_schedule_as_terminal() -> None:
+    async with build(
+        settings=_enabled_settings(),
+        fixed_clock_at=NOW,
+        sequential_ids=True,
+        enabled_tools=["schedule.create"],
+    ) as composition:
+        registered = cast(
+            RegisteredTool,
+            composition.tool_pipeline._registry.get("schedule.create"),
+        )
+        tool = cast(ScheduleCreateTool, registered.implementation)
+        context = replace(
+            tool_context(),
+            principal=composition.principal,
+            idempotency_key="cancelled-schedule-invocation",
+        )
+        first = await tool.execute(ARGUMENTS, context)
+        assert first.ok is True
+        assert first.structured is not None
+        schedule_id = UUID(first.structured["schedule_id"])
+        await composition.schedules.cancel(composition.principal, schedule_id, 1)
+
+        replay = await tool.execute(ARGUMENTS, context)
+
+    assert replay.ok is True
+    assert replay.structured is not None
+    assert replay.structured["schedule_id"] == str(schedule_id)
+    assert replay.structured["state"] == "CANCELLED"
+    assert replay.structured["next_fire_at"] is None
+    assert replay.structured["replayed"] is True
+    [narration] = replay.content
+    assert isinstance(narration, TextPart)
+    assert "will not fire again" in narration.text

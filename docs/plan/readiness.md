@@ -580,7 +580,7 @@ Two further items deserved naming.
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1476`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1482`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -1013,6 +1013,16 @@ policy"*, and only the second survives the index, with no policy
 written to choose between them. It is recorded here rather than
 resolved: resolving it is Milestone 10 work, and this review
 authorizes none.
+
+The measurement above is preserved as the pre-Milestone-13 baseline
+it was. Milestone 13 closed it:
+[subagents-and-delegation.md](subagents-and-delegation.md) supplies
+the brief schema the explicit objective lacked, the rule that derives
+a child's own limits from the parent's remainder, and the
+`delegations` ledger that carries the separate trace and the artifact
+references, and ADR-0063 resolves the recorded session conflict by
+always materializing a dedicated child session, leaving the
+one-active-run index untouched.
 
 The historical verdict was that this was a direction rather than a milestone.
 The authorization and new memory-maturation acceptance criteria changed that
@@ -1551,7 +1561,7 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1476` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1482` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
     Milestone 3.** `engineering-plan.md:2541` against
     `model-gateway.md:1795` and `milestone-map.md:1420`. The map

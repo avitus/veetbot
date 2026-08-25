@@ -25,7 +25,14 @@ class InlineRunDispatcher:
             if run_id in self._dispatched:
                 return
             self._dispatched.add(run_id)
-        await self._execute(run_id)
+        try:
+            await self._execute(run_id)
+        except BaseException:
+            # Exactly-once holds for successful execution; a failed execution
+            # must stay dispatchable or the run is unrecoverable in-process.
+            async with self._lock:
+                self._dispatched.discard(run_id)
+            raise
 
     async def resume(self, run_id: UUID) -> None:
         async with self._lock:

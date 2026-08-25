@@ -42,8 +42,13 @@ OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "schedule_id": {"type": "string", "format": "uuid"},
-        "state": {"type": "string", "enum": ["ACTIVE"]},
-        "next_fire_at": {"type": "string", "format": "date-time"},
+        # A fresh creation is always ACTIVE; an idempotent replay reports the
+        # schedule's current state, which may have moved on since creation.
+        "state": {
+            "type": "string",
+            "enum": ["ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"],
+        },
+        "next_fire_at": {"type": ["string", "null"], "format": "date-time"},
         "replayed": {"type": "boolean"},
     },
     "required": ["schedule_id", "state", "next_fire_at", "replayed"],
@@ -185,23 +190,23 @@ class ScheduleCreateTool:
                 retryable=False,
             )
 
-        assert record.schedule.next_fire_at is not None
+        next_fire_at = record.schedule.next_fire_at
         structured = {
             "schedule_id": str(record.schedule.id),
             "state": record.schedule.state.value,
-            "next_fire_at": record.schedule.next_fire_at.isoformat(),
+            "next_fire_at": None if next_fire_at is None else next_fire_at.isoformat(),
             "replayed": record.replayed,
         }
+        if next_fire_at is not None:
+            narration = f"Created schedule {record.schedule.id} for {next_fire_at.isoformat()}."
+        else:
+            narration = (
+                f"Schedule {record.schedule.id} already exists and is "
+                f"{record.schedule.state.value.lower()}; it will not fire again."
+            )
         return ToolResult(
             ok=True,
-            content=[
-                TextPart(
-                    text=(
-                        f"Created schedule {record.schedule.id} for "
-                        f"{record.schedule.next_fire_at.isoformat()}."
-                    )
-                )
-            ],
+            content=[TextPart(text=narration)],
             structured=structured,
         )
 

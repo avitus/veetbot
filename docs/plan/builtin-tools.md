@@ -187,12 +187,18 @@ identities (plus historical versions of `memory.remember` and `skill.load`):
 tools, and `schedule.create`. Step 6 validates every registered version of
 those twenty identities.
 `delegate.run` is the
-twenty-first model-callable tool declared by the corpus, but
-[tool-system.md](tool-system.md) defers its implementation with the
-general-purpose-subagent extension; it has no checked-in spec, is not
-registered, and therefore is not input to step 6. Step 3, domain membership,
-already passes for all twenty registered tools because the partition table in
-[tool-system.md](tool-system.md) lists their builtin domains.
+twenty-first model-callable tool declared by the corpus.
+[tool-system.md](tool-system.md) deferred its implementation with the
+general-purpose-subagent extension, and Milestone 13 supplied it:
+[subagents-and-delegation.md](subagents-and-delegation.md) is its checked-in
+specification, a control tool in the `delegate` domain gated behind
+`AGENT_DELEGATION_ENABLED`. The composition root registers it only when that
+flag is on, so a default deployment still validates twenty identities in
+step 6 while a delegation-enabled one validates `delegate.run` as the
+twenty-first. Step 3, domain membership,
+already passes for every registered tool because the partition table in
+[tool-system.md](tool-system.md) lists their builtin domains, `delegate`
+among them.
 
 ### Why `artifact.export` is Milestone 6
 

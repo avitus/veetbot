@@ -285,7 +285,7 @@ public struct RunFailureView: Codable, Sendable {
     public var userFacingMessage: String {
         let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return "The run ended because (reason.displayName.lowercased())."
+            return "The run ended because \(reason.displayName.lowercased())."
         }
         return trimmed
     }

@@ -66,6 +66,9 @@ _JOIN_CHILD_FAILED_MESSAGE = (
 
 WriteProbe = Callable[[str], None]
 FORBIDDEN_CHILD_TOOLS = frozenset({"delegate.run", "skill.manage"})
+# json.dumps escapes neither < nor >, so a brief naming the envelope tag could
+# read to the child model as closing the untrusted-data boundary.
+BRIEF_ENVELOPE_DELIMITER = "delegation_brief"
 CHILD_RUN_PRIORITY = 10
 CHILD_INSTRUCTIONS_FRAME = (
     "Work only toward the objective below and stop when the success condition "
@@ -315,6 +318,11 @@ class DelegationMaterializer:
                     raise _reject(
                         DelegationRejectionReason.BRIEF_INVALID,
                         "a brief failed credential validation",
+                    )
+                if BRIEF_ENVELOPE_DELIMITER in text.lower():
+                    raise _reject(
+                        DelegationRejectionReason.BRIEF_INVALID,
+                        "a brief may not name the seed envelope delimiter",
                     )
 
     async def _admit(

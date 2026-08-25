@@ -33,6 +33,27 @@ import Testing
     }
 
     @Test
+    func testBlankFailureMessageFallsBackToTheInterpolatedReason() {
+        let reducer = RunStateReducer()
+
+        reducer.reduce(
+            SSEFrame(
+                id: 10,
+                event: "run.failed",
+                data: [
+                    "failure": .object([
+                        "reason": .string("budget_exceeded"),
+                        "message": .string("   "),
+                        "occurred_at": .string("2026-08-25T09:00:00Z"),
+                    ])
+                ]
+            )
+        )
+
+        #expect(reducer.failure?.userFacingMessage == "The run ended because budget exceeded.")
+    }
+
+    @Test
     func testChatRendersTheStructuredRunFailureInTheConversation() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

@@ -92,8 +92,14 @@ class PostgresSessionDeletionRepository:
         for parent_row in parent_rows:
             for child in parent_row.children:
                 child_session = child.get("child_session_id")
-                if child_session is not None:
+                if child_session is None:
+                    continue
+                try:
                     await self.delete(UUID(str(child_session)), principal, deleted_at)
+                except NotFoundError:
+                    # A dangling ledger link — the child session and its
+                    # tombstone are both gone — must not block the parent.
+                    continue
         referencing = (
             await self._session.scalars(
                 select(DelegationRow)

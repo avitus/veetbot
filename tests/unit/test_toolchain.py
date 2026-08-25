@@ -1363,7 +1363,7 @@ def test_docs_checks_admit_the_roadmap_milestones(
     monkeypatch.setattr(check_docs, "PLAN", plan)
     monkeypatch.setattr(check_docs, "errors", [])
     check_docs.check_plan()
-    for milestone in range(12, 19):
+    for milestone in range(12, 20):
         assert f"engineering-plan.md missing 'Milestone {milestone}' section" in check_docs.errors
 
 
