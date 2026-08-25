@@ -139,22 +139,21 @@ failure. New adapters must begin with their shared contract suite, and new
 public surfaces require boundary-level happy-path, validation, authorization,
 failure, and retry coverage.
 
-## Pull request review gate
+## Pull request review and deployment gate
 
-GitHub mergeability does not make a PR ready under this contract. Use only the
-CodeRabbit GitHub PR integration, never the local CLI (rate-limited, not authoritative). Loop:
+GitHub mergeability is insufficient. Use only the CodeRabbit GitHub PR integration; never use the rate-limited, non-authoritative local CLI. Loop:
 
 1. Wait for CodeRabbit to finish reviewing the current head commit.
-2. Address every CodeRabbit comment of any severity or placement — inline,
-   summary, outside-diff, nitpick, suggestion, or trivial. Fix each valid
-   finding; answer inapplicable ones with concrete evidence and resolve the
-   conversation.
+2. Address every CodeRabbit comment — inline, summary, outside-diff, nitpick, suggestion, trivial, or any severity.
+   Fix valid findings; answer inapplicable ones with concrete evidence and resolve the conversation.
 3. Push, wait for the review of the new head commit, and repeat until
    CodeRabbit reports no findings and every conversation is resolved.
 4. Confirm all required CI checks pass on that same final head commit.
+5. After merging to `main`, follow the merge commit's CircleCI pipeline through production delivery. Verify the application and documentation jobs pass
+   and their public release-identity checks report the merged revision, as defined in `docs/deployment.md`. If delivery fails, keep the work active through
+   diagnosis and recovery; a merge is not complete until its production deployment succeeds.
 
-Never call a PR ready, mergeable, approved, or complete while CodeRabbit is
-queued, running, has unresolved comments, or has not reviewed the latest push.
+Never call a PR ready, mergeable, approved, or complete while CodeRabbit is queued, running, has unresolved comments, or has not reviewed the latest push.
 
 ## Documentation update rules
 
