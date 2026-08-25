@@ -24,6 +24,8 @@ FIRE_AT = datetime(2026, 8, 26, 2, tzinfo=UTC)
 
 
 async def _run_worker(composition: Composition, worker_id: str) -> None:
+    """Run one durable queue claim for the test composition."""
+
     worker = DurableWorker(
         uow_factory=composition.uow_factory,
         executor=composition.executor,
@@ -34,6 +36,8 @@ async def _run_worker(composition: Composition, worker_id: str) -> None:
 
 
 async def test_clarified_reminder_resumes_once_and_creates_schedule() -> None:
+    """A clarified reminder should resume once, pass approval, and persist."""
+
     arguments = {
         "title": "Throw the ball for Marzipan",
         "instruction": "Remind me to throw the ball for Marzipan.",

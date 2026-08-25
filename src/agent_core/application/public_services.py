@@ -918,6 +918,8 @@ class PublicRunService:
         content: list[ContentBlock],
         question_id: UUID | None,
     ) -> SubmitResult:
+        """Complete one suspended question and atomically queue its run to resume."""
+
         checkpoint = await uow.checkpoints.latest(run.id)
         if checkpoint is None:
             raise InvalidStateTransition("waiting run has no checkpoint")
