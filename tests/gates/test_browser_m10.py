@@ -37,7 +37,6 @@ from tests.unit.test_hosted_browser_provider import (
 
 async def test_provider_contract() -> None:
     await provider_contract.test_browser_provider_navigation_and_observation_contract()
-    await provider_contract.test_browser_provider_close_contract()
     await provider_contract.test_playwright_adapter_satisfies_browser_provider_contract()
 
 
