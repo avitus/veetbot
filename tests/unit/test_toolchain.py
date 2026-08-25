@@ -1498,6 +1498,31 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     )
 
 
+def test_apple_ui_macos_destination_signs_ad_hoc_for_ci() -> None:
+    """The macOS UI-test arm must not require a certificate or profile.
+
+    CircleCI mac runners hold no Mac Development certificate for the team,
+    and the app's entitlements (aps-environment, keychain access groups)
+    require a provisioning profile no runner can mint. The macOS destination
+    therefore builds with manual ad-hoc signing and no entitlements; the iOS
+    simulator destinations never needed signing at all.
+    """
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    recipe = makefile.split("test-apple-ui:", 1)[1].split("test-deploy:", 1)[0]
+    parts = recipe.split("-destination 'platform=macOS'")
+    assert len(parts) == 2, "the macOS UI-test destination is missing"
+    invocation_tail = parts[1].split("|| exit", 1)[0]
+    for override in (
+        "CODE_SIGN_STYLE=Manual",
+        "CODE_SIGN_IDENTITY=-",
+        "CODE_SIGNING_REQUIRED=NO",
+        "CODE_SIGN_ENTITLEMENTS=",
+        "PROVISIONING_PROFILE_SPECIFIER=",
+        "DEVELOPMENT_TEAM=",
+    ):
+        assert override in invocation_tail, f"macOS UI-test arm is missing {override}"
+
+
 def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
     status = tmp_path / "docs" / "status"
     status.mkdir(parents=True, exist_ok=True)
