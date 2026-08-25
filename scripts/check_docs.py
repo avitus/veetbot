@@ -263,6 +263,115 @@ def check_citations() -> None:
                 note(ln[6:])
 
 
+_MILESTONE_STATUS_SECTIONS = {
+    "complete": "Complete",
+    "in_progress": "In progress",
+    "authorized": "Authorized",
+}
+_MILESTONE_BULLET = re.compile(r"^- \*\*Milestone (\d+) — (.+?)\*\*")
+_MILESTONE_HEADING = re.compile(r"^### Milestone (\d+) — (.+?)\s*$")
+
+
+def check_milestones_page() -> None:
+    """Reconcile docs/status/milestones.md against project-state.yaml.
+
+    Every milestone the state file declares must appear exactly once on the
+    page, under the section matching its status, with its exact title. An
+    in-progress milestone must declare its remaining work as ``open_items``
+    in the state file, and the page's unchecked task list must match that
+    list exactly; finished work is removed from both, never checked off.
+    """
+    state_path = ROOT / "docs" / "status" / "project-state.yaml"
+    page_path = ROOT / "docs" / "status" / "milestones.md"
+    try:
+        state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return  # check_project_state already reports these
+    declared = (state or {}).get("milestones", {})
+    if not isinstance(declared, dict) or not declared:
+        return
+    if not page_path.is_file():
+        err("milestones page missing: docs/status/milestones.md")
+        return
+
+    section = None
+    entries: dict[int, tuple[str | None, str]] = {}
+    checklists: dict[int, list[tuple[str, bool]]] = {}
+    current_heading_milestone: int | None = None
+    seen_twice: set[int] = set()
+    for line in lines_without_code(page_path.read_text(encoding="utf-8")):
+        section_match = re.match(r"^## (.+?)\s*$", line)
+        if section_match:
+            section = section_match.group(1)
+            current_heading_milestone = None
+            continue
+        entry = _MILESTONE_BULLET.match(line) or _MILESTONE_HEADING.match(line)
+        if entry:
+            number, title = int(entry.group(1)), entry.group(2)
+            if number in entries:
+                seen_twice.add(number)
+            entries[number] = (section, title)
+            current_heading_milestone = number if line.startswith("### ") else None
+            continue
+        task = re.match(r"^- \[([ x])\] (.+?)\s*$", line)
+        if task and current_heading_milestone is not None:
+            checklists.setdefault(current_heading_milestone, []).append(
+                (task.group(2), task.group(1) == "x")
+            )
+
+    for number in sorted(seen_twice):
+        err(f"milestones.md must list milestone {number} exactly once")
+    for key in sorted(declared, key=int):
+        number = int(key)
+        info = declared[key] or {}
+        status = info.get("status")
+        title = info.get("title", "")
+        expected_section = _MILESTONE_STATUS_SECTIONS.get(status)
+        if expected_section is None:
+            err(f"project-state.yaml milestone {number} has unmapped status {status!r}")
+            continue
+        if number not in entries:
+            err(f"milestones.md is missing milestone {number}")
+            continue
+        page_section, page_title = entries[number]
+        if page_section != expected_section:
+            err(
+                f"milestones.md places milestone {number} under {page_section!r} "
+                f"but project-state.yaml status {status!r} requires "
+                f"{expected_section!r}"
+            )
+        if page_title != title:
+            err(
+                f"milestones.md title for milestone {number} does not match "
+                f"project-state.yaml: {page_title!r} != {title!r}"
+            )
+        if status == "in_progress":
+            open_items = info.get("open_items")
+            if not open_items:
+                err(
+                    f"project-state.yaml milestone {number} is in_progress "
+                    "but declares no open_items"
+                )
+                continue
+            page_items = checklists.get(number, [])
+            checked = [item for item, done in page_items if done]
+            for item in checked:
+                err(
+                    f"milestones.md milestone {number} has a checked item "
+                    f"({item!r}); remove finished work from open_items instead"
+                )
+            if [item for item, done in page_items if not done] != list(open_items):
+                err(
+                    f"milestones.md checklist for milestone {number} does not "
+                    "match project-state.yaml open_items"
+                )
+    for number in sorted(entries):
+        if str(number) not in declared:
+            err(
+                f"milestones.md lists milestone {number}, which project-state.yaml does not declare"
+            )
+
+
 def check_gate_registry() -> None:
     """Reconcile declarations, map rows, checks, anchors, and census."""
     current_milestone = project_current_milestone()
@@ -294,6 +403,7 @@ def main() -> None:
     check_manifest()
     check_no_root_docx_links()
     check_agents_size()
+    check_milestones_page()
     check_citations()
     check_gate_registry()
     if "--no-build" not in sys.argv:

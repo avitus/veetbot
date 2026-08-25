@@ -1496,3 +1496,134 @@ def test_deploy_sudoers_contract_covers_every_sudo_command() -> None:
     assert used <= rule_binaries, (
         f"sudo commands without a contract rule: {sorted(used - rule_binaries)}"
     )
+
+
+def _milestones_fixture(tmp_path: Path, page: str | None) -> None:
+    status = tmp_path / "docs" / "status"
+    status.mkdir(parents=True, exist_ok=True)
+    milestones = {
+        "0": {"title": "Repository and engineering foundation", "status": "complete"},
+        "1": {
+            "title": "In-memory vertical slice",
+            "status": "in_progress",
+            "open_items": ["Hosted CI on the final head", "Owner smoke of the flow"],
+        },
+        "2": {"title": "PostgreSQL persistence and durable worker", "status": "authorized"},
+    }
+    (status / "project-state.yaml").write_text(
+        yaml.safe_dump({"project": {"current_milestone": 0}, "milestones": milestones}),
+        encoding="utf-8",
+    )
+    if page is not None:
+        (status / "milestones.md").write_text(page, encoding="utf-8")
+
+
+_CONSISTENT_MILESTONES_PAGE = """\
+# Milestones
+
+## Complete
+
+- **Milestone 0 — Repository and engineering foundation** — delivered.
+
+## In progress
+
+### Milestone 1 — In-memory vertical slice
+
+- [ ] Hosted CI on the final head
+- [ ] Owner smoke of the flow
+
+## Authorized
+
+- **Milestone 2 — PostgreSQL persistence and durable worker**
+
+## Deferred
+
+Roadmap prose only; no milestone entries live here.
+"""
+
+
+def _milestones_page_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, page: str | None
+) -> list[str]:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, page)
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_milestones_page()
+    return list(check_docs.errors)
+
+
+def test_milestones_page_reconciles_against_project_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    assert _milestones_page_errors(monkeypatch, tmp_path, _CONSISTENT_MILESTONES_PAGE) == []
+
+
+def test_milestones_page_flags_absence_coverage_and_grouping(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    errors = _milestones_page_errors(monkeypatch, tmp_path, None)
+    assert any("docs/status/milestones.md" in e and "missing" in e for e in errors)
+
+    dropped = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**\n", ""
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, dropped)
+    assert any("milestone 2" in e and "missing" in e for e in errors)
+
+    misgrouped = _CONSISTENT_MILESTONES_PAGE.replace(
+        "## Authorized\n\n- **Milestone 2 — PostgreSQL persistence and durable worker**",
+        "## Authorized\n",
+    ).replace(
+        "- **Milestone 0 — Repository and engineering foundation** — delivered.",
+        "- **Milestone 0 — Repository and engineering foundation** — delivered.\n"
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, misgrouped)
+    assert any("milestone 2" in e and "'Complete'" in e and "'authorized'" in e for e in errors)
+
+    retitled = _CONSISTENT_MILESTONES_PAGE.replace(
+        "Milestone 0 — Repository and engineering foundation",
+        "Milestone 0 — Repository foundation",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, retitled)
+    assert any("milestone 0" in e and "title" in e for e in errors)
+
+    duplicated = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**\n"
+        "- **Milestone 2 — PostgreSQL persistence and durable worker**",
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, duplicated)
+    assert any("milestone 2" in e and "once" in e for e in errors)
+
+
+def test_milestones_page_flags_checklist_drift(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    drifted = _CONSISTENT_MILESTONES_PAGE.replace("- [ ] Owner smoke of the flow\n", "")
+    errors = _milestones_page_errors(monkeypatch, tmp_path, drifted)
+    assert any("milestone 1" in e and "open_items" in e for e in errors)
+
+    checked = _CONSISTENT_MILESTONES_PAGE.replace(
+        "- [ ] Hosted CI on the final head", "- [x] Hosted CI on the final head"
+    )
+    errors = _milestones_page_errors(monkeypatch, tmp_path, checked)
+    assert any("milestone 1" in e and "checked" in e for e in errors)
+
+
+def test_milestones_page_requires_open_items_for_in_progress(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
+    check_docs = importlib.import_module("check_docs")
+    _milestones_fixture(tmp_path, _CONSISTENT_MILESTONES_PAGE)
+    state_path = tmp_path / "docs" / "status" / "project-state.yaml"
+    state = yaml.safe_load(state_path.read_text(encoding="utf-8"))
+    del state["milestones"]["1"]["open_items"]
+    state_path.write_text(yaml.safe_dump(state), encoding="utf-8")
+    monkeypatch.setattr(check_docs, "ROOT", tmp_path)
+    monkeypatch.setattr(check_docs, "errors", [])
+    check_docs.check_milestones_page()
+    assert any("milestone 1" in e and "open_items" in e for e in check_docs.errors)

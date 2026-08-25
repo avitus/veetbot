@@ -62,6 +62,7 @@ validation:
 
 nav:
   - Home: index.md
+  - Milestones: status/milestones.md
   - Current Milestone: plan/current-milestone.md
   - Engineering Plan: plan/engineering-plan.md
   - Specs:
