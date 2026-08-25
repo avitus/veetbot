@@ -267,17 +267,29 @@ def test_trajectory_provenance_mismatch_is_rejected(tmp_path: Path) -> None:
         load_scenarios(tmp_path, "research")
 
 
-def test_milestone_ten_capability_scenario_is_accepted(tmp_path: Path) -> None:
+def test_milestone_thirteen_capability_scenario_is_accepted(tmp_path: Path) -> None:
     _fixture(tmp_path)
     path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
     path.write_text(
-        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 10"),
+        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 13"),
         encoding="utf-8",
     )
 
     _settings, scenarios = load_scenarios(tmp_path, "research")
 
-    assert scenarios[0].scenario.milestone == 10
+    assert scenarios[0].scenario.milestone == 13
+
+
+def test_milestone_fourteen_capability_scenario_is_rejected(tmp_path: Path) -> None:
+    _fixture(tmp_path)
+    path = tmp_path / "evals" / "capability" / "scenarios" / "research.yaml"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace("milestone: 3", "milestone: 14"),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="less than or equal to 13"):
+        load_scenarios(tmp_path, "research")
 
 
 async def test_tied_cost_ceiling_uses_scenario_scope(tmp_path: Path) -> None:

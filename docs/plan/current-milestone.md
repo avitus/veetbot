@@ -9,8 +9,9 @@ title: Current Milestone
   next sequential authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
   gates, and is in progress: build steps 1 through 5 and the deterministic
-  half of 6 are implemented with every registered gate resolving to a live,
-  locally passing check. Milestone 14 — inbound surfaces and
+  half of 6 are implemented, and the capability scenario schema admits
+  Milestone 13 while retaining a closed upper bound, with every registered
+  gate resolving to a live, locally passing check. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
   twenty-one gates and follows Milestone 13. Milestone 15 — operational
   hardening — is specified by
@@ -52,9 +53,13 @@ title: Current Milestone
   erasure, delegate.run and its one-transaction materializer, the child-run
   suspension, join, and cancel cascade, the delegation limits block with
   tenant admission and the default-off flag, and case 32 with the tools arm
-  overlay are implemented, with all twenty-one gates passing locally; the
-  capability scenario awaits the owner's redacted failed trajectory, and
-  hosted CI and the CodeRabbit review loop remain outstanding. Milestones 14
+  overlay are implemented, with all twenty-one gates passing locally. Pull
+  request 64 passed all five CircleCI lanes, both Xcode Cloud archives,
+  GitGuardian, and a finding-free final-head CodeRabbit review before merging
+  to `main`, covering the implementation on that head. The capability-bound
+  continuation passes locally; the owner's redacted failed trajectory, its two
+  live scores, and hosted verification of the completed evidence head remain.
+  Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the

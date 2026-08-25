@@ -60,7 +60,7 @@ class CapabilityScenario(BaseModel):
 
     id: str = Field(pattern=r"^cap-[a-z0-9]+(?:-[a-z0-9]+)*-\d{4}$")
     suite: str = Field(pattern=r"^[a-z0-9]+(?:_[a-z0-9]+)*$")
-    milestone: int = Field(ge=0, le=10)
+    milestone: int = Field(ge=0, le=13)
     task: str = Field(min_length=1)
     attachments: list[str] = Field(default_factory=list)
     tools: list[str] = Field(default_factory=list)

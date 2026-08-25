@@ -53,6 +53,21 @@ title: Changelog
   16/17, and 19 additions, and `AGENTS.md` and `CLAUDE.md` correct their
   milestone and specification counts.
 
+## 2026-08-25 — Milestone 13 capability scenario bound and hosted evidence
+
+- Raised the capability scenario schema's closed milestone ceiling from 10 to
+  13, as the delegation design requires. Focused regression coverage admits a
+  Milestone 13 trajectory-sourced scenario and rejects Milestone 14; it does
+  not fabricate the real failed trajectory that the publication gate requires.
+- Recorded the hosted evidence already completed by pull request 64. On final
+  head `071e6422503df592f8fe172484a7b1b304014540`, all five CircleCI lanes,
+  both Xcode Cloud archives, GitGuardian, and CodeRabbit passed; CodeRabbit had
+  no final-head finding and every review thread was resolved before the pull
+  request merged to `main`. That evidence covers the implementation on that
+  head, not this later local continuation. The owner-supplied redacted failed
+  trajectory, its single-agent and delegating live scores, and hosted
+  verification of the completed evidence head remain outstanding.
+
 ## 2026-08-24 — Deployment sudo contract covers notifications
 
 - Repaired the production sudoers contract so notification-enabled releases

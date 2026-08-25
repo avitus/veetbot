@@ -160,7 +160,9 @@ milestones:
           downward-only cancel cascade, the delegation limits block with
           the tenant admission lock and the default-off flag, and case 32
           with the tools arm overlay are implemented and verified by the
-          static, contract, and PostgreSQL integration lanes.
+          static, contract, and PostgreSQL integration lanes. The capability
+          scenario schema now admits the Milestone 13 scenario while keeping
+          Milestone 14 outside its closed bound.
       - check: red-green discipline for the Milestone 13 suites
         outcome: recorded
         detail: >-
@@ -175,15 +177,30 @@ milestones:
           repositories and constraint-free row, the end-to-end suspension
           suite failing with the parent completing without any delegation
           machinery, and tests/unit/test_config.py failing on the ten
-          missing delegation knobs.
+          missing delegation knobs. The capability-bound continuation ran
+          pytest tests/unit/test_capability_boundaries.py -k
+          'milestone_thirteen or milestone_fourteen', which failed because
+          the pre-change schema rejected 13 and reported 10, not 13, as its
+          upper bound.
+      - check: hosted CI and final review for pull request 64
+        outcome: passed_on_final_head
+        detail: >-
+          On final head 071e6422503df592f8fe172484a7b1b304014540 all five
+          CircleCI lanes, the Xcode Cloud iOS and macOS archives, GitGuardian,
+          and CodeRabbit passed. CodeRabbit reviewed that exact head with no
+          new finding, every review thread was resolved, and GitHub merged the
+          dev-to-main pull request as 07c8bdfec085a2e6aef75311ea1d5cb046391ab5.
+          This evidence covers the implementation on that head, not the later
+          local capability-bound continuation or the still-unwritten live
+          scenario.
       - check: capability scenario from a real failed trajectory
         outcome: not_started
         detail: >-
           The owner has not yet supplied the redacted failed long-research
           trajectory the gate for multi-agent work names; without it the
           milestone is buildable but not activatable. Its single-agent
-          baseline and delegating re-run scoring remain outstanding, as do
-          hosted CI and the CodeRabbit review loop of build step 7.
+          baseline and delegating re-run scoring remain outstanding, followed
+          by hosted CI and final review on the completed evidence head.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
