@@ -422,6 +422,44 @@ import Testing
     }
 
     @Test
+    func testRetryableArgumentFailureRendersAsCorrectedAfterSuccessfulRetry() {
+        let reducer = RunStateReducer()
+        let failedOutcome = retryableArgumentFailureOutcome
+        reducer.reduce(retryableArgumentFailureFrame(id: 1, callID: "remember-portable"))
+
+        #expect(reducer.tools[0].status.rawValue == "needs correction")
+
+        reducer.reduce(
+            toolFrame(
+                id: 2,
+                callID: "remember-contextual",
+                name: "memory.remember"
+            )
+        )
+
+        #expect(reducer.tools.map(\.status.rawValue) == ["corrected and retried", "completed"])
+        #expect(reducer.tools[0].result?.content.first?.text == failedOutcome)
+    }
+
+    @Test
+    func testLaterSameToolCallDoesNotClaimAnInterruptedCorrection() {
+        let reducer = RunStateReducer()
+        reducer.reduce(retryableArgumentFailureFrame(id: 1, callID: "remember-portable"))
+        reducer.reduce(
+            toolFrame(id: 2, callID: "time", name: "system.current_time")
+        )
+        reducer.reduce(
+            toolFrame(
+                id: 3,
+                callID: "remember-unrelated",
+                name: "memory.remember"
+            )
+        )
+
+        #expect(reducer.tools[0].status.rawValue == "needs correction")
+    }
+
+    @Test
     func testDeniedAndUncertainToolsBreakCompletedToolBundles() {
         for (event, expectedStatus) in [
             ("tool.call.denied", ToolActivityStatus.denied),
@@ -588,6 +626,31 @@ import Testing
             id: id,
             event: event,
             data: data
+        )
+    }
+
+    private var retryableArgumentFailureOutcome: String {
+        #"{"status":"failed","action":"memory.remember","reason_code":"tool.invalid_arguments.portability_ceiling","message":"Use contextual portability.","retryable":true,"remediation":"modify_arguments"}"#
+    }
+
+    private func retryableArgumentFailureFrame(id: Int, callID: String) -> SSEFrame {
+        SSEFrame(
+            id: id,
+            event: "tool.call.failed",
+            data: [
+                "call_id": .string(callID),
+                "name": .string("memory.remember"),
+                "result_item": .object([
+                    "content": .array([
+                        .object([
+                            "type": .string("text"),
+                            "text": .string(retryableArgumentFailureOutcome),
+                        ]),
+                    ]),
+                    "is_error": .bool(true),
+                    "trust": .string("internal_tool"),
+                ]),
+            ]
         )
     }
 }
