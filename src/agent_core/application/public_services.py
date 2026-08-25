@@ -53,6 +53,7 @@ from agent_core.domain.messages import (
     FileReferencePart,
     ImageReferencePart,
     TextPart,
+    ToolCallItem,
     ToolResultItem,
     UserMessage,
 )
@@ -1023,6 +1024,20 @@ class PublicRunService:
             state,
             question_text if isinstance(question_text, str) else None,
         )
+        pending_calls = [
+            ToolCallItem.model_validate(call) for call in checkpoint.pending_tool_calls
+        ]
+        resolved_calls = [call for call in pending_calls if call.call_id == invocation.call_id]
+        if len(resolved_calls) != 1:
+            raise InvalidStateTransition(
+                "checkpoint does not contain exactly one pending question call"
+            )
+        checkpoint.conversation.append(result_item)
+        checkpoint.pending_tool_calls = [
+            call.model_dump(mode="json")
+            for call in pending_calls
+            if call.call_id != invocation.call_id
+        ]
         checkpoint.working_state["context"] = state.model_dump(mode="json")
         checkpoint.working_state.pop("outstanding_question_id", None)
         checkpoint.working_state.pop("outstanding_question_text", None)
