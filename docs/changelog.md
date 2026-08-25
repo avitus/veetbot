@@ -4,6 +4,14 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-24 — Deployment sudo contract covers notifications
+
+- Repaired the production sudoers contract so notification-enabled releases
+  can install, enable, restart, and verify `veetbot-notify` without an
+  interactive password prompt. The structural test now checks every supported
+  base, schedule, notification, and combined unit list instead of checking only
+  the base and schedule variants.
+
 ## 2026-08-24 — Milestone 18 specified: first-class email integration
 
 - Added `docs/plan/email-integration.md` and proposed ADR-0071, meeting

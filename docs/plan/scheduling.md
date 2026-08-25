@@ -36,11 +36,14 @@ ordinary durable runs. It includes:
 - durable audit events, metrics, and offline result retrieval through the
   occurrence-to-run link.
 
-The milestone does not include arbitrary cron expressions, monthly calendar
+Milestone 11 does not include arbitrary cron expressions, monthly calendar
 rules, dependency graphs, workflow DAGs, user-selectable catch-up algorithms,
 push notifications, general-purpose subagents, or a second queue technology.
-It does not make a schedule a tool the model may create. Schedule management is
-an authenticated application surface.
+It deliberately did not make a schedule a tool the model may create; schedule
+management was an authenticated application surface. Milestone 19, authorized
+by the owner on 2026-08-24 and recorded in ADR-0072, adds the narrow
+model-callable creation surface specified below without changing the Milestone
+11 control plane or its completed gates.
 
 ## The boundary: a scheduler creates runs; it does not execute them
 
@@ -674,6 +677,71 @@ Track:
 Metrics contain tenant-safe identifiers or aggregates and never instructions or
 credentials.
 
+## Model-callable one-time creation
+
+Milestone 19 closes the missing edge between a conversational request and the
+existing scheduling control plane. It adds one capability tool:
+
+```text
+name                 schedule.create
+kind                 capability
+source               builtin
+target_kind          in_process
+side_effect          external_write
+risk                 high
+idempotency          conditionally_idempotent
+required_scopes      schedule.write
+timeout_seconds      15
+maximum_output_bytes 4096
+allow_parallel       false
+output_trust         internal_tool
+```
+
+The input schema is closed and has exactly three required fields:
+
+```json
+{
+  "title": "Throw the ball for Marzipan",
+  "instruction": "Remind me to throw the ball for Marzipan.",
+  "at": "2026-08-25T02:00:00+00:00"
+}
+```
+
+`at` is one timezone-aware ISO 8601 instant. Natural-language parsing is not
+part of the tool: the model uses `system.current_time` and, when the date or
+timezone is not known, `conversation.ask_user` before proposing a call. The
+tool creates only `OnceCadence`; daily and weekly creation and every lifecycle
+mutation remain on the HTTP surface.
+
+The tool is registered and present in the default agent only when both
+`AGENT_SCHEDULE_API_ENABLED` and `AGENT_SCHEDULE_WORKER_ENABLED` are true.
+`schedule` becomes a build-time builtin domain. The ordinary pipeline checks
+the exact `schedule.write` scope and the default policy requires approval for
+its `EXTERNAL_WRITE` classification. The approval view contains the concrete
+title, instruction, instant, and the empty requested-scope set.
+
+Execution calls `ScheduleService.create` directly with
+`ToolExecutionContext.principal` and `ToolExecutionContext.idempotency_key`.
+It performs no internal HTTP request and sees no credential. The application
+service remains the one validator and persistence path, including request-key
+replay. A past or naive instant is an argument failure and leaves no schedule.
+
+The definition pins the active agent version and its policy profile and always
+sets `requested_scopes = frozenset()`. Its step, model-call, and tool-call
+limits are the minimum of the active agent's limits and the existing schedule
+ceilings. Cost is the minimum of the active agent's finite cost or `1` and the
+schedule cost ceiling; run timeout is the lesser of 300 seconds and its
+ceiling; misfire grace is the lesser of 3,600 seconds and its ceiling; the
+one-time schedule permits one consecutive failure. No model argument can widen
+any of these values.
+
+The successful result contains `schedule_id`, `state`, `next_fire_at`, and
+whether the application request replayed. Milestone 12's notification behavior
+is unchanged: after the occurrence's run is accounted, the outbox emits the
+generic content-free `schedule_run_finished` notification. The push does not
+contain the title or instruction and can arrive after the nominal instant by
+the duration of the scheduled run.
+
 ## Build sequence
 
 1. Add the domain values, recurrence calculator, and deterministic civil-time
@@ -694,6 +762,14 @@ credentials.
 9. Run the full non-live suite, PostgreSQL integration and resilience lanes,
    hosted CI, and the required GitHub CodeRabbit loop on one final head.
    **M11.**
+10. Add the closed `schedule.create` schema, classification, approval view,
+    exact-instant conversion, and application-service adapter. **M19.**
+11. Register the tool only with both schedule flags, add it to the enabled
+    agent roster on the same condition, and prove scope denial and retry
+    idempotency through the ordinary pipeline. **M19.**
+12. Run the five Milestone 19 gates, the scheduling and notification
+    partitions, the complete non-live suite, PostgreSQL integration, hosted CI,
+    and the CodeRabbit loop on the final head. **M19.**
 
 ## Hard gates
 
@@ -802,12 +878,32 @@ credentials.
     security and repository predicates prevent cross-tenant and cross-principal
     reads and mutations. Registered as `gate.schedule.persistence_isolated`,
     case. **M11.**
+24. **Conversational creation is a governed, default-off capability.**
+    `schedule.create` registers only when both schedule flags are enabled and
+    is classified as approval-gated, conditionally idempotent, non-parallel,
+    and exactly scoped by `schedule.write`. Registered as
+    `gate.schedule.model_create_contract`, structural. **M19.**
+25. **A direct reminder request can create one schedule through the ordinary
+    tool pipeline.** The call waits for approval, persists one future one-time
+    definition, pins the active agent, and delegates no tool scopes. Registered
+    as `gate.schedule.model_create_happy_path`, case. **M19.**
+26. **Conversational creation cannot outrun its principal.** A run without
+    `schedule.write` is denied before execution and leaves no schedule state.
+    Registered as `gate.schedule.model_create_authorization`, case. **M19.**
+27. **Conversational creation accepts only an exact future instant.** A past or
+    non-timezone-aware instant returns a stable argument failure and leaves no
+    schedule state. Registered as `gate.schedule.model_create_validation`,
+    case. **M19.**
+28. **Conversational creation is retry-safe.** Replaying one tool idempotency
+    key and identical normalized arguments returns the original schedule rather
+    than creating a duplicate. Registered as
+    `gate.schedule.model_create_retry`, case. **M19.**
 
 ## Open questions
 
-1. Push notification delivery is intentionally outside this milestone. The
-   occurrence API is the durable inbox; email, mobile, and webhook delivery need
-   their own destination authorization, retry, and secret-handling contract.
+1. Milestone 12 delivered Apple push for schedule outcomes. Email and webhook
+   delivery still need their own destination authorization, retry, and
+   secret-handling contracts.
 2. Arbitrary cron and RFC 5545 recurrence are intentionally outside the closed
    cadence union. Evaluation of real schedule demand should choose which one, if
    either, expands it.

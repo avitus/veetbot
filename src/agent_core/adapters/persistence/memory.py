@@ -1246,6 +1246,18 @@ class InMemoryArtifactRepository:
                 return artifact.model_copy(deep=True)
         raise NotFoundError("artifact not found")
 
+    async def list_for_run(self, run_id: UUID, principal: Principal) -> list[ArtifactRef]:
+        async with self._lock:
+            artifacts = [
+                artifact
+                for artifact in self._rows.values()
+                if artifact.run_id == run_id
+                and artifact.tenant_id == principal.tenant_id
+                and artifact.principal_id == principal.principal_id
+            ]
+        artifacts.sort(key=lambda artifact: (artifact.created_at, artifact.id))
+        return [artifact.model_copy(deep=True) for artifact in artifacts]
+
     async def retain_for_knowledge(self, artifact_id: UUID, principal: Principal) -> ArtifactRef:
         async with self._lock:
             artifact = self._rows.get(artifact_id)

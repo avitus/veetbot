@@ -9,9 +9,9 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestone 16 was authorized as a parallel workstream on 2026-08-22
-  # (ADR-0069) and Milestone 17 on 2026-08-23 (ADR-0070); the gates of
-  # neither advance the verified ceiling past 15.
+  # Milestones 16 through 19 are independently authorized parallel
+  # workstreams under ADRs 0069, 0070, 0071, and 0072; their gates do not
+  # advance the verified ceiling past the sequential work through 15.
   authorized_milestones:
     - 0
     - 1
@@ -32,6 +32,7 @@ project:
     - 16
     - 17
     - 18
+    - 19
 
 milestones:
   "0":
@@ -112,7 +113,7 @@ milestones:
       - email and webhook transports
   "13":
     title: General-purpose subagents and delegation
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-20
     design: docs/plan/subagents-and-delegation.md
     adr: docs/adr/0063-milestone-13-subagents-and-delegation.md
@@ -126,6 +127,58 @@ milestones:
     deferred_scope:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
+    evidence:
+      - check: twenty-one Milestone 13 gate.delegate.* gates
+        outcome: passed_locally
+        detail: >-
+          All twenty-one registered Milestone 13 entries in
+          evals/gates/delegate.yaml resolve to live checks — seventeen in
+          tests/gates/test_delegate_m13.py, one in
+          tests/unit/test_persistence_schema.py, and three in the
+          PostgreSQL integration lane
+          (tests/integration/test_delegation_materializer_m13.py and
+          tests/integration/test_migrations.py) — and all pass when
+          executed by node identifier. The harness cannot execute them
+          through agent eval gates yet for the reason Milestones 16 and 17
+          recorded: --milestone 13 would also activate the still-pending
+          Milestone 14 and 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
+      - check: build sequence steps 1 through 5 and the deterministic half of 6
+        outcome: passed_locally
+        detail: >-
+          The delegation domain values and limit derivation, the
+          delegations ledger persistence with erasure and its shared
+          repository contract on both tiers, delegate.run and the
+          one-transaction materializer with write-probe crash coverage,
+          the child_run suspension, join, requeue_after_child edge, and
+          downward-only cancel cascade, the delegation limits block with
+          the tenant admission lock and the default-off flag, and case 32
+          with the tools arm overlay are implemented and verified by the
+          static, contract, and PostgreSQL integration lanes.
+      - check: red-green discipline for the Milestone 13 suites
+        outcome: recorded
+        detail: >-
+          Every build step began with a recorded failing run before its
+          green implementation. The focused red commands and their expected
+          failures were, in build order, pytest
+          tests/gates/test_delegate_m13.py failing on the unimplemented
+          limit derivation and materializer, tests/unit/
+          test_delegation_domain_m13.py failing on unenforced brief bounds,
+          tests/contract/test_delegation_repository_contract.py and
+          tests/unit/test_persistence_schema.py failing on the unimplemented
+          repositories and constraint-free row, the end-to-end suspension
+          suite failing with the parent completing without any delegation
+          machinery, and tests/unit/test_config.py failing on the ten
+          missing delegation knobs.
+      - check: capability scenario from a real failed trajectory
+        outcome: not_started
+        detail: >-
+          The owner has not yet supplied the redacted failed long-research
+          trajectory the gate for multi-agent work names; without it the
+          milestone is buildable but not activatable. Its single-agent
+          baseline and delegating re-run scoring remain outstanding, as do
+          hosted CI and the CodeRabbit review loop of build step 7.
   "14":
     title: Inbound surfaces and pairing
     status: authorized
@@ -312,6 +365,24 @@ milestones:
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
+  "19":
+    title: Conversational schedule creation
+    status: authorized
+    authorized_on: 2026-08-24
+    design: docs/plan/scheduling.md
+    adr: docs/adr/0072-milestone-19-conversational-schedule-creation.md
+    gates_registered: 5
+    authorized_scope:
+      - one-time schedule creation through the model-callable schedule.create tool
+      - exact aware instants after the current time
+      - mandatory approval and the exact schedule.write scope
+      - empty delegated scopes and finite per-occurrence limits
+      - direct reuse of the existing ScheduleService and notification lifecycle
+    deferred_scope:
+      - recurring schedule creation through the model
+      - schedule update, pause, resume, delete, occurrence list, and run list tools
+      - a separate reminder record or notification payload with user content
+      - notification transports beyond the existing Milestone 12 delivery path
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -362,14 +433,17 @@ readiness:
     first-class email integration, as a third parallel workstream (ADR-0071),
     meeting roadmap item B11's entry condition for its email half; it is
     specified by email-integration.md with thirteen registered gates in a
-    new email area. Model routing remains
+    new email area. On 2026-08-24 the owner also authorized Milestone 19,
+    conversational one-time schedule creation, as a fourth parallel workstream
+    (ADR-0072); scheduling.md declares its five `gate.schedule.*` entries.
+    Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-24T07:32:16Z
+last_updated: 2026-08-25T01:00:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

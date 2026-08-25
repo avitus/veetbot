@@ -106,6 +106,9 @@ public struct ChatView: View {
                             }
                             .id(NotificationFocus.question(prompt.questionID).scrollID)
                         }
+                        if let failure = state.failure {
+                            RunFailureCard(failure: failure)
+                        }
                         Color.clear.frame(height: 1).id(Self.bottomAnchorID)
                     }
                     .padding()
@@ -190,7 +193,7 @@ public struct ChatView: View {
     private var scrollChangeToken: String {
         // Follow newly inserted activity, but leave the viewport fixed while an
         // existing assistant message grows so its beginning remains readable.
-        "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none")"
+        "\(state.timeline.count):\(state.tools.count):\(state.approvals.count):\(state.clarifyingQuestion?.id.uuidString ?? "none"):\(state.failure?.occurredAt.timeIntervalSince1970 ?? 0)"
     }
 
     private func scroll(_ proxy: ScrollViewProxy) {
@@ -220,6 +223,37 @@ public struct ChatView: View {
 
 private struct ArtifactSelection: Identifiable {
     let id: UUID
+}
+
+private struct RunFailureCard: View {
+    let failure: RunFailureView
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Conversation failed", systemImage: "exclamationmark.triangle.fill")
+                .appFont(.headline)
+                .foregroundColor(.red)
+            Text(failure.userFacingMessage)
+                .appFont(.body)
+                .textSelection(.enabled)
+            Text(failure.diagnosticSummary)
+                .appFont(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: 680, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.red.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.red.opacity(0.35))
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("conversation.failure")
+    }
 }
 
 private struct TimelineBubble: View {

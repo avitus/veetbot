@@ -5,6 +5,7 @@ enum ConversationNavigationUITestFixture {
     static let launchArgument = "--ui-testing-conversation-navigation"
     static let firstSessionID = "00000000-0000-0000-0000-000000000123"
     static let secondSessionID = "00000000-0000-0000-0000-000000000456"
+    static let memoryID = "00000000-0000-0000-0000-000000000321"
 
     @MainActor
     static func makeModelIfRequested() -> ChatViewModel? {
@@ -26,6 +27,25 @@ enum ConversationNavigationUITestFixture {
             historyStore: VolatileSessionHistoryStore(),
             urlSession: URLSession(configuration: configuration)
         )
+    }
+
+    @MainActor
+    static func makeMemoryAPIClientIfRequested() -> VeetbotAPIClient? {
+        guard ProcessInfo.processInfo.arguments.contains(launchArgument) else { return nil }
+        guard
+            let configuration = try? ConnectionConfiguration(
+                baseURLString: "https://ui-testing.veetbot.invalid"
+            )
+        else { return nil }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [ConversationNavigationUITestURLProtocol.self]
+        let transport = HTTPTransport(
+            configuration: configuration,
+            tokenStore: InMemoryTokenStore(token: "ui-test-token"),
+            session: URLSession(configuration: sessionConfiguration)
+        )
+        return VeetbotAPIClient(transport: transport)
     }
 }
 
@@ -76,6 +96,16 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
                   {"sequence":2,"role":"assistant","content":[{"type":"text","text":"Second historical answer loaded"}]}
                 ],"next_cursor":null}
                 """
+        case ("GET", "/v1/memories"):
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            guard query.contains(URLQueryItem(name: "ceiling", value: "restricted")) else {
+                client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+                return
+            }
+            statusCode = 200
+            body = """
+                {"items":[\(Self.memoryJSON)],"next_cursor":null}
+                """
         case ("GET", "/v1/browser-profiles"):
             statusCode = 200
             body = #"{"items":[],"next_cursor":null}"#
@@ -117,6 +147,10 @@ private final class ConversationNavigationUITestURLProtocol: URLProtocol {
 
     private static let secondSessionJSON = """
         {"id":"\(ConversationNavigationUITestFixture.secondSessionID)","status":"ACTIVE","agent_id":"general","agent_version":"1","title":"Second historical chat","metadata":{},"created_at":"2026-08-13T00:00:00Z","updated_at":"2026-08-13T00:04:00Z","active_run_id":null,"last_run_id":null}
+        """
+
+    private static let memoryJSON = """
+        {"id":"\(ConversationNavigationUITestFixture.memoryID)","subject":"the user","statement":"The user prefers dark mode.","belief_type":"preference","status":"active","polarity":"assert","scope":"session","portability":"portable","authority":"user","sensitivity":"restricted","confidence":0.87,"corroboration_count":3,"flagged_for_review":false,"conflicts_with":[],"superseded_by":null,"source_session_id":"\(ConversationNavigationUITestFixture.firstSessionID)","source_event_ids":[10,11],"formation_run_id":"00000000-0000-0000-0000-000000000900","consolidation_policy_version":"formation@1","origin_scopes":["session"],"valid_from":"2026-08-01T00:00:00Z","valid_to":null,"expires_at":null,"last_reinforced_at":"2026-08-15T00:00:00Z","created_at":"2026-07-01T00:00:00Z","updated_at":"2026-08-20T00:00:00Z"}
         """
 
     private static let browserProfileID = "00000000-0000-0000-0000-000000000789"

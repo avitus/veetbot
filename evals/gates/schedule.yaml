@@ -139,3 +139,33 @@
   spec: docs/plan/scheduling.md#hard-gates
   statement: "**Scheduling persistence is principal isolated.** PostgreSQL row-level security and repository predicates prevent cross-tenant and cross-principal reads and mutations."
   check: tests/integration/test_schedule_persistence_m11.py::test_schedule_rows_are_principal_isolated
+- id: gate.schedule.model_create_contract
+  milestone: 19
+  kind: structural
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational creation is a governed, default-off capability.** `schedule.create` registers only when both schedule flags are enabled and is classified as approval-gated, conditionally idempotent, non-parallel, and exactly scoped by `schedule.write`."
+  check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_is_feature_gated_and_classified
+- id: gate.schedule.model_create_happy_path
+  milestone: 19
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**A direct reminder request can create one schedule through the ordinary tool pipeline.** The call waits for approval, persists one future one-time definition, pins the active agent, and delegates no tool scopes."
+  check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_runs_through_approval_and_persists
+- id: gate.schedule.model_create_authorization
+  milestone: 19
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational creation cannot outrun its principal.** A run without `schedule.write` is denied before execution and leaves no schedule state."
+  check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_requires_schedule_write_scope
+- id: gate.schedule.model_create_validation
+  milestone: 19
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational creation accepts only an exact future instant.** A past or non-timezone-aware instant returns a stable argument failure and leaves no schedule state."
+  check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_rejects_a_past_instant_without_state
+- id: gate.schedule.model_create_retry
+  milestone: 19
+  kind: case
+  spec: docs/plan/scheduling.md#hard-gates
+  statement: "**Conversational creation is retry-safe.** Replaying one tool idempotency key and identical normalized arguments returns the original schedule rather than creating a duplicate."
+  check: tests/gates/test_schedule_tool_m19.py::test_schedule_create_tool_replays_one_idempotent_schedule

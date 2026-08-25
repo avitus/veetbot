@@ -147,6 +147,12 @@ class RunRow(Base):
             unique=True,
             postgresql_where=text("parent_run_id IS NOT NULL AND run_kind = 'skill_review'"),
         ),
+        Index(
+            "ix_runs_parent_kind",
+            "parent_run_id",
+            "run_kind",
+            postgresql_where=text("parent_run_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
@@ -1357,3 +1363,58 @@ class NotificationDeliveryRow(Base):
     provider_reason: Mapped[str | None] = mapped_column(Text)
     provider_id: Mapped[str | None] = mapped_column(Text)
     attempted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class DelegationRow(Base):
+    __tablename__ = "delegations"
+    __table_args__ = (
+        UniqueConstraint("invocation_id", name="uq_delegations_invocation"),
+        CheckConstraint("depth >= 0", name="delegation_depth_nonnegative"),
+        CheckConstraint(
+            "status IN ('PENDING','RUNNING','JOINED','CANCELLED','REJECTED')",
+            name="delegation_status_closed",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(brief) = 'object' AND jsonb_typeof(children) = 'array' "
+            "AND jsonb_typeof(derived_limits) = 'array' "
+            "AND jsonb_typeof(granted_scopes) = 'array'",
+            name="delegation_documents_shaped",
+        ),
+        CheckConstraint(
+            "(status = 'JOINED' AND joined_at IS NOT NULL AND result IS NOT NULL) OR "
+            "(status <> 'JOINED' AND joined_at IS NULL AND result IS NULL)",
+            name="delegation_join_consistent",
+        ),
+        Index("ix_delegations_parent_run", "parent_run_id"),
+        Index(
+            "ix_delegations_tenant_principal_created",
+            "tenant_id",
+            "principal_id",
+            "created_at",
+            "id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(Text)
+    principal_id: Mapped[str] = mapped_column(Text)
+    parent_run_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("runs.id", ondelete="CASCADE")
+    )
+    parent_session_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE")
+    )
+    invocation_id: Mapped[UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("tool_invocations.id", ondelete="CASCADE")
+    )
+    depth: Mapped[int] = mapped_column(SmallInteger)
+    brief: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    derived_limits: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    granted_scopes: Mapped[list[list[str]]] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(32))
+    children: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    # SQL NULL, never JSON null: the join-consistency check reads IS NULL.
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True))
+    links_erased_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

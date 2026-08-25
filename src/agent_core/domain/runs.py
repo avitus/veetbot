@@ -30,6 +30,7 @@ class RunStatus(StrEnum):
 class RunKind(StrEnum):
     INTERACTIVE = "interactive"
     SKILL_REVIEW = "skill_review"
+    DELEGATED = "delegated"
 
 
 class CancelReason(StrEnum):

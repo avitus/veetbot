@@ -1295,6 +1295,16 @@ not the model — but a client rendering a tool result is rendering
 untrusted text, and the payload therefore carries the same
 `trust` label the context engine uses so that a UI can mark it.
 
+The native Apple presentation does not rewrite that durable outcome when a
+retryable argument-validation call is rejected. It renders a failed outcome
+whose `reason_code` is in the `tool.invalid_arguments.*` family (or is
+`tool.arguments_invalid`), whose `retryable` flag is true, and whose remediation
+is `modify_arguments` as **Needs correction**. When the immediately following
+invocation of the same tool completes, that earlier card becomes **Corrected and
+retried**. The original `tool.call.failed` event and its result remain intact;
+an intervening activity or a non-argument failure is never presented as
+recovered.
+
 ## Approvals
 
 [policy-and-approvals.md](policy-and-approvals.md) owns this surface

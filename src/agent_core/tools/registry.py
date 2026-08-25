@@ -37,6 +37,7 @@ BUILTIN_DOMAINS = frozenset(
         "knowledge",
         "web",
         "browser",
+        "schedule",
     }
 )
 RESERVED_DOMAINS = frozenset({"mcp", "device"})

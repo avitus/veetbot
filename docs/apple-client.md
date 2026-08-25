@@ -118,7 +118,10 @@ transient deltas are best effort. It does not infer a gap from non-contiguous
 sequence values. Disconnects and overflow reconnect with `Last-Event-ID`,
 suspension keeps the logical stream alive, and only completed, failed, or
 cancelled run events close it. Raw reasoning text is discarded at the reducer
-boundary and represented by a compact activity indicator.
+boundary and represented by a compact activity indicator. A failed run renders
+the API's public failure message inside the conversation together with its
+stable reason and available step and attempt numbers; the header status is not
+the only failure indication.
 
 The sidebar mirrors the server's authoritative, paginated session index.
 SwiftData stores that cache on iOS 17+/macOS 14+. The minimum supported OS

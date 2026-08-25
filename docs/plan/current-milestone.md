@@ -8,7 +8,9 @@ title: Current Milestone
   complete. Milestone 13 — general-purpose subagents and delegation — is the
   next sequential authorized milestone, is specified by
   [subagents-and-delegation.md](subagents-and-delegation.md) with twenty-one
-  gates, and has not started. Milestone 14 — inbound surfaces and
+  gates, and is in progress: build steps 1 through 5 and the deterministic
+  half of 6 are implemented with every registered gate resolving to a live,
+  locally passing check. Milestone 14 — inbound surfaces and
   pairing — is specified by [inbound-surfaces.md](inbound-surfaces.md) with
   twenty-one gates and follows Milestone 13. Milestone 15 — operational
   hardening — is specified by
@@ -22,7 +24,9 @@ title: Current Milestone
   Milestone 18 — first-class email integration — is specified by
   [email-integration.md](email-integration.md) with thirteen gates and is a
   third parallel workstream on the same terms, its two shared-file touches
-  named in ADR-0071.
+  named in ADR-0071. Milestone 19 — conversational schedule creation — is
+  specified by [scheduling.md](scheduling.md) with five gates and is a fourth
+  parallel workstream, limited to one-time creation through the model.
 - **Verified gate ceiling:** Milestone 12 (247 gates).
 - **Authorized workstreams:** Milestones 13 through 15 in order — general-purpose
   subagents and delegation, inbound surfaces and pairing, operational hardening
@@ -33,7 +37,9 @@ title: Current Milestone
   2026-08-23 as a second such workstream (ADR-0070), on the same terms: its
   gates may go green independently and move the verified ceiling no further.
   Milestone 18, first-class email integration, was authorized on 2026-08-24
-  as a third (ADR-0071), on the same terms again.
+  as a third (ADR-0071), on the same terms again. Milestone 19,
+  conversational schedule creation, was authorized on 2026-08-24 as a fourth
+  (ADR-0072), again without advancing the verified ceiling.
 - **Deferred:** New model-routing behavior and everything listed in the
   engineering plan's roadmap subsection. Nothing on the roadmap is authorized
   until the owner says so and a specification with gates exists for it.
@@ -41,9 +47,16 @@ title: Current Milestone
   gates, the full local and PostgreSQL lanes, Apple package and simulator lanes,
   hosted CI passed on the candidate head, and the completed integration was
   delivered directly to `dev`; code review is reserved for the final merge into
-  `main`. Milestones 13 through 15 remain
-  authorized and specified with twenty-one, twenty-one, and sixteen registered
-  gates; none has started. Milestone 16, the parallel memory-evaluation
+  `main`. Milestone 13 is in progress: the
+  delegation domain values and limit derivation, the ledger persistence and
+  erasure, delegate.run and its one-transaction materializer, the child-run
+  suspension, join, and cancel cascade, the delegation limits block with
+  tenant admission and the default-off flag, and case 32 with the tools arm
+  overlay are implemented, with all twenty-one gates passing locally; the
+  capability scenario awaits the owner's redacted failed trajectory, and
+  hosted CI and the CodeRabbit review loop remain outstanding. Milestones 14
+  and 15 remain authorized and specified with twenty-one and sixteen
+  registered gates; neither has started. Milestone 16, the parallel memory-evaluation
   workstream, has implemented all twenty of its gates, republished the
   provider evidence at `formation@8`, and re-recorded its baseline, and completed on 2026-08-23 when hosted CI and
   the CodeRabbit review loop finished clean on the `dev` to `main` pull
@@ -62,7 +75,10 @@ title: Current Milestone
   hosted CI and the CodeRabbit review loop on the `dev` to `main` pull request
   remain outstanding. Milestone 18, the third parallel workstream, is
   authorized and specified with thirteen registered gates; it has not
-  started.
+  started. Milestone 19, the fourth parallel workstream, is authorized and
+  specified with five registered gates; its one-time model tool and focused
+  gate suite are implemented locally, with full repository verification and
+  hosted review still outstanding.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;
@@ -111,7 +127,9 @@ landed on the same day as that milestone's authorization, adding ten more
 `gate.memory.*` entries to the same area. Milestone 18's
 [email-integration.md](email-integration.md) and ADR-0071 landed the same
 way on 2026-08-24, adding thirteen `gate.email.*` entries in a new area of
-their own.
+their own. Milestone 19 reuses [scheduling.md](scheduling.md) and the existing
+`schedule` area under ADR-0072, adding five gates for the deliberately narrow
+one-time creation bridge.
 
 Milestone 12 — notifications and device identity — completed all eight build
 steps. The delivered slice includes the principal-scoped device registry,
@@ -157,6 +175,7 @@ substitute.
 - [Milestone 16 — memory evaluation and lifecycle](engineering-plan.md#milestone-16-memory-evaluation-and-lifecycle)
 - [Milestone 17 — memory read API and browser](engineering-plan.md#milestone-17-memory-read-api-and-browser)
 - [Milestone 18 — first-class email integration](engineering-plan.md#milestone-18-first-class-email-integration)
+- [Milestone 19 — conversational schedule creation](engineering-plan.md#milestone-19-conversational-schedule-creation)
 - [Roadmap beyond Milestone 15](engineering-plan.md#roadmap-beyond-milestone-15)
 - [First assignment for the coding agent](engineering-plan.md#26-first-assignment-for-the-coding-agent)
 
@@ -195,7 +214,9 @@ acceptance criteria and the
 [memory-read-api-and-browser design](memory-read-api-and-browser.md).
 Milestone 18's contract is its thirteen `gate.email.*` entries plus the
 plan's acceptance criteria and the
-[email-integration design](email-integration.md).
+[email-integration design](email-integration.md). Milestone 19's contract is
+its five new `gate.schedule.*` entries plus the plan's acceptance criteria and
+the [scheduling design](scheduling.md#model-callable-one-time-creation).
 
 ## Completion rule
 
@@ -239,3 +260,8 @@ an approval delivered to the phone, and one approved send — is recorded as
 evidence, because the mailbox is an external system no gate's fake can vouch
 for. Being a parallel workstream changes nothing about the ceiling, which
 still advances only after every earlier milestone has completed.
+
+Milestone 19 completes when its five gates and the cumulative registry pass,
+all relevant local and hosted lanes pass on the final head, and the final
+CodeRabbit review is clean. Because it is a parallel workstream, completion
+does not advance the verified gate ceiling past the sequential milestones.

@@ -15,6 +15,7 @@ from agent_core.adapters.persistence.mappers import artifact_to_domain
 from agent_core.adapters.persistence.sqlalchemy_models import (
     ArtifactRow,
     ConsolidationRunRow,
+    DelegationRow,
     KnowledgeDocumentRow,
     MemoryRejectionRow,
     MemoryRow,
@@ -78,6 +79,44 @@ class PostgresSessionDeletionRepository:
                 reason="active_run_exists",
                 details={"run_id": str(active)},
             )
+
+        # Delegated child sessions exist only for their parent: erase each of
+        # them first; the parent's ledger rows leave with the session through
+        # their CASCADE foreign keys. A child deleted alone stamps the ledger
+        # row and clears its identifiers instead.
+        parent_rows = (
+            await self._session.scalars(
+                select(DelegationRow).where(DelegationRow.parent_session_id == session_id)
+            )
+        ).all()
+        for parent_row in parent_rows:
+            for child in parent_row.children:
+                child_session = child.get("child_session_id")
+                if child_session is None:
+                    continue
+                try:
+                    await self.delete(UUID(str(child_session)), principal, deleted_at)
+                except NotFoundError:
+                    # A dangling ledger link — the child session and its
+                    # tombstone are both gone — must not block the parent.
+                    continue
+        referencing = (
+            await self._session.scalars(
+                select(DelegationRow)
+                .where(DelegationRow.children.contains([{"child_session_id": str(session_id)}]))
+                .with_for_update()
+            )
+        ).all()
+        for ledger_row in referencing:
+            ledger_row.children = [
+                (
+                    {**child, "child_run_id": None, "child_session_id": None}
+                    if child.get("child_session_id") == str(session_id)
+                    else child
+                )
+                for child in ledger_row.children
+            ]
+            ledger_row.links_erased_at = deleted_at
 
         artifacts = list(
             (
@@ -248,6 +287,7 @@ class InMemorySessionDeletionRepository:
         knowledge: Any,
         schedules: Any,
         notification_outbox: Any,
+        delegations: Any,
     ) -> None:
         self._sessions = sessions
         self._runs = runs
@@ -264,6 +304,7 @@ class InMemorySessionDeletionRepository:
         self._knowledge = knowledge
         self._schedules = schedules
         self._notification_outbox = notification_outbox
+        self._delegations = delegations
         self._lock = asyncio.Lock()
         self._tombstones: dict[UUID, tuple[str, str, datetime]] = {}
         self._pending: dict[UUID, dict[UUID, ArtifactRef]] = {}
@@ -327,6 +368,44 @@ class InMemorySessionDeletionRepository:
                 "An active run must be stopped before deleting the conversation.",
                 reason="active_run_exists",
                 details={"run_id": str(active[0].id)},
+            )
+        # Delegated child sessions exist only for their parent: erase each of
+        # them first, then drop the parent's ledger rows the way the CASCADE
+        # foreign keys do in PostgreSQL. A child deleted alone stamps the
+        # ledger row and clears its identifiers instead.
+        parent_rows = [
+            row for row in self._delegations._rows.values() if row.parent_session_id == session_id
+        ]
+        for row in parent_rows:
+            for child in row.children:
+                if (
+                    child.child_session_id is not None
+                    and child.child_session_id in self._sessions._sessions
+                ):
+                    self._delete_locked(child.child_session_id, principal, deleted_at)
+        self._delegations._rows = {
+            key: value
+            for key, value in self._delegations._rows.items()
+            if value.parent_session_id != session_id
+        }
+        for key, row in list(self._delegations._rows.items()):
+            if not any(child.child_session_id == session_id for child in row.children):
+                continue
+            self._delegations._rows[key] = row.model_copy(
+                update={
+                    "children": [
+                        (
+                            child.model_copy(
+                                update={"child_run_id": None, "child_session_id": None}
+                            )
+                            if child.child_session_id == session_id
+                            else child
+                        )
+                        for child in row.children
+                    ],
+                    "links_erased_at": deleted_at,
+                },
+                deep=True,
             )
         run_ids = {
             run_id for run_id, run in self._runs._runs.items() if run.session_id == session_id

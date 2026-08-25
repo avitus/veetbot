@@ -48,6 +48,14 @@ class DeviceValidationError(AgentCoreError):
         self.reason = reason
 
 
+class DelegationValidationError(AgentCoreError):
+    """A delegation request failed one stable boundary rule."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
 class InvalidStateTransition(ConflictError):  # noqa: N818 - normative taxonomy name
     """A resource exists but cannot accept the requested state change."""
 
@@ -122,6 +130,21 @@ class UserInputRequiredError(AgentCoreError):
         super().__init__(f"question {question_id} is waiting for input")
         self.question_id = question_id
         self.invocation_id = invocation_id
+
+
+class ChildRunRequiredError(AgentCoreError):
+    """Normal control flow indicating child runs have parked the parent."""
+
+    def __init__(
+        self,
+        delegation_id: UUID,
+        invocation_id: UUID,
+        child_run_ids: list[UUID],
+    ) -> None:
+        super().__init__(f"delegation {delegation_id} is running")
+        self.delegation_id = delegation_id
+        self.invocation_id = invocation_id
+        self.child_run_ids = child_run_ids
 
 
 class ApprovalDenied(ConflictError):  # noqa: N818 - normative taxonomy name

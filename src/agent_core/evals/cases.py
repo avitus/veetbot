@@ -92,6 +92,7 @@ class EvalArm(StrictModel):
     skills: list[str] = Field(default_factory=list)
     skill_source: Literal["operator", "agent"] = "operator"
     carry: list[Literal["memory"]] = Field(default_factory=list)
+    tools: list[str] | None = None
     expected: EvalExpected
 
     @model_validator(mode="after")
@@ -110,7 +111,7 @@ class EvalDelta(StrictModel):
 
 class EvalCase(StrictModel):
     name: str
-    milestone: int = Field(ge=1, le=10)
+    milestone: int = Field(ge=1, le=13)
     source: Literal["authored", "trajectory"] = "authored"
     source_export_id: UUID | None = None
     tags: list[str] = Field(default_factory=list)

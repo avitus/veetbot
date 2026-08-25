@@ -10,16 +10,18 @@ from uuid import UUID
 
 from agent_core.domain.agents import Principal
 from agent_core.domain.context import ContextPlan
+from agent_core.domain.delegations import DelegationStatus
 from agent_core.domain.errors import (
     ApprovalRequiredError,
     BudgetExceededError,
+    ChildRunRequiredError,
     ConflictError,
     ContextOverflow,
     RunCancelledError,
     UserInputRequiredError,
     WorkerFencedError,
 )
-from agent_core.domain.events import NewEvent
+from agent_core.domain.events import NewEvent, ProcessEvent
 from agent_core.domain.messages import (
     AssistantMessage,
     ResolvedModel,
@@ -30,6 +32,7 @@ from agent_core.domain.messages import (
 from agent_core.domain.persistence import ClaimedRun, WorkerLease
 from agent_core.domain.policies import TrustLevel
 from agent_core.domain.runs import (
+    TERMINAL_RUN_STATUSES,
     CancelReason,
     FailureReason,
     OutcomeKind,
@@ -72,6 +75,7 @@ type BudgetFactory = Callable[[WorkerLease | None], BudgetLedger]
 type TokenCallback = Callable[[UUID, RunCancellationToken], None]
 type TokenCompleteCallback = Callable[[UUID], None]
 type RunCompleteCallback = Callable[[UUID, int | None], Awaitable[None]]
+type ChildSuspensionCallback = Callable[[UUID, UUID], Awaitable[None]]
 type FinalizationWriteProbe = Callable[[str], None]
 logger = logging.getLogger(__name__)
 
@@ -114,6 +118,7 @@ class RunExecutor:
         on_token: TokenCallback | None = None,
         on_token_complete: TokenCompleteCallback | None = None,
         on_run_complete: RunCompleteCallback | None = None,
+        on_child_suspension: ChildSuspensionCallback | None = None,
         on_model_event: ModelEventCallback | None = None,
         notification_producer: RunNotificationProducer | None = None,
         finalization_write_probe: FinalizationWriteProbe | None = None,
@@ -142,6 +147,7 @@ class RunExecutor:
         self._on_token = on_token
         self._on_token_complete = on_token_complete
         self._on_run_complete = on_run_complete
+        self._on_child_suspension = on_child_suspension
         self._on_model_event = on_model_event
         self._notification_producer = notification_producer
         self._finalization_write_probe = finalization_write_probe
@@ -168,6 +174,47 @@ class RunExecutor:
             RunStatus.QUEUED,
         )
 
+    async def requeue_after_child(self, uow: RepositoryUnitOfWork, run: Run) -> Run:
+        """Apply the guarded child-run join resume edge in the sole state writer."""
+
+        return await uow.runs.transition(
+            run.id,
+            RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.QUEUED,
+        )
+
+    async def fail_suspended_on_budget(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+        message: str,
+    ) -> Run:
+        """Fail a child-run-suspended parent whose children exceeded its budget."""
+
+        failure = RunFailure(
+            reason=FailureReason.BUDGET_EXCEEDED,
+            error_class="BudgetExceededError",
+            message=message,
+            step_number=run.step_count or None,
+            occurred_at=self._clock.now(),
+        )
+        failed = await uow.runs.transition(
+            run.id,
+            RunStatus.WAITING_FOR_APPROVAL,
+            RunStatus.FAILED,
+            failure=failure,
+        )
+        await uow.events.append(
+            NewEvent(
+                session_id=run.session_id,
+                run_id=run.id,
+                event_type="run.failed",
+                actor_type="runtime",
+                payload={"failure": failure.model_dump(mode="json")},
+            )
+        )
+        return failed
+
     async def cancel_parked_run(
         self,
         uow: RepositoryUnitOfWork,
@@ -178,6 +225,7 @@ class RunExecutor:
 
         if run.status is RunStatus.WAITING_FOR_APPROVAL:
             await uow.approvals.cancel_for_run(run.id)
+            await self._cancel_delegated_children(uow, run, principal_id)
         if run.status is RunStatus.WAITING_FOR_USER:
             owner = Principal(
                 tenant_id=run.tenant_id,
@@ -232,6 +280,94 @@ class RunExecutor:
             )
         )
         return cancelled
+
+    async def _cancel_delegated_children(
+        self,
+        uow: RepositoryUnitOfWork,
+        run: Run,
+        principal_id: str,
+    ) -> None:
+        """Cascade a suspended parent's cancellation downward, never upward."""
+
+        owner = Principal(tenant_id=run.tenant_id, principal_id=principal_id)
+        invocations = await uow.invocations.list_for_run(run.id, owner)
+        suspended = [
+            invocation
+            for invocation in invocations
+            if invocation.status is ToolInvocationStatus.RUNNING
+            and invocation.suspended_kind == "child_run"
+        ]
+        if not suspended:
+            return
+        for delegation in await uow.delegations.get_for_parent_run(run.id):
+            if delegation.status not in {DelegationStatus.PENDING, DelegationStatus.RUNNING}:
+                continue
+            for child in delegation.children:
+                if child.child_run_id is None:
+                    continue
+                child_run = await uow.runs.get(child.child_run_id, owner)
+                if child_run.status in TERMINAL_RUN_STATUSES:
+                    continue
+                if child_run.status is RunStatus.RUNNING:
+                    await uow.runs.request_cancellation(child_run.id, child_run.status)
+                else:
+                    await self.cancel_parked_run(uow, child_run, principal_id)
+            try:
+                await uow.delegations.transition(
+                    delegation.id,
+                    delegation.status,
+                    delegation.model_copy(update={"status": DelegationStatus.CANCELLED}),
+                )
+            except ConflictError:
+                continue
+            await uow.process_events.append(
+                ProcessEvent(
+                    id=self._ids.new_id(),
+                    event_type="delegation.cancelled",
+                    actor_type="principal",
+                    actor_id=principal_id,
+                    payload={
+                        "delegation_id": str(delegation.id),
+                        "tenant_id": run.tenant_id,
+                        "parent_run_id": str(run.id),
+                        "invocation_id": str(delegation.invocation_id),
+                        "event_time": self._clock.now().isoformat(),
+                    },
+                    derivation_key=f"delegation.cancelled:{delegation.id}",
+                    created_at=self._clock.now(),
+                )
+            )
+        now = self._clock.now()
+        for invocation in suspended:
+            outcome = ToolOutcome(
+                status=ToolOutcomeStatus.FAILED,
+                action=invocation.tool_name,
+                reason_code="tool.run_cancelled",
+                message="The run was cancelled while waiting for delegated children.",
+                retryable=False,
+                remediation="none",
+            )
+            failed = invocation.model_copy(
+                update={
+                    "status": ToolInvocationStatus.FAILED,
+                    "suspended_kind": None,
+                    "suspended_ref": None,
+                    "outcome": outcome,
+                    "result_item": ToolResultItem(
+                        call_id=invocation.call_id,
+                        content=[TextPart(text=outcome.message)],
+                        is_error=True,
+                        trust=TrustLevel.PLATFORM,
+                    ),
+                    "updated_at": now,
+                },
+                deep=True,
+            )
+            await uow.invocations.transition(
+                invocation.id,
+                ToolInvocationStatus.RUNNING,
+                failed,
+            )
 
     async def execute(self, run_id: UUID) -> None:
         """Execute an in-process queued run after its creating commit."""
@@ -454,6 +590,17 @@ class RunExecutor:
                         "approval_id": str(exc.approval_id),
                     },
                 )
+            except ChildRunRequiredError as exc:
+                await checkpoint(context, "suspended")
+                outcome = RunOutcome(
+                    kind=OutcomeKind.SUSPENDED,
+                    suspension={
+                        "kind": "child_run",
+                        "delegation_id": str(exc.delegation_id),
+                        "invocation_id": str(exc.invocation_id),
+                        "child_run_ids": [str(child_id) for child_id in exc.child_run_ids],
+                    },
+                )
             except UserInputRequiredError as exc:
                 question = next(
                     (
@@ -547,6 +694,26 @@ class RunExecutor:
         except WorkerFencedError:
             if lease is None:
                 raise
+        else:
+            # The parked parent is the safe instant to start its children: the
+            # suspension is durable, so an inline child chain (and even its
+            # join) can never race this run's own finalize.
+            if (
+                self._on_child_suspension is not None
+                and outcome.kind is OutcomeKind.SUSPENDED
+                and isinstance(outcome.suspension, dict)
+                and outcome.suspension.get("kind") == "child_run"
+            ):
+                try:
+                    await self._on_child_suspension(
+                        run.id,
+                        UUID(str(outcome.suspension["delegation_id"])),
+                    )
+                except Exception:
+                    logger.exception(
+                        "delegation_child_dispatch_failed",
+                        extra={"run_id": str(run.id)},
+                    )
 
     async def _resume_pending_tools(self, context: RunContext) -> None:
         if not context.checkpoint.pending_tool_calls:
@@ -694,7 +861,17 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             context.finalization_write_probe("terminal_event")
         last_event = terminal_event
         approval_id: UUID | None = None
-        if outcome.kind is OutcomeKind.SUSPENDED and status is RunStatus.WAITING_FOR_APPROVAL:
+        suspension_kind = (
+            outcome.suspension.get("kind") if isinstance(outcome.suspension, dict) else None
+        )
+        child_run_suspension = (
+            outcome.kind is OutcomeKind.SUSPENDED and suspension_kind == "child_run"
+        )
+        if (
+            outcome.kind is OutcomeKind.SUSPENDED
+            and status is RunStatus.WAITING_FOR_APPROVAL
+            and not child_run_suspension
+        ):
             approval_id = (
                 context.checkpoint.pending_approval_ids[0]
                 if context.checkpoint.pending_approval_ids
@@ -714,7 +891,7 @@ async def _finalize_once(context: RunContext | _FinalizationContext, outcome: Ru
             )
             if context.finalization_write_probe is not None:
                 context.finalization_write_probe("approval_event")
-        if context.notification_producer is not None:
+        if context.notification_producer is not None and not child_run_suspension:
             question_id = None
             approval_expires_at = None
             if status is RunStatus.WAITING_FOR_USER:

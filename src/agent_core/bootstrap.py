@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from functools import partial
 from pathlib import Path
 from types import TracebackType
@@ -88,6 +89,10 @@ from agent_core.adapters.persistence.database import (
     assert_schema_revision,
     create_engine,
     create_session_factory,
+)
+from agent_core.adapters.persistence.delegations import (
+    InMemoryDelegationRepository,
+    PostgresDelegationRepository,
 )
 from agent_core.adapters.persistence.memory import (
     InMemoryAgentRepository,
@@ -191,6 +196,7 @@ from agent_core.application.browser_management import (
     BrowserProfileManagementService,
     BrowserUnitOfWorkFactory,
 )
+from agent_core.application.delegations import DelegationJoin, DelegationMaterializer
 from agent_core.application.device_management import (
     DeviceManagementService,
     NotificationInboxService,
@@ -272,6 +278,7 @@ from agent_core.context.planner import EventContextPlanner
 from agent_core.context.working_state import WorkingStateManager
 from agent_core.domain.agents import AgentSpec, Principal
 from agent_core.domain.browser import BrowserProfile
+from agent_core.domain.delegations import DelegationCaps, DelegationDefaults
 from agent_core.domain.devices import PushProvider
 from agent_core.domain.errors import NotFoundError
 from agent_core.domain.events import NewEvent, ProcessEvent
@@ -373,6 +380,7 @@ from agent_core.tools.browser_observe import BrowserObserveTool
 from agent_core.tools.calculator import CalculatorTool
 from agent_core.tools.context_update import WORKING_STATE_TOOL_NAME, UpdateWorkingStateTool
 from agent_core.tools.current_time import CurrentTimeTool
+from agent_core.tools.delegate_run import DelegateRunTool
 from agent_core.tools.demo_external_write import DemoExternalWriteTool
 from agent_core.tools.executor import ToolPipeline
 from agent_core.tools.knowledge_ingest import KnowledgeIngestTool
@@ -382,6 +390,7 @@ from agent_core.tools.memory_remember import LegacyMemoryRememberTool, MemoryRem
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
+from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
     LegacySkillLoadTool,
@@ -585,6 +594,7 @@ def _memory_uow_repositories(
     devices = InMemoryDeviceRegistry()
     notification_outbox = InMemoryNotificationOutbox(clock, devices)
     schedule_occurrences = InMemoryScheduleOccurrenceRepository(schedules)
+    delegations = InMemoryDelegationRepository()
     checkpoints = InMemoryCheckpointRepository()
     idempotency = InMemoryIdempotencyRepository(clock)
     usage = InMemoryUsageRepository(runs)
@@ -606,6 +616,7 @@ def _memory_uow_repositories(
         knowledge=knowledge,
         schedules=schedules,
         notification_outbox=notification_outbox,
+        delegations=delegations,
     )
     return UnitOfWorkRepositories(
         agents=agents,
@@ -642,6 +653,7 @@ def _memory_uow_repositories(
         devices=devices,
         device_registration_idempotency=InMemoryDeviceRegistrationIdempotencyRepository(),
         notification_outbox=notification_outbox,
+        delegations=delegations,
         queue=None,
     )
 
@@ -721,6 +733,7 @@ def _postgres_repository_factory(
                 PostgresDeviceRegistrationIdempotencyRepository(session)
             ),
             notification_outbox=PostgresNotificationOutbox(session, clock),
+            delegations=PostgresDelegationRepository(session),
             queue=PostgresRunQueue(
                 session,
                 clock,
@@ -1224,6 +1237,8 @@ async def _compose(
     schedule_fallback_poll_seconds: float,
     schedule_admission_backoff_seconds: float,
     schedule_definition_limits: ScheduleDefinitionLimits,
+    delegation_defaults: DelegationDefaults,
+    delegation_caps: DelegationCaps,
     notification_expiry_seconds: float,
     schedule_notify: Callable[[], Awaitable[None]],
     schedule_wait: Callable[[float], Awaitable[None]],
@@ -1361,6 +1376,13 @@ async def _compose(
     )
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
+    schedule_service = ScheduleService(
+        uow_factory=uow_factory,
+        clock=clock,
+        ids=ids,
+        limits=schedule_definition_limits,
+        wake_worker=schedule_notify,
+    )
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
@@ -1381,6 +1403,10 @@ async def _compose(
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(BrowserObserveTool(browser_provider))
         registry.register(BrowserActTool(browser_provider))
+    if settings.delegation_enabled:
+        registry.register(DelegateRunTool())
+    if settings.schedule_api_enabled and settings.schedule_worker_enabled:
+        registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
 
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
@@ -1780,6 +1806,19 @@ async def _compose(
                 policy=policy_engine,
                 now=clock.now,
             )
+        checkpoint_seeder = DurableCheckpointSeeder(clock)
+        delegation_materializer = (
+            DelegationMaterializer(
+                uow_factory=uow_factory,
+                clock=clock,
+                ids=ids,
+                seed_checkpoint=checkpoint_seeder,
+                defaults=delegation_defaults,
+                caps=delegation_caps,
+            )
+            if settings.delegation_enabled
+            else None
+        )
         pipeline = ToolPipeline(
             registry,
             uow_factory,
@@ -1795,9 +1834,9 @@ async def _compose(
             maximum_skill_body_tokens=int(skill_bodies_config["max_tokens"]),
             approval_expiry_seconds=dict(ruleset.approval_expiry_seconds),
             standing_authorizer=standing_authorizer,
+            delegations=delegation_materializer,
         )
         token_slot = _ActiveToken()
-        checkpoint_seeder = DurableCheckpointSeeder(clock)
         notification_producer = (
             NotificationProducer(clock=clock, ids=ids)
             if settings.notification_dispatch_enabled
@@ -1812,6 +1851,11 @@ async def _compose(
         )
         principal_resolver = StaticPrincipalResolver(principal)
         skill_reviews: SkillBackgroundReview | None = None
+        delegation_joins: DelegationJoin | None = None
+
+        async def on_child_suspension(run_id: UUID, delegation_id: UUID) -> None:
+            if delegation_joins is not None:
+                await delegation_joins.parent_parked(run_id, delegation_id)
 
         async def complete_run_resources(run_id: UUID, lease_epoch: int | None) -> None:
             try:
@@ -1865,6 +1909,8 @@ async def _compose(
                     )
                 except Exception:
                     logger.exception("memory_usage_feedback_failed", extra={"run_id": str(run_id)})
+            if delegation_joins is not None:
+                await delegation_joins.after_run(run_id)
             if skill_reviews is not None:
                 await skill_reviews.after_run(run_id)
 
@@ -1889,6 +1935,7 @@ async def _compose(
             on_token=token_slot.set,
             on_token_complete=token_slot.discard,
             on_run_complete=complete_run_resources,
+            on_child_suspension=on_child_suspension,
             on_model_event=lambda run, event: _publish_model_event(
                 live_events, run.session_id, run.id, event
             ),
@@ -1903,6 +1950,17 @@ async def _compose(
             if storage == "memory"
             else PostgresRunDispatcher()
         )
+        if settings.delegation_enabled:
+            delegation_joins = DelegationJoin(
+                uow_factory=uow_factory,
+                dispatcher=dispatcher,
+                requeue_parent=executor.requeue_after_child,
+                fail_parent_on_budget=executor.fail_suspended_on_budget,
+                clock=clock,
+                ids=ids,
+                principal=principal,
+                summary_max_bytes=delegation_caps.summary_max_bytes,
+            )
         skill_reviews = SkillBackgroundReview(
             uow_factory=uow_factory,
             dispatcher=dispatcher,
@@ -1945,6 +2003,7 @@ async def _compose(
             seed_checkpoint=checkpoint_seeder,
             cancel_parked_run=executor.cancel_parked_run,
             trajectory_export_enabled=trajectory_export_enabled,
+            on_parked_cancelled=(None if delegation_joins is None else delegation_joins.after_run),
         )
         approval_service = ApprovalService(
             uow_factory=uow_factory,
@@ -1996,13 +2055,6 @@ async def _compose(
             policy_version=ruleset.policy_version,
         )
 
-        schedule_service = ScheduleService(
-            uow_factory=uow_factory,
-            clock=clock,
-            ids=ids,
-            limits=schedule_definition_limits,
-            wake_worker=schedule_notify,
-        )
         device_service = DeviceManagementService(
             uow_factory=uow_factory,
             clock=clock,
@@ -2439,6 +2491,23 @@ async def build(
     circuit_breaker = tool_config["circuit_breaker"]
     parallel = tool_config["parallel"]
     output_config = tool_config["output"]
+    delegation_config = runtime_config["delegation"]
+    delegation_defaults = DelegationDefaults(
+        max_steps=int(delegation_config["child_max_steps"]),
+        max_model_calls=int(delegation_config["child_max_model_calls"]),
+        max_tool_calls=int(delegation_config["child_max_tool_calls"]),
+        max_cost=Decimal(str(delegation_config["child_max_cost"])),
+        wall_seconds=int(delegation_config["child_wall_seconds"]),
+    )
+    delegation_caps = DelegationCaps(
+        max_children_per_call=int(delegation_config["max_children_per_call"]),
+        max_live_children_per_parent=int(delegation_config["max_live_children_per_parent"]),
+        max_depth=int(delegation_config["max_depth"]),
+        max_live_delegated_runs_per_tenant=int(
+            delegation_config["max_live_delegated_runs_per_tenant"]
+        ),
+        summary_max_bytes=int(delegation_config["summary_max_bytes"]),
+    )
 
     # Phase 2: determinism, before any clock or identifier consumer exists.
     if clock is not None and fixed_clock_at is not None:
@@ -2492,7 +2561,14 @@ async def build(
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
+        *(
+            [SCHEDULE_CREATE_TOOL_NAME]
+            if effective_settings.schedule_api_enabled
+            and effective_settings.schedule_worker_enabled
+            else []
+        ),
         *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
+        *(["delegate.run"] if effective_settings.delegation_enabled else []),
     ]
     agent = AgentSpec(
         id=DEFAULT_AGENT_ID if storage == "postgres" else effective_ids.new_id(),
@@ -2714,6 +2790,8 @@ async def build(
                 scheduling_config["admission_backoff_seconds"]
             ),
             schedule_definition_limits=schedule_definition_limits,
+            delegation_defaults=delegation_defaults,
+            delegation_caps=delegation_caps,
             notification_expiry_seconds=float(notification_config["terminal_expiry_seconds"]),
             schedule_notify=schedule_wakeup.notify,
             schedule_wait=schedule_wakeup.wait,
