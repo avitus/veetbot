@@ -301,7 +301,10 @@ snapshot caps that leave `memory/profiles.yaml` for `context/plan.yaml`. The
 plan originally names **three
 environment variables**: `AUTH_MODE`, `OPENAI_MODEL`, and
 `RUN_LIVE_MODEL_TESTS`; Milestone 11 adds the default-off schedule API and
-worker feature flags. Those facts are not in tension by accident. Read
+worker feature flags. Milestone 19 reuses that pair: the composition root
+registers `schedule.create` only when both are enabled, so it cannot create
+work that no materializer will claim. Those facts are not in tension by
+accident. Read
 the inventory and the pattern is obvious: they are almost all tuning values —
 `MAX_COMPACTIONS_PER_STEP = 2`, the RRF constant `k = 60`, the 15,000-token
 prefix ceiling, the three approval expiry windows, the 8-way parallel-batch
@@ -505,7 +508,8 @@ SANDBOX_MECHANISM=docker
 AGENT_CONFIG_DIR=
 
 # Scheduled task control plane and materializer. Both default off and
-# production activation requires changing them together.
+# production activation requires changing them together. New sessions expose
+# schedule.create only while both are enabled.
 AGENT_SCHEDULE_API_ENABLED=0
 AGENT_SCHEDULE_WORKER_ENABLED=0
 

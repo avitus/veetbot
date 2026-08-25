@@ -382,6 +382,7 @@ from agent_core.tools.memory_remember import LegacyMemoryRememberTool, MemoryRem
 from agent_core.tools.memory_search import MemorySearchTool
 from agent_core.tools.registry import StaticToolRegistry
 from agent_core.tools.sandbox_run_command import SandboxRunCommandTool
+from agent_core.tools.schedule_create import SCHEDULE_CREATE_TOOL_NAME, ScheduleCreateTool
 from agent_core.tools.skill_load import (
     SKILL_LOAD_TOOL_NAME,
     LegacySkillLoadTool,
@@ -1361,6 +1362,13 @@ async def _compose(
     )
     episode_search = EventEpisodeSearch(uow_factory, principal)
     query_former = DeterministicQueryFormer(principal)
+    schedule_service = ScheduleService(
+        uow_factory=uow_factory,
+        clock=clock,
+        ids=ids,
+        limits=schedule_definition_limits,
+        wake_worker=schedule_notify,
+    )
     registry = StaticToolRegistry()
     registry.register(CalculatorTool())
     registry.register(AskUserTool())
@@ -1381,6 +1389,8 @@ async def _compose(
         registry.register(BrowserNavigateTool(browser_provider))
         registry.register(BrowserObserveTool(browser_provider))
         registry.register(BrowserActTool(browser_provider))
+    if settings.schedule_api_enabled and settings.schedule_worker_enabled:
+        registry.register(ScheduleCreateTool(schedule_service, agent, schedule_definition_limits))
 
     # A session keeps the exact tool version it was shown. Retain compatible
     # builtin history so a process upgrade cannot turn an advertised tool into
@@ -1996,13 +2006,6 @@ async def _compose(
             policy_version=ruleset.policy_version,
         )
 
-        schedule_service = ScheduleService(
-            uow_factory=uow_factory,
-            clock=clock,
-            ids=ids,
-            limits=schedule_definition_limits,
-            wake_worker=schedule_notify,
-        )
         device_service = DeviceManagementService(
             uow_factory=uow_factory,
             clock=clock,
@@ -2492,6 +2495,12 @@ async def build(
         "knowledge.search",
         *(["web.search"] if web_search_enabled else []),
         *(["web.fetch"] if web_fetch_enabled else []),
+        *(
+            [SCHEDULE_CREATE_TOOL_NAME]
+            if effective_settings.schedule_api_enabled
+            and effective_settings.schedule_worker_enabled
+            else []
+        ),
         *(["browser.navigate", "browser.observe", "browser.act"] if browser_enabled else []),
     ]
     agent = AgentSpec(

@@ -127,7 +127,7 @@ Eight is the number of tools *this document* designs. It is not the
 number of tools the model can call, and the gap is wide enough to
 state here rather than leave a reader to assemble.
 
-Twelve more model-callable tools are declared at build time by other
+Thirteen more model-callable tools are declared at build time by other
 specifications:
 
 ```text
@@ -145,9 +145,10 @@ knowledge.ingest              capability  knowledge-documents
 knowledge.search              capability  knowledge-documents
 web.search                    capability  web-access
 web.fetch                     capability  web-access
+schedule.create               capability  scheduling
 ```
 
-Twenty model-callable tools in total, and this document's roster is
+Twenty-one model-callable tools in total, and this document's roster is
 eight of them. The rule that keeps both numbers right is
 [knowledge-documents.md](knowledge-documents.md)'s, and it is repeated
 here because a reader who finds it only there has already been
@@ -160,8 +161,9 @@ subject document of their own.
 Two consequences follow, and both read wrong if they are not said.
 
 **The classification table below is complete for the eight and for
-nothing else.** Of the other twelve, `skill.manage`, `web.search`, and
-`web.fetch` are fully classified in their subject specifications;
+nothing else.** Of the other thirteen, `skill.manage`, `web.search`,
+`web.fetch`, and `schedule.create` are fully classified in their subject
+specifications;
 `skill.manage` is in [skills.md](skills.md), which gives it six fields;
 `skill.load` carries three. The three remaining control tools inherit
 `side_effect: NONE` and `target_kind: in_process` from the
@@ -176,19 +178,20 @@ one. Whoever builds a tool on that list supplies its classification
 with it, in the document that owns it.
 
 **The registration check below runs over the registry, not over this
-roster.** Its subject is the nineteen checked-in, complete builtin tool
+roster.** Its subject is the twenty checked-in, complete builtin tool
 identities (plus historical versions of `memory.remember` and `skill.load`):
 `math.calculate`, `conversation.ask_user`, `system.current_time`, the three
 `workspace.*` tools, `demo.external_write`, `sandbox.run_command`,
 `artifact.export`, `context.update_working_state`, the three `memory.*` tools,
-`skill.load`, `skill.manage`, the two `knowledge.*` tools, and the two `web.*`
-tools. Step 6 validates every registered version of those nineteen identities.
+`skill.load`, `skill.manage`, the two `knowledge.*` tools, the two `web.*`
+tools, and `schedule.create`. Step 6 validates every registered version of
+those twenty identities.
 `delegate.run` is the
-twentieth model-callable tool declared by the corpus, but
+twenty-first model-callable tool declared by the corpus, but
 [tool-system.md](tool-system.md) defers its implementation with the
 general-purpose-subagent extension; it has no checked-in spec, is not
 registered, and therefore is not input to step 6. Step 3, domain membership,
-already passes for all nineteen registered tools because the partition table in
+already passes for all twenty registered tools because the partition table in
 [tool-system.md](tool-system.md) lists their builtin domains.
 
 ### Why `artifact.export` is Milestone 6
@@ -1611,9 +1614,9 @@ These fail the build.
     diagnosis, the message carries the remedy and the supported set,
     and neither carries the input. The table keeps its invariant.
 8.  **The roster reads as the corpus's tool census and is not.** Eight
-    is what this document designs; twenty model-callable tools are
-    declared at build time across the corpus, and twelve of them belong
-    to other specifications. Resolved by naming those twelve here,
+    is what this document designs; twenty-one model-callable tools are
+    declared at build time across the corpus, and thirteen of them belong
+    to other specifications. Resolved by naming those thirteen here,
     together with the rule that keeps the roster's count correct —
     [knowledge-documents.md](knowledge-documents.md)'s, which had
     written it down in the one place a reader of the roster would not

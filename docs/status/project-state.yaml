@@ -9,9 +9,9 @@ project:
   active_milestone: 12
   # Milestones 12 through 15 were authorized in order on 2026-08-20
   # (ADR-0061); each begins with its detailed-design document and ADR.
-  # Milestone 16 was authorized as a parallel workstream on 2026-08-22
-  # (ADR-0069) and Milestone 17 on 2026-08-23 (ADR-0070); the gates of
-  # neither advance the verified ceiling past 15.
+  # Milestones 16 through 19 are independently authorized parallel
+  # workstreams under ADRs 0069, 0070, 0071, and 0072; their gates do not
+  # advance the verified ceiling past the sequential work through 15.
   authorized_milestones:
     - 0
     - 1
@@ -32,6 +32,7 @@ project:
     - 16
     - 17
     - 18
+    - 19
 
 milestones:
   "0":
@@ -312,6 +313,24 @@ milestones:
       - interval and cron recurrence (B5)
       - the email inbound Surface (B3) and email notification transport (B4)
       - auto-approval profiles and standing grants (B8)
+  "19":
+    title: Conversational schedule creation
+    status: authorized
+    authorized_on: 2026-08-24
+    design: docs/plan/scheduling.md
+    adr: docs/adr/0072-milestone-19-conversational-schedule-creation.md
+    gates_registered: 5
+    authorized_scope:
+      - one-time schedule creation through the model-callable schedule.create tool
+      - exact aware instants after the current time
+      - mandatory approval and the exact schedule.write scope
+      - empty delegated scopes and finite per-occurrence limits
+      - direct reuse of the existing ScheduleService and notification lifecycle
+    deferred_scope:
+      - recurring schedule creation through the model
+      - schedule update, pause, resume, delete, occurrence list, and run list tools
+      - a separate reminder record or notification payload with user content
+      - notification transports beyond the existing Milestone 12 delivery path
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -362,14 +381,17 @@ readiness:
     first-class email integration, as a third parallel workstream (ADR-0071),
     meeting roadmap item B11's entry condition for its email half; it is
     specified by email-integration.md with thirteen registered gates in a
-    new email area. Model routing remains
+    new email area. On 2026-08-24 the owner also authorized Milestone 19,
+    conversational one-time schedule creation, as a fourth parallel workstream
+    (ADR-0072); scheduling.md declares its five `gate.schedule.*` entries.
+    Model routing remains
     deferred on the plan's roadmap. Every plan subject through Milestone 12 has a
     design document, no milestone carries a named gap, and the gate
     registry, its census, and the milestone map are reconciled by make
     docs-check. The corpus audit passes and their findings are preserved in
     the audit log.
-  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+  implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-24T07:32:16Z
+last_updated: 2026-08-25T00:32:53Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

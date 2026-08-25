@@ -17,6 +17,8 @@ were written. The present answer is different: Milestones 0 through 12 are
 complete, and Milestone 13 subagents and delegation is the next sequential,
 fully specified milestone. Milestone 16 memory evaluation and lifecycle
 completed on 2026-08-23 as a separately authorized parallel workstream.
+Milestones 17 through 19 are also authorized parallel workstreams with
+complete designs and registered gates.
 
 Milestone 5 crossed that boundary after this review was written, and
 it crossed because of it. The finding was that the API had a plan
@@ -60,7 +62,7 @@ Three things are deliberately not treated as evidence of absence.
     still owes. That is a smaller and better-understood hole than an
     item nobody has looked at, and it is scored separately.
 3.  **A reserved seam is not an omission** where the document says so.
-    `tool-system.md:1980` states that device tools are *"a reserved
+    `tool-system.md:1982` states that device tools are *"a reserved
     seam, not a design"*. The seam is the decision.
 
 The gate census in [milestone-map.md](milestone-map.md) was used as an
@@ -91,6 +93,8 @@ rather than smoothed.
 | 15 | Operational hardening | Authorized | 16 | Nothing in the corpus; the bucket, the `age` identity, the first escrow, and the first off-host rehearsal are owner actions outside it |
 | 16 | Memory evaluation and lifecycle | Complete | 20 | Nothing in the corpus; the public datasets are owner-supplied local files and the live arm needs a funded provider key |
 | 17 | Memory read API and browser | Authorized | 10 | Nothing; the owner decided on 2026-08-23 to expose the three provenance fields, so the projection carries twenty-six fields |
+| 18 | First-class email integration | Authorized | 13 | Nothing in the corpus; OAuth consent and the real-mailbox smoke are owner actions outside it |
+| 19 | Conversational schedule creation | Authorized | 5 | Nothing; the surface is deliberately limited to approved one-time creation |
 
 The gate column is the count of registry entries whose `milestone`
 field names that milestone. Its correlation with the verdict column is
@@ -226,7 +230,7 @@ specification, and recorded as
     and a repository constructed with a live session that never
     commits. `gate.structure.orm_confined` asserts the confinement.
 2.  **Alembic had no authoring conventions.**
-    `engineering-plan.md:1646` says *"Create Alembic migrations for at
+    `engineering-plan.md:1659` says *"Create Alembic migrations for at
     least these tables"* and `development-toolchain.md:183` supplies
     the `make migrate` target. Between them there was no statement of
     naming, no branch policy, no rule for data migrations versus
@@ -250,7 +254,7 @@ ORM.
 
 One milestone conflict is reported and not resolved here. The plan
 places *"Usage token classes and cost-source precedence in the schema
-(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2528`, while
+(Section 6.5)"* in Milestone 2 at `engineering-plan.md:2541`, while
 [model-gateway.md](model-gateway.md) designs it and sequences it to
 Milestone 3, and the map follows the gateway. The schema column can
 exist a milestone before anything writes to it, so this is a question
@@ -270,7 +274,7 @@ Three items fell short, one of them completely.
 
 1.  **Provider response metadata is designed nowhere.**
     `provider_metadata` appears exactly once in the entire corpus, as
-    a `dict[str, Any]` field at `engineering-plan.md:1232`. No document
+    a `dict[str, Any]` field at `engineering-plan.md:1245`. No document
     states which keys go in it, whether the set is open or closed,
     whether it is persisted, or where. It is absent from the
     `model_calls` schema. A field of that shape with no key discipline
@@ -358,11 +362,11 @@ of thing that is written three different ways by three implementers,
 two of which are subtly wrong.
 
 **Principal scopes were half-designed.** The `Principal` model lived
-only at `engineering-plan.md:486`, the policy spec identified where
+only at `engineering-plan.md:499`, the policy spec identified where
 scopes are checked, and nothing stated the scope vocabulary, its
 grammar, or the comparison algorithm — whether a scope was an opaque
 string, a hierarchy, or a pattern. Relatedly,
-`bootstrap-and-composition.md:596` named `ApprovalService` as one of
+`bootstrap-and-composition.md:600` named `ApprovalService` as one of
 the services `build` returns, and no document gave it a method
 signature.
 
@@ -454,7 +458,7 @@ the fewest of any milestone that adds work — and that number was the
 finding.
 
 Section 16 of the engineering plan, at
-`engineering-plan.md:1820-2025`, designs the API more thoroughly than
+`engineering-plan.md:1833-2038`, designs the API more thoroughly than
 a summary of this milestone's coverage would suggest. At the time of the
 Milestone 5 review it specified nine endpoints with methods, paths, and where
 relevant headers; ADR-0050 later added the authoritative session list and
@@ -470,8 +474,8 @@ readiness constraint that a probe must not call a provider.
 What did not exist was any expansion of that section. No
 detailed-design specification covered the API layer. The only HTTP
 routes designed outside the plan were three: the two approvals reads
-at `policy-and-approvals.md:1041-1042` and the resolve at
-`policy-and-approvals.md:1051`, and one reference in
+at `policy-and-approvals.md:1044-1045` and the resolve at
+`policy-and-approvals.md:1054`, and one reference in
 `runtime-loop.md:1182` to `POST /runs/{id}/input` that routed to an
 endpoint it did not design.
 
@@ -497,7 +501,7 @@ Six things were visibly unsettled inside it.
     to the trace identifier the observability section requires.
 3.  **`Idempotency-Key` handling is named in two places and specified
     in neither.** It appears as a header at
-    `engineering-plan.md:1913` and as an implement bullet, and the
+    `engineering-plan.md:1926` and as an implement bullet, and the
     idempotency port the map schedules at Milestone 1 is a tool-call
     concern rather than an HTTP one. Whether these are the same
     mechanism is undecided.
@@ -553,11 +557,11 @@ workspace lifecycle, resource limits, no-network execution,
 `sandbox.run_command`, the filesystem artifact store, artifact
 metadata and content endpoints, and workspace cleanup.
 
-Section 28 of the plan is not empty — `engineering-plan.md:3770-3847`
+Section 28 of the plan is not empty — `engineering-plan.md:3828-3905`
 states a six-item threat model that assumes model-generated code is
 hostile, and is recorded as ADR-0008. But it was not expanded, and
 two specifications pointed at the expansion as though it already
-existed. `tool-system.md:1010` constrains MCP server URLs by *"the
+existed. `tool-system.md:1012` constrains MCP server URLs by *"the
 egress allowlist the sandbox spec establishes"*, and there was no
 sandbox spec.
 `bootstrap-and-composition.md:205` and `:183` assign ownership of
@@ -566,17 +570,17 @@ itself, which is the corpus recording that nothing below the plan owns
 them.
 
 Two bullets are covered. Output truncation and artifactization are
-specified at `tool-system.md:724`, and the programmatic orchestration
-bridge Section 8.5 requires is specified from `tool-system.md:1374`.
+specified at `tool-system.md:726`, and the programmatic orchestration
+bridge Section 8.5 requires is specified from `tool-system.md:1376`.
 
 Two further items deserved naming.
 
 1.  **The plan demands a red-team test with no case behind it.**
-    `engineering-plan.md:3845` requires a container-escape attempt as
+    `engineering-plan.md:3903` requires a container-escape attempt as
     a security test. The twenty-five-case table contains no such case
     and no Milestone 6 security row.
 2.  **`sandbox.run_command` was placed at two milestones.**
-    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1473`
+    `builtin-tools.md` said Milestone 5 where `builtin-tools.md:1476`
     now says Milestone 6; the plan's Milestone 6 implement list
     contains it. The map follows the plan. This was reported rather
     than resolved, because the right answer depended on a sandbox
@@ -605,7 +609,7 @@ The eight types the corpus referenced and never declared are declared:
 `ArtifactWriter`, and `CredentialResolver` from
 `ToolExecutionContext`. That removes the last of the
 referenced-and-undeclared types the API specification named as
-remaining. The egress allowlist `tool-system.md:1010` depends on by
+remaining. The egress allowlist `tool-system.md:1012` depends on by
 name gets a grammar, an owner, and two enforcement points, of which
 the address denylist runs first and no allowlist entry can waive it.
 Workspace lifecycle is settled by a rule rather than a mechanism —
@@ -726,7 +730,7 @@ criteria" and the acceptance criteria say nothing about mocks.
 **Skills had no specification below the tool system.** The stronger
 claim this review first made — that skills have no specification at
 all — was wrong, and the correction matters because it changes what
-had to be written. `tool-system.md:1306-1353` draws the line between
+had to be written. `tool-system.md:1308-1355` draws the line between
 a skill and a tool, fixes the metadata block at four fields, puts
 `required_tools` checking at load rather than at authoring, assigns
 trust by author, and classifies `skill_manage`. That is real design.
@@ -734,7 +738,7 @@ What was missing was everything underneath it: no package format, no
 manifest schema, no types, no storage, no reference grammar, no
 context accounting, and no gates. The acceptance criterion *"A
 selected skill is version-pinned in the run"* at
-`engineering-plan.md:2778` had no design behind it — and no document
+`engineering-plan.md:2791` had no design behind it — and no document
 outside the plan and ADR-0013 mentioned `SKILL.md`, which was true
 and remains the sharper of the two observations.
 
@@ -974,26 +978,26 @@ rather than a full transcript — and two more were partial.
 That subagent count is now stale, and it is the only verdict in this
 review that later documents overtook. Re-measured against the corpus
 as it stands, five of the nine are supplied. `parent_run_id` is a
-Section 15 column at `engineering-plan.md:1705`, and the sibling join
+Section 15 column at `engineering-plan.md:1718`, and the sibling join
 at `runtime-loop.md:1140` reads it. Restricted context is
 `context-engine.md:291`, where `runs.seed_event_sequence` is nullable
 for child runs because they *"seed from a parent's concise
 instruction rather than from session history"*, together with the
 child-run recall class at `memory-retrieval-and-ranking.md:87`, which
 gets fifteen beliefs against an interactive run's forty. The
-restricted tool set is `tool-system.md:977`: *"the registry resolves
+restricted tool set is `tool-system.md:979`: *"the registry resolves
 the child's set through `specs_for_session` with the child's
 principal, not the parent's"*. The child deadline is
 `runtime-loop.md:1147`: *"the parent's `deadline_at` is copied onto
 every child at creation"*. The concise return is the sibling join
 plus the `EXTERNAL_UNTRUSTED` label the returned result carries at
-`tool-system.md:973`. Two are partial: the explicit objective has a
+`tool-system.md:975`. Two are partial: the explicit objective has a
 carrier but no schema, since `delegate.run` is a control tool at
-`tool-system.md:931` and no input type for it exists anywhere, and
-the child budget is additive by `engineering-plan.md:580` while no
+`tool-system.md:933` and no input type for it exists anywhere, and
+the child budget is additive by `engineering-plan.md:593` while no
 rule derives a child's own `limits`. Two still have none — the
 separate trace and the artifact references, stated at
-`engineering-plan.md:3754` and `engineering-plan.md:2977` and picked
+`engineering-plan.md:3812` and `engineering-plan.md:2990` and picked
 up by no specification.
 
 Re-measuring surfaced a conflict the stale count was hiding.
@@ -1300,11 +1304,36 @@ overlaps this milestone carries — the policy condition, the configuration
 surface, and the MCP adapter's non-idempotent failure mapping — are named in
 the ADR rather than discovered in review.
 
+## Milestone 19: conversational schedule creation, authorized and specified
+
+[scheduling.md](scheduling.md#model-callable-one-time-creation) closes the
+specific gap between two already delivered capabilities: Milestone 11 exposed
+schedule creation only through HTTP, while Milestone 12 delivered push for
+terminal run outcomes. The new `schedule.create` tool gives the model one
+governed way to reach the existing application service. It accepts a title,
+instruction, and exact aware instant, creates only `once` cadence, and is
+registered only when both existing scheduling flags are on.
+
+The tool is `EXTERNAL_WRITE`, high risk, conditionally idempotent, requires
+exactly `schedule.write`, and always waits for approval under the existing
+policy matrix. It delegates no scopes to the future run, applies finite
+per-occurrence limits, routes through `ScheduleService.create`, and preserves
+the existing idempotency key. Past or naive instants fail validation, and a
+retry returns the original schedule rather than creating a duplicate. The
+notification path is unchanged: the scheduled run reaches an ordinary
+terminal event, and the Milestone 12 outbox wakes the client with its existing
+content-free payload.
+
+The readiness verdict is **Authorized**: ADR-0072, the five new
+`gate.schedule.*` entries, and the Milestone 19 census row specify the whole
+surface. Recurring creation and every other schedule lifecycle operation
+remain HTTP-only rather than becoming implicit parts of the model tool.
+
 ## The three plan sections no specification expanded
 
 Sections 29 through 31 were the only major sections of the
 engineering plan with no outward cross-reference paragraph. A scan of
-`engineering-plan.md:3849-4007` for links to other documents returned
+`engineering-plan.md:3907-4065` for links to other documents returned
 nothing when this review was written, where every other major section
 acquired one during the specification work. Two of the three were
 genuinely unexpanded; the third was half-expanded from the consuming
@@ -1329,8 +1358,8 @@ new mechanism. What it introduces beyond that is the `Device` concept
 and four named ports for capabilities that are inherently local to one
 machine, and none of the four has a contract.
 
-`tool-system.md:1457` does open a *"Device-scoped tools"* section, and
-`tool-system.md:1980` states that device tools are *"a reserved seam,
+`tool-system.md:1459` does open a *"Device-scoped tools"* section, and
+`tool-system.md:1982` states that device tools are *"a reserved seam,
 not a design"*. That is an explicit deferral rather than an oversight,
 and it is the right call for a Milestone 10-adjacent concern. What it
 left behind was a model with no home.
@@ -1370,7 +1399,7 @@ rewriting the fifteen-string grammar and the gate that asserts it,
 and the `device.` that already exists is a tool-name domain rather
 than a scope prefix. Three conflicts between Section 29 and later
 specifications are named and resolved in the specifications' favour,
-one of them the question `tool-system.md:1471` reserved by name —
+one of them the question `tool-system.md:1473` reserved by name —
 whether a device tool may be advertised in a session opened while the
 device was absent — which resolves against the pinned prefix on the
 same precedent that governs an MCP catalog change mid-session. None
@@ -1396,7 +1425,7 @@ sandboxed scripts — 30.4's metadata-only loading rule, 30.5's rollout
 criterion, and 30.6's constraints are each carried forward rather
 than reinterpreted. Two citation errors are corrected in the process.
 One is this review's: the version-pinning criterion is at
-`engineering-plan.md:2778`, and the line this review first named was
+`engineering-plan.md:2791`, and the line this review first named was
 an MCP configuration bullet a few lines above it. A line-number
 citation into the plan is correct only until the plan is next edited,
 which is why every citation in this corpus is now recorded in
@@ -1522,10 +1551,10 @@ under the conflict it settles.
     mechanism refuses to start in production, so a tool that only
     works against it is not a milestone deliverable, and the spec's
     Milestone 5 was an off-by-one against a list in which 5 is the
-    HTTP API. `builtin-tools.md:1473` now says Milestone 6.
+    HTTP API. `builtin-tools.md:1476` now says Milestone 6.
 2.  **Usage token classes and cost-source precedence at Milestone 2 or
-    Milestone 3.** `engineering-plan.md:2528` against
-    `model-gateway.md:1795` and `milestone-map.md:1395`. The map
+    Milestone 3.** `engineering-plan.md:2541` against
+    `model-gateway.md:1795` and `milestone-map.md:1420`. The map
     follows the gateway. Nothing is built differently either way; only
     the migration's timing changes.
 3.  **`Idempotency-Key` and the idempotency port.** Named as an HTTP
@@ -1534,7 +1563,7 @@ under the conflict it settles.
     to the API specification. Resolved there as two: two scopes, two
     milestones, a table and a column, one unfortunate name.
 4.  **The container-escape test and the case table.**
-    `engineering-plan.md:3845` requires a test the harness's case set
+    `engineering-plan.md:3903` requires a test the harness's case set
     does not contain. Belongs to the sandbox specification and the
     harness together. Resolved by both: the case set gains a
     twenty-sixth row, a Milestone 6 security case backed by
@@ -1585,7 +1614,7 @@ under the conflict it settles.
     settles it on evidence rather than on the prediction.
 2.  **Does the sandbox specification precede Milestone 5, or follow
     it?** Milestone order says it follows. Two arguments say it should
-    come first: `tool-system.md:1010` already depends on an egress
+    come first: `tool-system.md:1012` already depends on an egress
     allowlist it establishes, and it is the only undesigned area whose
     failure mode is a security boundary rather than a missing feature.
     Writing it early costs nothing except the order in which two

@@ -347,7 +347,7 @@ The first segment is the **domain**, and domains are partitioned:
 | `system` `math` `workspace` `sandbox` `artifact` | builtin | build time |
 | `demo` `delegate` | builtin | build time |
 | `conversation` `context` | builtin, control | build time |
-| `skill` `memory` | builtin | build time |
+| `skill` `memory` `schedule` | builtin | build time |
 | `knowledge` | builtin, corpus | build time |
 | `web` | builtin, external data | build time |
 | `mcp` | reserved for MCP | at discovery |
@@ -356,6 +356,8 @@ The first segment is the **domain**, and domains are partitioned:
 The control annotation is on the two domains that hold nothing else.
 `skill` holds `skill.load` and `skill.manage`, one of each kind, and
 `memory` holds three capability tools and no control tool.
+`schedule` holds the Milestone 19 one-time `schedule.create` capability; its
+registration remains conditional on the scheduling deployment flags.
 `web` holds the read-only `web.search` and `web.fetch` capabilities designed in
 [web-access.md](web-access.md). Their `web_provider` target is valid only with
 `NETWORK_READ`, `READ_ONLY`, and `EXTERNAL_UNTRUSTED`; registration refuses any
