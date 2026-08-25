@@ -59,6 +59,29 @@ final class ConversationNavigationUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Historical answer loaded"].exists)
     }
 
+    func testMemoryBrowserListsAndOpensDetail() {
+        let memoryButton = app.buttons["sidebar.memory"]
+        XCTAssertTrue(memoryButton.waitForExistence(timeout: 10))
+        memoryButton.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["memory.browser"].waitForExistence(timeout: 5)
+        )
+        let memoryRow = app.descendants(matching: .any)[
+            "memory.row.00000000-0000-0000-0000-000000000321"
+        ]
+        XCTAssertTrue(memoryRow.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["The user prefers dark mode."].exists)
+
+        memoryRow.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["memory.detail"].waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.staticTexts["The user prefers dark mode."].exists)
+        XCTAssertTrue(app.staticTexts["User"].exists)
+    }
+
     func testWebsiteAccessCreatesARecoverableBrowserHandoff() {
         let settingsButton = app.buttons["Settings"]
         XCTAssertTrue(settingsButton.waitForExistence(timeout: 10))
