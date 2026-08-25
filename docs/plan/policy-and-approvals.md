@@ -309,12 +309,15 @@ schedule.read      schedule.write      schedule.cancel
 The fifteen-string list remains the completed Milestone 4 baseline and the
 subject of its historical gate. The four browser scopes added by Milestone 10
 and the three schedule scopes added by Milestone 11 make the executable
-platform vocabulary twenty-two strings. The three scheduling additions authorize the
-application-level schedule routes in [scheduling.md](scheduling.md), not model
-tools: read covers schedule and occurrence reads, write covers create, update,
-pause, and resume, and cancel covers the terminal schedule transition. Exact
-matching, MCP namespace isolation, and every other rule in this section are
-unchanged.
+platform vocabulary twenty-two strings. The three scheduling additions
+authorize the application-level schedule routes in
+[scheduling.md](scheduling.md): read covers schedule and occurrence reads,
+write covers create, update, pause, and resume, and cancel covers the terminal
+schedule transition. That was the complete Milestone 11 surface. Milestone 19
+also gives the one-time model tool `schedule.create` exactly `schedule.write`;
+its `EXTERNAL_WRITE`/`HIGH` classification makes approval mandatory under the
+existing matrix. Exact matching, MCP namespace isolation, and every other rule
+in this section are unchanged.
 
 Milestone 12 adds `device.read`, `device.write`, and `notification.read`
 for the device and notification routes in
@@ -344,7 +347,7 @@ joined by dots, of which the last is the action. All twenty-six have
 exactly two.
 
 A closed list needs no grammar, so the grammar exists for the one
-contributor the list cannot enumerate. `tool-system.md:1219` takes an MCP
+contributor the list cannot enumerate. `tool-system.md:1221` takes an MCP
 tool's `required_scopes` from server configuration — the operator declares
 them, never the server — and an operator-declared string is outside a
 closed set by construction. The rule is therefore that an entry is legal

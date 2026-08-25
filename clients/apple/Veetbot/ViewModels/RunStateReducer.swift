@@ -26,6 +26,8 @@ public enum ToolActivityStatus: String, Sendable {
     case running
     case awaitingApproval = "awaiting approval"
     case completed
+    case needsCorrection = "needs correction"
+    case correctedAndRetried = "corrected and retried"
     case failed
     case denied
     case uncertain
@@ -401,14 +403,21 @@ public final class RunStateReducer: ObservableObject {
             ?? activeRunID?.uuidString
             ?? "unknown-run"
         let callID = frame.data["call_id"]?.stringValue ?? "tool-\(runID)-\(name)"
+        let result = frame.data["result_item"].flatMap({
+            decode(ToolResultPayload.self, from: $0)
+        })
+        let presentedStatus =
+            status == .failed && result?.needsArgumentCorrection == true
+            ? ToolActivityStatus.needsCorrection
+            : status
         ensureTool(
             callID: callID,
             name: name,
             hasKnownName: suppliedName != nil,
-            status: status
+            status: presentedStatus
         )
         updateTool(callID: callID) { tool in
-            tool.status = status
+            tool.status = presentedStatus
             if let suppliedName {
                 tool.name = suppliedName
                 tool.hasKnownName = true
@@ -422,10 +431,7 @@ public final class RunStateReducer: ObservableObject {
             if let value = frame.data["risk"]?.stringValue {
                 tool.risk = RiskLevel(rawValue: value.lowercased())
             }
-            if let result = frame.data["result_item"].flatMap({
-                decode(ToolResultPayload.self, from: $0)
-            }
-            ) {
+            if let result {
                 tool.result = ToolResultView(
                     content: result.content,
                     trust: result.trust,
@@ -434,6 +440,33 @@ public final class RunStateReducer: ObservableObject {
                 )
             }
         }
+        if presentedStatus == .completed {
+            markImmediatelyPreviousCorrectionRecovered(
+                before: callID,
+                toolName: toolIndex[callID].map { tools[$0].name } ?? name
+            )
+        }
+    }
+
+    private func markImmediatelyPreviousCorrectionRecovered(
+        before callID: String,
+        toolName: String
+    ) {
+        guard
+            let currentActivityIndex = activityOrder.lastIndex(where: {
+                guard case .tool(let candidateID) = $0 else { return false }
+                return candidateID == callID
+            }),
+            currentActivityIndex > activityOrder.startIndex
+        else { return }
+        let previousActivityIndex = activityOrder.index(before: currentActivityIndex)
+        guard
+            case .tool(let previousCallID) = activityOrder[previousActivityIndex],
+            let previousToolIndex = toolIndex[previousCallID],
+            tools[previousToolIndex].name == toolName,
+            tools[previousToolIndex].status == .needsCorrection
+        else { return }
+        tools[previousToolIndex].status = .correctedAndRetried
     }
 
     private func ensureTool(
@@ -566,8 +599,34 @@ private struct ToolResultPayload: Decodable {
     let isError: Bool
     let trust: TrustLabel?
 
+    var needsArgumentCorrection: Bool {
+        guard
+            isError,
+            let text = content.compactMap(\.text).first,
+            let data = text.data(using: .utf8),
+            let outcome = try? JSONDecoder.server.decode(ToolOutcomePayload.self, from: data)
+        else { return false }
+        return outcome.status == "failed"
+            && outcome.retryable
+            && outcome.remediation == "modify_arguments"
+            && (outcome.reasonCode == "tool.arguments_invalid"
+                || outcome.reasonCode.hasPrefix("tool.invalid_arguments."))
+    }
+
     enum CodingKeys: String, CodingKey {
         case content, trust
         case isError = "is_error"
+    }
+}
+
+private struct ToolOutcomePayload: Decodable {
+    let status: String
+    let reasonCode: String
+    let retryable: Bool
+    let remediation: String
+
+    enum CodingKeys: String, CodingKey {
+        case status, retryable, remediation
+        case reasonCode = "reason_code"
     }
 }
