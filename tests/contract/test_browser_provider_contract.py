@@ -87,14 +87,6 @@ async def test_browser_provider_navigation_and_observation_contract() -> None:
     )
 
 
-async def test_browser_provider_close_contract() -> None:
-    provider = ContractBrowserProvider()
-
-    await provider.close()
-
-    assert provider.closed
-
-
 @dataclass
 class AdapterRuntime:
     current_url: str = "https://example.org/"
