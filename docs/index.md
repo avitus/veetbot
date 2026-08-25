@@ -47,6 +47,8 @@ Markdown and YAML are canonical. HTML under `site/` and `dist/` is **generated**
 and must never be edited by hand.
 
 - [Engineering plan](plan/engineering-plan.md) — the canonical, normative plan.
+- [Milestones](status/milestones.md) — every milestone grouped by state, with
+  open work itemized; reconciled against the project state on every build.
 - [Current milestone](plan/current-milestone.md) — the work currently authorized.
 - [Project state](status/index.md) — machine-readable execution state.
 - [Architecture decisions](adr/index.md) — approved ADRs.
@@ -59,14 +61,12 @@ as an archival record.
 
 ## Current status
 
-Milestones 0 through 9 are complete. The shared core, HTTP API, sandbox,
-context engine, skills and MCP, and long-term memory and knowledge retrieval
-have passed their recorded acceptance evidence. Milestone 10 is in progress
-through its separately authorized automatic-memory, self-authored-skills, and
-provider-neutral web-access workstreams, but the milestone as a whole is
-incomplete. See the
-[current milestone](plan/current-milestone.md) and
-[project state](status/index.md) pages for recorded evidence.
+The [milestones page](status/milestones.md) is the grouped summary of every
+milestone and the work still open; it is reconciled against the authoritative
+[project state](status/index.md) on every documentation build, so what it says
+is what the state file says. The [current milestone](plan/current-milestone.md)
+page points into the plan for the work currently authorized, and recorded
+evidence lives with the project state.
 
 ## For coding agents
 

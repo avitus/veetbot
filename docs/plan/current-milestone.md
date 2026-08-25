@@ -67,7 +67,7 @@ title: Current Milestone
   `evals/capability/memory-benchmark-evidence.192a0161d881837218c0ed125c55a121663f8eda.json`
   with four retried runs and a lift of forty-five — which is milestone evidence
   rather than one of the two completion conditions below. Milestone 17, the
-  second parallel workstream, is authorized and specified with ten registered
+  second parallel workstream, is in progress with ten registered
   gates; its server-side routes, store methods, and gate suite are implemented
   and passing locally, and its Apple client — the models, client methods,
   browser view model and views, and sidebar entry point, with native Swift
@@ -75,10 +75,12 @@ title: Current Milestone
   hosted CI and the CodeRabbit review loop on the `dev` to `main` pull request
   remain outstanding. Milestone 18, the third parallel workstream, is
   authorized and specified with thirteen registered gates; it has not
-  started. Milestone 19, the fourth parallel workstream, is authorized and
-  specified with five registered gates; its one-time model tool and focused
+  started. Milestone 19, the fourth parallel workstream, is in progress with
+  five registered gates; its one-time model tool and focused
   gate suite are implemented locally, with full repository verification and
-  hosted review still outstanding.
+  hosted review still outstanding. Each in-progress milestone's remaining
+  work is itemized on the [milestones page](../status/milestones.md), which
+  `make docs-check` reconciles against the project state.
 
 Milestone 10A adds governed foreground skill authoring and an optional,
 non-joining background-review child run. Authoring stays disabled by default;

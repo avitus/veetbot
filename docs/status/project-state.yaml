@@ -127,6 +127,11 @@ milestones:
     deferred_scope:
       - handoffs, role-named agents, delegation deeper than one level
       - model routing changes
+    open_items:
+      - Owner-supplied redacted failed long-research trajectory for the capability scenario
+      - Capability-scenario scoring, the single-agent baseline and the delegating re-run
+      - Hosted CI on the milestone's final head
+      - CodeRabbit review loop on the dev to main pull request (build step 7)
     evidence:
       - check: twenty-one Milestone 13 gate.delegate.* gates
         outcome: passed_locally
@@ -230,7 +235,7 @@ milestones:
       - belief merge and global consolidation, HTTP memory surface
   "17":
     title: Memory read API and browser
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-23
     design: docs/plan/memory-read-api-and-browser.md
     adr: docs/adr/0070-milestone-17-memory-read-api-and-browser.md
@@ -246,6 +251,9 @@ milestones:
       - every write, edit, retraction, and deletion over HTTP
       - recall-trace viewing, blocked on tenant and principal trace predicates
       - consolidation and formation audit routes, knowledge documents
+    open_items:
+      - Hosted CI on the milestone's final head
+      - CodeRabbit review loop on the dev to main pull request (build step 8)
     evidence:
       - check: ten Milestone 17 gate.memory.read_api_* and browse_contract_parity gates
         outcome: passed_locally
@@ -367,7 +375,7 @@ milestones:
       - auto-approval profiles and standing grants (B8)
   "19":
     title: Conversational schedule creation
-    status: authorized
+    status: in_progress
     authorized_on: 2026-08-24
     design: docs/plan/scheduling.md
     adr: docs/adr/0072-milestone-19-conversational-schedule-creation.md
@@ -383,6 +391,22 @@ milestones:
       - schedule update, pause, resume, delete, occurrence list, and run list tools
       - a separate reminder record or notification payload with user content
       - notification transports beyond the existing Milestone 12 delivery path
+    open_items:
+      - Full repository verification (make check and the PostgreSQL lanes) on the final head
+      - Hosted CI and the CodeRabbit review loop on the dev to main pull request
+    evidence:
+      - check: five Milestone 19 gate.schedule.* gates
+        outcome: passed_locally
+        detail: >-
+          The five registered Milestone 19 entries in evals/gates/schedule.yaml
+          all resolve to checks in tests/gates/test_schedule_tool_m19.py, and
+          the file's seven tests pass locally (2026-08-25, uv run pytest
+          tests/gates/test_schedule_tool_m19.py). The harness cannot execute
+          them through agent eval gates yet for the reason Milestones 16 and
+          17 recorded: --milestone 19 would also activate the still-pending
+          Milestone 13 through 15 gates and the registry validator correctly
+          refuses. They become executable through the harness when
+          project.current_milestone advances past them.
 
 # Evidence for completed milestones 0 through 12 and 16 lives in
 # docs/status/verification-history.yaml; a future in-progress milestone's
@@ -445,5 +469,5 @@ readiness:
   implementable_from_corpus: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
   documents_required_before_coding_reaches_them: []
 
-last_updated: 2026-08-25T01:00:00Z
+last_updated: 2026-08-25T22:30:00Z
 last_reviewed_commit: ce695b0 plus the task-12 review fix round

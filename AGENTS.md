@@ -90,12 +90,12 @@ validates the floor, and no trailer means lane A.
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
-- Milestones 0 through 9 are complete; 10 and 11 await hosted review. Milestones
-  12 through 15 — notifications and device identity, subagents and delegation,
-  inbound surfaces and pairing, operational hardening — are authorized in that
-  order (ADR-0061), with Milestone 16 memory evaluation (ADR-0069), 17 the
-  memory read API and browser (ADR-0070), and 18 email integration (ADR-0071)
-  in parallel; model routing and the plan's remaining roadmap items are not.
+- Milestones 0 through 12 and 16 are complete. Milestones 13 through 15 —
+  subagents and delegation, inbound surfaces and pairing, operational
+  hardening — proceed in that order (ADR-0061); 17 through 19 are parallel
+  workstreams (ADRs 0070–0072). Model routing and the plan's remaining roadmap
+  items are not authorized. The grouped summary with each in-progress
+  milestone's open items is `docs/status/milestones.md`.
 - Avoid unrelated refactors.
 - Do not introduce a major dependency without documenting the decision (an ADR or a note in the relevant doc).
 - Prefer the smallest coherent implementation that satisfies the active acceptance criteria.
