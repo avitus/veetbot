@@ -77,6 +77,10 @@ title: Changelog
   research baseline exposed that the prior generic failure discarded the one
   diagnostic needed to distinguish a provider-stream defect from a governed
   credential-content rejection.
+- Refined bare bearer-value detection so ordinary documentation such as
+  `Bearer authentication` remains model content, while raw authorization
+  headers, provider-key prefixes, mixed-shape bearer values, and long opaque
+  bearer values remain rejected by the normalized-stream boundary.
 - Taught the live capability driver to distinguish a genuine pending approval
   from Milestone 13's approval-free child-run suspension. A delegated research
   subject now drives both interactive and asynchronous queue classes through

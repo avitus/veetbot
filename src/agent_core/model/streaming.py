@@ -37,9 +37,14 @@ class ModelStreamError(ValueError):
         self.failure = failure
 
 
+_TOKEN_CHARS = r"[a-z0-9._~+/=-]"
+_BARE_BEARER_VALUE = (
+    rf"(?:[a-z]{{24,}}|(?={_TOKEN_CHARS}{{8,}})"
+    rf"(?={_TOKEN_CHARS}*[0-9._~+/=-]){_TOKEN_CHARS}{{8,}})"
+)
 SECRET_VALUE = re.compile(
-    r"(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?[a-z0-9._~+/=-]{8,}|"
-    r"bearer\s+[a-z0-9._~+/=-]{8,}|"
+    rf"(?i)(?:authorization\s*[:=]\s*(?:bearer\s+)?{_TOKEN_CHARS}{{8,}}|"
+    rf"bearer\s+{_BARE_BEARER_VALUE}|"
     r"sk-(?:ant-|proj-)?[a-z0-9_-]{8,}|-----begin [a-z ]*private key-----)"
 )
 
