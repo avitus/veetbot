@@ -457,7 +457,7 @@ trustworthy.
    help; these fields are excluded because of what they are, not because
    of what they contain.
 2. **Pattern replacement.** The secret scanner's five rule families
-   (`bootstrap-and-composition.md:1171-1179`) run over every message body,
+   (`bootstrap-and-composition.md:1180-1188`) run over every message body,
    every tool argument, and every tool result, and a match is replaced with
    `[redacted:<rule_name>]`. The key-name families the log-redaction
    processor already uses (`development-toolchain.md:153-155`) run over
@@ -474,7 +474,7 @@ export **fails closed**: a verification hit raises `ExportRedactionError`,
 writes no artifact, and reports the rule name and the message index. It
 never reports the match, for the reason the scanner already gives — a
 report that echoes the secret has moved the secret somewhere worse
-(`bootstrap-and-composition.md:1184-1186`).
+(`bootstrap-and-composition.md:1193-1195`).
 
 Failing rather than repairing is deliberate. A verification hit means stage
 two has a gap, and silently redacting the same string a second time hides
@@ -568,7 +568,7 @@ agent run export <run-id> --json   the ArtifactRef on stdout
 ```
 
 `export` becomes the fourth reserved word after `agent run`
-(`bootstrap-and-composition.md:1008`), which is cheaper than a thirteenth
+(`bootstrap-and-composition.md:1017`), which is cheaper than a thirteenth
 top-level command and follows the precedent `agent eval`'s five
 subcommands already set. It reuses the existing exit codes without
 addition: a refused consent check exits 1, an unknown run exits 2, an

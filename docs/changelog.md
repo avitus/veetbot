@@ -4,6 +4,16 @@ title: Changelog
 
 # Changelog
 
+## 2026-08-26 — Routine fact lookups avoid sandbox approval
+
+- Added least-powerful-tool guidance to the versioned default agent: routine
+  arithmetic, date/time questions, and public facts use available read-only
+  tools instead of falling back to `sandbox.run_command`. When no read-only
+  capability can answer, the agent explains the limitation or asks before
+  proposing arbitrary code execution. The sandbox policy remains unchanged,
+  so model-authored code still receives its normal deterministic review and
+  one-time approval when proposed.
+
 ## 2026-08-25 — Milestone 17 completion recorded
 
 - Reconciled the milestone record with the already merged delivery evidence.
