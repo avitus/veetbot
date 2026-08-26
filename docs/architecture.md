@@ -132,7 +132,7 @@ by the detailed-design document the routing table in `AGENTS.md` names.
   established-fact admission, decay sweep, and usage feedback, and the
   read-only `/v1/memories` list and detail routes entered `agent_core.api`
   behind the exact `memory.read` scope and a default-off flag (Milestone 17,
-  in progress).
+  complete).
 - `agent_core.tools.schedule_create` is the model-callable, approval-gated
   one-time creation bridge over the existing
   `agent_core.application.schedule_service` (Milestone 19, in progress).

@@ -321,8 +321,13 @@ def check_milestones_page() -> None:
 
     for number in sorted(seen_twice):
         err(f"milestones.md must list milestone {number} exactly once")
-    for key in sorted(declared, key=int):
-        number = int(key)
+    numbered: list[tuple[int, object]] = []
+    for key in declared:
+        try:
+            numbered.append((int(str(key)), key))
+        except ValueError:
+            err(f"project-state.yaml has a non-numeric milestone key {key!r}")
+    for number, key in sorted(numbered, key=lambda item: item[0]):
         info = declared[key] or {}
         status = info.get("status")
         title = info.get("title", "")

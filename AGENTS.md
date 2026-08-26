@@ -90,10 +90,10 @@ validates the floor, and no trailer means lane A.
 ## Scope control
 
 - Work only on the **active** milestone or an explicitly authorized one (see project state); do not begin later milestones speculatively.
-- Milestones 0 through 12 and 16 are complete. Milestones 13 through 15 —
+- Milestones 0 through 12, 16, and 17 are complete. Milestones 13 through 15 —
   subagents and delegation, inbound surfaces and pairing, operational
-  hardening — proceed in that order (ADR-0061); 17 through 19 are parallel
-  workstreams (ADRs 0070–0072). Model routing and the plan's remaining roadmap
+  hardening — proceed in that order (ADR-0061); 18 and 19 are parallel
+  workstreams (ADRs 0071–0072). Model routing and the plan's remaining roadmap
   items are not authorized. The grouped summary with each in-progress
   milestone's open items is `docs/status/milestones.md`.
 - Avoid unrelated refactors.
