@@ -88,7 +88,10 @@ async def test_export_replaces_all_rules_and_fails_closed(tmp_path: Path) -> Non
     }
     assert artifact.origin == "trajectory_export"
     assert document["outcome"] == "COMPLETED"
-    assert all("source_event_sequence" not in message for message in document["messages"])
+    assert all(
+        "source_event_sequence" not in message and "principal_id" not in message
+        for message in document["messages"]
+    )
     assert "usage" not in rendered
     assert "provider_metadata" not in rendered
 

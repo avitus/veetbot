@@ -35,7 +35,7 @@ from agent_core.ports.determinism import Clock, IdFactory
 from agent_core.ports.persistence import UnitOfWorkFactory
 from agent_core.ports.tools import ToolRegistry
 
-BUILDER_VERSION = "trajectory@4"
+BUILDER_VERSION = "trajectory@5"
 RULESET_VERSION = "secrets@1"
 RETENTION = timedelta(days=30)
 logger = logging.getLogger(__name__)
@@ -338,7 +338,12 @@ class TrajectoryExportService:
                     if call_id in seen_tool_results:
                         continue
                     seen_tool_results.add(call_id)
-                messages.append(item.model_dump(mode="json", exclude={"source_event_sequence"}))
+                messages.append(
+                    item.model_dump(
+                        mode="json",
+                        exclude={"principal_id", "source_event_sequence"},
+                    )
+                )
         return messages
 
     def _tool_descriptors(self, invocations: list[Any]) -> list[dict[str, str]]:

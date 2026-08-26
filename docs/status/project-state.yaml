@@ -200,10 +200,11 @@ milestones:
           long-research failure: it exhausted its tool-call budget before
           producing an answer. Its governed export remains quarantined rather
           than checked in because the first artifact retained internal event
-          sequence fields that the trajectory contract excludes. Deployment
-          of the local exporter regression fix, a fresh governed export and
-          fixture review, single-agent baseline and delegating re-run scoring,
-          hosted CI, and final review on the completed evidence head remain.
+          sequence and principal-attribution fields that the trajectory
+          contract excludes. Deployment of the local exporter regression fix,
+          a fresh governed export and fixture review, single-agent baseline and
+          delegating re-run scoring, hosted CI, and final review on the
+          completed evidence head remain.
   "14":
     title: Inbound surfaces and pairing
     status: authorized

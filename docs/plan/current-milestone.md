@@ -58,9 +58,10 @@ title: Current Milestone
   GitGuardian, and a finding-free final-head CodeRabbit review before merging
   to `main`, covering the implementation on that head. The capability-bound
   continuation passes locally. A consent-stamped failed long-research run has
-  now been captured, but its first export exposed an internal event-sequence
-  field that the trajectory contract excludes; fixture admission, the two live
-  scores, and hosted verification of the completed evidence head remain.
+  now been captured, but its first export exposed internal event-sequence and
+  principal-attribution fields that the trajectory contract excludes; fixture
+  admission, the two live scores, and hosted verification of the completed
+  evidence head remain.
   Milestones 14
   and 15 remain authorized and specified with twenty-one and sixteen
   registered gates; neither has started. Milestone 16, the parallel memory-evaluation
